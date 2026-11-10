@@ -54,11 +54,12 @@ names, so they are unlinked. Partial checkpoint directories below ``b`` are
 renamed aside, never deleted. Both happen only after every check passed.
 Forward boundary entries and sealed checkpoints are never touched.
 
-**PrismaBuild.** A relaunch is a new PrismaBuild owner. It reads the
-original's boundary entries, the checkpoint entries and this file as
-declared inputs, exactly as a forward-recovery capsule's inputs are read,
-and the original owner must be contained first (``require_contained``).
-That dispatcher contract is not exercised by the fixture tests.
+**Native dispatch.** A relaunch has a new native launch. Its selected inputs
+authenticate the original boundary and checkpoint entries and this chain
+state. The original producer's exact native scope must be stopped and its
+cleanup verified before reuse. Local scientific fixtures exercise the tensor
+and chain transitions; the separate native proof exercises launch, selected
+input authority and scope containment.
 """
 from __future__ import annotations
 
@@ -511,32 +512,25 @@ def plan_chain_resume(space, document, *, recomputed, running_implementation_sha
 
 
 def require_producer_contained(producer) -> None:
-    """The PrismaBuild owner that wrote the interrupted attempt is gone.
-
-    Removing its rolling entries while it still runs would pull files out
-    from under a live writer; PrismaBuild's containment certificate is the
-    proof it will not write again.
-    """
-    from .joint_forward_resume import ForwardRecoveryRefused, _sdk, require_contained
-
-    sdk = _sdk()
+    """Require the recorded native producer and its actual execution scope stopped."""
+    from . import flux_jobs
     try:
-        require_contained(sdk["pool"].PoolQueue(producer["queue_root"]),
-                          {"owner_action_key": producer["owner_action_key"],
-                           "owner_attempt": producer["owner_attempt"]}, sdk)
-    except ForwardRecoveryRefused as exc:
-        raise ChainResumeRefused(
-            f"the owner {producer['owner_action_key'][:12]} that wrote the "
-            f"interrupted attempt is not contained: {exc}") from exc
+        if producer.get("schema") != "prismaquant.flux_result_producer.v1":
+            raise ValueError("legacy producer records cannot authorize native mutation")
+        saved = flux_jobs.load_submission(Path(producer["record_dir"]))
+        if (saved.launch_sha256 != producer["launch_sha256"] or
+                flux_jobs.job_id_number(saved.job_id) != flux_jobs.job_id_number(producer["job_id"])):
+            raise ValueError("producer differs from saved native ID/launch")
+        expected = {key: producer[key] for key in ("argv", "source", "resources", "afterok", "staged_input")}
+        expected["environment"] = None
+        flux_jobs.require_stopped_job(saved, expected_launch=expected)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        raise ChainResumeRefused(f"native producer is not verified stopped: {exc}") from exc
 
 
 def producer_binding(publication) -> dict | None:
-    """The PrismaBuild owner of this attempt, for a later resume's containment check."""
-    if publication is None:
-        return None
-    return {"owner_action_key": str(publication.instance["owner_action_key"]),
-            "owner_attempt": publication.instance["owner_attempt"],
-            "queue_root": str(publication.queue.root)}
+    """Capture the authenticated active launch; this is no output authority."""
+    return None if publication is None else dict(publication.producer)
 
 
 def apply_chain_resume(space, plan: ChainResume, *, producer=None, split=None) -> dict:

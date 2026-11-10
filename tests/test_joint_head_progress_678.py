@@ -18,7 +18,7 @@ from tests.test_tessera_joint_aura import fixture
 
 def _reports(monkeypatch, bridge):
     seen = []
-    monkeypatch.setattr(bridge, "_pb_commit",
+    monkeypatch.setattr(bridge, "log_progress",
                         lambda units, phase, unit=None: seen.append((units, phase, unit)))
     return seen
 

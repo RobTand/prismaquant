@@ -80,8 +80,7 @@ model, not pretrained H9 results or GLM quality evidence.
 The CAS payload was read and its SHA256 verified as
 `371f03a441a4d53b2abccf3e581e5e38bdd4f7dd285c9ff77c7e5c1096defd39`;
 receipt `88b81f27d76e4d05415ffbe4628ee16295ab3d1626ad16470946304aebe9919a`.
-Terminal and CAS records live under `/mnt/shared/prismabuild-fleet`, keyed by
-the full action above. Outputs are
+The retired execution system kept terminal and CAS records for this action; they are historical and not read by any tool. Outputs are
 `/mnt/shared/tessera-measurements/pq1962-sol-20261002/container-qualify/`.
 
 ## Loader regression and correction

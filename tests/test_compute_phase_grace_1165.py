@@ -75,16 +75,15 @@ def _dispatch(tmp_path, monkeypatch, capsys, *, replay_mode, ceilings,
         _coverage=lambda rows: [])
     assert code == 0, capsys.readouterr().err
     (row,) = gateway.submitted
-    return dispatch, manifest, row["argv"]
+    return dispatch, manifest, row["row"]
 
 
 def _graces(argv):
-    return {name: int(value) for name, value in (
-        argv[i + 1].split("=", 1) for i, word in enumerate(argv)
-        if word == "--progress-phase")}
+    return {name: int(value) for name, value in (item.split("=", 1) for item in argv["progress_phases"])}
 
 
 def _stamps(argv):
+    argv = argv["argv"]
     flag = "--progress-grace-derivation"
     return json.loads(argv[argv.index(flag) + 1]) if flag in argv else []
 
@@ -96,11 +95,10 @@ def _plan(manifest):
 def _read_term(dispatch, phase_bytes):
     """W + ceil(bytes / floor): the fixture dispatch has one row, so the
     built-in one-reader floor applies."""
-    from prismaquant.residency_shard_reader import staged_range_wait_from_env
 
     env = json.loads(Path(dispatch.SPEC_PATH).read_text()).get("env") or {}
     floor = dispatch.LOAD_PHASE_FLOOR_ONE_READER["floor_bytes_per_s"]
-    return math.ceil(staged_range_wait_from_env(env)) + -(-phase_bytes // floor)
+    return -(-phase_bytes // floor)
 
 
 # -- red: the defect, at the dispatcher ------------------------------------
@@ -318,19 +316,19 @@ def _r13_grace(name, *, phase_bytes, entries, context=V7_CONTEXT):
     work = quantum_row.compute_phase_work(
         name, replay_mode="spill", entries=entries, n_probes=4, capture_batch=4)
     return dispatch.compute_phase_grace(
-        name, work=work, phase_bytes=phase_bytes, staged_wait_s=300.0,
+        name, work=work, phase_bytes=phase_bytes,
         link=dispatch.link_readers(rows=1), context=context,
         ceilings=dispatch.compute_ceilings())
 
 
 def test_the_r13_row_shape_derives_from_the_built_in_measurements():
     bound = _r13_grace("chain-044-bound", phase_bytes=8_591_036_928, entries=512)
-    assert (bound["mode"], bound["grace_s"]) == ("derived", 300 + 137 + 1686)
+    assert (bound["mode"], bound["grace_s"]) == ("derived", 137 + 1686)
     spill = _r13_grace("spill-p0", phase_bytes=8_591_036_928, entries=512)
     assert [term["grace_s"] for term in spill["compute"]] == [4393, 1800]
-    assert (spill["mode"], spill["grace_s"]) == ("blanket", 300 + 137 + 4393 + 1800)
+    assert (spill["mode"], spill["grace_s"]) == ("blanket", 137 + 4393 + 1800)
     render = _r13_grace("render-01", phase_bytes=5_940_033_993, entries=354)
-    assert (render["mode"], render["grace_s"]) == ("blanket", 300 + 95 + 1800)
+    assert (render["mode"], render["grace_s"]) == ("blanket", 95 + 1800)
     # Layer 43 spills less per batch than the measured layer 44: in scope.
     smaller = {**V7_CONTEXT, "spill.geometry.batch_bytes": 545259520,
                "spill.geometry.batch_x_bytes": 243269632}

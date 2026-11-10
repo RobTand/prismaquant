@@ -81,7 +81,6 @@
   "reach:tests/test_pb_generation_pin_1084.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_pipeline_prepriced_additivity_tail_audit.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_pq3017_qualification_integration.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
-  "reach:tests/test_pq87_paired_validation.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_prefill_load_sweep.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_prepare_extended_joint_quanta.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_prismabuild_residency_map.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",

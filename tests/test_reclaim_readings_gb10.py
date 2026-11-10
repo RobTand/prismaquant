@@ -83,7 +83,7 @@ SETTLE_SECONDS = 2.0
 
 @pytest.fixture(autouse=True)
 def _no_residency_map(monkeypatch):
-    monkeypatch.delenv("PRISMABUILD_RESIDENCY_MAP", raising=False)
+    monkeypatch.delenv("PRISMAQUANT_STAGED_MANIFEST", raising=False)
 
 
 @pytest.fixture

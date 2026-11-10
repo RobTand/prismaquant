@@ -281,10 +281,11 @@ def test_the_stream_head_reports_durable_progress_before_its_journal_exists(
     so every report counts rows a relaunch can adopt, and never more than the
     wires on disk."""
     campaign, argv, state = stream_fixture(monkeypatch, tmp_path)
-    from prismaquant import cost_stage_checkpoint, prismabuild_progress
+    from prismaquant import cost_stage_checkpoint, joint_run_progress
     wire = state["root"] / "cache" / "wire"
     events, streamed = [], set()
     original_write_unit = cost_stage_checkpoint.write_unit
+    original_log = joint_run_progress.log_progress
 
     def write_unit(*args, **kwargs):
         if kwargs["stage"] == campaign.STREAM_JOURNAL_STAGE:
@@ -293,13 +294,13 @@ def test_the_stream_head_reports_durable_progress_before_its_journal_exists(
             events.append(("journal",))
         return original_write_unit(*args, **kwargs)
 
-    def report(phase, units_completed, **_kwargs):
+    def report(units_completed, phase, unit=None):
         landed = len(list(wire.glob("*.tessera"))) if wire.is_dir() else 0
         events.append(("report", phase, units_completed, landed, len(streamed)))
-        return True
+        original_log(units_completed, phase, unit)
 
     monkeypatch.setattr(cost_stage_checkpoint, "write_unit", write_unit)
-    monkeypatch.setattr(prismabuild_progress, "report", report)
+    monkeypatch.setattr(joint_run_progress, "log_progress", report)
     assert campaign.main(argv) == 0
     first_journal = events.index(("journal",))
     early = [event for event in events[:first_journal] if event[0] == "report"]

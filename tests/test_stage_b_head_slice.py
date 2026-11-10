@@ -302,14 +302,14 @@ def test_producer_refuses_a_layer_without_units(tmp_path):
         _produce(campaign, layers=(0, 7))
 
 
-def test_head_reports_the_walks_cumulative_units_once(tmp_path, monkeypatch):
+def test_head_reports_the_walks_cumulative_units_once(tmp_path, capsys):
     campaign = _campaign(tmp_path)
     _, bindings = _produce(campaign)
-    progress = tmp_path / "progress.json"
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(progress))
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "t")
     _consume(campaign, _record(0, bindings[0]), progress_phase="head")
-    record = json.loads(progress.read_text())
+    lines = [line for line in capsys.readouterr().out.splitlines()
+             if line.startswith('application progress: ')]
+    assert len(lines) == 1
+    record = json.loads(lines[0].split(': ', 1)[1])
     assert record["phase"] == "head"
     assert record["units_completed"] == len(campaign["data"].formats_by_qname)
 
@@ -534,6 +534,8 @@ def _run_to_the_device_envelope(campaign, binding, monkeypatch):
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *a, **k: None)
     monkeypatch.setattr(memory_management, "enforce_device_envelope", envelope)
     monkeypatch.delenv(residency_map.ENV_VAR, raising=False)
+    # The staged manifest bind is another owner's seam; this runner is about the device envelope.
+    monkeypatch.setattr(residency_map, "bind_residency_manifest", lambda digest: None)
     residency_map.reset_residency_resolver_for_tests()
     try:
         with pytest.raises(_EnvelopeReached):

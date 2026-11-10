@@ -1,5 +1,887 @@
 # PrismaQuant Architecture
 
+<!-- flux-current-start -->
+## Current execution: stock Flux
+
+As of: 2026-11-10, P-4 hosted repair. Sources below describe the current implementation.
+Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
+`prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
+
+`flux_jobs.submit_job` admits a clean, detached shared checkout. The coordinator's
+`FLUX_URI` takes precedence when nonempty. When unset or empty, the executor invokes
+`/mnt/shared/flux-migration/flux-uri.sh` with only `PATH=/usr/bin:/bin` and a
+five-second timeout, accepting one `local://` URI line. Failure refuses submission,
+including inside a job. Client paths are read lazily from the fleet-owned
+`/mnt/shared/flux-migration/INSTANCE`, strictly one absolute `PREFIX RUN` line.
+Importing the module never reads shared storage. Every CLI call resolves the
+current prefix; no run name or install prefix is embedded in live launch code.
+The CPU profile permits at most four cores, 16 GiB and
+1800 seconds. Consumer rules in `/mnt/shared/flux-migration/CAPS.md` also apply.
+Scientific row builders retain image admission intent, with neutral queue priority
+by default. GPU rows still refuse native execution at P-7. Namespace provenance
+binds the admitting profile's `config_sha256` and `r_sha256`.
+Memory is declared to Flux. The container sets `--cgroups=disabled` and runs
+inside the Flux job's cgroup; it does not enforce the declared per-job memory
+size. The job unit and aggregate fleet cgroup caps remain separate host bounds.
+The limits in `CAPS.md` are consumer rules, not stock Flux enforcement.
+
+Payloads use `PATH=/usr/bin:/bin`, so Torch Inductor selects the system compiler
+with its multiarch includes. Coordinator CLI invocations retain the Flux
+install and dependency tool directories on PATH and the Flux library search
+path for native client calls. Payloads carry no `LD_LIBRARY_PATH`. No coordinator
+`FLUX_SCRATCH` is exported. The wrapper uses an instance-provided job value when
+present, otherwise the existing host table: XFS
+`/home/rob/tl-gates/flux-validation` on dl380g10, ext4 `/tmp/flux-vanilla` on
+either Spark.
+Each selected root must pass the host filesystem qualification. Scratch lives under the exact
+`$FLUX_SCRATCH/$FLUX_JOB_ID`, with the payload ID normalized to its equivalent
+ASCII f58 spelling for scientific path contracts. Scratch is removed on exit.
+Its source and filesystem are retained with cleanup evidence. The staged proof uses `TMPDIR`
+inside that same owned directory. Launcher allow-lists contain no variable
+names with KEY, TOKEN, SECRET, PASS or AUTH substrings; quality prefill shares
+the executor's allow-list, and container/staged names are checked alongside it.
+No environment names were renamed.
+
+`launch.json` records source, argv, instance and resource identity. The executor
+retains raw `submit.stdout` and `submit.stderr` before classifying the response,
+including failed or unparseable submissions. It then saves a parsed ID in fsynced
+`submitted-job.json` before the ordinary `submission.json` and `jobid` receipts. `load_submission` and `collect_job` recover from that
+acknowledgement if ordinary receipt publication fails. A lost acknowledgement
+stays unknown and never triggers another submit. Collection authenticates the
+saved launch and retains terminal status, eventlog, allocation, payload logs and
+scratch cleanup evidence in the same record directory.
+Stage preflight resolves the same instance and checks its health before creating
+state or manifests. An empty live configuration is hashed as evidence and is
+allowed; missing broker identity and offline ranks still refuse.
+
+As of: 2026-11-10, P-4 dependency separation, after D-fix `90ceda405`.
+Source: `prismaquant/contract_checks.py`, `prismaquant/io_buffers.py`,
+`prismaquant/joint_quantum_handoff.py`,
+`prismaquant/data_manifest_contract.py`, `prismaquant/exact_activation_contract.py`,
+`tools/tessera_fleet/common.py`,
+`tools/pq_profile_artifact.py`.
+As of: 2026-11-10, P-4 graph round 3. Sources: `prismaquant/file_identity.py`,
+`prismaquant/cost_stage_checkpoint.py`, `prismaquant/staged_tier_policy.py`.
+Native writers pass a `WriterIdentities` registry that captures and retains their
+held file identities. Generic journals depend on descriptor IO primitives rather
+than the native registry implementation. No-follow directory traversal lives with
+sealed buffers in `io_buffers.py`; the tier policy owns the launch environment
+names and does not import the manifest implementation to activate itself.
+
+Shared strict JSON and refusal checks live below numerical artifact schemas.
+The IO engine's sealed buffers and synchronous extent copy share one leaf;
+staged metadata and readers use them without importing the engine's scheduler.
+Handoff publication binds its native owner directly, without importing the
+Stage A driver. Scientific budgets and publication authority remain checked.
+Scientific manifest validation lives below campaign planning, and recovery
+tooling imports that contract directly. Native status presentation shares the
+stage path definition with submission in the existing fleet common module,
+without importing the status CLI. Profile argv contracts live with profile
+artifact policy, and the stdlib source loader owns its digest bindings directly.
+Adjoint boundary receipts read exact activation metadata and filenames from the
+activation contract, without importing the cache or the Stage A driver.
+
+Graph receipt equality linkage uses a native arm's saved `job_id`. The legacy
+producer field remains a read-only fallback for recorded receipts that lack
+`job_id`; it cannot override a conflicting native ID.
+
+`tessera_campaign_container` authenticates admission before namespace setup.
+Its explicit container environment forwards `FLUX_JOB_ID` and `OUT` for pilot
+publication and Stage A produced-output binding. This fixes the argv contract;
+it does not qualify publication inside a real GPU container. The GPU lane
+remains held for P-7. `native_results` owns authenticated result selection;
+`quality_prefill_flux` owns the declared phase DAG. There is no live client for
+the retired execution service.
+
+`staged_launch` verifies the external cache helper against a source-pinned SHA256
+before executing those verified bytes with Python isolated mode, excluding cwd
+imports. Immutable staged coverage checks run once. They have no
+landing wait, poll deadline or progress-grace coupling. One resolver entry must
+cover the requested span; adjacent objects do not form a synthetic entry.
+Scientific rows retain container-image, device-memory, residency and phase-grace
+intent for review. The container specification remains bound in argv. Post-campaign
+rows record the declared head grace and 900-second layer phases. These fields do
+not qualify native enforcement: native submission refuses unsupported requirements.
+Capture chains emit no queue priority field and refuse an explicit nonzero priority.
+Production GPU rows refuse with `GPU lane not qualified; requires plan step P-7` before CPU admission.
+
+The dated entries below preserve earlier designs and measurements. Their
+execution-service descriptions are historical; this section and §7.0.2 describe
+the current native route. CLI descriptions and placement errors name admitted
+jobs; retained schema identifiers remain byte-for-byte unchanged. Numerical and
+serving gates remain independent.
+<!-- flux-current-end -->
+
+As of: 2026-11-10, stock Flux slot shape and runtime instance resolution, P-3.
+Source: `prismaquant/flux_jobs.py`, `tests/test_flux_jobs.py`, based on `cb07374d5`.
+The native CPU profile is `pq.flux.stock-slot.v3`. It submits
+`slot/[core=N;memory=M]`, with a GPU child only when requested by a future
+qualified profile. Today's gate still permits zero GPUs only. Core class is
+chosen by the loaded topology; allocation authentication counts core, memory
+and GPU leaves and preserves physical core/PU/affinity checks.
+The coordinator may set `FLUX_URI` explicitly; otherwise the fleet URI resolver
+selects its host-local socket. The client prefix comes from `INSTANCE` as
+described in the current execution section. There is no run-name guessing or
+newest-run discovery. Every rank declared in live `resource.R`
+must be online and have a full broker overlay. Live config and R response
+SHA256 values, URI and broker starttime are recorded in both launch and
+submission receipts as observations, without config or model hash pins.
+Collection, cancellation and native verification use the saved URI and require
+the same broker starttime, so a restarted instance cannot reuse a saved job ID.
+Saved `pq.flux.fv1-model.perf-memory.v2` launches retain their original shape
+when authenticated on resume; no launch is rewritten. Lost acknowledgements
+remain unknown and are never retried. CPU limits remain four cores, 16 GiB and
+1800 seconds. No GPU, numerical, serving or performance qualification follows.
+
+As of: 2026-11-09, PB-zero closure of the remaining experiment, tool and test surfaces, slice6.
+Source: `tools/prepare_stageb_after_capture.py`, `tests/test_prismabuild_ban.py`, `archive/pq_experiments_2026-11-09/README.md`, based on `b78164ab5`. The shrink-only 4C-14 list and its loader are gone: the ban has no allowlist and its only live finding is the CI workflow line owned outside this repository.
+`tools/prepare_stageb_after_capture.py` replaces the shell wrapper: it writes the preparation submission, requires an explicit staged launch binding for that submission's read manifest, passes the submission's own produced-output declaration and strict read flags, and submits one native CPU job (`--dry-run` only validates);
+the progress-phase text elsewhere in this document describes the retired wrapper. The retired-queue diagnostics, recovery-request and class-evidence tools are deleted; the native-MoE launchers, pq87/pq183 A/B family, LFM mixed-serving drivers, docker launchers and their scenario tests moved to `archive/pq_experiments_2026-11-09/` (not executable). No numerical, GPU, serving or production qualification follows.
+
+As of: 2026-11-09, PB-zero closure in live PrismaQuant source, slice5.
+Source: `tests/test_prismabuild_ban.py`, `tests/test_prismabuild_boundary.py`, `prismaquant/shape_runtime_prices.py`, `prismaquant/recorded_cas_receipt.py`, `prismaquant/staged_lease.py`, based on `0bbf045a0`. The local-scratch charge wire is gone (a container spec naming a retired service setting is refused;
+nothing prices scratch at placement, a named limit). The shape-time checker receipt is v2: it embeds one `native_results` selection, whose authenticated launch source and argv must equal exactly one reviewed pin and whose published artifact must equal the observation bytes; v1 receipts refuse and
+the v1 config is archived under `experiments/measurements/`. Recorded CAS receipts are checked offline by `recorded_cas_receipt`. The `staged_lease` doorways are deleted; `tools/build_stagea_seed_package.py` refuses without a native data-manifest validator. `gate_evidence` has no pbtest `inventory` kind.
+A ban over live source (text mechanisms plus an AST import/dynamic-load scan, explicit history/definition exclusions, and a shrink-only 4C-14 file list) replaces the PB boundary allowlist and the import-leak guard.
+The `pbsdk` dependency group and every pin and manifest of the retired client (`pyproject.toml`, `uv.lock`, `tools/bazel/requirements*`, `pip_modules.json`, `MODULE.bazel`, the source-identity document and their test guards) are deleted in the slice's final commit; the hosted install in `.github/workflows/bazel-hosted.yml` must drop `--group pbsdk` in the same merge.
+No numerical, GPU, serving or production qualification follows.
+
+As of: 2026-11-09, test-runtime closure, slice4f.
+Source: `tests/conftest.py`, `tests/test_own_process_isolation.py`, `tools/bazel/runtime.py`, based on `5373e63da`. The test runtime no longer
+carries PrismaBuild: `tests/fleet_sdk.py` and `tests/prismabuild_imports.py` are deleted, and `tests/conftest.py` has no PB import, name or control
+(no module restore, no queue-environment injection, no PB bound plugin, no PB distribution in the environment line). The requested per-test bound is
+pytest-timeout's own `--timeout`, a declared test dependency; a requested bound without the plugin is a usage error (exit 4) or a child that exits
+non-zero and fails its proxies by exit status, never a skip. An own-process child gets `-p pytest_timeout` only when its parent registered the plugin
+under that explicit name; a parent that autoloaded it registered it as `timeout`, and naming it again made pytest refuse "Plugin already registered under
+a different name" (the base failure of `test_own_process_isolation`, reproduced in a native session). Lazy reset reach, the certified default, the
+`fleet_data`/`task_suite` opt-ins, collection-skip exit status, own-process modules and golden rows are unchanged. The `pbsdk` dependency group, its pins
+and manifests, and two local-scratch pricing tests stay for slice 5. No numerical, GPU, serving or production qualification follows.
+
+As of: 2026-11-09, pilot/result callers on native authority and the PB-only demonstrations retired, slice4e.
+Source: `tools/{dispatch_joint_quanta,paired_trade_report_proof,tessera_campaign_container}.py`,
+`prismaquant/{joint_dispatch_pilot,joint_cost_quantum,campaign_container_spec}.py`, based on
+`adaf3d9f6`. The joint dispatch pilot gate now takes its result from the existing native owner:
+`--pilot-selector SELECTION_PATH SELECTION_SHA256` names a `native_results` selection (saved job,
+launch, expected launch intent and exact publication), and the production Gateway reads it with
+`read_selected_result`, which authenticates the succeeded terminal execution, the launch source and
+runtime, the retained announcement and the artifact bytes. The pilot counters name their producer by
+native `job_id` (`PILOT_SCHEMA` v2; a v1 document refuses), the reviewed `--pilot-source-contract` v2
+binds the launch's commit and tree and the container spec, the supplied counters must equal the
+published counters, and `bind_capture_command` is gone. A pilot quantum run by a native job publishes
+its completion and counters as one native result (`publish_pilot_result`); a container job has no
+native identity inside the container, so a real GPU pilot stays held for unit 4E and is not claimed.
+`tools/paired_trade_report_proof.py` publishes its archive with `publish_result`. The produced-spool
+environment (`PRISMABUILD_PRODUCED_SPOOL_*`) is gone: the spool's root and bound are the launch-bound
+declaration's, the dispatcher and the container spec refuse the retired names, and the adapter's early
+writable-identity-mount check for the spool root is replaced by the refusal at spool construction.
+`experiments/{build_dryrun_queue,receipt_demo}.py` and the fabricated PB carrier fixture are deleted.
+`staged_lease.client_sdk()` and its callers (checker receipts, historical original-capture receipts)
+keep failing closed; their disposition belongs to the PB-zero gate. No numerical, GPU, serving or
+production qualification follows; proofs are in the migration evidence.
+
+As of: 2026-11-09, G3 and staged-reader callers on the native staged manifest, slice4d.
+Source: `tools/g3job/{g3_residency,g3_launch,g3_progress_launch,g3_submit}.py`,
+`tools/tessera_campaign_container.py`, `prismaquant/campaign_container_spec.py`, based on
+`4033a2246`. The PB residency map, reader helper/queue/lease client and mover protocol are
+gone from the shipped readers. The container adapter forwards the five native staged names
+(`PRISMAQUANT_STAGED_MANIFEST` and its digest, the read-contract digest and path, the
+allowed tier) with container-translated paths and binds the `retained_shared_phase` namespace
+read-only; a `host_local_cache` manifest refuses at the container boundary, because its pins
+are process descriptors and the descriptor transfer is an unbuilt unit 4D obligation, never
+an implicit fallback. G3's `StagedReader` reads through the existing resolver and
+`LeaseWindow`: an undeclared range reads its declared origin, a declared range that fails an
+integrity check raises and never reads another copy, and a phase's descriptors are held until it
+finishes. `g3_launch` takes an explicit digest-checked read plan equal to the bound manifest's
+extents. `g3_submit` submits through `flux_jobs.submit_job` with a staged-launch binding and
+resumes from the saved ID; a GPU or over-16 GiB request fails closed in the native profile's own
+limits, so the GPU/GLM G3 run remains held for unit 4E and is not claimed. Progress is the 4b
+local log. `tools/stage_fed_demonstration.py` is deleted. No numerical, GPU, serving or
+production qualification follows; proofs are in the migration evidence.
+
+As of: 2026-11-09, native container admission and namespace provenance v2, slice4c.
+Source: `tools/{tessera_campaign_container,tessera_campaign_namespace}.py`,
+`prismaquant/campaign_container_spec.py`, based on `989d3ef46`. The campaign
+container adapter no longer runs Docker or forwards PB action, nonce, scope,
+queue, helper-root or progress context. It requires an admitted native Flux job
+(saved launch, original jobspec, event log, cgroup scope, R allocation and
+affinity, through the existing `flux_jobs.verify_current_job`), then creates one
+rootless Podman container by captured CID with the accepted G01 controls: pull
+never, cgroups disabled, no network, the native cpuset, no device, readonly
+sealed checkout, finite forwarded environment. Only the captured CID is stopped
+and removed, on success, failed start, interruption and late failure (an interrupted
+cleanup finishes in about a second, inside the native five second kill grace), and the
+adapter records `container.json` beside the native launch. A clean payload with
+failed cleanup exits 91. Container memory is declared, not kernel-enforced at
+container level: with cgroups disabled `--memory` is accepted but ignored (probe
+job fV3wqkMnFq), so a spec cap above the admitted memory refuses and the job unit
+bounds the process. The GPU arm stays held for unit 4E. Namespace bindings are
+schema v2; provenance is the Tessera pin, image content digest, native profile
+and native runtime digest, and v1 refuses. A spec naming a retired PB
+setting refuses. The residency map, produced spool and local scratch PB wire stay
+until 4d, 4e and slice 5. Container content digests are engine specific, so
+specs sealed under Docker need re-sealing. No numerical, GPU, serving or
+production qualification follows; proofs are in the migration evidence.
+
+As of: 2026-11-09, local application progress, slice4b.
+Source: `prismaquant/joint_run_progress.py` (`log_progress`),
+`prismaquant/{joint_cost_quantum,joint_stage_b_head,tessera_campaign,
+tessera_joint_aura}.py`, `tools/{build_tessera_selected_cache,
+capture_glm_routed_layers,tessera_campaign_container}.py`, based on
+`345c9f681`. The PB progress module, its token/phase/staged-wait/export-wait
+protocol, per-progress source memo and dev stamp are retired, along with the
+container progress forwarding. Writers still announce counts only after their
+existing durable or verified boundary, now as one local diagnostic line that
+carries no schema, file, acknowledgement or success authority. Phase rosters
+are explicit application data; no environment names them. Replay and overlay
+cadence takes an explicit finite `progress_interval_s`; the old
+`progress_allowance_s` and `--head-progress-allowance-s` refuse, naming the
+retired no-progress watchdog. Native walltime remains the execution bound. The
+older entries below that describe the PB progress record, `.staged-wait` and
+`.export-wait` files or `PRISMAQUANT_DEV_PROGRESS_STAMP` are history. G3
+helper-script transport stays in slice 4d. No numerical, serving, GPU or
+production qualification follows; proofs are in the migration evidence.
+
+As of: 2026-11-08, native private pin/bootstrap, slice4a.
+Source: `tools/{check_tessera_dev_install,provision_tessera_pin,
+accept_tessera_pin_provisioner,resolve_tessera_dev_pin}.py`, based on
+`84850aed9`. The install check derives expected package and contract bytes
+from the unchanged reviewed Git commit and measures the target interpreter's
+actual import owner and contents under isolated Python. Provenance alone
+cannot authorize execution. Private bootstrap uses explicit owned prefixes,
+and acceptance refuses preexisting work roots. Shared operator provisioning
+remains an operator action. The PB pin resolver, reader pin aliases and
+original-CUDA dependency-pack entry are retired. Remaining PB test/build
+dependencies stay explicit until their callers migrate; the existing Bazel
+provenance document owns that temporary build dependency. No numerical,
+serving, source-runtime, GPU or production qualification follows from this
+bootstrap migration. Per-step proofs and caller/PB audits are recorded in
+the migration evidence, not inferred from this description.
+
+As of: 2026-11-08, native prefill scientific consumers, slice3c.
+Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py` and
+`experiments/tessera_quality_prefill.py`, based on `85ffade23`.
+The driver submits explicit frozen native phases and collects saved IDs.
+Expected tasks come from the manifest roster. Caller receipt files cannot
+authorize completion. Native selected measurements supply observation values
+and phase-result coverage; explicit scientific labels retain their declared
+meaning and do not imply numerical qualification. Structural seals alone
+grant no execution authority. Partial, unknown and failed outcomes stay
+separate. Saved state is a presentation record, not native success evidence.
+The PB prefill adapter and its decomposition/SDK/queue/group-only tests are
+retired. Existing scientific validators and finite native owners retain
+currency, measured-estimate, exact-cover, publication and failure gates.
+CPU contract and actual native driver/observation proofs are retained in
+migration Jobs97 and99, including named cycle, duplicate-parent and foreign-
+manifest refusals. The cycle is rejected by final-manifest DAG validation.
+These bounded CPU results leave combined review and qualification separate.
+GPU prefill remains a separately approved Unit4E canary obligation.
+
+As of: 2026-11-08, native prefill sibling recovery boundary.
+Source: `prismaquant/quality_prefill_flux.py`, based on `6bc747549`.
+Common sealed manifests, structural rosters and phase submissions independently
+establish the finite population and expected child paths. Actual envelope and
+staged-input checks belong to each child. Collection visits every acknowledged
+child and retains available native outcomes beside metadata refusals;
+cancellation withholds an
+unverified target while still visiting independently authenticated siblings.
+Complete staged admission still precedes submission and any record publication.
+Value adoption, original-launch authentication, failure precedence and the
+declared parent DAG remain unchanged. The two-sibling native regression at the
+prior head is retained. Dependent scientific-driver work requires the corrected
+native proof. The CPU fixture freezes the same standard-library import roster
+for staged and unstaged children; measured runtime equality remains mandatory.
+
+As of: 2026-11-08, native prefill child documents and scientific value body.
+Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py`, based on
+`60c1158b0`. A bounded task envelope authenticates the final sealed manifest,
+acyclic plan context and complete declared child task population. The scientific
+envelope explicitly names its phase record directory for finite DAG routing;
+its envelope and result paths must belong to that canonical directory. The
+measurement body retains exact task payload, currency/status rules, finite
+nonnegative value and bounded artifact bindings. The native publisher checks
+actual admission, frozen source/runtime and complete task results through the
+existing result owner. Explicit phase records constrain envelope/native paths
+and route only through the declared parent DAG, verifying original native
+parent launches against their own frozen phase records. Each phase submits its
+explicit roster once, preserving partial/unknown submissions. Collection never
+resubmits during saved-ID resume. Cancellation targets authenticated
+known children. Conclusive failure stays separate from missing publication or
+query errors, and dependent values require every ancestor's selected success.
+The bounded CPU fixture proves three native parent phases, known bytes and
+value, saved-ID resume, late failure, cancellation, dependency exclusion,
+lost acknowledgement, partial submission and result replacement refusal.
+Its arithmetic uses 32 float32 values with an independently known sum of 528;
+it does not qualify model-quality measurements or the host Btrfs runtime.
+The scientific driver and numerical qualification remain separate slice3 work.
+
+As of: 2026-11-08, native Flux profile v2.
+Source: `prismaquant/flux_jobs.py`, based on `a79b37acb`. The migration lead
+qualified the exact config revision making `exec.sdexec-constrain-resources`
+explicitly false. The config hash changes to `ff9384f0...`; the resource model,
+broker generation, performance-core/memory rendering and CPU-only bounds stay
+pinned. Unknown config/model bytes still refuse. The archived single-key delta
+and both old-profile refusals are retained in migration Job69. Native proof of
+the revised profile is separate from prefill or scientific qualification.
+
+As of: 2026-11-08, finite native prefill measured admission, slice3b.
+Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py`, based on
+`614dad302`. Manifest v2 binds immutable phase rosters and explicit native
+dispatch and local-log policy. Finite measured setup/task evidence is matched
+to the declared command, runtime, resources and ordered task cover. Work limits
+count tasks; cost limits cap aggregate estimated elapsed seconds, with setup
+charged once per explicit child. Serial estimates must fit each native walltime.
+Existing scientific validators remain authoritative. This gate does not choose
+grouping or fill missing estimates. Native prefill lifecycle and the scientific
+driver remain unfinished, with GPU and production qualification separately held.
+
+As of: 2026-11-08, finite native prefill documents, slice3a.
+Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py`, based on
+`f1d66889a`. Scientific task payloads have one application-owned validator.
+The explicit roster bounds tasks, children, resources and inputs and requires
+an exact ordered cover. Publication uses the existing nofollow writer and
+bounded reader with parent and writer identities. Runtime evidence is checked
+structurally here; execution and native publication authentication remain
+separate. PB transport and the experiment driver remain unfinished slice3 work.
+No GPU, scientific measurement or production qualification follows from this
+document boundary.
+
+As of: 2026-11-08, remaining native scientific fixture consumers.
+Source: `tests/{test_fleet_acceptance_level1,test_quantum_executable_readset,test_stage_minimal_covers,test_stage_cover_mid_copy_mover}.py`,
+based on `ee4a13ae6`.
+Scientific producer, tensor, stream, source-cleanliness, phase-order and recovery
+checks use existing application and immutable staged-input owners. PB-only fleet,
+broker, mover, SDK, pin and watchdog-protocol test support is retired. The
+historical conformance matrix and bundle pin JSON remain unchanged evidence.
+Native Flux has no PB watchdog or incremental mover discovery. Complete inputs
+precede consumers; source/runtime and GPU qualification gates remain separate.
+
+As of: 2026-11-08, native spill and retained-budget fixture bindings.
+Source: `tests/{test_spill_phase_plan_1011,test_stage_b_spill_ceiling_sealed,test_retained_budget_provenance_1022}.py`,
+based on `f81c8179d`.
+Spill capacity assertions inspect the actual native payload specification;
+retained-budget fixtures use the existing native state owner. The PB-only spill
+planner test is removed. Exact geometry, grid, byte-count, phase and budget
+positives and refusals remain CPU checks, with no production qualification.
+
+As of: 2026-11-08, retired PB lease-comparison benchmark.
+Source: deletion of `tools/pwc_window_load_bench.py`, based on `0a725806a`.
+The historical cross-tree PB claim/map comparison has been removed. Native
+strict-reader, prepared-render and bridge tests retain tensor, receipt and
+reader-lifetime obligations. Power-window and page-cache helper controls remain
+in their existing shared owners. This retirement makes no performance claim.
+
+As of: 2026-11-08, unpublished native declaration dry-run.
+Source: `prismaquant/{joint_quantum_row,stage_a_produced_output}.py` and
+`tools/dispatch_joint_quanta.py`, based on `c4d031c70`.
+Fresh band-producer dry-runs derive declaration arguments from their bounded,
+validated unpublished bytes, preserving the no-write contract. Normal launches
+read the published file. Actual native consumers still authenticate that file
+against the argv digest. No new executor, publication schema or runtime
+qualification follows from a hypothetical row.
+
+As of: 2026-11-08, native staged reads with declared metadata fences.
+Source: `prismaquant/io_engine.py`, based on `f4d4166b7`.
+Retained PWC windows keep their explicit canonical regular-file metadata fence
+before and after native staged reads. Payload bytes still come from the staged
+descriptor and pass the existing immutable size, digest and identity checks.
+Post-read metadata refusal closes a sealed buffer. Native callers without a
+declared metadata signature remain independent of the canonical path. This
+repairs the reached retained-window transport and grants no source/runtime,
+performance or production qualification.
+
+As of: 2026-11-08, failed staged-shard setup ownership.
+Source: `prismaquant/residency_shard_reader.py`, based on `9401b7e3f`.
+An entered reader window stays with shard setup until its checked descriptor
+row is registered. Native integrity and read-shape errors close that window
+before propagating; successfully registered rows stay with the reader's normal
+exit. Cleanup errors cannot replace the original failure. This preserves the
+existing immutable input contract and grants no production qualification.
+
+As of: 2026-11-08, whole-input native object offsets.
+Source: `prismaquant/{perturbed_x_cache,tessera_joint_aura}.py`, based on
+`5b0261b5e`. Verified activation and exact-entry reads honor immutable object
+offsets while retaining their canonical stat, content, tensor and budget gates.
+Native wire reads use the existing bounded staged buffer owner. Prefix/trailer
+bytes outside the declared extent never enter its decoded content.
+
+As of: 2026-11-08, independent native reader positions.
+Source: `prismaquant/residency_map.py`, based on `307a7a61b`.
+The staged resolver retains its original object witness and checks every
+consumer open against it. Each returned descriptor has an independent file
+position, so sequential and concurrent readers cannot inherit another read's
+EOF. Window close still follows joined reader completion.
+
+As of: 2026-11-08, native resident PWC receipts.
+Source: `prismaquant/production_weight_cache.py`, based on `5400e3c49`.
+The IO engine's native immutable input path supplies no canonical-file stat.
+PWC receipts retain their verified delivered digest and resident tensor guard
+without requiring that source path. Ordinary file receipts retain their saved
+stat checks. Tensor mutation and cache lifetime changes still invalidate both.
+This CPU reader correction grants no production/runtime qualification.
+
+As of: 2026-11-08, canonical staged-cache Python isolation.
+Source: `prismaquant/staged_launch.py`, based on `818cc8991e3e939471650ce93a09bb1ff0368b29`.
+The host-local staged launcher invokes the single external fluxcache helper
+with Python `-s`, preserving its run-set CLI and inherited pin descriptors.
+Strict-reader fixture migration uses the existing immutable materializer and
+IO engine with job-owned retained phases. This does not qualify production
+source/runtime, numerical behavior or container cache descriptor inheritance.
+
+As of: 2026-11-08, census-discovered scientific and experiment callers.
+Source: `tests/{test_stage_a_bands,test_stage_a_head_skip}.py` and
+`experiments/alloc_lead_asd/tiny_glm_control.py`, based on `5921b1d36`.
+Band and head-skip CPU recovery fixtures select actual immutable application
+publications through the existing offline terminal-authority seam. Their tensor,
+checkpoint and campaign assertions remain. Obsolete PB keyed-egress and template
+wire assertions are removed; native launch-coordinate tests replace PB owner
+identity tests. The tiny-GLM control declares one dtype per native session and
+accepts immutable declaration flags. Its existing capture owner finalizes and
+cleans up; the experiment no longer calls the deleted PB release API. CPU
+orchestration tests cover exact private tensor publication and original capture
+or later failure preservation. They do not qualify GLM numerical behavior.
+
+As of: 2026-11-08, shipped byte-cycle caller directory ownership.
+Source: `tools/stagea_produced_byte_cycle.py`, based on `9326498bc`.
+The byte-cycle caller opens its generation through the shared nofollow owner
+before exclusively creating entries relative to that held directory. It saves
+the created directory identity for every spool record. Output or generation
+symlinks refuse before creating files or directories in their targets.
+
+As of: 2026-11-08, copy destination and failed checkpoint cleanup ownership.
+Source: `prismaquant/{io_engine,produced_output_spool,streamed_boundary_artifacts,joint_adjoint_checkpoints,file_identity,perturbed_x_cache,cost_stage_checkpoint,staged_manifest}.py`,
+based on `c7a50d4d431830d5e9ee1894b8d932d99a4f79ab`.
+Canonical export and rematerialization copies require the saved destination
+directory identity on the same nofollow FD used to create temporary bytes.
+Checkpoint reservations share original writer and created-directory sidecars
+from the attempt's first write, including partial temporary files. Cleanup
+scans can validate or refuse those identities, never grant new ownership to
+planned-name files or directories. Exact reclamation rechecks saved parent
+identities and retains reservations on uncertainty. Secondary abandonment
+refusals cannot replace the original checkpoint error. Scientific JSON and
+standalone journal replacement semantics remain unchanged.
+
+As of: 2026-11-08, produced writer directory and file ownership.
+Source: `prismaquant/{perturbed_x_cache,produced_output_spool,streamed_boundary_artifacts,stage_b_prep_io,joint_adjoint_checkpoints,cost_stage_checkpoint,stage_a_produced_output,file_identity,staged_manifest}.py`,
+based on `98c1ded0346ad67697ee32c2fe7ca808c3347c26`.
+Every produced tensor write checks the saved direct or spool directory identity
+through a nofollow directory descriptor. Tensor, metadata, preparation and
+checkpoint writers retain file signatures from held writer descriptors through
+group sealing. Spool publication retains the copy-returned destination signature.
+Descriptor construction refuses missing signatures and same-byte replacements.
+Transient signatures remain outside scientific reference and checkpoint JSON.
+Native small-file writers also retain their generation, preparation and
+checkpoint parent-directory identities. Every later write checks them through
+the shared nofollow directory reader before creating a file. Native checkpoint
+shared files and manifests publish exclusively through that same directory FD;
+standalone journal replacement behavior remains unchanged.
+
+As of: 2026-11-08, selected produced-index byte admission.
+Source: `prismaquant/{native_results,stage_a_produced_output}.py`,
+based on `774fd155dbfebbda6e22590b4110cd7b46b49680`.
+Produced consumers require the sole produced_index artifact role at at most
+16 MiB before the authenticated reader reads its bytes. This bound is separate
+from the native aggregate input/artifact ceiling and applies to successful
+results and explicitly selected failed checkpoints.
+
+As of: 2026-11-08, checkpoint cancellation ownership.
+Source: `prismaquant/{streamed_boundary_artifacts,stage_a_produced_output}.py`,
+based on `e41094b825374d33f94c48d21bcb52f33f3b208c`.
+An unwritten checkpoint cancellation releases its native prewrite before
+forgetting the application reservation. Occupied or uncertain paths retain
+both records. Explicitly released paths may be reserved by a new batch.
+
+As of: 2026-11-08, composed preparation publication ownership.
+Source: `tools/{prepare_extended_joint_quanta,regenerate_joint_quanta}.py`,
+based on `063b1972f615b2409f5485f8344a0a488175b8ef`.
+Standalone regeneration finalizes its produced index after its records. The
+enclosing preparation defers that step, publishes its launch recipe, then
+finalizes the shared publication once. Exclusive index publication remains
+immutable. CPU metadata proofs do not qualify the production source/runtime.
+
+As of: 2026-11-08, produced writer prewrite limits.
+Source: `prismaquant/streamed_boundary_artifacts.py`, based on `db9f80a0d`.
+Direct and spooled tensor writers enforce the same declared per-entry tensor
+ceiling before creating a group. Write-only metadata reserves its largest
+sequential temporary file before either the direct writer or spool creates it.
+
+As of: 2026-11-08, Unit4B joined lifecycle and scientific consumer migration under review.
+Source: `prismaquant/{stage_a_produced_output,produced_output_spool,stage_a_retirement,joint_forward_resume,io_engine}.py`,
+based on `a185df89c66db4085f59417e9bd491b0ba6f4bfe`.
+An immutable produced declaration is bound by actual native argv. Finite batch
+manifests carry the authenticated producer, session, complete descriptor roster,
+inline writer digests and exact file identities. Prewrite ceilings are application
+bounds. No service funding, mover queue, persistent capacity ledger or scheduler
+is retained. The existing IO engine copies and exclusively publishes same-box
+spool files; reader holds and durable publication precede local release and
+deferred canonical unlinks. Rematerialization reads the existing immutable group.
+`produced_stager` now contains only bookkeeping synchronization.
+
+Independent reuse selects the existing native-results owner, runtime v5 and
+actual terminal native evidence. Explicit launch-declared failed checkpoints
+use a separate reader that retains the failed verdict. Running, canceled,
+dependency-failed and unknown executions cannot authorize independent recovery.
+Recovery v2 uses a finite selected-publication chain and a launch-bound scientific
+state input; legacy PB capsules refuse. Batch metadata is bounded at 16 MiB per
+index and recovery coordinate maps at 65536 entries before allocation.
+Retirement v2 joins every recorded native
+producer, successor/session and whole declared consumer binding scan, then seals
+exact file targets before unlinking. Crash continuation rechecks all barriers
+and cannot acquire additional targets. Chain-state active launch records establish
+later stopped-scope checks, never selected output authority. Separate producer,
+warm and consumer phases use native dependencies through `flux_jobs`.
+Checkpoint abandonment seals the planned file roster under the writer's recorded
+directory identity; disposal refuses unknown files and replacements. Native
+dependency proofs submit consumers before releasing producer completion events.
+Writer file identities are transient disposal fences and never serialized into
+scientific references. Active reader aliases hold local and canonical copies
+until their existing IO window closes. Read-ahead only stages the current owner's
+produced index; borrowed recovery inputs retain their existing reader authority.
+Publication metadata directories open through the existing descriptor-based
+nofollow owner before creation. Removed service queue/funding/stager telemetry
+has no replacement backend. Stage A progress remains local to its log and writer.
+The historical PB905 pacing experiment's execution entrypoints refuse; its
+offline packet checks and verified tensor-byte readers remain. Its lifecycle
+positive uses the actual native application spool. The opt-in CPU IO profile
+also uses that existing engine, with no simulated exporter or readiness sleeps.
+
+```mermaid
+flowchart LR
+    L[Native launch and immutable declaration] --> W[Existing tensor or metadata writer]
+    W --> S[Bounded same-box spool]
+    S --> I[Existing IO engine and immutable batches]
+    S --> R[Existing exact resident reader]
+    I --> N[Terminal native selected result]
+    N --> F[Finite recovery chain]
+    N --> T[Successor and consumer barriers]
+    T --> U[Sealed exact retirement targets]
+```
+
+This migration remains under parent and independent review. CPU byte fixtures
+and actual tensor/scientific tests are reported separately. Unit4, production
+Btrfs/symlink runtime, CUDA/full64 and integrated qualification remain incomplete.
+No numerical format, serving gate, production default or performance claim moves.
+
+As of: 2026-11-08, native executor Python startup policy.
+Source: `prismaquant/flux_jobs.py`, based on `884b79fda`.
+The owned native wrapper and staged-input launcher explicitly use Python `-s`.
+Saved original argv authenticates that setting. This follows the migration's
+no-user-site rule without adding inherited environment settings or changing
+the selected numerical runtime's qualification.
+
+As of: 2026-11-08, retained failure evidence after independent review.
+Source: `prismaquant/flux_jobs.py`, based on `f7125cf36`.
+Recollection of a launch-bound failed/canceled/dependency-failed result retains
+its original eventlog/status/allocation bytes and diagnostics. Fresh native
+responses go to separate `*.recollection.*` diagnostic files, and still drive
+the current collection. Malformed or unsuccessful responses cannot overwrite
+the retained proof. Saved success is never reused when fresh queries fail.
+There is no result cache, query history service or new scheduling state.
+
+As of: 2026-11-08, bounded installed runtime metadata after independent review.
+Source: `prismaquant/native_results.py`, based on `bb3d8e345`.
+Only filesystem PathDistribution dist-info owners are supported. METADATA and
+RECORD pass the shared nonblocking regular-file/component reader before parsing,
+with finite metadata/file/aggregate byte ceilings and a RECORD entry bound.
+Name/version come from those fenced bytes, not eager distribution properties.
+The final observation repeats the same bounded path and checks descriptor/path
+identity. FIFO, symlink, oversized metadata and replacement refuse. Runtime v5,
+content/source/scientific gates and the production Btrfs refusal are preserved.
+
+As of: 2026-11-08, scientific native-consumer coverage under parent review.
+Source: `prismaquant/source_generation.py` and its reader/admission tests,
+based on `983b08719`.
+Scientific reader controls independently join both runtime inputs, source
+config, every granted-resource axis and every actual staged delivery. CPU
+fixtures retain exact node/role/artifact binding refusals and cannot issue
+full64 or independent-root qualification. The parent native proof at `983b08719`
+feeds actual verified native bytes into these artifact consumers. Runtime v5
+and the scientific fixtures remain subject to independent review; the current
+Btrfs interpreter is unqualified by its mapped-device fence.
+
+As of: 2026-11-08, current execution-scope authentication.
+Source: `prismaquant/flux_jobs.py`, based on `cabd4b20e4f8a2c34dab64c77caabb21e440cb79`.
+Active original-source context additionally requires started nonterminal native
+events and the current process's exact sdexec job unit. A completed job or an
+ID borrowed by another process scope cannot establish current admission, even
+when its source, saved original jobspec and allocation all match.
+
+As of: 2026-11-08, R1 native runtime v5 content authority under review.
+Source: `prismaquant/{native_results,file_identity,digests,source_generation}.py`,
+based on parent `ccf8ac2340f8f95b4268b60f0515e2b8624902c5`.
+`measure_runtime` and `validate_runtime` retain their public signatures and use
+`prismaquant.flux_result_runtime.v5`; old v1/v2/v3/v4 runtime evidence is refused.
+The finite declared distribution roster measures complete durable package,
+metadata and bundled-library contents, including nested code/data and empty files.
+Actual directory census detects additions/removals outside RECORD. Declared
+import roots must agree with independent import resolution and loaded owners.
+The host-interpreter contract measures standard/platform stdlib and dynload,
+authenticates the actual executable, records interpreter flags, and measures mapped
+libpython/external libraries. Other loaded implementations have individually
+measured file owners and an exact observed roster. New imports/mappings change
+identity or refuse; this does not claim a closure for arbitrary future code.
+Existing loaded bytecode caches are separately measured. Custom loaders and
+unverifiable mapping owners, including the current x86 Btrfs device-alias case,
+refuse, as do executable anonymous stacks and editable/path-injection owners.
+The positive native CPU proof uses a scoped static fixture interpreter with
+its GNU_STACK executable permission removed and the exact binary digest recorded.
+Original-source declarations include safetensors, numpy, sympy and mpmath beside
+torch, transformers and Tessera. Descriptor streaming, finite file/root/count/byte
+budgets, pre/post file identity and full directory-stat/import/mapping checks refuse
+races and unsupported owners. There is no runtime cache or second source archive.
+The existing durable-package filter now lives in the light file_identity owner;
+the weight-cache roster and behavior are preserved. R2/R3/R5, scientific/full64,
+root/source-family/calibration/material/format/serving gates remain unchanged.
+Focused/native proof evidence is recorded in
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit4-runtime-content/`.
+Parent review/integration and scientific consumer coverage remain required.
+
+As of: 2026-11-08, authenticated active CPU source context.
+Source: `prismaquant/{flux_jobs,native_results}.py`, based on `e9b366743`.
+Active original-source controls authenticate the current saved ID and launch
+against its original native jobspec before using resource claims. The granted
+single-host allocation must match core/performance/memory leaves and actual
+process affinity. Its allocation is retained. Missing submit acknowledgement
+refuses context; an unverified launch file cannot establish admission.
+The current profile admits no GPU. Runtime completeness and scientific consumer
+coverage remain acceptance blockers under parent review.
+
+As of: 2026-11-08, parent review of native failure evidence.
+Source: `prismaquant/{flux_jobs,native_results}.py`, based on `7cb15a3e0a6eca4a8943d4c2b5b6ba68357b6adf`.
+A valid native completed payload followed by a fatal execution exception stays
+failed. Its observed payload exit remains separate from the fatal native ending,
+and missing cleanup cannot erase that conclusive failure. Ancillary wait,
+allocation, cancellation and evidence-write errors remain diagnostics beside
+authenticated failure. Saved failure observations bind the exact launch and ID;
+later unavailable queries cannot erase them. Success is always re-observed and
+requires complete evidence. Selected results collect execution before checking
+optional publication evidence. Parent pre-fix job
+`ƒEN8nirvum` reproduced the classification gap; the admitted focused regression
+and policy checks are recorded under `evidence/unit4-parent-authority/` in the
+shared migration directory. The authority slice remains under parent review;
+this correction supplies no GPU, full64 or production qualification.
+
+As of: 2026-11-08, unit4 slice4A native selected-result and original-source controls.
+Source: parent `6dc0d5e1bddd2aa81dc55f91f193fb57471e1dff`,
+`prismaquant/{native_results,flux_jobs,source_generation,tessera_calibration_cache}.py`
+and their direct CPU fixtures/qualification producers.
+The app-owned `prismaquant.flux_result_selection.v1` selects one known native
+ID, record directory, launch SHA256 and immutable publication path/digest/length.
+`native_results` joins independent launch intent to the retained actual original jobspec,
+then requires successful native status, complete events, allocation and cleanup.
+Native status/event/allocation and bounded owned cleanup sidecars use strict JSON.
+The publication binds finite named input/artifact rosters, execution-measured
+interpreter, complete declared dependency contents and imported/support owners, and exactly one retained
+publisher announcement. Artifact reads check length, digest and file identity.
+ASCII/Unicode f58 IDs share native identity. Resume reads the saved ID and never
+submits. Conclusive native failure survives cleanup errors; query/evidence errors
+cannot authorize a result. No scheduler, service, CAS or result cache is added.
+Original runtime v2 replaces the PB helper/worker/proxy seal with measured native
+runtime. Publisher whole-roster Git/LFS authority and immutable read-contract
+parsing use the existing staged reader, IO and owned-buffer accounting.
+Actual full64 CUDA, independent root matched-source admission, source-family,
+calibration, execution, material/copy completion, format and serving gates remain.
+CPU fixtures prove transport and real original material/CPU arithmetic only.
+The qualification controller runs inside its caller's explicitly admitted
+interpreter/image; it no longer invokes a PB container adapter or publishes CAS
+artifacts. GPU execution is still refused by the current native CPU profile.
+No GPU qualification, performance, full-suite or production claim follows.
+Slice4B still owns produced batches/spool and forward recovery. Slice4C owns
+prefill, package/dependency pins and other selected-result consumers. The direct
+original CUDA inner dependency pack retains its existing package-pin contract
+for 4C; no old proof is relabeled as native. Slice4E owns integrated qualification.
+Evidence and retained failures: `/mnt/shared/flux-migration/pq-tessera/evidence/unit4-authority/`.
+Parent independent review/integration is required.
+
+As of: 2026-11-07, parent review of integrated native staged inputs.
+Source: local reader head `176681e27cab45923d348cb27f91844c4a42e040`
+and parent corrections through `b52bd5450`.
+Canceled immutable coverage checks return a conclusive refusal. Native launch
+serialization reuses the digest owners' exact byte profiles; no receipt identity
+or admission policy changes. The shrink-only duplication gates remain intact.
+Parent Flux job `ƒDCd39x4SK` passed 413 targeted tests and 53 subtests with
+24 compile/import checks, then repeated the actual Spark warm, bound staged
+reader and cleanup chain. The previous policy failures, cancellation traceback
+and stale-refusal assertion failures are retained in
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit2-parent/`.
+These scoped CPU checks do not qualify GPU work, a full suite or production.
+
+As of: 2026-11-07, unit2 immutable native staged-input reader, parent 635e945e4.
+Source: `prismaquant/{staged_manifest,staged_launch,residency_map,staged_lease,
+residency_shard_reader,staged_whole_file,stage_b_prep_io,io_engine,flux_jobs,
+tessera_campaign_rows}.py` and direct CPU regression/proof tools.
+Native rows may bind explicit staged-manifest and scientific read-contract
+paths, their separate SHA256 values and a finite SSD policy through
+`prismaquant.staged_launch.v1`. Source/read bindings are
+retained and rechecked on resume and collection. Scheduling remains in the
+stock-slot CPU profile described by the P-3 stamp above. Arbitrary environments, GPU/container,
+progress-stall, pilot and authenticated publication requirements still refuse.
+The immutable `prismaquant.staged_input_manifest.v1` separates source identity,
+extent digest and object identity. An extent reads at object_offset + requested
+source offset - source_offset. Strict shard headers require bounded declared
+staged coverage; byte zero of a range object is never treated as a source header.
+Existing whole-file, shard, IO stream and owned-buffer consumers use the same
+resolver and descriptor windows. The reader has no PB SDK, dynamic maps,
+landing polls or claim-context injection. Offline materialization computes
+actual extent/object digests while copying on the IO caller thread, fsyncs and
+publishes with exclusive atomic links. Launch does not rehash entire sources.
+
+Host-local rows run the external canonical `fluxcache.py run-set` on the owner,
+with 1..1024 unique digest/length members. Worker-only opens validate the
+inherited object map and shared pin descriptors, retaining pin duplicates and
+object descriptors through reader lifetime. Static coordinator checks never
+stat Spark-local objects. The helper's same-owner host-local trust boundary
+applies; it is not adversarial-owner authentication. Shared phases have no
+retirement operation in the reader and remain retained until every named scope
+is stopped or fenced. Unknown scopes and native clean do not authorize deletion.
+No namespace, mount, quota, RAM or export reservation is provisioned here.
+
+Legacy source-stat requirements refuse at the IO boundary until source authority
+migrates. Historical SDK pin literals remain for unit4 build-time consumers.
+Source-generation, selected-result/pilot, produced-output and quality-prefill
+contracts remain explicit unit4 holds; removing the reader SDK completes none
+of those authority contracts. Tessera remains unit3. Serving pins, formats,
+ship gates and numerical behavior are unchanged, and GGUF is untouched.
+Admitted CPU evidence is recorded in
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit2-reader/`; it supplies no
+GPU-feeding, RDMA throughput, numerical, serving or production qualification.
+
+As of: 2026-11-07, native joint, Stage A split and capture-chain caller slice.
+Source: `tools/dispatch_{joint_quanta,stage_a_split,capture_chain}.py`,
+`prismaquant/{joint_quantum_row,tessera_campaign_rows}.py` and direct caller tests,
+based on parent `c481bedbb8f6df6c8758daf0c5c2b5fa558c9915`.
+The joint builders return neutral application rows preserving source/read/plan,
+calibration and handoff bindings, demands, priorities, container pins, progress
+requirements and durable-output declarations. One profile in `flux_jobs.py`
+continues to render resources and the finite clean environment.
+`Gateway` and the split/capture submitters reuse native row submit/collect and
+saved-ID launch validation. Native records bind exact source, argv, full resources,
+effective environment and dependency IDs. Joint dispatch records scientific intent
+before submission and can reconnect a saved ID after the event-log publication gap.
+Old PB state and ambiguous submission refuse. Split/capture attempts have explicit
+native schemas; only a known terminal failure permits an explicit retry, retaining
+all earlier IDs, records and terminal evidence. Both native success and independent
+scientific content/coverage barriers remain required. An early success artifact
+cannot qualify a late-failing or incomplete producer. Native afterok edges use saved
+producer IDs. The shared planner is `campaign_row`; all live callers use that name.
+
+Real CPU fixture proofs drove Gateway dependencies/failure/resume/unknown,
+Stage A prep/quantum ordering and source pins, the seeded scientific capture chain
+with actual output gates, and retained-failure capture retry. Each proof's 12 payload jobs
+and controllers are terminal and collected, with exact known bytes and job-ID scratch
+absence. Recovery checks bind row cwd to the recorded source. Split/capture
+pointers must match the core submission descriptor before resume. Production
+joint receipt reuse also requires a saved native Stage A producer.
+Scripts and final test/audit verdicts are recorded under
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit1-joint/`.
+This transport proof does not qualify scientific GPU payloads. Strict staged inputs,
+produced-output authentication, native pilot authority, GPU/container admission,
+application settings and unenforced stall requirements still refuse before launch.
+The retained pilot verifier has positive fake-evidence coverage; production Gateway
+refuses unavailable native result authority without consulting the PB SDK.
+Units 2/3/4 still own staged readers, canonical fluxcache, source-generation/output
+authority and Tessera. No cache, scheduler, service, format, ship gate, numerical or
+performance change is claimed. Generated Bazel targets are refreshed from the
+integrated source and checked by the final admitted audit. These development
+results are not a CI verdict. Parent independent review remains required.
+
+As of: 2026-11-07, native campaign receipt review correction.
+Source: `prismaquant/flux_jobs.py`, `prismaquant/tessera_campaign_rows.py`
+and their boundary tests, based on `eadef29d96679b231016655409ea4f91765211a4`.
+Saved native launches are rechecked against complete placement, effective
+allowlisted environment, source, command, resources and dependency intent at
+resume and collection. A changed manifest cannot reuse another execution's
+success to pass the independent scientific merge gate. Production holds and
+the CPU-only qualification scope below remain in force.
+Flux review job `ƒCEzciD3ao` passed 387 tests, 53 subtests, 22 compile checks
+and the real caller lifecycle proof. The preceding failed regression run is
+retained. Review evidence is in `evidence/unit1-campaign/PARENT-REVIEW.md`
+under the shared migration directory.
+
+As of: 2026-11-07, native campaign and Tessera-fleet callers, unit 1 slice 2.
+Source: `prismaquant/{flux_jobs,tessera_campaign_rows}.py`,
+`tools/dispatch_tessera_campaign.py`, `tools/tessera_fleet/` and their direct
+caller tests, based on independently reviewed core `805568d53b601737f60e0190fe96dc81d4f48ac1`.
+Campaign census/capture/submit and fleet stages now use native submit/collect
+and saved-ID reconnect. Campaign `status` and the fleet status command query
+only IDs under `.flux-state/`; neither reads historical PB state. Exact row
+intent, detached source commit/tree, producer records and every native ID are
+kept separately from scientific outputs. Resume refuses changed intent,
+changed source identity and unknown submission; it never adopts by name or
+infers a cache hit. Native afterok edges bind saved producers from the current
+standing instance. Query errors remain unknown even when payload exit is known.
+Campaign merge re-collects native success for the exact submitted manifest
+before the existing coverage, Hessian, wire and checkpoint validation.
+An early scientific receipt cannot override a subsequent payload failure.
+
+Fleet workspaces keep actual committed detached bytes in `source/`, external
+workflow state in `.flux-state/`, and immutable per-stage spec/barrier sources.
+`initialize_git` stages the real copied files; an empty commit is insufficient.
+Payload source must be shared on every eligible host. Source remains immutable;
+job scratch comes from the existing native executor wrapper. The shared scientific planner is now named `campaign_row`. Existing pb-result.json scientific
+record names/schemas are retained, independently of native execution facts.
+
+The current CPU-only baseline and its resource/environment gates are unchanged.
+Strict data manifests/residency, produced-output authentication, pilots,
+GPU/container/device admission, unqualified application environments, priorities
+and unenforced progress-stall requirements explicitly refuse before any launch.
+A hard walltime does not replace a stall watchdog. Production campaign/export
+and ladder runs therefore remain held; numerical runtime pins and class
+placement attestations are preserved without claiming new qualification.
+Post-campaign commands retain explicit intent and read manifests but cannot
+launch those contracts. Their scientific environment comes from the versioned
+spec, never ambient shell settings. The joint/Stage A/capture caller stamp above supersedes their earlier transport.
+Canonical fluxcache and the Tessera repository remain for later serial slices.
+No format, serving lane, cache, ship gate, numerical, GPU or performance change.
+
+Rerunnable verification and all retained failures are under
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit1-campaign/`; native records
+are under `pq-tessera/jobs/unit1-campaign-*/`. Targeted verification passed 384 tests plus 53 subtests and 21 source compile
+checks in job `ƒCAoBfemLT`; this includes the architecture and documentation
+checks. The earlier 363-test run is retained as `ƒC7LRxmMKD`. Caller proof controllers including `ƒC6UK3oZ43` and `ƒCAoBfemLT` verified exact known
+bytes, blocked native dependencies, exit-7 failure despite an early receipt,
+never-launched dependent, saved-ID resume and scratch absence. The latter also
+verified caller-level query failure and durable unknown-submit refusal. Final audit `ƒCBLEXQNWb` verified all 28 preceding native jobs, including
+resource leaves, perf affinity and scratch absence for every started job. Its
+own terminal records and scratch absence were collected separately. All 29
+submitted jobs are terminal and collected. Post-campaign read manifests use
+immutable publication, including on admission refusal. The complete job ledger
+and retained failures are recorded in the evidence report.
+The PB-importing root pytest fixture/plugins were excluded; scientific tests
+used the existing pinned Tessera interpreter. This is CPU caller qualification,
+not production activation. Independent parent review of this slice remains due.
+
+As of: 2026-11-07, native Flux executor core, migration unit 1.
+Source: `prismaquant/flux_jobs.py` and `tests/test_flux_jobs.py`, based on
+main `f6c99e8edb5e05fbf2d21d6240cd3df407ee7867`.
+The opt-in stdlib/CLI module owns submit, collect, cancel and saved-ID reconnect.
+Its current stock-slot profile requests core and GiB memory leaves without a
+core-class marker, finite walltime, a clean allowlisted environment and job-ID scratch.
+Launch/submission/result records bind a clean detached source commit, exact
+intent and observed instance identity to native job facts. Ambiguous
+submission refuses reuse; query failure remains separate from payload exit.
+The profile qualifies CPU jobs only, at most four cores, 16 GiB and 30 minutes.
+At this core checkpoint campaign, joint, Stage A, capture and fleet callers
+still used their prior transports; the caller stamp above records the next slice. Strict staged reads and authenticated output/pilot contracts
+remain unqualified pending migration units 2 and 4. No result cache, scheduler,
+topology cutover, numerical, performance, serving or production claim follows.
+The rerunnable CPU proof and native records live under
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit1-core/` and
+`/mnt/shared/flux-migration/pq-tessera/jobs/unit1-core-*/`.
+CPU verification at code commit `392c7197390becb183ad96b1a070723f7a24b78b`:
+21 stdlib boundary tests and two compile checks passed in Flux job
+`ƒBwJ8JiQ3y`, bypassing the old PB-importing pytest conftest. Controller
+`ƒBwHDHv5ao` proved native dependency blocking, exact fixture bytes, failure,
+never-launched dependent, cancellation, saved-ID reconnect and query failure.
+An architecture-constrained portable child exercised Spark perf cores and
+scratch. Audit `ƒBx2CRSKwu` checked all 21 preceding job records and verified
+CPU affinity and scratch removal for every started job. The first proof's
+incorrect native event spelling failed and remains recorded in
+`jobs/unit1-core-01`; it was corrected before subsequent verification.
+Memory leaves provide admission accounting, not a per-job cap at the declared
+GiB value. SIGKILL or node loss can prevent cleanup and require reconciliation.
+The core passed independent parent review; the remaining caller and
+qualification units are separate.
+
 As of: 2026-11-07, default-off scratch-traffic declaration uptake, PQ #2798.
 Source: `tools/tessera_campaign_container.py` and
 `tools/dispatch_joint_quanta.py`, based on main `d92c37fe42`.
@@ -8243,11 +9125,11 @@ PQ #1098, part of #997).
   no bound keeps 104; a malformed bound refuses. Gate:
   `tests/test_dispatch_joint_quanta.py`.
 - **Stage B preparation progress phases (PQ #1098).**
-  `tools/prepare_stageb_after_capture.sh` passes one `--progress-phase` per
+  `tools/prepare_stageb_after_capture.py` passes one `--progress-phase` per
   read phase of the manifest it submits, in order, because pbrun refuses a
   v2 read plan otherwise (`require_linear_read_plan_progress`). The
   preparation commits no progress units, so each allowance is the run's
-  `--timeout-s`. Gate: `tests/test_prepare_stageb_after_capture_1098.py`.
+  `--timeout-s`. Gate: `tests/test_prepare_stageb_after_capture_native.py`.
 
 No format, pipeline default, stage or ship gate changes.
 
@@ -8387,7 +9269,7 @@ they are.
 `stage_b_preparation_submission` now declares a SHA-256 for every entry it
 adds. Bound digests are taken from their bindings, and the rest are hashed.
 PrismaBuild's copies are therefore pinned to declared bytes. The submission
-also emits `strict_read_flags`, which `prepare_stageb_after_capture.sh`
+also emits `strict_read_flags`, which `prepare_stageb_after_capture.py`
 appends to the command. Without the flags, the reads are plain file reads,
 as before.
 
@@ -8536,7 +9418,7 @@ A proofs, the production pickle, and the config, index and header ranges
 `layer_streaming.streaming_source_plan` reads, PQ #1095) and a write-only
 produced-output template over the metadata root (PB #912: zero window, one
 `stage_b_metadata` payload slot, a ceiling of 64 MiB per file it can write).
-`tools/prepare_stageb_after_capture.sh` submits the preparation with both,
+`tools/prepare_stageb_after_capture.py` submits the preparation with both,
 with `--residency stage`, and with the tools' new `--produced-output` flag.
 Under that flag `prismaquant.stage_b_prep_io.publish_files` files one
 prewrite per group of files it creates (extension, inputs, manifests,
@@ -9228,7 +10110,7 @@ spec whose `PRISMAQUANT_STAGED_RANGE_WAIT_S` is not below 900 s refuses before
 any metadata is published. It also refuses a plan whose retained budget is not
 its resource policy's (PQ #1022), and the generator settles every layer's
 retained admission before the head intake, naming `derive_policy` when an
-operator-declared budget does not fit the roster. `tools/prepare_stageb_after_capture.sh` is the
+operator-declared budget does not fit the roster. `tools/prepare_stageb_after_capture.py` is the
 repository launcher for that step; it resolves the interpreter from the Tessera
 dev pin. Gates: `tests/test_joint_catalog_extension.py`,
 `tests/test_prepare_extended_joint_quanta.py`,
@@ -12484,8 +13366,9 @@ callers now declare it through PB's admission contract:
   its own `--tag` and the image declaration is a separate envelope option.
 - `tools/dispatch_tessera_campaign.py` adds `container_images: [REF]` to every
   generated manifest row from the row's resolved container class (a class
-  override declares its own image) and the same flag to its direct
-  submit-joint/submit-aqua commands.
+  override declares its own image). Direct submit-joint/submit-aqua now retain
+  the same `container_images` intent under the native caller migration and
+  refuse launch until device/container and staging admission qualify.
 - `tools/tessera_campaign_container.admission_image_reference` is the one
   reader: it validates the spec with the launcher's `validate_container` and
   returns the image, or `None` for a spec that runs no container or binds a
@@ -15767,7 +16650,7 @@ remain bit-exact, so the record keeps `build.binary_sha256` and replaces
 and carried in its receipt. Consequence, stated plainly: the packaged record no
 longer admits the spark-vllm image it was first qualified in. A record is
 retired and replaced per runtime, never extended.
-`experiments/joint_projection_reduce_run.sh` takes the image and run root as
+`archive/pq_experiments_2026-11-09/experiments/joint_projection_reduce_run.sh` takes the image and run root as
 inputs (defaults unchanged) and `joint_projection_reduce_bench.py` takes
 `--binary/--binary-sha256` to replay a bound binary instead of building one.
 Gates: `tests/test_joint_projection_backend.py`
@@ -20083,7 +20966,7 @@ executable census that fails for any future detection call inside a broad
 
 Re-stamped (2026-09-05, `claude/pq-decisions`) for the **replayed candidate
 decision in the paired validation driver** (§7.2; #87). The opt-in
-`experiments/pq87_paired_validation.py` counted a candidate arm as observed
+`archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation.py` counted a candidate arm as observed
 when the receipt's stored `decision.verdict` agreed with the client's exit
 status — a stored bit, which `replay_no_new_failures` exists to refuse and
 which had no caller outside the tests (pq-190 review, side-finding 3). The
@@ -20225,7 +21108,7 @@ dense/packed regressions, both shown failing before the refusal).
 
 Re-stamped (2026-09-04, `codex/pq87-paired-policy`) for a **frozen sequential
 native-candidate validation plan**, not a measured result. The opt-in
-`experiments/pq87_paired_validation.py` reuses the existing bounded BF16
+`archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation.py` reuses the existing bounded BF16
 instrument helpers and the paired client. A committed manifest declares
 distinct native BF16/quantized sources, screen and disjoint held-out schedules,
 both-box telemetry URLs and the deadline. It freezes both artifacts before
@@ -20423,7 +21306,7 @@ dense. The helper delegates value validation to `ServingContext`; it does
 not change a runtime default or attest any new serving cell.
 
 Re-stamped (2026-09-04, `codex/pq87-physical-ab`) for the opt-in bounded
-physical boundary controller. `experiments/pq87_physical_ab.py` freezes and
+physical boundary controller. `archive/pq_experiments_2026-11-09/experiments/pq87_physical_ab.py` freezes and
 hashes native BF16 source before starting one read-only-model server, then
 requires the client to observe that same content. It journals every completed
 HTTP response and cap step, uses explicit one-sequence/4096-context/1-GiB-KV
@@ -28372,22 +29255,14 @@ fallback:
   That is the intent, not yet the code: 17 core modules still import lane
   modules or branch on Tessera names. `tests/test_tessera_core_boundary.py`
   (PQ #1534) freezes those sites and the private lane helpers other modules
-  import, `tests/test_prismabuild_boundary.py` freezes PQ's reach into
-  PrismaBuild internals, and their allowlists under `tests/boundary_allowlists/`
-  only shrink. PQ's public door into PrismaBuild is `prismabuild.client`
-  (PB #1254, `PUBLIC_CLIENT` in that test): `staged_lease`,
-  `stage_a_produced_output`, `glm_capture_compatibility`, `residency_map` and
-  `quality_prefill_pb_adapter` reach PB only through it, via
-  `staged_lease.client_sdk`. `staged_lease.sdk_submodule` remains for
-  `joint_forward_resume`, `produced_output_spool` and some tools, which need
-  names the SDK does not publish yet.
-  The Tessera fleet drivers PrismaBuild used to carry (the whole-model
-  dispatcher and its worker, the per-shard export and ladder dispatchers, the
-  status screen and `render_identity.py`) live here since 2026-09-28
-  (RobTand/prismabuild#1076): `tools/tessera_fleet/` and `tools/render_identity.py`.
-  They reach PrismaBuild only by running the published `pbcampaign.py` and
-  `pbwait.py`, so they add no line to the PrismaBuild allowlist
-  (`docs/operations/tessera_fleet_drivers.md`).
+  import. `tests/test_prismabuild_boundary.py` bans static and dynamic loads
+  of the retired execution package. `tests/test_prismabuild_ban.py` checks live
+  mechanism tokens and the current execution documentation. Frozen evidence
+  schemas remain readable offline through `recorded_cas_receipt`.
+  `staged_lease` uses the immutable manifest resolver. `stage_a_produced_output`
+  binds native launch declarations; `quality_prefill_flux` submits and collects
+  the declared native DAG. `tools/tessera_fleet/` uses the same native row path.
+  There is no SDK doorway or boundary allowlist for the retired service.
 
 Activation-quantizer attestation requires all seven E2M1 midpoint magnitudes,
 a signed input, element saturation and the scale underflow boundary.
@@ -29601,7 +30476,7 @@ The configuration schema is `prismaquant.ship_gates/1`. Supply these fields:
 - `stages`: an ordered list with the card's `required_slots`, `offline.g3` and `task_suite` exactly once.
 
 Multi-node topology also needs explicit rank, master address, port and both
-multiprocessing backend selections. PrismaBuild's data manifest must declare
+multiprocessing backend selections. The immutable staged input binding must declare
 shared inputs in their read order.
 
 Each stage has a unique `output` path. Quality stages also have a `config` path.
@@ -29642,83 +30517,54 @@ is not evidence. A lane producer may need its serving owner's lifecycle driver.
 
 #### 7.0.2 Submit and retain evidence
 
-Inspect the published client's `--help` before submission.
-Run disk admission on every eligible host. Retain its complete JSON for the
-checkout, output, scratch and CAS mounts. Supply actual resource demand for
-the configured workload, including the controller and concurrent children.
-The examples use operator-supplied demands; they are not workload requirements.
+Set the coordinator's `FLUX_URI` explicitly or leave it unset to use the fleet
+resolver. The client prefix is read lazily from `INSTANCE`, as described in the
+current execution section. Read `/mnt/shared/flux-migration/CAPS.md` before submission. Use a clean,
+detached checkout under `/mnt/shared`, a unique record directory outside that
+checkout, a finite walltime, and the actual aggregate CPU and memory demand.
+`flux_jobs` starts each payload environment empty with `--env=-*` and adds its
+explicit allow-list, system-tool PATH, bounded native threads and output directory.
+Scratch is chosen inside the job from its instance environment or qualified host table.
+The wrapper removes its job-specific scratch and records the cleanup outcome.
 
-`CLIENT`, `CHECKOUT`, `CONFIG`, `RESULT`, `DATA_MANIFEST` and interpreter
-variables name actual operator paths. CPU preflight uses the same entry point:
+Run CPU preflight through the repository's submission API. These Python values
+name operator-selected paths and measured resource demands:
 
-```bash
-"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
-  --cwd "$CHECKOUT" --tag x86 --cpus "$CPUS" --demand "mem_gb=$HOST_MEMORY_GB" \
-  --max-attempts 1 --timeout-s "$TIMEOUT_S" --data-manifest "$DATA_MANIFEST" \
-  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 \
-  --env OPENBLAS_NUM_THREADS=1 --env CUDA_VISIBLE_DEVICES= --env TMPDIR=/tmp \
-  --detach -- "$CPU_PYTHON" -m prismaquant.ship_gates \
-  --config "$CONFIG" --output "$RESULT" --preflight
+```python
+from pathlib import Path
+from prismaquant.flux_jobs import FluxResources, submit_job, collect_job
+
+submission = submit_job(
+    [CPU_PYTHON, '-s', '-m', 'prismaquant.ship_gates',
+     '--config', CONFIG, '--output', RESULT, '--preflight'],
+    checkout=Path(CHECKOUT), record_dir=Path(RECORD_DIR),
+    resources=FluxResources(CPUS, HOST_MEMORY_GB, 0, TIMEOUT_S),
+    staged_input=STAGED_BINDING,
+)
+ending = collect_job(submission)
 ```
 
-After CPU preflight succeeds, the single-host production command uses the same
-configuration and module. Declare aggregate CPUs, host memory and the GPU
-subset from the actual workload. The serving image must already exist on an
-eligible host. `IMAGE` is immutable; `SERVING_PYTHON` names its interpreter.
+`STAGED_BINDING` is the versioned immutable input binding, or `None` for a
+preflight with no staged inputs. Each required configuration and evidence file
+must be declared by the binding when strict staging is requested. Unsupported
+settings refuse before submission; there is no general environment passthrough.
+Keep the returned job ID and record directory. Reconnect with `load_submission`;
+never submit again to recover a lost receipt.
 
-```bash
-"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
-  --cwd "$CHECKOUT" --tag gb10 --cpus "$CPUS" --gpu \
-  --demand "mem_gb=$HOST_MEMORY_GB" --gpu-memory-gb "$GPU_MEMORY_GB" \
-  --container-image "$IMAGE" --max-attempts 1 --timeout-s "$TIMEOUT_S" \
-  --data-manifest "$DATA_MANIFEST" --residency stage \
-  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
-  --detach -- "$SERVING_PYTHON" -m prismaquant.ship_gates \
-  --config "$CONFIG" --output "$RESULT"
-```
+Read the job's own terminal state, payload exit, query errors, stdout, stderr,
+allocation and cleanup records. A submission acknowledgement is not a pass.
+For scientific artifacts, `native_results.read_selected_result` separately
+checks the authenticated producer, publication, source, runtime and file bytes.
+The ship-gates runner retains its per-stage exits, outputs, hashes and logs.
+A final pass still needs every quality criterion and required card slot, and
+`publish_artifact` remains the publication gate.
 
-This example grants no GPU priority. D49 still sets GPU order.
-A single-host declaration does not cover the two-Spark target.
-
-The HF-only task backend cannot complete native task quality for Tessera bytes.
-Keep that task limitation explicit in a Tessera production plan.
-An HF proxy score cannot replace current-artifact native task evidence.
-Serving-backed Tessera tasks require a backend with the native vLLM plugin.
-That backend remains a production prerequisite; this HF path does not provide native qualification.
-
-For multi-host submission, use published `pbgang.py --manifest M --cwd CHECKOUT`.
-Each member needs explicit topology, resource, image and data declarations.
-The kernels-owned `rank_window.py`, `managed_window.py` and `tp2_recipe.py`
-own rank lifecycle. Their reported recipe covers eager, graph, KL probe and
-determinism. Full route, served PPL, offline quality and complete one-action
-coverage remain unverified. The native gang orders no stages and stops no successful peers.
-
-Do not fork that lifecycle or add another transport.
-Full ordered stages and peer teardown remain explicit production prerequisites.
-The runner refuses multi-host execution without that complete lifecycle.
-CPU preflight can inspect its topology without qualifying it.
-
-Retain each action key at submission. Start the published completion client:
-
-```bash
-"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbwait.py \
-  "$ACTION_KEY" --wait-s "$WAIT_S" --json
-```
-
-Run that client under the existing supervisor. Do not poll with an agent.
-Inspect the native ending, process exit, logs, result claim, CAS payload and
-receipt. Keep failed actions. A submission is not completion.
-
-The runner atomically writes `prismaquant.ship_gates_result/1` after each stage.
-It retains process exits, output and log paths, file hashes, source and device
-population. Compare retained files with the hashes printed in stdout.
-PrismaBuild seals input identity, not arbitrary output files.
-A final pass needs every quality criterion and required card slot.
-Publication still uses the existing `publish_artifact` gate.
-
-Use `--verify-only` to replay stored quality and card evidence without new inference.
-Missing evidence still refuses. A CPU preflight, selected tests or primitive
-parity does not establish serving, model quality or multi-host behavior.
+GPU submission, the G3 GPU smoke and GPU quality-prefill are held until P-7
+qualifies the GPU lane. CPU preflight does not grant GPU, serving or multi-host
+qualification. The runner refuses multi-host execution without the complete
+rank lifecycle and peer teardown. The HF-only task backend cannot establish
+native Tessera task quality; that requires the serving backend with the pinned
+native plugin. Use `--verify-only` to replay stored evidence without inference.
 
 
 ### 7.1 What runs where
@@ -33232,6 +34078,19 @@ polish, full rejected-methods catalog) is at
 
 ## 12. Known gaps and debt register
 
+Current execution debt, recorded 2026-11-10:
+
+- A4: `prismaquant/tessera_runtime/shape_time_checker_config.json` has an empty
+  checker table. `allocator --pact-shape-table` refuses every table containing
+  measured rows because no native checker source and argv has a reviewed pin.
+  Restore it by running the checker through Flux admission, independently
+  reviewing its source, argv and authenticated result, and adding the reviewed
+  v2 checker pin. Do not restore the retired v1 receipt.
+- A5: G3 and the GPU quality-prefill arm refuse because the current Flux profile
+  permits zero GPUs. Plan step P-7 must qualify GPU admission, container device
+  attachment and the required smoke before either arm can run. CPU tests do
+  not close this debt.
+
 Honest register, code-cited, as of 2026-08-03 (`release/prismaquant-0.8.0`, implementation
 baseline commit `7183d21`; external Gridbook pin
 `9011a19228ddb96b8a49e11a20ac75c99c83998e`, v0.8.0). The DSv4 study's working tree carried a
@@ -33661,7 +34520,7 @@ layers' entries) reaches a quantum or its identity.
 carries the run header, one checkpoint record and the boundary entries of the
 layers that checkpoint serves: from the next lower stride boundary (or 0) up
 to `b-1`. `python3 -m prismaquant.joint_adjoint_band` builds one from a Stage A
-request and the sealed checkpoint directory, as a read-only CPU PB action, and
+request and the sealed checkpoint directory, in an admitted CPU phase, and
 refuses a checkpoint that does not seal its manifest. Its output equals the
 band that the completed receipt implies, field for field; the gate runs real
 fixture Stage A captures, uninterrupted and resumed from a recovery capsule.
@@ -34152,8 +35011,8 @@ checkpoint, so the file's existence implies the tail's. It carries the run
 header (`run_identity`, `stride`, `boundary_storage` with the session and any
 forward-recovery binding), the bind identity, the arithmetic stamp, every
 forward boundary entry record, the batch and layer counts, the artifact budget
-override, the tail checkpoint's digest and the PrismaBuild owner of the attempt
-(`producer`, or `null` outside PrismaBuild). It seals itself
+override, the tail checkpoint's digest and the active native launch context
+(`producer`, or `null` in offline scientific fixtures). It seals itself
 (`chain_state_sha256`) and is never rewritten. A fresh run refuses, before its
 forward pass, an output root that already holds a chain state or resume
 records. A run started before #1001 has no chain state and cannot resume its
@@ -34198,8 +35057,8 @@ and the resume adopts the chain state's stored run and bind identities.
   under the run's session, with the tail matching the chain state's digest,
   and no unsealed checkpoint directory sits at or above `b`;
 - `--resume-from-checkpoint`, when given, is `b`;
-- every PrismaBuild owner recorded for the run is contained
-  (`require_contained`, as forward recovery asks).
+- every recorded native producer's exact scope has stopped, with verified
+  cleanup (`require_contained`, as forward recovery asks).
 
 After the rebind, the forward-recovery capsule the relaunch binds must be the
 one the chain state records.
@@ -34240,12 +35099,12 @@ is recorded outside the header digest: in the receipt's top-level
 checkpoint lies below the switch. Slices and band-set headers are unchanged
 by it. The receipt's telemetry carries `chain_resume`.
 
-**Limits.** A relaunch under PrismaBuild is a new owner. Its dispatcher must
-declare the original's boundary entries, the checkpoint entries and the chain
-state as inputs, contain the original owner first, and give it an output
-prefix that holds the run's generation directory (`bind_produced_output`
-refuses an own-generation path outside it). The fixture tests do not exercise
-that dispatcher contract.
+**Native dispatch.** A relaunch has a new native launch. Its selected inputs
+authenticate the original boundary entries, checkpoint entries and chain state.
+The original producer's scope must stop with verified cleanup before reuse.
+The immutable declaration's output prefix must contain the reopened generation.
+Local scientific fixtures prove tensor and chain transitions; separate native
+proofs exercise selected-input authority, known-ID resume and scope containment.
 
 ### Stage A seed mode (#1016)
 
@@ -34637,7 +35496,15 @@ against 2, 4 and 8 quanta; on its CPU fixture the critical path fell from
 11.2 s to 3.7 s at 4 quanta, dominated by entry `fsync`, and every split's
 chain state equals the single owner's.
 
-### Stage A dispatch requires the paced spool (#1012)
+### Historical PB paced spool (#1012)
+
+The following records the retired PB design and its original measurements.
+Since the 2026-11-08 Unit4B migration, native launches bind the immutable
+application declaration through actual argv. That declaration carries the
+provisioned local spool root, finite byte bound and two-plane window. The
+existing IO engine owns copies and immutable publication. PB environment,
+funding, pacing and capacity-ledger settings below cannot authorize a native
+run. The current joined lifecycle is described at the start of this document.
 
 A bound `StreamedBoundaryArtifacts` owner writes its produced groups through
 PrismaBuild's local output spool (`prismaquant/produced_output_spool.py`)
@@ -34698,6 +35565,18 @@ the spec's 32 GiB bound; see "Same-box readback and write-behind export
 spec's bound.)
 
 ### Same-box readback and write-behind export (#1110)
+
+Current ownership, 2026-11-08: the application spool uses the existing IO engine
+and its completion futures. Durable publication verifies destination bytes and
+inline writer digests before release. Reader holds and aliases retain local
+copies; deferred canonical unlinks wait for release and the last possible read.
+Rematerialization uses the existing immutable batch and reader. No service
+stager, export queue, progress exemption or persistent capacity ledger remains.
+The two-plane prewrite bounds and exact tensor readers remain in force.
+
+The account below preserves the historical PB implementation, measurements and
+issue rationale. Its PB protocol names and limits are historical, superseded by
+the native lifecycle above; they are not current execution instructions.
 
 The reverse chain retires plane L+1 entry by entry while it writes plane L,
 and it reads each plane one layer after writing it. Before #1110 every read
@@ -34895,7 +35774,7 @@ the two allowances are equal.
 Stage A (`joint_cost_stage_a.run_adjoint_capture`) needs these facts from its
 head: the unit roster, whose digest names the campaign in the run identity;
 the unit and measured-cell counts its result records; and the unit count its
-PrismaBuild progress starts from. Until #1051 it re-derived them by walking
+local progress starts from. Until #1051 it re-derived them by walking
 the whole anchor catalog (`tessera_joint_aura.load_measured_anchor_input`) on
 every root. On R12 the walk held the GPU claim for about 78 minutes, judging
 by its `head-walk/` and `run/` directory timestamps. The prepare action had

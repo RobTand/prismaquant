@@ -10,7 +10,7 @@ soon as that module's body has run, so it still wins as it did when the fixture
 imported the module itself. A test that never loads the module does not depend
 on it. Fixtures that only some tests use live in helper modules those tests
 import (``lane_table_fixtures``, ``graph_lane_fixtures``,
-``legacy_capture_fixtures``, ``fleet_sdk``, ``fullstack_pb_generation``).
+``legacy_capture_fixtures``).
 ``tests/test_conftest_reach.py`` pins all of this.
 
 What is here: the autouse fixtures -- profile detection is process-global
@@ -38,8 +38,7 @@ import pytest
 
 #: Resets the autouse fixtures below apply to a module only once a test has
 #: loaded it, keyed by module name. This file imports none of these modules, so
-#: a test that never loads one does not depend on it (#3215; PrismaBuild #2585
-#: is the same pattern). ``_when_loaded`` applies a reset to a module already
+#: a test that never loads one does not depend on it (#3215). ``_when_loaded`` applies a reset to a module already
 #: in ``sys.modules`` at once, and ``_resets_follow_module_loads`` applies it to
 #: one the test loads later. Each fixture registers through a ``MonkeyPatch``
 #: of its own, so the registration ends with that fixture's teardown, and no
@@ -271,94 +270,6 @@ def _no_activation_scale_policy_carried_between_tests():
         os.environ[ACTIVATION_SCALE_ENV] = incoming
 
 
-@pytest.fixture(autouse=True, scope="module")
-def _no_prismabuild_import_carried_between_modules():
-    """No module inherits another module's ``prismabuild`` imports (PQ #1281).
-
-    The per-test restore below cannot see an import made by a module-scoped
-    fixture: that fixture is set up before the test's own snapshot is taken.
-    ``tests/test_fleet_acceptance_level1.py``'s and
-    ``tests/test_fullstack_real_chain.py``'s ``pb`` fixtures import from a
-    sealed generation that way. An autouse fixture is set up before the other
-    fixtures of its scope, so this snapshot comes first and the module's
-    teardown puts the imports back. This module explicitly owns a detached,
-    initially unbound graph: collection or a public pytest plugin may have
-    imported the installed package before setup. Clearing only those cached
-    entries lets each resolver choose and authenticate its own source; it
-    neither pins a default nor weakens an origin assertion. Installed-build
-    tests still import from their original paths, and teardown restores the
-    exact pre-existing module objects and parent edges. Test imports themselves
-    must remain inside a test or fixture (PQ #2265).
-    """
-    from prismabuild_imports import prismabuild_imports_restored
-    with prismabuild_imports_restored(detach=True):
-        yield
-
-
-@pytest.fixture(autouse=True)
-def _no_prismabuild_import_carried_between_tests():
-    """No test inherits another test's ``prismabuild`` imports (PQ #1281).
-
-    Where ``import prismabuild`` resolves is process-global: ``sys.path``
-    and ``sys.modules``. A test that imports PrismaBuild from a sealed
-    generation tree left both pointing at it, and every later test on that
-    worker then ran against the generation instead of the installed SDK
-    (``tests/test_stageb_one_pass_spill.py`` then
-    ``tests/test_strict_reader_tier_enforcement.py`` refused
-    ``no-claim-context``). ``prismabuild_imports.prismabuild_imports_restored`` says
-    what is put back and why.
-    """
-    from prismabuild_imports import prismabuild_imports_restored
-    with prismabuild_imports_restored():
-        yield
-
-
-@pytest.fixture(autouse=True)
-def _no_launching_queue_root_from_the_test_shard(monkeypatch):
-    """No test reads the queue that launched its pbtest shard.
-
-    A pbtest shard is itself a PrismaBuild action, and the pool launcher
-    publishes that action's queue root as ``PRISMABUILD_QUEUE_ROOT``
-    (PB #961). ``reader_lease.injected_context`` prefers it to the queue a
-    test's residency map names, so a test that fakes an action context in a
-    ``tmp_path`` queue would look for its claim in the live fleet queue and
-    refuse ``no-claim-context``. A test that wants the variable sets it.
-    """
-    monkeypatch.delenv("PRISMABUILD_QUEUE_ROOT", raising=False)
-    yield
-
-
-@pytest.fixture(autouse=True)
-def _no_staged_range_wait_unless_asked(monkeypatch):
-    """Tests do not wait on a PrismaBuild fleet that is not running.
-
-    ``StagedShardReader._range_for`` waits a bounded time for a range the
-    residency map does not cover yet, because on the fleet an uncovered span
-    is usually a mover that has not run rather than a range that will never
-    arrive (PQ #874). Under pytest there are no movers: every uncovered span
-    is permanent, so the default 300 s bound would turn each of the several
-    existing tests that assert an immediate ``readset-not-staged`` refusal
-    into a five-minute sleep that still passes.
-
-    Setting the bound to 0 here restores the pre-#874 refuse-on-first-miss
-    behaviour as the suite-wide default, which is what those tests were
-    written against. The tests that are ABOUT the wait set the variable
-    themselves; a test's own ``monkeypatch.setenv`` runs after this fixture
-    and wins.
-
-    This hides no cost. What waits on the fleet is
-    ``layer_streaming._await_layer_readset``, and only it: the strict policy
-    path, the layer read, and only spans PrismaBuild's sealed readset
-    declares and no mover has written yet. A span the readset does not
-    declare, an entry that covers a span and fails a check, and an unbound
-    readset all refuse at once there, exactly as they do here. The one
-    behaviour this default replaces is the 300 s a *declared* range that
-    never arrives would cost before failing -- which needs movers to be
-    meaningful, and there are none under pytest.
-    """
-    monkeypatch.setenv("PRISMAQUANT_STAGED_RANGE_WAIT_S", "0")
-
-
 @pytest.fixture(autouse=True)
 def _certified_mode_unless_asked(monkeypatch):
     """Tests run in certified mode unless they ask for dev mode.
@@ -383,8 +294,7 @@ def pytest_sessionfinish(session, exitstatus):
     the run prints ``1 skipped`` and still exits 5.
 
     That is invisible in a full-suite run, because some other file collects.
-    It matters under PrismaBuild, where ``pbtest`` gives each shard its own
-    pytest: a shard whose only file skips at collection exits 5, and the shard
+    It matters where a shard gets its own pytest: a shard whose only file skips at collection exits 5, and the shard
     reads as failed even though pytest reported the skip and nothing went
     wrong (RobTand/prismaquant#915, seen on
     ``tests/test_tessera_stack_group_cli.py``, which imports
@@ -407,9 +317,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 #: Distributions whose versions decide what this suite can run. The GLM
 #: modules need transformers >= 5.16 (``test_glm5_next_streamed_forward_parity``
-#: and the five modules that import from it), and Tessera and PrismaBuild are
-#: pinned (``tools/resolve_*_dev_pin.py``).
-ENVIRONMENT_DISTRIBUTIONS = ("torch", "transformers", "tessera-quant", "prismabuild")
+#: and the five modules that import from it), and Tessera is pinned
+#: (``tools/resolve_*_dev_pin.py``).
+ENVIRONMENT_DISTRIBUTIONS = ("torch", "transformers", "tessera-quant")
 
 
 def environment_line() -> str:
@@ -430,11 +340,11 @@ def environment_line() -> str:
 def pytest_terminal_summary(terminalreporter):
     """Name the environment in every session's output (PQ #1090).
 
-    Six GLM modules skipped at collection in every PrismaBuild run because
+    Six GLM modules skipped at collection in every run because
     the test interpreter had transformers 5.6.0, and nothing in a receipt
-    said which transformers a run had. A shard's output is its receipt, and
-    ``pbtest`` runs pytest with ``--no-header``, so the report header cannot
-    carry this; the terminal summary is printed either way.
+    said which transformers a run had. A run's output is its receipt, and a
+    run with ``--no-header`` has no report header to carry this; the terminal
+    summary is printed either way.
     """
 
     terminalreporter.write_line(environment_line())
@@ -444,12 +354,11 @@ def pytest_terminal_summary(terminalreporter):
 # Modules that need a pytest process of their own (PQ #1008)
 # ---------------------------------------------------------------------------
 #
-# Some harnesses cannot share a process. The Stage A produced-output harness
-# (``test_stage_a_produced_boundary_chain``) resolves a pinned PrismaBuild
-# bundle, and one process can hold only one ``prismabuild``: in a session
-# that has already imported the deployed one, the harness used to skip every
-# test that needed the bundle, so a multi-file shard reported them as
-# skipped and stayed green (25 tests in the #996 run).
+# Some harnesses cannot share a process: a module may need an import graph no
+# other module in the session has touched, and in a session that has already
+# imported something else it used to skip every test that needed it, so a
+# multi-file shard reported them as skipped and stayed green (25 tests in the
+# #996 run).
 #
 # A module marked ``own_process`` keeps its tests and their node ids. When
 # the session collects only that module, nothing changes. When it collects
@@ -465,81 +374,29 @@ def pytest_terminal_summary(terminalreporter):
 # The per-test bound applies to each test in the child, not to the module
 # (PQ #1027). The child starts before any bound is armed for the first proxy,
 # and runs under the bound the parent runs under: pytest-timeout's
-# ``--timeout``, PrismaBuild's ``prismabuild.pytest_test_bound``, or both. A
-# test that hangs in the child fails alone, with the bound named in its
-# failure, and the tests after it still run.
-#
-# PrismaBuild's bound is on whenever ``PRISMABUILD_TEST_TIMEOUT_S`` is set
-# (PQ #1055). ``pbtest`` exports the variable to every shard, but no shard
-# names the plugin with ``-p`` and ``prismabuild`` registers no entry point,
-# so this conftest registers it. It loads the plugin from its file rather
-# than importing the ``prismabuild`` package: an ``own_process`` harness
-# refuses a process whose ``prismabuild`` is not its pinned candidate, and a
-# child session inherits the variable and loads the plugin the same way.
+# ``--timeout``, the only per-test bound this suite declares
+# (``pytest-timeout`` is a test dependency in ``pyproject.toml``). A requested
+# bound without the plugin is a failure, never a skip: pytest refuses an
+# unrecognized ``--timeout``, and a child that cannot load the plugin exits
+# non-zero and fails its proxies by exit status.
 
 OWN_PROCESS_MARK = "own_process"
 #: Set in a child session only: the file the child appends its reports to.
 OWN_PROCESS_REPORT_ENV = "PQ_OWN_PROCESS_REPORT"
 OWN_PROCESS_MEASURE_ENV = "PQ_OWN_PROCESS_MEASURE"
-#: PrismaBuild's per-test bound plugin, by the name ``-p`` loads it under.
-PRISMABUILD_TEST_BOUND_PLUGIN = "prismabuild.pytest_test_bound"
-#: The per-test bound in seconds, which ``pbtest`` exports to every shard and
-#: the plugin reads. Unset or empty: no bound.
-PRISMABUILD_TEST_BOUND_ENV = "PRISMABUILD_TEST_TIMEOUT_S"
 
 
-def _load_prismabuild_test_bound(config) -> None:
-    """Register PrismaBuild's per-test bound when the shard sets one.
-
-    Does nothing when ``PRISMABUILD_TEST_TIMEOUT_S`` is unset or empty, or
-    when the plugin is already registered (``-p``). Otherwise the plugin's
-    file is found without importing ``prismabuild`` (``find_spec`` of a
-    top-level package does not run it), loaded under a private module name,
-    and registered under the plugin's own name. It imports only the standard
-    library and pytest. A bound the session asks for but cannot load is
-    refused: running unbounded and green is what the bound exists to end.
-    """
-    import importlib.util
-
-    if not os.environ.get(PRISMABUILD_TEST_BOUND_ENV, "").strip():
-        return
-    if config.pluginmanager.has_plugin(PRISMABUILD_TEST_BOUND_PLUGIN):
-        return
-    try:
-        package = importlib.util.find_spec("prismabuild")
-    except (ImportError, ValueError):
-        package = None
-    candidates = [Path(location) / "pytest_test_bound.py" for location in
-                  (package.submodule_search_locations or ())] if package else []
-    path = next((candidate for candidate in candidates if candidate.is_file()),
-                None)
-    if path is None:
-        raise pytest.UsageError(
-            f"{PRISMABUILD_TEST_BOUND_ENV} is set, but no "
-            f"{PRISMABUILD_TEST_BOUND_PLUGIN} is installed to apply it: this "
-            "session would run with no per-test bound")
-    spec = importlib.util.spec_from_file_location(
-        "_pq_prismabuild_pytest_test_bound", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    # Registered from pytest_configure, a historic hook: the plugin's own
-    # pytest_configure runs now and reads the bound.
-    config.pluginmanager.register(module, PRISMABUILD_TEST_BOUND_PLUGIN)
-
-
-#: Marks a test that reads fleet-local campaign data or live PrismaBuild
-#: state that no PB action declares (PQ #1014): a gigabyte real-data read, a
-#: walk over a campaign tree, a read of the live queue. Such reads bypass
-#: PB's admission and tiered caching, so these tests skip by default, with a
-#: reason that names the opt-in. They run when ``-m`` names the mark
-#: (``pbtest --pytest-args "-m fleet_data"``) or ``PQ_FLEET_DATA_TESTS=1`` is
-#: set; declaring their reads to PB is PB #915. A skip, not a deselection:
+#: Marks a test that reads fleet-local campaign data that no native record
+#: declares (PQ #1014): a gigabyte real-data read, a walk over a campaign
+#: tree. Such reads bypass declared admission, so these tests skip by default,
+#: with a reason that names the opt-in. They run when ``-m`` names the mark
+#: (``-m fleet_data``) or ``PQ_FLEET_DATA_TESTS=1`` is set. A skip, not a deselection:
 #: under xdist only the workers see a deselection, so a shard of nothing but
 #: these tests would exit 5 ("no tests collected") and read as a failure.
 FLEET_DATA_MARK = "fleet_data"
 FLEET_DATA_ENV = "PQ_FLEET_DATA_TESTS"
 FLEET_DATA_SKIP_REASON = (
-    f"{FLEET_DATA_MARK}: reads fleet data PrismaBuild does not declare "
+    f"{FLEET_DATA_MARK}: reads fleet data no native record declares "
     f"(PQ #1014); run with -m {FLEET_DATA_MARK} or {FLEET_DATA_ENV}=1")
 TASK_SUITE_MARK = "task_suite"
 TASK_SUITE_ENV = "PQ_TASK_SUITE_TESTS"
@@ -584,7 +441,6 @@ def pytest_configure(config):
         f"{OWN_PROCESS_MARK}: the module needs a pytest process of its own. In "
         "a session that collects other modules too, its tests run in one "
         "child pytest and report back under their own node ids (PQ #1008).")
-    _load_prismabuild_test_bound(config)
 
 
 
@@ -634,21 +490,19 @@ def _fold_own_process_reports(records, *, log):
 def _own_process_bound_args(config) -> list[str]:
     """The child's arguments for the per-test bound the parent runs under.
 
-    pytest-timeout's ``--timeout``, and PrismaBuild's plugin when the parent
-    named it with ``-p``. A plugin the parent loaded from
-    ``PRISMABUILD_TEST_TIMEOUT_S`` loads in the child the same way, since the
-    child inherits the variable (PQ #1055); naming it with ``-p`` there
-    would import the ``prismabuild`` package into the child. A bound the
-    parent does not run under is not added.
+    pytest-timeout's ``--timeout``. The child names the plugin with ``-p`` only
+    when the parent registered it under that explicit name (autoload disabled):
+    a parent that autoloaded it registered it as ``timeout``, its child autoloads
+    it too, and pytest refuses the same module under a second name ("Plugin
+    already registered under a different name"). A bound the parent does not
+    run under is not added.
     """
-    argv = []
     timeout = getattr(config.option, "timeout", None)
-    if timeout:
-        argv.append(f"--timeout={timeout}")
-    if PRISMABUILD_TEST_BOUND_PLUGIN in (getattr(config.option, "plugins", None)
-                                        or ()):
-        argv += ["-p", PRISMABUILD_TEST_BOUND_PLUGIN]
-    return argv
+    if not timeout:
+        return []
+    plugins = config.pluginmanager
+    named = plugins.has_plugin("pytest_timeout") and not plugins.has_plugin("timeout")
+    return [*(["-p", "pytest_timeout"] if named else []), f"--timeout={timeout}"]
 
 
 def _own_process_measure_args(config, root, key):
@@ -716,7 +570,7 @@ def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
                     launcher, measure_args, measure_env = _own_process_measure_args(
                         config, root, key)
                     env.update(measure_env)
-                argv = [sys.executable, *launcher, "-q", "--no-header",
+                argv = [sys.executable, "-s", *launcher, "-q", "--no-header",
                         "-p", "no:cacheprovider",
                         "--rootdir", str(config.rootpath),
                         "--basetemp", str(root / f"{key}.tmp")]
@@ -894,8 +748,8 @@ def pytest_runtest_protocol(item, nextitem):
     test's bound covered the whole module (PQ #1027): a module could time out
     on its test count, and the proxy that failed was the first one, not the
     one that hung. ``tryfirst`` makes this the outermost wrapper, so the child
-    runs before pytest-timeout's protocol timer or PrismaBuild's per-phase
-    alarms are armed for the proxy, and each test in the child runs under a
+    runs before pytest-timeout's protocol timer
+    is armed for the proxy, and each test in the child runs under a
     bound of its own (``_own_process_bound_args``). The child's collection
     and exit are bounded as the parent session's own are, by the run's
     ceiling. Its wall time is not attributed to any proxy in ``--durations``

@@ -2,8 +2,8 @@
 
 Use the existing shipcard verifier, not a window wrapper's `passed` flag.
 This CPU-only command never runs a serve, measures, calls the Hub, copies a
-serving manifest or changes the artifact's identity. Run it through the
-published PrismaBuild client with honest CPU/memory demand and bounded native
+serving manifest or changes the artifact's identity. Run it as an
+admitted Flux job (`prismaquant/flux_jobs.py`) with honest CPU/memory demand and bounded native
 threads. Stage the final LICENSE before creating the authoritative card and
 collecting evidence.
 
@@ -126,9 +126,9 @@ observe the actual NCCL transport. Changing `NCCL_IB_DISABLE` cannot supply it.
 
 To replay the synthetic numerical tests with separately reviewed metadata,
 seal a `git archive` containing that external Tessera commit's `src/tessera`
-and `pyproject.toml`. Run `tools/check_graph_receipt_metadata.py` through
-PrismaBuild with `--archive`, `--sha256`, and `--commit`, declaring the archive
-with `pbrun --requires-files`. The tool verifies the archive bytes, Git commit,
+and `pyproject.toml`. Run `tools/check_graph_receipt_metadata.py` as an
+admitted Flux job with `--archive`, `--sha256`, and `--commit`, declaring the
+archive as a job input. The tool verifies the archive bytes, Git commit,
 import origin, and shared population API before running the numerical tests.
 This test dependency does not adopt that commit as the production runtime pin.
 

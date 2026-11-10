@@ -9,13 +9,12 @@ payloads, invoke Hub APIs, or upload anything.
 
 Use a qualified PrismaQuant Python environment on the admitted worker. Set
 `ARTIFACT` to its exported directory and `PYTHON` to that environment's executable.
-Submit the check through PrismaBuild:
+Submit the check as an admitted Flux job (`prismaquant/flux_jobs.py`
+`submit_job`; one CPU, 4 GB) whose `argv` is:
 
 ```bash
-python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
-  --cwd "$PWD" --anywhere --cpus 1 --demand mem_gb=4 --priority -10 \
-  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
-  -- "$PYTHON" -m prismaquant.lane_shipcard preflight \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  "$PYTHON" -m prismaquant.lane_shipcard preflight \
   --lane tessera --artifact "$ARTIFACT"
 ```
 

@@ -7,7 +7,6 @@ consumer evidence matrix states which remaining outputs are not exercised here.
 from __future__ import annotations
 
 import copy
-import ast
 import importlib.util
 import json
 import os
@@ -22,6 +21,7 @@ from golden_table import GoldenTable
 
 GOLDEN = GoldenTable("spaced_lax_tools_consumers_2320")
 ROOT = Path(__file__).resolve().parents[1]
+RETIRED_HELP_TOOLS = {"tools/pwc_window_load_bench.py"}
 LAUNCH_CONTRACTS = json.loads((Path(__file__).parent / "fixtures" /
     "spaced_lax_tools_launch_contracts_2320.json").read_text())["rows"]
 
@@ -35,7 +35,10 @@ def test_state_append_preserves_existing_bytes_and_nonfinite_event(tmp_path, mon
     path.parent.mkdir()
     path.write_bytes(b"previous event\n")
     _append_state(path, {"quantum_id": "q-é", "values": [float("nan"), {}, []]})
-    GOLDEN.value(path.read_bytes())
+    assert path.read_bytes() == (
+        b'previous event\n{"quantum_id": "q-\\u00e9", '
+        b'"schema": "prismaquant.joint.native-event.v1", '
+        b'"unix": 1234.5, "values": [NaN, {}, []]}\n')
 
 
 def test_state_encoding_failure_does_not_append_a_partial_event(tmp_path):
@@ -62,14 +65,12 @@ def test_fence_finish_reports_calculated_median_and_removes_scratch(tmp_path, ca
 
 
 @pytest.mark.parametrize("spy", [None, "/tools/spy-é"], ids=["no-spy", "spy"])
-def test_chain_spec_removes_spool_environment_and_mounts(tmp_path, capsys, spy):
+def test_chain_spec_emits_the_base_spec_with_scratch_and_spy(tmp_path, capsys, spy):
     from tools.chain_roll_bench import cmd_spec
 
     spec = {"container": {"mounts": [
-        {"source": "/spool", "target": "/spool", "readonly": False},
         {"source": "/model-é", "target": "/model", "readonly": True}]},
-        "env": {"PRISMABUILD_PRODUCED_SPOOL_ROOT": "/spool",
-                "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": "100", "KEEP": "é"}}
+        "env": {"KEEP": "é"}}
     path = tmp_path / "base.json"
     path.write_text(json.dumps(spec))
     before = path.read_bytes()
@@ -124,27 +125,28 @@ def test_container_wrapper_emits_transformed_spec_and_preserves_input(tmp_path):
 
 
 def test_campaign_submission_preserves_inline_spec_bytes_and_envelope(tmp_path):
-    from tools.dispatch_tessera_campaign import _pbrun_argv
+    from tools.dispatch_tessera_campaign import _native_action_row
 
-    args = SimpleNamespace(spec=tmp_path / "unused.json", pbrun="/published/pbrun.py",
-        demand="gpu=1,mem_gb=16", cpus=2, tag="gb10", priority=0,
-        timeout_s=None, container_arg=[])
+    args = SimpleNamespace(spec=tmp_path / "unused.json", demand="gpu=1,mem_gb=16",
+        cpus=2, tag="gb10", priority=0, timeout_s=None, container_arg=[])
     spec = {"env": {"LABEL": "é"}, "container": {"image": "sha256:" + "a" * 64}}
-    GOLDEN.call(lambda: _pbrun_argv(args, manifest=tmp_path / "manifest.json",
-        inner=["payload", "é"], container_spec=spec), tmp=tmp_path)
+    row = _native_action_row(args, manifest=tmp_path / "manifest.json",
+        inner=["payload", "é"], container_spec=spec)
+    encoded = row['argv'][row['argv'].index('--spec') + 1]
+    assert encoded == '{"container": {"image": "sha256:' + 'a' * 64 + '"}, "env": {"LABEL": "\\u00e9"}}'
+    assert row['demand'] == {'gpu': 1, 'mem_gb': 16, 'cpu': 2}
+    assert row['data_manifest'] == str(tmp_path / 'manifest.json')
 
 
 def test_campaign_row_embeds_the_resolved_container_spec():
-    from prismaquant.tessera_campaign_rows import prismabuild_row
+    from prismaquant.tessera_campaign_rows import campaign_row
 
     spec = {"cwd": "/work", "python": "python3", "cpus": 2, "tags": ["gb10"],
             "env": {"LABEL": "é"}, "container": {"image": "sha256:" + "a" * 64}}
-    frozen = json.loads((ROOT / "tests/fixtures/spaced_lax_tools_consumers_2320.json").read_text())
-    expected = ast.literal_eval(frozen['test_campaign_row_embeds_the_resolved_container_spec#0']['returned'])
-    # The serializer oracle predates campaign argument admission. Only the
-    # input flag changes; all serialized bytes and row obligations stay checked.
-    expected['argv'][-2] = '--model'
-    assert prismabuild_row(spec, ["--model", "é"], mem_gb=16,
+    # The pre-refactor serializer bytes stay literal and independent of the
+    # row builder. Native intent retains the image and omits retired phases.
+    expected = json.loads((ROOT / "tests/fixtures/native_campaign_row_2320.txt").read_text())
+    assert campaign_row(spec, ["--model", "é"], mem_gb=16,
                 timeout_s=30, module="prismaquant.tessera_campaign") == expected
 
 
@@ -169,7 +171,7 @@ def _standalone(name, args, tmp_path):
 
 
 @pytest.mark.parametrize("name", [row["file"].removeprefix("tools/")
-    for row in LAUNCH_CONTRACTS if row["kind"] == "Standard-library argument/help entry"])
+    for row in LAUNCH_CONTRACTS if row["kind"] == "Standard-library argument/help entry" and row["file"] not in RETIRED_HELP_TOOLS])
 def test_lightweight_cli_help_works_without_scientific_dependencies(name, tmp_path):
     result = _standalone(name, ["--help"], tmp_path)
     assert result.returncode == 0, result.stderr.decode()
@@ -293,3 +295,9 @@ def test_separately_staged_model_worker_keeps_its_standard_library_help(tmp_path
     result = subprocess.run(["/usr/bin/python3", "-S", str(worker), "--help"],
         cwd=tmp_path, env=env, capture_output=True, check=False)
     assert result.returncode == 0, result.stderr.decode()
+
+
+def test_retired_pb_lease_benchmark_cannot_be_launched():
+    """The migration removed this PB-only benchmark, not its live CLI coverage."""
+    for filename in RETIRED_HELP_TOOLS:
+        assert not (ROOT / filename).exists()

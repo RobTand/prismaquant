@@ -71,8 +71,7 @@ class KneeSelectionError(QualityPrefillContractError):
 
     This subclasses the contract error because every case it reports is a
     fixable document: a wider sweep, a declared resolution, or a single
-    currency. It is emphatically *not* the fleet-capability refusal that
-    ``quality_prefill_pb_adapter.DecompositionUnavailable`` is.
+    currency. Native execution and runtime qualification are separate gates.
     """
 
 

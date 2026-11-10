@@ -45,7 +45,7 @@ def test_checkpoint_hashes_route_to_owners(monkeypatch, tmp_path):
     entry = {"path": str(blob), "sha256": "0" * 64,
              "file_bytes": blob.stat().st_size, "name": "s"}
     with pytest.raises(RuntimeError):
-        checkpoints.read_shared_state_pack(entry, deadline=None)
+        checkpoints.read_shared_state_pack(entry)
     with pytest.raises(RuntimeError):
         checkpoints.load_adjoint_receipt(blob, "0" * 64)
     assert checkpoints.write_adjoint_receipt(space, {"a": 1}) is True

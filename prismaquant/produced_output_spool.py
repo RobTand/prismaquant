@@ -1,217 +1,49 @@
-"""Declared outputs written locally, then exported by PrismaBuild.
+"""Bounded same-box writer copies, published through the existing IO engine.
 
-``StreamedBoundaryArtifacts`` is this client's one user. A bound owner whose
-PrismaBuild publication seals a spool root writes through it: the boundary
-and cotangent entries of its produced groups, and the small-file groups of
-``write_produced_files`` (the band-serial handoff record, PQ #1015). The
-writer serializes into a PB-reserved group on the producing host's local
-disk; PB exports the group to its canonical destinations as an ordinary
-action, and the writer's own thread never waits on the pool's disks.
-
-Nothing else writes through it. Stage A's adjoint checkpoints are written
-directly into the output root (``joint_adjoint_checkpoints``), and renders
-never bind it. Without a sealed root (``PRISMABUILD_PRODUCED_SPOOL_ROOT``)
-a bound owner writes its entries straight into the pool; the Stage A
-dispatch therefore refuses a spec that declares none (PQ #1012).
-
-This adapter serializes nothing and moves nothing. It remembers exact writer
-references until PB acknowledges immutable canonical origins. Only that ack may
-advance durable entry progress or release the PB-owned local reservation. Each
-entry carries PB's artifact class. Every writer today records ``payload``;
-``checkpoint`` is PB's class for a checkpoint charged to the prewrite budget
-its producer declared, and no writer uses it yet.
-
-An owner whose template is write-only (PB #912, the band-serial handoff since
-PQ #1075) commits each acknowledged group at its origin through
-``commit_origin``; the ack is what that commit checks the origins against.
-
-Same-box readback and write-behind (PQ #1110)
----------------------------------------------
-
-An acknowledged group is not released at once any more. Its local copy stays
-while the writer may still read one of its entries on this box, so the
-reverse chain reads the cotangent plane it wrote one layer earlier from here
-and never asks PrismaBuild to stage its own bytes back to itself
-(``local_reads``). The copy is released when the last of three things holds:
-
-* the export is acknowledged (PB's ``release_group`` refuses before that);
-* no read of it follows here: every entry was retired (``retire_entry``),
-  or every entry was written with no read to follow (``read_back=False``);
-* or, earlier, when the window needs its room and nothing that is not read
-  again can give it (``_make_room_locked``): the oldest acknowledged group
-  that is not being read and has no retired entry goes first.
-
-The window is PrismaBuild's sealed per-owner bound (:data:`MAX_ENV`); the
-owner sizes it to two cotangent planes (``two_plane_window_bytes``). No wait
-here has a clock. A barrier (``await_group``, ``drain``) waits while
-PrismaBuild reports the export live and refuses the moment it reports it
-failed, withdrawn or done without an acknowledgement, naming the export
-action and that state; a full window waits while an export that would free
-room is live and refuses at once when none is. Every refusal, every wait
-that waited and every group released for room is kept as a record
-(``report()["refusals"]``, ``["waits"]``, ``["evictions"]``); a claim ahead
-of the writer that the window declines is counted, with its latest reason.
-
-Every group also keeps its export record (``report()["exports"]``, PQ
-#1225): the export action's key, the bytes and entries it carries, and when
-it was reserved, submitted, seen landed and released, with the seconds a
-barrier waited on it. The key names PrismaBuild's own record of the export
-(``pb-queue/done/<key>.json``: published, claimed and finished), which is
-otherwise lost when PrismaBuild retires the spool namespace.
-
-Because PB's ``release_group`` re-checks every landed destination against
-the export's receipt, a retired entry's canonical file must outlive the
-group's release. The owner therefore unlinks it only once ``released``
-says so (``StreamedBoundaryArtifacts._retire``, the deferred unlink). A group
-released for room before its reads are done keeps its retired files until
-its last live entry is retired too (PQ #1236): that entry's read publishes
-or restages the whole group, and PB stats every origin in it.
-
-A wait commits nothing, so to PrismaBuild's ``no_progress`` rung it looks
-quiet. Every wait that waits therefore declares itself (PQ #1240, PB #1035):
-``<progress path>.export-wait`` names the export keys it waits on, the
-barrier's group or every live export a full window waits on, and is
-removed when the wait ends, however it ends. The rung leaves the wait out
-of the quiet only while a named export shows progress.
+Application ceilings are process-owned bounds, not persistent capacity or fleet
+reservations. Completion means verified durable destination and batch manifest.
+Reader holds and owned-copy completion precede release and deferred unlinks.
 """
 from __future__ import annotations
 
 from contextlib import contextmanager
 import dataclasses
+import os
 from pathlib import Path
+import shutil
 import threading
-import time
 
-from . import prismabuild_progress
+from . import io_engine
+from .staged_manifest import open_directory
+from .stage_a_produced_output import (MAX_GROUPS, MAX_GROUP_ENTRIES, MAX_PAYLOAD_BYTES,
+    produced_file_identity, _limit, produced_identifier)
 
-ROOT_ENV = "PRISMABUILD_PRODUCED_SPOOL_ROOT"
-MAX_ENV = "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"
-#: PB's closed set of export artifact classes (``produced_spool.submit_group``).
-ARTIFACT_CLASSES = ("payload", "checkpoint")
-#: How often a wait looks at PrismaBuild's export state again. A cadence, not
-#: a bound: nothing ends a wait but the export's own state. The value is the
-#: one this adapter always polled at (PQ #989's stager deferral uses the same
-#: order), and a poll is two small local reads (``poll_group``).
-POLL_S = 0.1
-
-#: One process can have several waits on its own exports at once: the compute
-#: thread's and the stager's, on every spool the action holds. PrismaBuild
-#: reads one export-wait record per action and a declaration replaces the
-#: last, so the record is the union of every live wait's export keys, dated
-#: from the earliest of them, and goes only when the last wait ends. Every
-#: write and removal happens under this lock, so the file on disk is always
-#: the union of the waits as the last one to change left it.
-_EXPORT_WAITS_LOCK = threading.Lock()
-_EXPORT_WAITS: dict[int, tuple[float, frozenset]] = {}
-
-
-def _declare_export_waits() -> None:
-    """Write the union of live waits to PrismaBuild, or clear it. Lock held."""
-    exports = set()
-    for _since, keys in _EXPORT_WAITS.values():
-        exports.update(keys)
-    if exports:
-        since = min(since for since, _keys in _EXPORT_WAITS.values())
-        prismabuild_progress.declare_export_wait(exports, since_unix=since)
-    else:
-        prismabuild_progress.clear_export_wait()
-
-
-def _export_wait(token: int, since_unix: float | None, export_keys) -> None:
-    """Record (or, with no keys, end) one wait on this action's own exports.
-
-    ``since_unix`` is when this wait began and stays the same for all of it:
-    PrismaBuild carries a named export's evidence only within one wait, and
-    a wait is one ``since_unix``. A key PrismaBuild did not return is not
-    named; a wait that can name none is not declared, and counts as quiet,
-    as every wait did before PQ #1240.
-    """
-    keys = frozenset(str(key) for key in export_keys if key)
-    with _EXPORT_WAITS_LOCK:
-        before = _EXPORT_WAITS.get(token)
-        if keys:
-            now = (float(since_unix), keys)
-            if before == now:
-                return
-            _EXPORT_WAITS[token] = now
-        elif before is None:
-            return
-        else:
-            del _EXPORT_WAITS[token]
-        _declare_export_waits()
-
-
-#: The writer's per-entry file envelope over the tensor bytes: the ``nbytes +
-#: 65536`` ceiling ``StreamedBoundaryArtifacts.write`` enforces and
-#: ``BoundaryProducedPublication.group_ceiling_bytes`` reserves per entry.
+ARTIFACT_CLASSES = ('payload', 'checkpoint')
 ENTRY_HEADER_ENVELOPE_BYTES = 65536
 
 
-def sealed_spool_root(env):
-    """The local spool root a producer's sealed environment names, or None.
-
-    ``env`` is the environment a produced-output owner binds from
-    (``BoundaryProducedPublication.env``). A byte bound without a root is
-    refused. :meth:`ProducedOutputSpool.from_publication` builds the spool
-    from this root, and the Stage A budget preflight reads it before the
-    owner binds (PQ #1120).
-    """
-    root = env.get(ROOT_ENV)
-    if not root:
-        if env.get(MAX_ENV):
-            raise ProducedOutputSpoolRefused(f"{MAX_ENV} requires {ROOT_ENV}")
-        return None
-    return str(root)
-
-
 def plane_partitions(*, n_rows, probe_microbatch):
-    """The calibration batches a cotangent plane holds one entry for.
-
-    The Stage A capture splits its ``n_rows`` calibration rows into
-    contiguous batches of ``probe_microbatch`` rows (all ``n_rows`` when it
-    is 0, and never more than ``n_rows``), the last one partial, and writes
-    one entry per batch into each probe's plane
-    (``joint_cost_stage_a.run_adjoint_capture_core``). Returns
-    ``(batch_rows, row_offsets)``: the rows of a full batch, and each batch's
-    first row. ``len(row_offsets)`` is the entries a plane holds, which the
-    capture binds and the Stage A dispatcher seals its window from
-    (PQ #1121).
-    """
     if type(n_rows) is not int or n_rows <= 0:
-        raise ValueError("plane partitions need a positive int row count")
+        raise ValueError('plane partitions need a positive int row count')
     if type(probe_microbatch) is not int or probe_microbatch < 0:
-        raise ValueError("plane partitions need a nonnegative int probe_microbatch")
+        raise ValueError('plane partitions need a nonnegative int probe_microbatch')
     batch_rows = min(probe_microbatch or n_rows, n_rows)
     return batch_rows, list(range(0, n_rows, batch_rows))
 
 
 def two_plane_window_bytes(*, n_probes, n_batches, group_size, group_ceiling=None,
                            max_entry_tensor_bytes=None):
-    """The local window a same-box reverse chain needs: two cotangent planes.
-
-    A cotangent plane is ``n_probes`` x ``n_batches`` entries, reserved in
-    groups of ``group_size`` (the last one partial). ``n_batches`` is the
-    entry count :func:`plane_partitions` gives, not the row count. The chain reads one
-    plane while it writes the next, so one plane is live and one more is the
-    room its writes and exports turn over in (PQ #1110). ``group_ceiling``
-    maps an entry count to the bytes PrismaBuild reserves for such a group;
-    without it the writer's own per-entry bound is used,
-    ``max_entry_tensor_bytes`` + :data:`ENTRY_HEADER_ENVELOPE_BYTES`, which is
-    what ``group_ceiling_bytes`` computes.
-    """
-    for name, value in (("n_probes", n_probes), ("n_batches", n_batches),
-                        ("group_size", group_size)):
+    for value in (n_probes, n_batches, group_size):
         if type(value) is not int or value <= 0:
-            raise ValueError(f"two-plane window {name} must be a positive int")
+            raise ValueError('two-plane geometry needs positive integers')
     if group_ceiling is None:
         if type(max_entry_tensor_bytes) is not int or max_entry_tensor_bytes <= 0:
-            raise ValueError("two-plane window needs the per-entry tensor bound")
-        per_entry = max_entry_tensor_bytes + ENTRY_HEADER_ENVELOPE_BYTES
-        group_ceiling = lambda entries: entries * per_entry  # noqa: E731
+            raise ValueError('two-plane window needs the per-entry tensor bound')
+        def group_ceiling(entries):
+            return entries * (max_entry_tensor_bytes + ENTRY_HEADER_ENVELOPE_BYTES)
     full, remainder = divmod(n_batches, group_size)
-    per_probe = full * int(group_ceiling(group_size)) + (
-        int(group_ceiling(remainder)) if remainder else 0)
-    return 2 * n_probes * per_probe
+    return 2 * n_probes * (full * group_ceiling(group_size) +
+                           (group_ceiling(remainder) if remainder else 0))
 
 
 class ProducedOutputSpoolRefused(RuntimeError):
@@ -219,673 +51,430 @@ class ProducedOutputSpoolRefused(RuntimeError):
 
 
 class ProducedExportRefused(ProducedOutputSpoolRefused):
-    """PrismaBuild reported a group's export failed; nothing will land it.
-
-    ``export_key`` is the export action and ``state`` PrismaBuild's refusal
-    for it (``export-failed-without-ack``, ``export-withdrawn-without-ack``,
-    ``export-done-without-ack``, or a receipt it could not verify).
-    """
-
-    def __init__(self, batch_id, answer, *, where):
-        self.batch_id = str(batch_id)
-        self.export_key = answer.get("export_key")
-        self.state = str(answer.get("refusal") or "export-refused")
-        self.where = str(where)
-        super().__init__(
-            f"PB local export failed: group {self.batch_id!r} export "
-            f"{self.export_key!r} is {self.state!r} at {self.where}; "
-            f"answer {answer!r}")
+    pass
 
 
 class ProducedWindowRefused(ProducedOutputSpoolRefused):
-    """The local window is full and nothing live can free it."""
+    pass
 
 
 class ProducedOutputWaitCancelled(RuntimeError):
-    """The writer's own action is failing: a wait ends without its evidence.
-
-    Raised from :meth:`ProducedOutputSpool.reserve` and
-    :meth:`ProducedOutputSpool.await_group` once the spool's ``cancelled``
-    predicate is true (PQ #1251). It is not a refusal: PrismaBuild reported
-    nothing. The owner that raised it exits on its failure path.
-    """
+    pass
 
 
 class ProducedOutputSpool:
-    def __init__(self, backend, *, capacity_deferred):
-        self.backend = backend
-        self.capacity_deferred = capacity_deferred
-        self._lock = threading.RLock()
-        #: A predicate the waits poll (PQ #1251): true once the writer's
-        #: action is failing, and a wait then raises
-        #: :class:`ProducedOutputWaitCancelled` instead of waiting on.
-        #: ``None`` waits as before, on PrismaBuild's evidence only.
+    def __init__(self, publication, *, root, max_bytes):
+        self.publication = publication
+        self.max_bytes = _limit(max_bytes, MAX_PAYLOAD_BYTES)
+        base = Path(root)
+        # The operator provisions capacity and this host-local root. A job may
+        # create only its own launch namespace, never a new shared cache.
+        if (not base.is_absolute() or not base.is_dir() or base.resolve() != base
+                or str(base).startswith('/mnt/shared')):
+            raise ProducedOutputSpoolRefused('explicit provisioned host-local spool root required')
+        job_component = produced_identifier(publication.producer['job_id'].replace('ƒ', 'f', 1))
+        namespace = base / job_component
+        namespace.mkdir(mode=0o700, exist_ok=True)
+        if namespace.is_symlink() or namespace.resolve() != namespace:
+            raise ProducedOutputSpoolRefused('job scratch namespace changed')
+        self.root = namespace / ('produced-' + publication.producer['launch_sha256'])
+        self.root.mkdir(mode=0o700, exist_ok=False)
+        self._root_identity = (self.root.stat().st_dev, self.root.stat().st_ino)
+        self._cond = threading.Condition(threading.RLock())
+        self._groups, self._local, self._durable_progress = {}, {}, []
         self.cancelled = None
-        self._groups = {}
-        self._pending = set()
-        self._durable_progress = []
-        self._sequence = 0
-        #: Local paths by canonical entry path, while their group holds them.
-        self._local = {}
-        #: One record per refused export or unfundable window, per wait that
-        #: waited, and per group released for room. Each list grows by at
-        #: most one per group the owner writes, so it is bounded by the run.
-        self.refusals = []
-        self.waits = []
-        self.evictions = []
-        self.telemetry = {"export_wait_s": 0.0, "drain_wait_s": 0.0,
-                          "window_wait_s": 0.0,
-                          "export_waits": 0, "window_waits": 0,
-                          "window_declines": 0, "last_window_decline": None,
-                          "release_held_s": 0.0, "release_held_max_s": 0.0,
-                          "groups_released_retired": 0,
-                          "groups_released_write_only": 0,
-                          "groups_released_for_room": 0,
-                          "groups_released_at_settle": 0}
+        self._cancelled = False
+        self.refusals, self.evictions = [], []
 
     @classmethod
     def from_publication(cls, publication):
-        env = getattr(publication, "env", {})
-        root = sealed_spool_root(env)
-        if root is None:
-            return None
-        from .staged_lease import sdk_submodule
-        module = sdk_submodule("produced_spool")
-        if getattr(module, "API_VERSION", None) != 1:
-            raise ProducedOutputSpoolRefused("the sealed PB helper lacks produced_spool API v1")
-        backend = module.ProducedSpool(
-            publication.queue, publication.instance, publication.template,
-            cas_root=publication.cas_root, root=root,
-            max_bytes=int(env.get(MAX_ENV, str(32 << 30))))
-        return cls(backend, capacity_deferred=module.SpoolCapacityDeferred)
-
-    @property
-    def max_bytes(self):
-        """PrismaBuild's sealed per-owner window, or None when it has none."""
-        value = getattr(self.backend, "max_bytes", None)
-        return None if value is None else int(value)
-
-    @property
-    def root(self):
-        value = getattr(self.backend, "root", None)
-        return None if value is None else Path(value)
-
-    def _refuse(self, batch_id, answer, *, where):
-        """Record PB's refusal of an export, then raise it.
-
-        One record per group: the stager's poll and a barrier can both read
-        the same refusal (PQ #1128), and it is one refusal.
-        """
-        exc = ProducedExportRefused(batch_id, answer, where=where)
-        group = self._groups.get(batch_id)
-        if group is None or not group.get("refused"):
-            self.refusals.append({"batch_id": exc.batch_id,
-                                  "export_key": exc.export_key,
-                                  "state": exc.state, "where": exc.where,
-                                  "unix": time.time()})
-            if group is not None:
-                group["refused"] = True
-        raise exc
+        config = publication.declaration['spool']
+        return None if config is None else cls(publication, **config)
 
     def reserve(self, batch_id, ceiling_bytes, *, wait=True):
-        """Reserve one group's local ceiling, making room first if needed.
+        produced_identifier(batch_id); _limit(ceiling_bytes, self.max_bytes)
+        with self._cond:
+            self._check_root()
+            if batch_id in self._groups:
+                prior = self._groups[batch_id]
+                if prior['ceiling_bytes'] != ceiling_bytes or prior['released']:
+                    raise ProducedOutputSpoolRefused('changed/released reservation')
+                return prior['directory']
+            if len(self._groups) >= MAX_GROUPS:
+                raise ProducedWindowRefused('group roster exceeds bound')
+            self._await_room(ceiling_bytes, wait=wait,
+                refusal_message='bounded local window has no releasable completed group')
+            free = shutil.disk_usage(self.root).free
+            if free < ceiling_bytes:
+                raise ProducedWindowRefused('local filesystem lacks declared headroom')
+            directory = self.root / batch_id
+            directory.mkdir(mode=0o700)
+            self._groups[batch_id] = {'directory': directory, 'ceiling_bytes': ceiling_bytes,
+                'identity': (directory.stat().st_dev, directory.stat().st_ino),
+                'references': [], 'future': None, 'durable': False, 'released': False,
+                'reading': 0, 'retired': set(), 'read_back': False, 'failure': None,
+                'binding': None, 'destinations': {}}
+            return directory
 
-        When PrismaBuild defers (the window is full, or the disk lacks the
-        headroom), room is made from groups no read here needs any more, and
-        then from the oldest acknowledged group not being read. If that frees
-        nothing, the wait is on an export that is still live and would free
-        room when it lands; with none live, nothing could, and this refuses
-        at once. ``wait=False`` neither waits nor takes a live group's copy:
-        the stager's claim ahead of the writer must not hold its lane on an
-        export, nor push out a copy the writer may read before it gets there.
-        While it waits, the live exports are declared to PrismaBuild's
-        ``no_progress`` rung (PQ #1240).
-        """
-        waited = None
-        since_unix = None
-        token = object()
+    def _held_bytes(self):
+        return sum(g['ceiling_bytes'] for g in self._groups.values() if not g['released'])
+
+    def _await_room(self, ceiling_bytes, *, wait, refusal_message):
+        while self._held_bytes() + ceiling_bytes > self.max_bytes:
+            self._check_failures()
+            if self._make_room():
+                continue
+            live = [g for g in self._groups.values() if g['future'] is not None and not g['durable']]
+            if not wait or not live:
+                raise ProducedWindowRefused(refusal_message)
+            self._raise_if_cancelled()
+            self._cond.wait()
+
+    def _check_root(self):
+        directory = open_directory(str(self.root))
         try:
-            while True:
-                with self._lock:
-                    if batch_id in self._groups:
-                        group = self._groups[batch_id]
-                        if group["ceiling_bytes"] != ceiling_bytes or group["released"]:
-                            raise ProducedOutputSpoolRefused("local reservation replay changed or was released")
-                        return group["directory"]
-                    try:
-                        directory = self.backend.reserve_group(batch_id, ceiling_bytes=ceiling_bytes)
-                    except self.capacity_deferred as deferred:
-                        freed = self._make_room_locked(
-                            where=f"reserve {batch_id}", evict=wait)
-                        if freed:
-                            continue
-                        live = self._live_exports_locked()
-                        if not live or not wait:
-                            reason = (
-                                f"local output spool cannot hold group {batch_id!r} "
-                                f"({ceiling_bytes} B): PrismaBuild deferred it "
-                                f"({deferred}); {self._window_summary_locked()}; "
-                                + ("no export is live, so nothing will free room"
-                                   if not live else "the caller does not wait"))
-                            if wait:
-                                self.refusals.append({
-                                    "batch_id": str(batch_id), "export_key": None,
-                                    "state": "window-full-no-live-export",
-                                    "where": "reserve", "reason": reason,
-                                    "unix": time.time()})
-                            else:
-                                # A claim ahead of the writer: the writer's own
-                                # reservation asks again and waits.
-                                self.telemetry["window_declines"] += 1
-                                self.telemetry["last_window_decline"] = reason
-                            raise ProducedWindowRefused(reason)
-                        # The window waits until one of these lands; the
-                        # set is read again at every look.
-                        live_keys = [self._groups[live_id].get("export_key")
-                                     for live_id in live]
-                    else:
-                        self._sequence += 1
-                        self._groups[batch_id] = dict(
-                            directory=Path(directory), references=[], submitted=False,
-                            durable=False, released=False,
-                            ceiling_bytes=int(ceiling_bytes), sequence=self._sequence,
-                            read_back=False, retired=set(), reading=0,
-                            reserved_unix=time.time(), submitted_unix=None,
-                            landed_unix=None, released_unix=None,
-                            export_wait_s=0.0, drain_wait_s=0.0)
-                        return Path(directory)
-                if waited is None:
-                    waited = time.monotonic()
-                    since_unix = time.time()
-                    with self._lock:
-                        waiting_on = self._live_exports_locked()
-                self._raise_if_cancelled(f"reserve {batch_id}")
-                _export_wait(id(token), since_unix, live_keys)
-                time.sleep(POLL_S)
+            info = os.fstat(directory)
+            if (info.st_dev, info.st_ino) != self._root_identity:
+                raise ProducedOutputSpoolRefused('owned spool root changed')
         finally:
-            if waited is not None:
-                # However the wait ends: room, a refusal, or an exception.
-                _export_wait(id(token), None, ())
-                seconds = time.monotonic() - waited
-                self.telemetry["window_wait_s"] += seconds
-                self.telemetry["window_waits"] += 1
-                self.waits.append({"kind": "window", "batch_id": str(batch_id),
-                                   "waiting_on": [str(b) for b in waiting_on],
-                                   "seconds": seconds, "unix": time.time()})
+            os.close(directory)
 
     def directory(self, batch_id):
-        with self._lock:
-            return self._groups[batch_id]["directory"]
+        return self.writer_directory(batch_id)[0]
 
-    def record(self, batch_id, local_reference, canonical_directory, *,
-               artifact_class="payload", read_back=False):
-        """Remember one written entry; returns its canonical reference.
-
-        ``read_back`` is the writer saying a read of this entry may follow
-        in this action; a group with such an entry keeps its local copy
-        after its export lands, until those reads are done.
-        """
-        if artifact_class not in ARTIFACT_CLASSES:
-            raise ProducedOutputSpoolRefused(
-                f"artifact class must be one of {ARTIFACT_CLASSES}, not {artifact_class!r}")
-        canonical = dataclasses.replace(
-            local_reference,
-            path=str(Path(canonical_directory) / Path(local_reference.path).name))
-        with self._lock:
+    def writer_directory(self, batch_id):
+        with self._cond:
+            self._check_root()
             group = self._groups[batch_id]
-            if group["submitted"]:
-                raise ProducedOutputSpoolRefused("cannot append to a submitted output group")
-            if any(ref.name == local_reference.name for ref, _, _ in group["references"]):
-                raise ProducedOutputSpoolRefused("local output group repeats an entry")
-            group["references"].append((local_reference, canonical, artifact_class))
-            group["read_back"] = group["read_back"] or bool(read_back)
+            descriptor = open_directory(str(group['directory']))
+            try:
+                info = os.fstat(descriptor)
+                if (info.st_dev, info.st_ino) != group['identity']:
+                    raise ProducedOutputSpoolRefused('owned group writer directory changed')
+                return group['directory'], group['identity']
+            finally:
+                os.close(descriptor)
+
+    def record(self, batch_id, local_reference, canonical_directory, *, canonical_directory_identity,
+               artifact_class='payload', read_back=False):
+        if artifact_class not in ARTIFACT_CLASSES or type(read_back) is not bool:
+            raise ProducedOutputSpoolRefused('invalid artifact class/readback policy')
+        canonical = dataclasses.replace(local_reference,
+            path=str(Path(canonical_directory) / Path(local_reference.path).name))
+        with self._cond:
+            self._check_root()
+            group = self._groups[batch_id]
+            parent = str(Path(canonical.path).parent)
+            destination_identity = tuple(canonical_directory_identity)
+            if group['destinations'].get(parent, destination_identity) != destination_identity:
+                raise ProducedOutputSpoolRefused('canonical writer directory identity changed')
+            if (group['future'] is not None or len(group['references']) >= MAX_GROUP_ENTRIES
+                    or Path(local_reference.path).parent != group['directory']
+                    or not self.publication.contains(canonical.path)
+                    or canonical.path in self._local):
+                raise ProducedOutputSpoolRefused('foreign, duplicate or completed local entry')
+            identity = produced_file_identity(local_reference.path)
+            writer = getattr(local_reference, 'writer_file_identity', None)
+            if (writer is None or list(writer) != identity or identity[2] != local_reference.file_bytes or
+                    sum(row[1].file_bytes for row in group['references']) + canonical.file_bytes > group['ceiling_bytes']):
+                raise ProducedOutputSpoolRefused('writer exceeded local prewrite ceiling')
+            group['references'].append((local_reference, canonical, artifact_class, identity))
+            group['destinations'][parent] = destination_identity
+            group['read_back'] |= read_back
             self._local[canonical.path] = (batch_id, local_reference)
         return canonical
 
-    def submit(self, batch_id, *, paced: bool | None = None):
-        with self._lock:
+    def submit(self, batch_id, *, lifetime='retain'):
+        with self._cond:
             group = self._groups[batch_id]
-            if group["submitted"]:
+            if group['future'] is not None:
                 return
-            entries = []
-            for local, canonical, artifact_class in group["references"]:
-                entry = dict(source_path=local.path, destination_path=canonical.path,
-                             bytes=local.file_bytes, sha256=local.sha256)
-                # PB defaults a missing class to payload; naming only the
-                # other class keeps every payload group's manifest unchanged.
-                if artifact_class != "payload":
-                    entry["artifact_class"] = artifact_class
-                entries.append(entry)
-            if not entries:
-                raise ProducedOutputSpoolRefused("cannot export an empty output group")
-            options = {} if paced is None else {"paced": paced}
-            answer = self.backend.submit_group(batch_id, entries=entries, **options)
-            if not answer.get("ok"):
-                self._refuse(batch_id, answer, where="submit")
-            group["submitted"] = True
-            group["submitted_unix"] = time.time()
-            group["export_key"] = answer.get("export_key")
-            self._pending.add(batch_id)
+            if not group['references']:
+                raise ProducedOutputSpoolRefused('cannot submit an empty group')
+            group['future'] = io_engine.ENGINE.submit(self._publish, batch_id, lifetime)
+            group['future'].add_done_callback(lambda future: self._complete(batch_id, future))
 
-    def _poll_locked(self, batch_id, group, *, where="poll"):
-        """Look once: True once the export is acknowledged. Never waits."""
-        if not group["submitted"]:
-            return False
-        answer = None if group["durable"] else self.backend.poll_group(batch_id)
-        return self._settle_poll_locked(batch_id, group, answer, where=where)
-
-    def _settle_poll_locked(self, batch_id, group, answer, *, where):
-        """Apply one ``poll_group`` answer; True once the export is acknowledged.
-
-        ``answer`` may have been read without the lock (``poll_oldest``), so
-        a group another thread already found durable is not advanced twice.
-        """
-        if not group["durable"]:
-            if not answer.get("ok"):
-                self._refuse(batch_id, answer, where=where)
-            if answer.get("complete") is not True:
-                return False
-            # Only the backend's verified durable receipt establishes this.
-            group["durable"] = True
-            # When this client first saw the acknowledgement: at most one
-            # look (``POLL_S``, or one write's poll) after PrismaBuild's own
-            # finish, which the export's record keeps.
-            group["landed_unix"] = time.time()
-            group["export_key"] = answer.get("export_key") or group.get("export_key")
-            self._pending.discard(batch_id)
-            self._durable_progress.extend(ref for _, ref, _ in group["references"])
-        if not group["released"] and self._done_locked(group):
-            self._release_locked(
-                batch_id, group,
-                "groups_released_retired" if group["read_back"]
-                else "groups_released_write_only")
-        return True
-
-    @staticmethod
-    def _done_locked(group):
-        """Will no read of this group follow here?"""
-        if group["reading"]:
-            return False
-        if not group["read_back"]:
-            return True
-        names = {canonical.name for _, canonical, _ in group["references"]}
-        return bool(names) and names <= group["retired"]
-
-    def _release_locked(self, batch_id, group, reason):
-        # PrismaBuild re-checks and unlinks every file of the group under
-        # this lock; its seconds are recorded (total and longest hold).
-        started = time.monotonic()
-        answer = self.backend.release_group(batch_id)
-        held = time.monotonic() - started
-        self.telemetry["release_held_s"] += held
-        self.telemetry["release_held_max_s"] = max(
-            self.telemetry["release_held_max_s"], held)
-        if not answer.get("ok"):
-            raise ProducedOutputSpoolRefused(f"PB retained local export debt: {answer!r}")
-        group["released"] = True
-        group["released_unix"] = time.time()
-        for _, canonical, _ in group["references"]:
-            self._local.pop(canonical.path, None)
-        group["references"] = [(None, canonical, artifact_class)
-                               for _, canonical, artifact_class in group["references"]]
-        self.telemetry[reason] += 1
-
-    def _live_exports_locked(self):
-        return [batch_id for batch_id in self._pending
-                if not self._groups[batch_id]["durable"]]
-
-    def exporting(self):
-        """Is any submitted group's export still live? Looks at no export."""
-        with self._lock:
-            return bool(self._pending)
-
-    def export_live(self, batch_id):
-        """Is this group's export submitted and not yet seen landed?
-
-        Looks at no export. A failing writer leaves such a group's files
-        alone (PQ #1251): its export may still land them.
-        """
-        with self._lock:
-            group = self._groups.get(batch_id)
-            return bool(group is not None and group["submitted"]
-                        and not group["durable"])
-
-    def poll_oldest(self, *, where="poll"):
-        """Look at live exports oldest first, until one is still live.
-
-        The oldest is the group reserved first. Each look is one
-        ``poll_group``, read without the lock so a read or a record on the
-        compute thread never waits on it (PQ #1128), and applied under it.
-        Stops at the first export PrismaBuild reports live, so a write pays
-        for one look however many exports are in flight; a younger export
-        that lands first is recorded when the ones before it have. Never
-        waits. Returns how many landed.
-        """
-        landed = 0
-        while True:
-            with self._lock:
-                live = [(self._groups[batch_id]["sequence"], batch_id)
-                        for batch_id in self._pending
-                        if not self._groups[batch_id]["durable"]]
-                if not live:
-                    return landed
-                batch_id = min(live)[1]
-            answer = self.backend.poll_group(batch_id)
-            with self._lock:
-                # A group is never forgotten, and one another thread found
-                # durable meanwhile is not advanced twice.
-                if not self._settle_poll_locked(
-                        batch_id, self._groups[batch_id], answer, where=where):
-                    return landed
-            landed += 1
-
-    def _make_room_locked(self, *, where, evict=True):
-        """Release what can go; return how many groups went.
-
-        First every acknowledged group no read here needs (released as its
-        export is polled). Then, oldest first, an acknowledged group that is
-        not being read and none of whose entries was retired: its entries
-        are still live, so a later read of one stages it back through
-        PrismaBuild, the path every read took before PQ #1110. A group with
-        a retired entry is never taken here, because its retired entries'
-        canonical files are unlinked only after the release, and a group
-        still being consumed is read again soon.
-        """
-        before = sum(g["released"] for g in self._groups.values())
-        for batch_id in tuple(self._pending):
-            self._poll_locked(batch_id, self._groups[batch_id], where=where)
-        freed = sum(g["released"] for g in self._groups.values()) - before
-        if freed or not evict:
-            return freed
-        candidates = sorted(
-            (group["sequence"], batch_id) for batch_id, group in self._groups.items()
-            if group["durable"] and not group["released"]
-            and not group["reading"] and not group["retired"])
-        if not candidates:
-            return 0
-        sequence, batch_id = candidates[0]
+    def _publish(self, batch_id, lifetime):
         group = self._groups[batch_id]
-        self._release_locked(batch_id, group, "groups_released_for_room")
-        self.evictions.append({"batch_id": str(batch_id), "sequence": sequence,
-                               "ceiling_bytes": group["ceiling_bytes"],
-                               "where": str(where), "unix": time.time()})
-        return 1
+        descriptors = []
+        for local, canonical, artifact_class, identity in group['references']:
+            identity = io_engine.publish_copy(local.path, canonical.path, length=canonical.file_bytes,
+                sha256=canonical.sha256, source_identity=identity,
+                destination_directory_identity=group['destinations'][str(Path(canonical.path).parent)])
+            descriptors.append(self.publication.descriptor_for(canonical,
+                producer_generation=batch_id, artifact_class=artifact_class, file_identity=identity))
+        return self.publication.publish(batch_id=batch_id, descriptors=descriptors, lifetime=lifetime)['ref']
 
-    def _window_summary_locked(self):
-        held = [g for g in self._groups.values() if not g["released"]]
-        return (f"window {self.max_bytes!r} B holds {len(held)} groups "
-                f"({sum(g['ceiling_bytes'] for g in held)} B): "
-                f"{sum(1 for g in held if not g['submitted'])} being written, "
-                f"{sum(1 for g in held if g['submitted'] and not g['durable'])} exporting, "
-                f"{sum(1 for g in held if g['durable'] and g['reading'])} being read, "
-                f"{sum(1 for g in held if g['durable'] and g['retired'])} partly retired, "
-                f"{sum(1 for g in held if g['durable'] and not g['reading'] and not g['retired'])} releasable")
-
-    def landed(self, batch_id):
-        """Look once: True when the group's export is acknowledged.
-
-        Never waits. A caller that must not hold its thread on an export
-        (the owner's stager, PQ #989) asks this and comes back later; a
-        failed export raises here exactly as it does in ``await_group``.
-        """
-        with self._lock:
+    def _complete(self, batch_id, future):
+        with self._cond:
             group = self._groups[batch_id]
-            if not group["submitted"]:
-                raise ProducedOutputSpoolRefused("incomplete local group has no export submission")
-            return self._poll_locked(batch_id, group)
+            try:
+                group['binding'] = future.result()
+                group['durable'] = True
+                self._durable_progress.extend(row[1] for row in group['references'])
+            except BaseException as exc:
+                group['failure'] = exc
+                self.refusals.append({'batch_id': batch_id, 'publication_error': repr(exc)})
+            self._cond.notify_all()
 
-    def _raise_if_cancelled(self, where):
-        cancelled = self.cancelled
-        if cancelled is not None and cancelled():
-            raise ProducedOutputWaitCancelled(
-                f"the writer's action is failing; its wait at {where} ends "
-                "without an export state")
+    def _raise_if_cancelled(self):
+        if self._cancelled or (self.cancelled is not None and self.cancelled()):
+            raise ProducedOutputWaitCancelled('producer is failing; publication remains separate')
 
-    def await_group(self, batch_id, *, where="barrier"):
-        """Wait, on evidence, until the group's export is acknowledged.
+    def cancel_waits(self):
+        with self._cond:
+            self._cancelled = True
+            self._cond.notify_all()
 
-        No clock: the wait lasts while PrismaBuild reports the export live
-        (queued, admitted or copying) and ends the moment it reports it
-        landed or refused. A refusal raises :class:`ProducedExportRefused`
-        naming the export action and its state, and is recorded. While it
-        waits, the export is declared to PrismaBuild's ``no_progress`` rung
-        (PQ #1240).
-        """
-        started = None
-        since_unix = None
-        token = object()
+    def _check_failures(self):
+        failed = [(key, g['failure']) for key, g in self._groups.items() if g['failure'] is not None]
+        if failed:
+            key, cause = failed[0]
+            raise ProducedExportRefused(f'group {key}: durable publication failed: {cause}') from cause
+
+    def await_group(self, batch_id, *, where='barrier'):
+        with self._cond:
+            group = self._groups[batch_id]
+            if group['future'] is None:
+                raise ProducedOutputSpoolRefused('incomplete group has no copy to await')
+            while not group['durable']:
+                self._check_failures()
+                self._raise_if_cancelled()
+                self._cond.wait()
+            if self._done(group):
+                self._release(batch_id, group)
+
+    def _done(self, group):
+        return not group['reading'] and (not group['read_back'] or
+            {row[1].name for row in group['references']} <= group['retired'])
+
+    def _release(self, batch_id, group):
+        if group['released']:
+            return
+        if not group['durable'] or group['reading']:
+            raise ProducedOutputSpoolRefused('durable publication and reader completion precede release')
+        self._check_root()
+        # Both sides are still exact owned files. A changed destination cannot
+        # make the local last good copy disappear.
+        from .native_results import verify_result_artifact
+        from .stage_a_produced_output import read_bound_document
+        manifest = read_bound_document(group['binding'])
+        for row in manifest['entries']:
+            verify_result_artifact(row, max_bytes=MAX_PAYLOAD_BYTES)
+        self._discard_local(group)
+
+    def discard_unsubmitted(self, batch_id):
+        with self._cond:
+            group = self._groups[batch_id]
+            if group['future'] is not None or group['reading']:
+                raise ProducedOutputSpoolRefused('copy or reader still owns local files')
+            self._discard_local(group)
+
+    def _discard_local(self, group):
+        self._check_root()
+        for local, _canonical, _artifact_class, identity in group['references']:
+            if produced_file_identity(local.path) != identity:
+                raise ProducedOutputSpoolRefused('local file changed before release')
+        directory = group['directory']
+        descriptor = open_directory(str(directory))
         try:
-            while True:
-                with self._lock:
-                    group = self._groups[batch_id]
-                    if not group["submitted"]:
-                        raise ProducedOutputSpoolRefused(
-                            "incomplete local group has no export submission")
-                    if self._poll_locked(batch_id, group, where=where):
-                        return
-                    export_key = group.get("export_key")
-                if started is None:
-                    started = time.monotonic()
-                    since_unix = time.time()
-                self._raise_if_cancelled(f"{where} {batch_id}")
-                _export_wait(id(token), since_unix, (export_key,))
-                time.sleep(POLL_S)
+            info = os.fstat(descriptor)
+            if (info.st_dev, info.st_ino) != group['identity']:
+                raise ProducedOutputSpoolRefused('owned group directory changed')
+            expected = {Path(row[0].path).name for row in group['references']}
+            if set(os.listdir(descriptor)) != expected:
+                raise ProducedOutputSpoolRefused('unknown local aliases retain group')
+            for local, canonical, _artifact_class, identity in group['references']:
+                from .file_identity import file_stat_signature
+                if list(file_stat_signature(os.stat(Path(local.path).name,
+                        dir_fd=descriptor, follow_symlinks=False))) != identity:
+                    raise ProducedOutputSpoolRefused('local file changed at release boundary')
+                os.unlink(Path(local.path).name, dir_fd=descriptor)
+                self._local.pop(canonical.path, None)
+            self._check_root()
+            directory.rmdir()
         finally:
-            if started is not None:
-                # However the wait ends: landed, refused, or an exception.
-                _export_wait(id(token), None, ())
-                seconds = time.monotonic() - started
-                self.telemetry["export_wait_s"] += seconds
-                self.telemetry["export_waits"] += 1
-                if where == "drain":
-                    self.telemetry["drain_wait_s"] += seconds
-                with self._lock:
-                    group = self._groups[batch_id]
-                    group["export_wait_s"] += seconds
-                    if where == "drain":
-                        group["drain_wait_s"] += seconds
-                    export_key = group.get("export_key")
-                self.waits.append({"kind": "export", "batch_id": str(batch_id),
-                                   "export_key": export_key, "where": str(where),
-                                   "seconds": seconds, "unix": time.time()})
+            os.close(descriptor)
+        group['released'] = True
+        self._cond.notify_all()
 
-    def holds(self, batch_id):
-        """Does this spool still hold the group's local copy?"""
-        with self._lock:
-            group = self._groups.get(batch_id)
-            return group is not None and not group["released"]
+    def _make_room(self):
+        for key, group in self._groups.items():
+            if group['durable'] and not group['released'] and not group['reading']:
+                if self._done(group) or not group['retired']:
+                    self._release(key, group)
+                    self.evictions.append({'batch_id': key, 'ceiling_bytes': group['ceiling_bytes']})
+                    return True
+        return False
 
-    def released(self, batch_id):
-        with self._lock:
-            group = self._groups.get(batch_id)
-            return group is not None and group["released"]
+    def prepare_reads(self, references):
+        """Restore evicted own groups without publishing or submitting again."""
+        keys = set()
+        with self._cond:
+            self._check_root()
+            self._check_failures()
+            for ref in references:
+                for key, group in self._groups.items():
+                    if any(row[1] == ref for row in group['references']):
+                        keys.add(key)
+                        break
+                else:
+                    raise ProducedOutputSpoolRefused('read names an unknown spool entry')
+            if sum(self._groups[key]['ceiling_bytes'] for key in keys) > self.max_bytes:
+                raise ProducedWindowRefused('read set exceeds bounded local window')
+            # Hold every wanted existing group during room-making so one
+            # restoration cannot evict another member of the same read set.
+            for key in keys:
+                self._groups[key]['reading'] += 1
+            try:
+                for key in keys:
+                    group = self._groups[key]
+                    if not group['released']:
+                        continue
+                    self._await_room(group['ceiling_bytes'], wait=True,
+                        refusal_message='live readers retain rematerialization room')
+                    directory = group['directory']
+                    directory.mkdir(mode=0o700)
+                    group['identity'] = (directory.stat().st_dev, directory.stat().st_ino)
+                    restored = []
+                    from .stage_a_produced_output import read_bound_document
+                    manifest = read_bound_document(group['binding'])
+                    by_path = {row['path']: row for row in manifest['entries']}
+                    try:
+                        for local, canonical, kind, _identity in group['references']:
+                            descriptor = by_path[canonical.path]
+                            identity = io_engine.publish_copy(canonical.path, local.path,
+                                length=canonical.file_bytes, sha256=canonical.sha256,
+                                source_identity=descriptor['file_identity'],
+                                destination_directory_identity=group['identity'])
+                            restored.append((local, canonical, kind, identity))
+                    except BaseException:
+                        # A partial restore remains owned and charged, and
+                        # cannot be mistaken for a complete local read set.
+                        group['released'] = False
+                        group['failure'] = RuntimeError('local rematerialization incomplete')
+                        raise
+                    group['references'] = restored
+                    group['released'] = False
+                    for local, canonical, _kind, _identity in restored:
+                        self._local[canonical.path] = (key, local)
+            finally:
+                for key in keys:
+                    self._groups[key]['reading'] -= 1
+                self._cond.notify_all()
 
     @contextmanager
     def local_reads(self, references):
-        """Hold the local copies of those ``references`` this spool still has.
-
-        Yields ``{reference: local path}`` for each entry whose group this
-        spool holds, and keeps those groups from being released for room
-        until the read is done. Lookup and hold happen under one lock, so a
-        copy it names cannot go before it is read. Entries it does not name
-        are read through PrismaBuild by the caller.
-        """
-        held, batches = {}, []
-        with self._lock:
-            for reference in references:
-                entry = self._local.get(getattr(reference, "path", None))
-                if entry is None:
-                    continue
-                batch_id, local = entry
-                group = self._groups[batch_id]
-                if group["released"]:
-                    continue
-                held[reference] = Path(local.path)
-                if batch_id not in batches:
-                    batches.append(batch_id)
-            for batch_id in batches:
-                self._groups[batch_id]["reading"] += 1
+        held, keys = {}, set()
+        with self._cond:
+            for ref in references:
+                row = self._local.get(ref.path)
+                if row is not None:
+                    batch, local = row
+                    group = self._groups[batch]
+                    if not group['released']:
+                        held[ref] = Path(local.path)
+                        keys.add(batch)
+            for batch in keys:
+                self._groups[batch]['reading'] += 1
         try:
             yield held
         finally:
-            with self._lock:
-                for batch_id in batches:
-                    self._groups[batch_id]["reading"] -= 1
+            with self._cond:
+                for batch in keys:
+                    group = self._groups[batch]
+                    group['reading'] -= 1
+                    if group['durable'] and self._done(group):
+                        self._release(batch, group)
+                self._cond.notify_all()
 
     def retire_entry(self, batch_id, canonical_reference):
-        """No read of this entry follows here. Returns True once released.
-
-        The group's local copy goes when its export has landed and no read
-        of any of its entries follows. Never waits.
-        """
-        with self._lock:
+        with self._cond:
             group = self._groups[batch_id]
-            group["retired"].add(canonical_reference.name)
-            if group["released"]:
-                return True
-            if group["durable"] and self._done_locked(group):
-                self._release_locked(batch_id, group, "groups_released_retired")
-                return True
-            return False
+            if canonical_reference not in [row[1] for row in group['references']]:
+                raise ProducedOutputSpoolRefused('retirement names a foreign reference')
+            group['retired'].add(canonical_reference.name)
+            if group['durable'] and not group['released'] and self._done(group):
+                self._release(batch_id, group)
+            return group['released']
 
-    def commit_origin(self, batch_id, descriptors, *, lifetime):
-        """Commit one exported group of a write-only owner at its origin.
+    def commit_origin(self, batch_id, descriptors=None, *, lifetime):
+        self.await_group(batch_id)
+        if descriptors is None:
+            from .stage_a_produced_output import read_bound_document
+            binding = self._groups[batch_id]['binding']
+            if read_bound_document(binding)['lifetime'] != lifetime:
+                raise ProducedOutputSpoolRefused('published group lifetime differs')
+            return {'ok': True, 'ref': dict(binding)}
+        return self.publication.commit_origin(batch_id=batch_id, descriptors=descriptors, lifetime=lifetime)
 
-        PrismaBuild's ``ProducedSpool.commit_origin_group`` (#912): only
-        after the group's export is acknowledged, against the identities
-        the export receipt recorded, because a retried export can still
-        replace a landed copy before that. ``descriptors`` must name exactly
-        the files the export landed. ``lifetime`` is the commit's (#914),
-        ``retain`` or ``consumed``. Returns PrismaBuild's answer, whose
-        ``ref`` a consumer declares; a refusal raises.
-        """
-        commit = getattr(self.backend, "commit_origin_group", None)
-        if not callable(commit):
-            raise ProducedOutputSpoolRefused(
-                "the sealed PB helper cannot commit an exported group at its "
-                "origin (PrismaBuild #912)")
-        with self._lock:
+    def landed(self, batch_id):
+        with self._cond:
+            self._check_failures()
+            return self._groups[batch_id]['durable']
+
+    def holds(self, batch_id):
+        with self._cond:
+            return batch_id in self._groups and not self._groups[batch_id]['released']
+
+    pending = holds
+
+    def released(self, batch_id):
+        with self._cond:
+            return batch_id in self._groups and self._groups[batch_id]['released']
+
+    def export_live(self, batch_id):
+        with self._cond:
             group = self._groups[batch_id]
-            if not group["durable"]:
-                raise ProducedOutputSpoolRefused(
-                    "a group commits at its origin only after PB acknowledged "
-                    "its export")
-        answer = commit(batch_id, list(descriptors), lifetime=lifetime)
-        if not answer.get("ok"):
-            raise ProducedOutputSpoolRefused(
-                f"PB refused the origin commit: {answer!r}")
-        return answer
+            return group['future'] is not None and not group['durable'] and group['failure'] is None
+
+    def exporting(self):
+        with self._cond:
+            return any(self.export_live(key) for key in self._groups)
 
     def durable_entries(self):
-        """The references acknowledged since the last call. Polls nothing.
-
-        The polls that find them run where the owner puts them: the stager's
-        ``poll_oldest`` after a write, or any wait (PQ #1128). Before #1128
-        this polled every live export, twice per write, on the compute
-        thread.
-        """
-        with self._lock:
-            committed, self._durable_progress = self._durable_progress, []
-            return committed
+        with self._cond:
+            result, self._durable_progress = self._durable_progress, []
+            return result
 
     def drain(self, *, release=False):
-        """Wait, on evidence, for every submitted group's export to land.
-
-        ``release`` is the action's end: no read follows anywhere in it, so
-        every acknowledged local copy is released too. A reservation that
-        holds no entry has nothing to export and is left to PrismaBuild; one
-        whose group was never completed is a writer defect and refuses.
-        """
-        with self._lock:
-            keys = list(self._groups)
-        for batch_id in keys:
-            with self._lock:
-                group = self._groups[batch_id]
-                if not group["submitted"]:
-                    if group["references"]:
-                        raise ProducedOutputSpoolRefused(
-                            f"local output group {batch_id!r} was never "
-                            "completed, so it has no export to wait for")
-                    continue
-            self.await_group(batch_id, where="drain")
-        if release:
-            with self._lock:
-                for batch_id, group in self._groups.items():
-                    if group["durable"] and not group["released"]:
-                        if group["reading"]:
-                            raise ProducedOutputSpoolRefused(
-                                f"local copy of {batch_id!r} is being read at settle")
-                        self._release_locked(batch_id, group,
-                                             "groups_released_at_settle")
+        for key, group in list(self._groups.items()):
+            self.await_group(key, where='drain')
+            if release:
+                with self._cond:
+                    self._release(key, group)
 
     def release_landed(self):
-        """A failing action's end: release every copy whose export landed.
+        # Join every owned copy even on failure. No async writer outlives the
+        # source retention barrier. A publication error remains independently
+        # visible and keeps its local bytes.
+        self.join_copies()
+        with self._cond:
+            for key, group in self._groups.items():
+                if group['durable'] and not group['reading']:
+                    self._release(key, group)
+            return [key for key in self._groups if self.holds(key)]
 
-        Never waits. Each live export is asked once; a refused one is
-        recorded (``refusals``) and left to PrismaBuild's recovery of a dead
-        producer's spool. Returns the batch ids still held.
-        """
-        with self._lock:
-            for batch_id in tuple(self._pending):
+    def join_copies(self):
+        for group in self._groups.values():
+            future = group['future']
+            if future is not None:
                 try:
-                    self._poll_locked(batch_id, self._groups[batch_id],
-                                      where="failed-exit")
-                except ProducedOutputSpoolRefused:
-                    continue
-            for batch_id, group in self._groups.items():
-                if group["durable"] and not group["released"] and not group["reading"]:
-                    self._release_locked(batch_id, group, "groups_released_at_settle")
-            return [batch_id for batch_id, group in self._groups.items()
-                    if not group["released"]]
-
-    def pending(self, batch_id):
-        with self._lock:
-            group = self._groups.get(batch_id)
-            return group is not None and not group["released"]
-
-    def export_records(self):
-        """One record per group, in the order the groups were reserved.
-
-        What a row's counters keep of its exports (PQ #1225): the export
-        action's key, the bytes and entries it carries, the unix times it
-        was reserved, submitted, seen landed and released (None until
-        then), and the seconds any barrier, and the end-of-action ``drain``
-        alone, waited on it. Reads no export state.
-        """
-        with self._lock:
-            records = []
-            for batch_id, group in sorted(self._groups.items(),
-                                          key=lambda item: item[1]["sequence"]):
-                references = group["references"]
-                records.append({
-                    "batch_id": str(batch_id),
-                    "export_key": group.get("export_key"),
-                    "entries": len(references),
-                    "bytes": sum(int(canonical.file_bytes)
-                                 for _, canonical, _ in references),
-                    "ceiling_bytes": group["ceiling_bytes"],
-                    "reserved_unix": group["reserved_unix"],
-                    "submitted_unix": group["submitted_unix"],
-                    "landed_unix": group["landed_unix"],
-                    "released_unix": group["released_unix"],
-                    "export_wait_s": group["export_wait_s"],
-                    "drain_wait_s": group["drain_wait_s"],
-                })
-            return records
+                    future.result()
+                except BaseException:
+                    pass
+                with self._cond:
+                    while not group['durable'] and group['failure'] is None:
+                        self._cond.wait()
 
     def report(self):
-        exports = self.export_records()
-        with self._lock:
-            held = [g for g in self._groups.values() if not g["released"]]
-            return dict(schema="prismaquant.produced_output_spool.v3",
-                        groups=len(self._groups),
-                        durable_groups=sum(g["durable"] for g in self._groups.values()),
-                        pending_groups=len(held),
-                        resident_landed_groups=sum(g["durable"] for g in held),
-                        retained_ceiling_bytes=sum(g["ceiling_bytes"] for g in held),
-                        window_bytes=self.max_bytes,
-                        refusals=[dict(record) for record in self.refusals],
-                        waits=[dict(record) for record in self.waits],
-                        evictions=[dict(record) for record in self.evictions],
-                        exports=exports,
-                        **{key: value for key, value in self.telemetry.items()})
+        with self._cond:
+            return {'schema': 'prismaquant.produced_output_spool.v4',
+                'groups': len(self._groups), 'durable_groups': sum(g['durable'] for g in self._groups.values()),
+                'pending_groups': sum(not g['released'] for g in self._groups.values()),
+                'retained_ceiling_bytes': self._held_bytes(), 'window_bytes': self.max_bytes,
+                'refusals': list(self.refusals), 'evictions': list(self.evictions),
+                'exports': [{'batch_id': key, 'publication': g['binding'],
+                    'entries': len(g['references']), 'durable': g['durable'], 'released': g['released'],
+                    'reading': g['reading'], 'publication_error': repr(g['failure']) if g['failure'] else None}
+                    for key, g in self._groups.items()]}

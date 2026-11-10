@@ -338,7 +338,13 @@ def _verify_graph_receipt(record: Mapping[str, Any], *, model_dir) -> list[str]:
     arm_name, action = observed.get("equality_arm"), observed.get("equality_action")
     arms = receipt.get("arms")
     matched = [arm for arm in arms if isinstance(arm, Mapping) and arm.get("name") == arm_name] if isinstance(arms, list) else []
-    if not isinstance(arm_name, str) or not arm_name or not isinstance(action, str) or not action or len(matched) != 1 or matched[0].get("pb_action") != action:
+    # Native arms carry the saved job_id. Only recorded receipts use the legacy field.
+    producer_id = None
+    if len(matched) == 1:
+        producer_id = matched[0].get("job_id")
+        if "job_id" not in matched[0]:
+            producer_id = matched[0].get("pb_action")
+    if not isinstance(arm_name, str) or not arm_name or not isinstance(action, str) or not action or len(matched) != 1 or producer_id != action:
         problems.append(f"{slot}: missing or inconsistent producer equality arm/action linkage")
     elif isinstance(resolved, Mapping):
         recorded = matched[0].get("resolved")

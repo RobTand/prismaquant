@@ -13,7 +13,7 @@ from prismaquant import joint_cost_quantum as quantum
 from prismaquant import model_profiles
 from test_capture_original_material import _owner, material  # noqa: F401
 from test_original_streaming_bootstrap_2010 import original_model  # noqa: F401
-from test_strict_reader_tier_enforcement import _forget_state  # noqa: F401
+from native_original_fixtures import _forget_state  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 

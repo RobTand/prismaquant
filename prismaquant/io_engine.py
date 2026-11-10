@@ -8,9 +8,9 @@ Stage B's retained-window replay, and it has two layers.
 
 **One file, read once.** :func:`load_file` is the read every ProductionWeight
 Cache shard takes (moved here from ``production_weight_cache``): the tier
-comes from PrismaBuild's residency map (``residency_map.residency_resolver``
-and ``staged_lease``, reused, not restated), the staged copy is read under its
-reader lease, the bytes are hashed once and held to the map's digest, and the
+comes from the immutable staged manifest (``residency_map.residency_resolver``
+and ``staged_lease``). The staged copy is read under its descriptor window,
+the bytes are hashed once and held to the extent's digest, and the
 caller's decoder turns them into a value. A staged copy that fails any fence
 falls back to the declared file unless the allowed-tier policy is active, in
 which case the read refuses. :func:`pin_group` pins a set of staged files under
@@ -89,12 +89,8 @@ from __future__ import annotations
 from concurrent.futures import CancelledError, ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-import fcntl
 from functools import partial
-import hashlib
-import io
 import math
-import mmap
 import os
 from pathlib import Path
 import stat
@@ -102,6 +98,10 @@ import threading
 import time
 from typing import Any, Callable, Hashable, Iterable, Protocol
 
+from .io_buffers import (  # noqa: F401 -- existing engine imports share the leaf implementation
+    SealedBuffer, kernel_seal_bits, _F_ADD_SEALS, _F_GET_SEALS, _SEALS,
+)
+from .io_buffers import copy_extent
 from .digests import bytes_sha256hex
 from .file_identity import file_stat_signature as _stat_signature
 from .residency_map import StagedReadRefused
@@ -127,195 +127,6 @@ class EntryError(RuntimeError):
 # One file, read once
 # --------------------------------------------------------------------------
 
-# The memfd seal numbers are Linux UAPI and ABI-fixed since kernel 3.11
-# (uapi/asm-generic/fcntl.h, uapi/linux/memfd.h). CPython defines the
-# ``fcntl`` names only when its build headers had them, so a portable
-# interpreter built against pre-glibc-2.27 headers lacks them and the module
-# must not read them at import (PB be3dd1332259: the capture qualification set
-# failed collection there with ``AttributeError: module 'fcntl' has no
-# attribute 'F_SEAL_SEAL'``). The kernel stays the authority: the seal is
-# attempted through fcntl and read back with ``F_GET_SEALS`` (tests/
-# test_io_engine.py::test_seal_constants_resolve_without_cpython_build_time_names).
-_F_ADD_SEALS = getattr(fcntl, "F_ADD_SEALS", 1033)
-_F_GET_SEALS = getattr(fcntl, "F_GET_SEALS", 1034)
-_SEALS = (
-    getattr(fcntl, "F_SEAL_SEAL", 0x0001)
-    | getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
-    | getattr(fcntl, "F_SEAL_GROW", 0x0004)
-    | getattr(fcntl, "F_SEAL_WRITE", 0x0008)
-)
-_MFD_CLOEXEC = getattr(os, "MFD_CLOEXEC", 0x0001)
-_MFD_ALLOW_SEALING = getattr(os, "MFD_ALLOW_SEALING", 0x0002)
-
-#: The runtime libc's ``memfd_create``, bound once with explicit ctypes
-#: signatures (D5 review of b601b76b9b5: rebuilding the ``CDLL`` handle per
-#: call re-dlopened and re-resolved on every sealed buffer). ``None`` until
-#: the first portable call needs it.
-_LIBC_MEMFD_CREATE = None
-
-
-def _create_memfd(name: str, flags: int) -> int:
-    """One anon_inode memfd, sealing-capable, this process owns.
-
-    ``os.memfd_create`` exists only in interpreters whose build headers had
-    the syscall; a portable build (pq-cpu312, PB ded8698fa4d6) lacks it and
-    every stream read died on the missing attribute. The runtime libc on the
-    same box still wraps the syscall (glibc 2.27+, musl 1.1.20+), so fall
-    through to it. The MFD flag numbers are Linux UAPI, ABI-fixed.
-    """
-    global _LIBC_MEMFD_CREATE
-    if hasattr(os, "memfd_create"):
-        return os.memfd_create(name, flags)
-    import ctypes
-
-    if _LIBC_MEMFD_CREATE is None:
-        libc = ctypes.CDLL(None, use_errno=True)
-        try:
-            call = libc.memfd_create
-        except AttributeError:
-            raise OSError(
-                f"this runtime libc exposes no memfd_create; sealed io "
-                f"buffers cannot hold {name!r} here") from None
-        call.argtypes = (ctypes.c_char_p, ctypes.c_int)
-        call.restype = ctypes.c_int
-        _LIBC_MEMFD_CREATE = call
-    fd = _LIBC_MEMFD_CREATE(name.encode(), flags)
-    if fd == -1:
-        raise OSError(ctypes.get_errno(), f"memfd_create({name!r}) failed")
-    return fd
-
-
-def kernel_seal_bits(fd: int) -> int:
-    """The kernel's actual seal bits on an open memfd (``F_GET_SEALS``)."""
-    return fcntl.fcntl(fd, _F_GET_SEALS)
-
-
-class SealedBuffer:
-    """One file's bytes in a memfd this process owns, sealed once hashed.
-
-    A stream holds what it reads ahead, so those bytes must leave the
-    process's committed memory the moment the stream or its consumer drops
-    them: the stream's depth is a live reading of that memory, and its
-    reclaim frees bytes so a check can pass. A tensor that ``torch.load``
-    allocates does not do that on this platform. Torch 2.11 on aarch64 bundles
-    mimalloc in ``libc10``, which keeps freed CPU pages: freeing 3.84 GB of
-    ``torch.empty`` tensors left 3.85 GB in RssAnon, where the same bytes in a
-    ``bytearray`` were returned (PQ #1291, PrismaBuild probe on a GB10).
-    Decoded tensors held ahead then pinned the row's committed memory: an
-    eviction of 1.95 GB did not move the guard's reading, and the row was
-    refused.
-
-    So a stream's read lands in a memfd: its pages are shared memory charged
-    to the reading cgroup (``committed_cgroup_bytes`` counts ``shmem``), and
-    they are freed when the last descriptor and mapping go. The bytes are
-    hashed on the one pass that reads them, then the memfd is sealed against
-    every write, so the bytes a decoder sees are the bytes the digest names.
-    A decoder maps it instead of copying it (``path`` names the memfd for
-    ``torch.load(..., mmap=True)``, a private copy-on-write view): the decoded
-    tensor owns the pages, and dropping the tensor returns them.
-    """
-
-    __slots__ = ("size", "_fd", "_map")
-
-    def __init__(self, size: int):
-        self.size = int(size)
-        self._map = None
-        self._fd = _create_memfd("pq-io", _MFD_CLOEXEC | _MFD_ALLOW_SEALING)
-        try:
-            os.ftruncate(self._fd, self.size)
-            if self.size:
-                self._map = mmap.mmap(
-                    self._fd, self.size,
-                    flags=mmap.MAP_SHARED | getattr(mmap, "MAP_POPULATE", 0))
-        except BaseException:
-            os.close(self._fd)
-            raise
-
-    def fill_bytes(self, payload: bytes) -> None:
-        """Fill owned writable pages from an already-delivered exact byte payload."""
-        if not isinstance(payload, bytes) or len(payload) != self.size:
-            raise ValueError("sealed io payload must be bytes of the declared size")
-        target = self._map
-        if self._fd is None or (self.size and target is None):
-            raise RuntimeError("sealed io buffer is not writable")
-        if target is not None:
-            target[:] = payload
-
-    def fill(self, fd: int) -> bool:
-        """Read ``fd`` from offset 0 into the buffer; whether it held exactly ``size`` bytes."""
-        offset = 0
-        if self.size:
-            view = memoryview(self._map)
-            try:
-                while offset < self.size:
-                    got = os.preadv(fd, [view[offset:]], offset)
-                    if got <= 0:
-                        break
-                    offset += got
-            finally:
-                view.release()
-        return offset == self.size and os.pread(fd, 1, self.size) == b""
-
-    def seal(self) -> str:
-        """Hash the bytes read, drop the writable mapping and seal; the SHA-256 hex."""
-        digest = hashlib.sha256()
-        if self._map is not None:
-            view = memoryview(self._map)
-            try:
-                digest.update(view)
-            finally:
-                view.release()
-            self._map.close()
-            self._map = None
-        fcntl.fcntl(self._fd, _F_ADD_SEALS, _SEALS)
-        return digest.hexdigest()
-
-    def require_sealed(self) -> None:
-        """Require actual kernel write/grow/shrink/seal protection, not a flag."""
-        if self._fd is None or kernel_seal_bits(self._fd) & _SEALS != _SEALS:
-            raise RuntimeError("original material lacks required kernel seals")
-
-    @property
-    def path(self) -> str:
-        """A path that opens this memfd (``/proc/self/fd``), for decoders that map files."""
-        if self._fd is None:
-            raise RuntimeError("sealed io buffer is closed")
-        return f"/proc/self/fd/{self._fd}"
-
-    @contextmanager
-    def readonly(self):
-        """A read-only, seekable view of the bytes (an ``mmap``), without a copy."""
-        if self._fd is None:
-            raise RuntimeError("sealed io buffer is closed")
-        if not self.size:
-            yield io.BytesIO(b"")
-            return
-        # Before Linux 6.7, F_SEAL_WRITE rejects shared mappings of an O_RDWR
-        # memfd even with PROT_READ. Private reads still use the memfd's pages;
-        # without writes, they never trigger copy-on-write.
-        view = mmap.mmap(self._fd, self.size, flags=mmap.MAP_PRIVATE, prot=mmap.PROT_READ)
-        try:
-            yield view
-        finally:
-            view.close()
-
-    def __bytes__(self) -> bytes:
-        with self.readonly() as view:
-            return view.read()
-
-    def __len__(self) -> int:
-        return self.size
-
-    def close(self) -> None:
-        """Drop this buffer's descriptor; a decoder's mapping keeps the pages it maps."""
-        if self._map is not None:
-            self._map.close()
-            self._map = None
-        if self._fd is not None:
-            os.close(self._fd)
-            self._fd = None
-
-
 def _close_sealed(raw) -> None:
     if isinstance(raw, SealedBuffer):
         raw.close()
@@ -338,14 +149,12 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
     instead, unless the allowed-tier policy is active, in which case it
     refuses.
 
-    Under the active policy the staged copy is read through a lifetime-pinned
-    window: ``lease`` (a group pin from :func:`pin_group`, as
-    ``(lease window, key, staged entry)``) when one pinned this file, else one
-    per read. The RAM leg needs RAM-mover covers the composed map does not
-    carry and refuses fast, the SSD copy acquires honestly with the map's
-    leads, payload comes from the held descriptor, and the SDK's own serving
-    record is registered at the successful actual open. Inactive policy keeps
-    the legacy stage-only open order.
+    Native staged entries use an owned descriptor window: ``lease`` from
+    :func:`pin_group`, as ``(lease window, key, staged entry)``, when supplied,
+    otherwise one window per read. The reader authenticates object bounds,
+    descriptor identity and bytes before returning. The resolver records
+    serving identity at the actual open. External cache pins or retained
+    phase ownership protect the object's lifetime.
 
     ``timing``, when given, receives ``read_s``: the seconds spent opening and
     reading the bytes, without the hash, so a caller can measure its
@@ -353,6 +162,29 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
     """
     from .residency_map import residency_resolver
     from .staged_tier_policy import policy_is_active
+    if staged is not None and '_resolver' in staged:
+        from .staged_whole_file import read_staged_entry
+        if declared_signature is not None:
+            before = path.lstat()
+            if not stat.S_ISREG(before.st_mode) or _stat_signature(before) != declared_signature:
+                raise StagedReadRefused('declared file changed before staged content read')
+        started = time.monotonic()
+        owner = staged['_resolver']
+        raw = read_staged_entry(owner, path, staged, label='io-engine', sealed=sealed,
+                                max_bytes=limit, lease=lease)
+        try:
+            if declared_signature is not None:
+                after = path.lstat()
+                if not stat.S_ISREG(after.st_mode) or _stat_signature(after) != declared_signature:
+                    raise StagedReadRefused('declared file changed during staged content read')
+        except BaseException:
+            _close_sealed(raw)
+            raise
+        if timing is not None:
+            timing['read_s'] = time.monotonic() - started
+        receipt = {'path': str(path), 'bytes': len(raw), 'sha256': staged['sha256'],
+                   'serving_tier': 'stage'}
+        return raw, receipt, declared_signature
     before = path.lstat()
     if not stat.S_ISREG(before.st_mode):
         raise RuntimeError("PWC file receipt requires a regular file, not a symlink")
@@ -506,7 +338,7 @@ def load_file(path: Path, limit: int, *, binding, decode, declared_signature=Non
     SHA-256 fence decides whether it is admitted, so a wrong or stale staged
     copy is refused exactly as a wrong pool copy would be. The declared path is
     the fallback and the accounting says so. Without
-    ``PRISMABUILD_RESIDENCY_MAP`` no resolver exists and the bytes are the
+    ``PRISMAQUANT_STAGED_MANIFEST`` no resolver exists and the bytes are the
     pool's.
 
     Under the active allowed-tier policy the read requires ``binding``, the
@@ -546,7 +378,7 @@ def load_file(path: Path, limit: int, *, binding, decode, declared_signature=Non
             if policy_is_active():
                 raise refuse_pool_bulk_read(str(path), str(refusal))
         else:
-            if resolver is not None:
+            if resolver is not None and '_resolver' not in staged:
                 if receipt.get("serving_tier") == "ram":
                     resolver.record_ram_read(path, receipt["bytes"])
                 else:
@@ -579,24 +411,19 @@ class _LeaseRef:
 def pin_group(members, live_leases, *, counters=None):
     """Pin a set of staged files under one reader lease (PQ #1210).
 
-    Under the strict tier policy each read used to acquire, open and release
-    its own reader-lease window: on row 041 that was 63% of the loader
-    threads' time (the SDK acquire's ownership lock and its scan of every
-    retiring mover, the per-entry cover lookup, and the release), paid once
-    per 16 MiB file. PrismaBuild's ``acquire`` pins a whole key set under one
-    ownership-lock hold (PQ #997), so a group's entries are pinned together
-    here, by the same ``staged_lease.enter_group_lease`` the exact activation
-    cache uses: RAM copies in one window and the rest in one SSD window.
+    Group files in one native descriptor window through the same
+    ``staged_lease.enter_group_lease`` used by the exact activation cache.
+    Cache eviction pins belong to the external fluxcache owner; shared-phase
+    retention belongs to the declared phase lifetime.
 
     ``members`` is ``[(declared path, expected sha256), ...]``. Returns
     ``{declared path: (lease window, map key, staged entry)}`` for the reads
     to open under, or ``None`` when no group applies: the policy is inactive,
     no resolver is bound, fewer than two files are staged with a bound digest,
-    or the batched lease refused. Then every read leases on its own exactly as
-    before, so a refusal keeps its single-entry kind. Nothing is served on the
-    batched proof alone: the SDK re-verifies every key under its lock at
-    acquire, each file is still opened through the SDK under the pin, and its
-    bytes are still hashed against the bound digest and the map's digest.
+    or the batched lease refused. Every individual read still opens through
+    the immutable resolver, checks descriptor identity and hashes the bytes
+    against the declared digest. A group does not supply read authority by
+    itself.
     ``live_leases`` receives every lease entered; :func:`unpin` exits them.
     """
     from .staged_tier_policy import policy_is_active
@@ -1454,6 +1281,74 @@ def read_stream(entries: Iterable[ReadEntry], *, budget: ReadBudget, ready=None,
     """:meth:`IOEngine.read_stream` on the process's one engine."""
     return ENGINE.read_stream(entries, budget=budget, ready=ready,
                               lease_counters=lease_counters)
+
+
+def publish_copy(source, destination, *, length, sha256, source_identity,
+                 destination_directory_identity):
+    """Copy and hash on the existing IO owner, then publish without replacement."""
+    import secrets
+    from .staged_manifest import open_regular, open_directory
+    if (not isinstance(destination_directory_identity, (tuple, list)) or
+            len(destination_directory_identity) != 2 or
+            any(type(value) is not int or value <= 0 for value in destination_directory_identity)):
+        raise ValueError('copy requires the saved destination directory identity')
+    source, destination = Path(source), Path(destination)
+    fd = open_regular(str(source))
+    directory = target_fd = None
+    temporary = None
+    try:
+        before = _stat_signature(os.fstat(fd))
+        if list(before) != list(source_identity) or before[2] != length:
+            raise RuntimeError('copy source identity differs from writer')
+        directory = open_directory(str(destination.parent), identity=destination_directory_identity)
+        candidate = '.copy-' + secrets.token_hex(16)
+        target_fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                            0o600, dir_fd=directory)
+        temporary = candidate
+        actual = copy_extent(fd, target_fd, 0, length)
+        if actual != sha256 or _stat_signature(os.fstat(fd)) != before:
+            raise RuntimeError('copy source bytes changed')
+        check = open_regular(str(source))
+        try:
+            if _stat_signature(os.fstat(check)) != before:
+                raise RuntimeError('copy source path changed')
+        finally:
+            os.close(check)
+        os.fchmod(target_fd, 0o444)
+        os.fsync(target_fd)
+        os.link(temporary, destination.name, src_dir_fd=directory, dst_dir_fd=directory,
+                follow_symlinks=False)
+        # Unlink changes ctime through the link count. Publish the signature
+        # only after the temporary alias is gone, at the real lifetime boundary.
+        os.unlink(temporary, dir_fd=directory)
+        temporary = None
+        os.fsync(directory)
+        check = open_regular(str(destination))
+        try:
+            observed = _stat_signature(os.fstat(check))
+            if observed != _stat_signature(os.fstat(target_fd)):
+                raise RuntimeError('copy destination changed during publication')
+        finally:
+            os.close(check)
+        return list(observed)
+    finally:
+        os.close(fd)
+        try:
+            if directory is not None:
+                try:
+                    if temporary is not None:
+                        try:
+                            current = os.stat(temporary, dir_fd=directory, follow_symlinks=False)
+                            owned = os.fstat(target_fd)
+                            if (current.st_dev, current.st_ino) == (owned.st_dev, owned.st_ino):
+                                os.unlink(temporary, dir_fd=directory)
+                        except FileNotFoundError:
+                            pass
+                finally:
+                    os.close(directory)
+        finally:
+            if target_fd is not None:
+                os.close(target_fd)
 
 
 class FixedBudget:

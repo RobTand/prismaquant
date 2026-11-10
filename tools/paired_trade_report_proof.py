@@ -1,6 +1,5 @@
 """Measure synthetic paired-trade reports through the actual allocator command."""
 from __future__ import annotations
-from prismaquant import joint_aura_rows
 
 import argparse
 import gc
@@ -17,13 +16,12 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from prismaquant import format_registry as fr, joint_aura as joint
-from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
-from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex
-from prismabuild import client as pb
-from prismaquant.layer_config import load_assignment
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_STRICT, bytes_sha256hex
+from prismaquant import native_results
 
 LOW, HIGH = "FP8_E4M3", "FP8_E5M2"
+#: Aggregate byte ceiling of the published archive plus its input (the native result owner caps at 1 GiB).
+PUBLICATION_MAX_BYTES = 1 << 30
 ROLES = ("gate", "up", "down")
 
 
@@ -47,6 +45,8 @@ def samples(layer, expert, role, probes):
 
 def fixture(directory, config, probes, layers):
     import torch
+    from prismaquant import format_registry as fr, joint_aura as joint, joint_aura_rows
+    from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
     c = config["text_config"]
     source_content = {"config": config, "weight_map": {"synthetic": "none"},
                       "shards": [{"path": "/synthetic/no-weights", "size": 1, "sha256": "a" * 64}]}
@@ -115,7 +115,25 @@ def profile_allocator_command(directory, fixture_dir, refusal=False):
              for path in directory.rglob("*") if path.is_file()}}
 
 
+def publish_archive(output, model_config, config_bytes):
+    """Publish ``output/proof.tar.gz`` as a native result of the running Flux job.
+
+    The exact model config bytes are the input, the archive is the artifact, and the publication is
+    authenticated by its reader. Returns the measured artifact binding and the publication binding.
+    """
+    archive = (Path(output) / "proof.tar.gz").resolve()
+    config_path = Path(model_config).resolve()
+    publication = native_results.publish_result(
+        Path(output) / "publication.json", producer_id="pq2286-paired-trade-proof",
+        inputs={"model_config": {"path": str(config_path), "sha256": bytes_sha256hex(config_bytes),
+                                 "bytes": len(config_bytes)}},
+        artifacts={"cli_proof": archive}, max_artifact_bytes=PUBLICATION_MAX_BYTES)
+    return native_results.bind_result_artifact(str(archive), max_bytes=PUBLICATION_MAX_BYTES), publication
+
+
 def main():
+    from prismaquant import joint_aura_rows
+    from prismaquant.layer_config import load_assignment
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model-config", type=Path, default=ROOT / "tools/pq2286_target_config.json")
@@ -188,36 +206,10 @@ def main():
              "native_threads": {key: os.environ[key] for key in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")}}
     (args.output / "proof.json").write_text(json.dumps(proof, indent=2))
     archive = args.output / "proof.tar.gz"
-    queue = pb.PoolQueue(os.environ["PRISMABUILD_QUEUE_ROOT"])
-    owner = os.environ["PRISMABUILD_ACTION_KEY"]
-    template = pb.declared_template(queue, owner)
-    assert template.get("write_only") is True
-    assert len(template["permitted_tiers"]) == 1
-    tier = template["permitted_tiers"][0]
-    instance = pb.bind_declared_instance(
-        queue, owner_action_key=owner, claim_snapshot=pb.read_claimed_record(queue, owner))
-    pb.declare_instance(queue.root, instance)
-    admitted = pb.admit_instance(queue, instance, template)
-    assert admitted["ok"], admitted
-    prewrite = pb.require_prewrite(
-        queue, instance, template, batch_id="cli-proof", tier=tier,
-        class_bytes={"payload": pb.checked_instance_maxima(template)["payload_max_bytes"],
-                     "checkpoint": 0, "temp": 0}, paths=[str(archive.resolve())])
-    assert prewrite["ok"], prewrite
     with tarfile.open(archive, "w:gz") as target:
         for child in ("allocation", "refusal", "proof.json"):
             target.add(args.output / child, arcname=child)
-    descriptor = pb.validate_descriptor({
-        "schema": pb.DESCRIPTOR_SCHEMA_V2, "slot": "cli_proof", "artifact_class": "payload",
-        "path": str(archive.resolve()), "bytes": archive.stat().st_size,
-        "sha256": file_sha256hex(archive), "producer_generation": instance["owner_attempt"]["nonce"],
-        "owner_action_key": owner, "owner_attempt": instance["owner_attempt"],
-    }, template, instance)
-    publication = pb.commit_origin_batch(
-        queue, instance, template, [descriptor], batch_id="cli-proof", lifetime="retain")
-    assert publication["ok"], publication
-    proof["artifact_bundle"] = descriptor
-    proof["artifact_publication"] = publication
+    proof["artifact_bundle"], proof["artifact_publication"] = publish_archive(args.output, args.model_config, config_bytes)
     print(DIRECT_ASCII_SPACED_LAX.text(proof))
 
 

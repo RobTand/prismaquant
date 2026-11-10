@@ -72,7 +72,7 @@ def test_dev_mode_row_runs_the_execution_plan_and_keeps_the_sealed_file(
         "sealed_plan_path": str(plan_path), "sealed_plan_sha256": _sha(plan_path)}
     rows = document["rows"]
     assert [row["quantum_id"] for row in rows] == ["layer-002"]
-    payload = rows[0]["argv"]
+    payload = rows[0]["row"]["argv"]
     assert payload[payload.index("--plan") + 1] == str(execution)
     assert payload[payload.index("--plan-sha256") + 1] == _sha(execution)
     # The sealed plan is never rewritten, and the record still names it.
@@ -105,7 +105,7 @@ def test_certified_mode_runs_a_byte_identical_execution_plan(
     code, out, err = _main(dispatch, [*argv, "--execution-plan", str(execution)],
                            capsys)
     assert code == 0, err
-    payload = _rows(out)["rows"][0]["argv"]
+    payload = _rows(out)["rows"][0]["row"]["argv"]
     assert payload[payload.index("--plan") + 1] == str(execution)
     assert payload[payload.index("--plan-sha256") + 1] == _sha(plan_path)
 

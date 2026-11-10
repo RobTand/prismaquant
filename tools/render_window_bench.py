@@ -33,7 +33,7 @@ Subcommands:
 
 * ``host`` (the action's command) extracts each earlier arm's
   ``prismaquant`` and ``tools`` from the action's own Git snapshot
-  (``--arm NAME=REF``, whose REF pbrun's ``--snapshot-ref`` must advertise),
+  (``--arm NAME=REF``, whose REF the launch's snapshot ref must advertise),
   writes the render files once, runs each repeat's arms, this tree last on
   the first repeat and in a rotated order after it, as ``child`` processes
   under ``py-spy record``, and ends with ``analyze``.

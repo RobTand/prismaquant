@@ -16,8 +16,8 @@ from safetensors.torch import save_file
 from prismaquant import layer_streaming, streaming_model, tessera_calibration_cache as cc
 from prismaquant.residency_map import bind_residency_manifest
 from test_capture_original_material import _bound, _owner, _sha, material  # noqa: F401
-from test_stage_b_prep_staged_reads_1092 import _stage_manifest
-from test_strict_reader_tier_enforcement import MANIFEST, _forget_state  # noqa: F401
+from native_original_fixtures import _stage_manifest
+from native_original_fixtures import _forget_state  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 
@@ -47,7 +47,6 @@ def _rebind(m, monkeypatch):
     stage = m['tmp'] / f"model-stage-{m['rebinds']}"
     stage.mkdir()
     m['staged'] = _stage_manifest(stage, monkeypatch, m['readset'])
-    bind_residency_manifest(MANIFEST)
 
 
 @pytest.fixture

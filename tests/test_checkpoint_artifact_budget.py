@@ -133,7 +133,7 @@ def test_rollback_retains_then_reclaims(tmp_path, monkeypatch):
     space = adjoint_space(tmp_path / "out")
     real_atomic = checkpoints.atomic_write_bytes
 
-    def fail_manifest(path, payload):
+    def fail_manifest(path, payload, **writer):
         raise RuntimeError("boom: simulated manifest failure")
 
     monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_manifest)
@@ -259,7 +259,8 @@ def test_output_descriptor_is_application_scope(tmp_path):
     assert descriptor["ceiling_bytes"] == owner.config["max_artifact_bytes"]
     assert descriptor["live_checkpoint_bytes"] == owner.telemetry["live_checkpoint_bytes"]
     assert descriptor["live_ordinary_bytes"] == owner.telemetry["live_artifact_bytes"]
-    assert "not a PrismaBuild" in descriptor["note"]
+    assert descriptor["note"] == (
+        "Application-level artifact accounting; filesystem capacity and fleet resource admission are independent.")
     assert owner.checkpoint_commitment(record["cotangent_sha256"]) is not None
 
 
@@ -348,11 +349,11 @@ def test_retained_partial_blocks_ordinary_until_reclaimed(tmp_path, monkeypatch)
     real_atomic = checkpoints.atomic_write_bytes
     calls = []
 
-    def fail_first_pickle(path, payload):
+    def fail_first_pickle(path, payload, **writer):
         calls.append(str(path))
         if len(calls) == 1:
             raise RuntimeError("boom: simulated pickle failure")
-        return real_atomic(path, payload)
+        return real_atomic(path, payload, **writer)
 
     monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_first_pickle)
     with pytest.raises(RuntimeError, match="boom"):
@@ -484,11 +485,13 @@ def _reserve_for_record(owner, space, record):
              for row in record["activation_entries"] + record["shared_state_entries"]]
     manifest_bytes = (directory / "checkpoint.json").stat().st_size
     envelope = sum(row["envelope_bytes"] for row in files) + manifest_bytes
-    return owner.reserve_checkpoint_artifact(
+    reservation = owner.reserve_checkpoint_artifact(
         label="tamper", envelope_bytes=envelope,
         file_plan={"files": files, "manifest_bytes": manifest_bytes,
                    "temp_overlap_bytes": 0, "envelope_bytes": envelope},
         checkpoint_dir=directory)
+    owner.checkpoint_directory_created(reservation)
+    return reservation
 
 
 def test_commit_rejects_unplanned_receipt_rows(tmp_path):
@@ -556,7 +559,7 @@ def test_close_disposes_retained_attempt(tmp_path, monkeypatch):
     space = adjoint_space(tmp_path / "out")
     real_atomic = checkpoints.atomic_write_bytes
 
-    def fail_manifest(path, payload):
+    def fail_manifest(path, payload, **writer):
         raise RuntimeError("boom: simulated manifest failure")
 
     monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_manifest)

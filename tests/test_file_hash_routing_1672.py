@@ -29,10 +29,7 @@ def _load(name: str, path: str):
 from prismaquant import tessera_census_union as UNION
 TEACHER = _load("route_teacher_1672", "tools/full_kl_teacher_payload.py")
 
-from prismaquant.quality_prefill_pb_adapter import (  # noqa: E402
-    document_bytes,
-    document_file_sha256,
-)
+from prismaquant.digests import bytes_sha256hex, canonical_json_bytes  # noqa: E402
 
 
 def test_values_match_hashlib(tmp_path):
@@ -42,5 +39,6 @@ def test_values_match_hashlib(tmp_path):
     want = hashlib.sha256(blob).hexdigest()
     assert UNION._sha256_file(target) == want
     assert TEACHER.file_sha256(target) == want
-    assert document_file_sha256({"a": 1}) == hashlib.sha256(
-        document_bytes({"a": 1})).hexdigest()
+    encoded = canonical_json_bytes({'a': 1}, where='document') + b'\n'
+    assert encoded == b'{"a":1}\n'
+    assert bytes_sha256hex(encoded) == hashlib.sha256(encoded).hexdigest()

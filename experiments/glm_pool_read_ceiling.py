@@ -93,27 +93,6 @@ def loadavg() -> list[float]:
         return []
 
 
-def concurrent_claims(host: str = "dl380g10") -> int:
-    """How many other PrismaBuild actions hold this box right now.
-
-    Only the count is kept: raw queue records are broker control material and
-    are never logged.
-    """
-    d = "/mnt/shared/prismabuild-fleet/pb-queue/claimed"
-    n = 0
-    try:
-        for fn in os.listdir(d):
-            try:
-                with open(os.path.join(d, fn)) as fh:
-                    if json.load(fh).get("claimed_host") == host:
-                        n += 1
-            except (OSError, ValueError):
-                continue
-    except OSError:
-        return -1
-    return n
-
-
 def read_self_io() -> dict:
     out = {}
     try:
@@ -210,7 +189,6 @@ def run_arm(root: str, files: list[str], readers: int, block: int) -> dict:
     arc_before = read_arcstats()
     disk_before = read_diskstats()
     load_before = loadavg()
-    claims_before = concurrent_claims()
     t0 = time.time()
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(readers)]
@@ -224,7 +202,6 @@ def run_arm(root: str, files: list[str], readers: int, block: int) -> dict:
     arc_after = read_arcstats()
     io_after = read_self_io()
     load_after = loadavg()
-    claims_after = concurrent_claims()
 
     read_bytes = sum(totals)
     self_phys = io_after.get("read_bytes", 0) - io_before.get("read_bytes", 0)
@@ -251,8 +228,6 @@ def run_arm(root: str, files: list[str], readers: int, block: int) -> dict:
                           for k in ("rchar", "read_bytes") if k in io_after},
         "loadavg_before": load_before,
         "loadavg_after": load_after,
-        "concurrent_claims_before": claims_before,
-        "concurrent_claims_after": claims_after,
         "errors": errors,
         "started_unix": t0,
         "finished_unix": t0 + wall,
@@ -310,8 +285,6 @@ def main() -> int:
                   f"wall={out['wall_s']:.1f}s self_phys={out['self_physical_read_bytes']} "
                   f"self/log={out['self_physical_over_logical']:.3f} "
                   f"box_hdd/self={ratio_text} "
-                  f"claims={out['concurrent_claims_before']}->"
-                  f"{out['concurrent_claims_after']} "
                   f"cold={out['cold']}", flush=True)
     finally:
         sampler.halt()
@@ -339,7 +312,7 @@ def main() -> int:
               f"{a['logical_bytes']/1024**3:7.2f} {a['wall_s']:8.1f} "
               f"{a['mb_per_s']:8.1f} {a['self_physical_over_logical']:9.3f} "
               f"{ratio_text:>12} "
-              f"{a['concurrent_claims_before']:7d} {str(a['cold']):>5}")
+              f"{str(a['cold']):>5}")
 
     compact = dict(result)
     compact.pop("samples", None)

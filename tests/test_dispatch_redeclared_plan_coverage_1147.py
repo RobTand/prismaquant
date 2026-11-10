@@ -164,7 +164,7 @@ def test_dev_mode_dry_run_reads_a_re_declared_plan(
     # The row names the files on disk by their digests, which is what the
     # quantum's byte check (joint_cost_quantum.verify_quantum_identity)
     # compares them with.
-    payload = rows[0]["argv"]
+    payload = rows[0]["row"]["argv"]
     assert payload[payload.index("--plan-sha256") + 1] == _sha(plan_path)
     assert payload[payload.index("--prepared-sha256") + 1] == _sha(prepared_path)
 
@@ -185,6 +185,8 @@ def test_certified_mode_refuses_a_re_declared_plan(
         # quantum_argv names the record's digest in certified mode, as on
         # main, and leaves the file to the quantum's byte check; the coverage
         # gap is the one main's check reported before #1147.
-        assert (f"campaign inputs: plan at {plan_path} does not hash to its "
-                "sealed digest") in err
+        report, _ = json.JSONDecoder().raw_decode(err)
+        assert report['gap_count'] == 1
+        assert report['gaps'][0]['detail'] == (
+            f"campaign inputs: plan at {plan_path} does not hash to its sealed digest")
         assert "1 source read(s) of 1 row(s) are not declared" in err

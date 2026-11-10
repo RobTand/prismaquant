@@ -37,29 +37,6 @@ def test_full_gate_uses_effective_retry_artifact_once(tmp_path):
     assert report['budget']['evidence'][node]['runner'] == 'ubuntu-24.04-arm'
 
 
-def test_inventory_reads_aggregate_scope_peak_and_repeat_outcomes(tmp_path):
-    action_evidence = {}
-    reports = []
-    for repeat, outcome in enumerate(('failed', 'passed', 'failed')):
-        key = str(repeat) * 64
-        action_evidence[key] = {
-            'complete': True, 'timed_out': [], 'state': 'done',
-            'outcome': {'finished_host': 'worker'},
-            'resource_profile': {'scope': {'memory_peak_bytes': 321}}}
-        outcomes = {'file_durations': {'tests/test_sample.py': repeat + 1},
-                    'reports': [['tests/test_sample.py::test_cost', 'call', outcome]]}
-        path = tmp_path / ('repeat-' + str(repeat) + '.json')
-        path.write_text(json.dumps([{'action_key': key, 'returncode': 0,
-            'output': 'pbtest-outcomes: ' + json.dumps(outcomes), 'verdict': {}}]))
-        reports.append(path)
-    report = evidence.inventory(reports, action_evidence=action_evidence)
-    assert {action['memory_peak_bytes'] for action in report['actions']} == {321}
-    assert report['always_failing'] == []
-    assert report['changed_outcomes'] == {
-        'tests/test_sample.py::test_cost': {1: 'fail', 2: 'pass', 3: 'fail'}}
-    assert report['files'] == {'tests/test_sample.py': 3}
-
-
 def test_hosted_wall_percentiles_use_completed_successful_full_gates(tmp_path):
     from datetime import datetime, timedelta, timezone
     start = datetime(2026, 11, 1, tzinfo=timezone.utc)

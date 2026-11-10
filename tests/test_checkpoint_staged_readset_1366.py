@@ -143,44 +143,19 @@ def test_foreign_incoming_slice_refuses_in_both_modes(tmp_path, monkeypatch, dev
         quanta.check_checkpoint_incoming_readset(bound, manifest, _slice(setup))
 
 
-def test_claim_digest_and_pb_decoder_are_used(tmp_path, monkeypatch):
-    """Real bounded CAS read/SDK decoder, with only the claim identity doubled."""
-    import prismabuild.client as sdk
-    from prismaquant import staged_lease as lease
-    setup = _setup(tmp_path)
-    manifest = _manifest(setup)
-    # PB checks the declared mount even when only metadata is read here.
-    for row in manifest["entries"]:
-        row["path"] = "/mnt/shared/checkpoint-fixture/" + row["path"].lstrip("/")
-    wire = quanta.seal_manifest_bytes(manifest)
-    digest = hashlib.sha256(wire).hexdigest()
-    cas = tmp_path / "cas"
-    blob = cas / "blobs" / digest[:2] / digest
-    blob.parent.mkdir(parents=True)
-    blob.write_bytes(wire)
-    monkeypatch.setattr(lease, "client_sdk", lambda: sdk)
-    monkeypatch.setattr(lease, "resolve_sealed_readset", lambda: (str(cas), digest, len(wire)))
-    assert lease.load_sealed_manifest(digest) == manifest
-    with pytest.raises(lease.ReadsetUnbound, match="claim row names manifest"):
-        lease.load_sealed_manifest("0" * 64)
-    blob.write_bytes(wire[:-1] + bytes([wire[-1] ^ 1]))
-    with pytest.raises(lease.ReadsetUnbound, match="does not hash"):
-        lease.load_sealed_manifest(digest)
-
-
 @pytest.mark.parametrize("case", ["inactive", "no_map", "unbound", "wrong_phase", "foreign_probe"])
 def test_runtime_requires_authenticated_context(tmp_path, monkeypatch, case):
     from prismaquant import joint_cost_quantum as runtime, staged_lease, staged_tier_policy
     setup = _setup(tmp_path)
     manifest = _manifest(setup)
     bound = _bound(setup, manifest)
-    monkeypatch.setenv("PRISMABUILD_RESIDENCY_MAP", "context-double")
+    monkeypatch.setenv("PRISMAQUANT_STAGED_MANIFEST", "context-double")
     monkeypatch.setattr(staged_tier_policy, "active_policy", lambda: frozenset(("ram", "ssd")))
     monkeypatch.setattr(staged_lease, "load_sealed_manifest", lambda digest: manifest)
     if case == "inactive":
         monkeypatch.setattr(staged_tier_policy, "active_policy", lambda: None)
     elif case == "no_map":
-        monkeypatch.delenv("PRISMABUILD_RESIDENCY_MAP")
+        monkeypatch.delenv("PRISMAQUANT_STAGED_MANIFEST")
     elif case == "unbound":
         def unbound(digest):
             raise staged_lease.ReadsetUnbound("missing claimed row")

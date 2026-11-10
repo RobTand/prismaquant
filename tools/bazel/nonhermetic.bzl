@@ -64,10 +64,6 @@ NONHERMETIC = {
         tags = ["runner"],
         reason = "Its helper CLI qualifies the real checkout through fleet_acceptance_runner and record_snapshots, which require git; remote runfiles have no .git. Existing absent-PB-bundle skips remain. The amd64 runner covers it; arm64 action coverage is excluded.",
     ),
-    "//tests:test_fleet_acceptance_pins": struct(
-        tags = ["runner"],
-        reason = "It qualifies the real checkout through fleet_acceptance_pins.record_snapshots, which requires git; remote runfiles have no .git. Existing absent-PB-bundle skips remain. The amd64 runner covers it; arm64 action coverage is excluded.",
-    ),
     "//tests:test_fp8_batched_midpoint_parity_audit": struct(
         tags = ["gpu"],
         reason = "1 of its test functions (4 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
@@ -278,7 +274,7 @@ NONHERMETIC = {
     ),
     "//tests:test_stage_b_streamed_incoming_1143": struct(
         tags = ["hosted-arm64"],
-        reason = "With the reviewed PrismaBuild SDK installed, its staging tests construct ExactCotangentScratch on tmp_path; that real disk guard refuses arm64 tmpfs. Static audit; fresh runtime validation pending.",
+        reason = "Its staging tests construct ExactCotangentScratch on tmp_path; that real disk guard refuses arm64 tmpfs. Static audit; fresh runtime validation pending.",
     ),
     "//tests:test_stage_b_workspace_profile": struct(
         tags = ["gpu"],
@@ -330,7 +326,7 @@ NONHERMETIC = {
     ),
     "//tests:test_strict_reader_tier_enforcement": struct(
         tags = ["hosted-arm64"],
-        reason = "With the reviewed PrismaBuild SDK installed, the local_scratch=True checkpoint test constructs ExactCotangentScratch on tmp_path; its disk guard refuses arm64 tmpfs. Static audit; runtime validation pending.",
+        reason = "The local_scratch=True checkpoint test constructs ExactCotangentScratch on tmp_path; its disk guard refuses arm64 tmpfs. Static audit; runtime validation pending.",
     ),
     "//tests:test_tensor_digest_owner_recipes_2638": struct(
         tags = ["gpu"],

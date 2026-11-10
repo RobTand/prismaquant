@@ -1,6 +1,6 @@
 """Conditional byte/launch budgets, not measurements of a mixed decoder.
 
-Reuse the retained NCU intake. This is a CPU PrismaBuild action. No kernels,
+Reuse the retained NCU intake. Run this inside an admitted CPU job. No kernels,
 allocation, calibration capture, serving change, or speed-neutrality claim.
 """
 from __future__ import annotations

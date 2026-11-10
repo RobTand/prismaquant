@@ -1,22 +1,9 @@
-"""Submit the Tessera rate-band probe, one PrismaBuild action per input shard.
+"""Plan Tessera rate-band probe rows for native Flux.
 
-What this buys, and why it is a separate stage from the export: the
-completion axis is embedded, so ONE encode per Linear prices the whole band
-``[rung/arity, cap/arity]`` bpp instead of one encode per rate point. At rung
-4 that is four rate points from one Viterbi, at a quarter of the encodes.
-
-It is a *generator*, not a shipping path. Measured 2026-09-01 on a real GLM
-expert: truncation costs 1.03x-1.28x, but choosing a low rung to widen the band
-costs up to 2.15x at equal bpp. So the band is priced by truncation and the
-selected point is re-encoded natively.
-
-Moved from PrismaBuild's ``tools/fleet/dispatch_tessera_ladder.py`` on
-2026-09-28 (RobTand/prismabuild#1076), and rewired onto ``pbcampaign``. The
-probe source is copied, with every ``.py`` of the encoder, into a new Git
-workspace that ``pbrun`` seals into each action, so two dispatches with
-different probe bytes are different actions and never overwrite each other's
-staged copy. ``--dry-run`` prints the manifest rows and stages and submits
-nothing, so it cannot touch the source checkout.
+Source and output contracts are preserved independently of native execution
+facts. GPU/container admission remains unqualified in the CPU baseline.
+Existing pb-result.json scientific records keep their historical name/schema;
+only a native terminal success can admit them for downstream validation.
 """
 from __future__ import annotations
 
@@ -25,7 +12,6 @@ import json
 from pathlib import Path
 
 from tools.tessera_fleet import common
-CHECKOUT = Path("/mnt/shared/prismabuild-fleet/checkout")
 SOURCE = "/mnt/shared/models/GLM-5.3-Flash-BF16"
 PYTHON = "/home/rob/dq-runs/venvs/prismaquant-cu130/bin/python"
 ENVIRONMENT = {
@@ -51,7 +37,7 @@ def probe_row(workspace: Path, shard: int, *, python: str, source: str, rung: in
         workspace,
         [python, WRAPPER, "--shard", str(shard), "--source", source,
          "--rung", str(rung), "--calibrate-every", str(calibrate_every),
-         "--result", f"results/glm53-tessera-ladder/rung{rung}/shard-{shard:05d}.json"],
+         "--result", str(Path(workspace) / "results" / f"glm53-tessera-ladder/rung{rung}/shard-{shard:05d}.json")],
         demand=RESOURCE_DEMAND, env=ENVIRONMENT)
 
 
@@ -71,7 +57,7 @@ def main(argv=None) -> int:
     ap.add_argument("--workspace", type=Path,
                     help="new directory the sealed tree and the submission records "
                          "are written to; required unless --dry-run")
-    ap.add_argument("--checkout", type=Path, default=CHECKOUT,
+    ap.add_argument("--checkout", type=Path, required=True,
                     help="tree holding the tessera/ encoder sources")
     ap.add_argument("--source", default=SOURCE, help="source checkpoint every shard reads")
     ap.add_argument("--python", default=PYTHON, help="interpreter on the GPU boxes")
@@ -87,6 +73,8 @@ def main(argv=None) -> int:
     if args.dry_run:
         print(json.dumps(rows, indent=1))
         return 0
+    # Refuse unqualified GPU/environment requirements before staging a new tree.
+    common.campaign_rows.validate_row(rows[0])
     wrapper = args.wrapper or args.checkout / WRAPPER
     common.stage_workspace(
         workspace, common.encoder_workspace_files(args.checkout, wrapper, WRAPPER),

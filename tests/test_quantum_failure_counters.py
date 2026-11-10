@@ -150,6 +150,8 @@ def failing_head(tmp_path, monkeypatch):
     monkeypatch.setattr(quantum, "bind_joint_served_quantizer", lambda formats: {})
     monkeypatch.setattr(aura, "_preflight_run_prepared", lambda *a, **k: None)
     monkeypatch.setattr(residency, "residency_report", lambda: None)
+    # The staged manifest bind is another owner's seam; this test is about the counters of a head failure.
+    monkeypatch.setattr(residency, "bind_residency_manifest", lambda digest: None)
     sampler = _Sampler()
     monkeypatch.setattr(quantum, "GpuPowerSampler", lambda: sampler)
     monkeypatch.setenv(aura.ACTIVATION_SCALE_ENV, "0")

@@ -6,7 +6,7 @@ Reports wall per take (median of REPEATS) plus a cProfile of the drain.
 """
 import cProfile, io, os, pstats, statistics, sys, tempfile, time
 sys.path.insert(0, os.getcwd())
-os.environ.pop("PRISMABUILD_RESIDENCY_MAP", None)
+os.environ.pop("PRISMAQUANT_STAGED_MANIFEST", None)
 from prismaquant import io_engine
 from prismaquant.digests import bytes_sha256hex
 

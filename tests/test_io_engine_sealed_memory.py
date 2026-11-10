@@ -49,7 +49,7 @@ PER_GROUP = 8
 
 @pytest.fixture(autouse=True)
 def _no_residency_map(monkeypatch):
-    monkeypatch.delenv("PRISMABUILD_RESIDENCY_MAP", raising=False)
+    monkeypatch.delenv("PRISMAQUANT_STAGED_MANIFEST", raising=False)
 
 
 def test_freed_read_ahead_leaves_the_committed_reading(tmp_path):

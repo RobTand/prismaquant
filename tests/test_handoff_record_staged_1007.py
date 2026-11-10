@@ -1,4 +1,4 @@
-"""Band-serial record metadata is declared and read from existing PB material."""
+"""Band-serial record metadata is declared and read from immutable staged extents."""
 from __future__ import annotations
 
 import gzip
@@ -10,19 +10,18 @@ import pytest
 
 from prismaquant import joint_quantum_handoff as handoffs
 from prismaquant.staged_tier_policy import TierPolicyRefused
-from test_band_serial_dispatch import _campaign, _emit, _slice
-from test_streamed_metadata_staged_reads import _activate, _deny_pool_opens
-from test_strict_reader_tier_enforcement import _forget_state  # noqa: F401
+from test_band_serial_handoff_produced import band_campaign, producer_owner, emit_handoff, _adjoint_slice
+from test_streamed_metadata_staged_reads import _activate, _deny_pool_opens, _forget_state  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 
 
 @pytest.fixture
 def emitted(tmp_path, monkeypatch):
-    bound, _receipt = _campaign(tmp_path)
-    published = _emit(bound[3])
-    consumer = bound[2]
-    source = _slice(consumer)
+    producer, consumer, storage = band_campaign(tmp_path, executable=True)
+    pub = producer_owner(tmp_path, producer, storage, monkeypatch)
+    published, _plane = emit_handoff(producer, storage, pub)
+    source = _adjoint_slice(consumer)
     document = handoffs.load_quantum_handoff(
         published["path"], published["sha256"], record=consumer,
         adjoint_slice=source, kda_capture_kernel=None)
@@ -72,7 +71,8 @@ def test_record_material_failure_never_falls_back(emitted, tmp_path, monkeypatch
               skip={str(path)} if fault == "missing" else (),
               corrupt={str(path)} if fault == "digest" else ())
     _deny_pool_opens(monkeypatch, path.parent, names=(path.name,))
-    with pytest.raises((TierPolicyRefused, RuntimeError), match="material|digest|staged|bound"):
+    expected = 'object length differs from manifest' if fault == 'digest' else 'readset-not-staged'
+    with pytest.raises((TierPolicyRefused, RuntimeError), match=expected):
         handoffs.load_quantum_handoff(
             path, published["sha256"], record=consumer, adjoint_slice=source,
             kda_capture_kernel=None)

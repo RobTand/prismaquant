@@ -25,7 +25,7 @@ import string
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from prismaquant.joint_forward_resume import _read, chain_documents
+from prismaquant.joint_forward_resume import _read, chain_documents, chain_records
 from prismaquant.stage_a_head import drop_source_head_walk_reads
 
 
@@ -34,9 +34,9 @@ MANIFEST_NAME = 'adjoint-recovery-manifest.json.gz'
 #: Campaign fields a reviewed declaration supplies. ``original_manifest_sha256``
 #: binds the scientific read manifest the recovery manifest is derived from.
 CAMPAIGN_FIELDS = frozenset((
-    'artifact_budget_bytes', 'bound_cpus', 'bound_demand', 'campaign_bindings',
+    'artifact_budget_bytes', 'campaign_bindings',
     'campaign_name', 'campaign_scope', 'original_manifest_sha256', 'panel', 'records',
-    'reviewed_cpus', 'reviewed_demand', 'run', 'scope_refusal'))
+    'run', 'scope_refusal'))
 
 
 def render_launcher(campaign, *, label, source_head, manifest_sha256, capsule):
@@ -47,8 +47,10 @@ def render_launcher(campaign, *, label, source_head, manifest_sha256, capsule):
                          f'unexpected {sorted(set(campaign) - CAMPAIGN_FIELDS)}')
     if not re.fullmatch(r'r(1\d|[2-9]\d)', label):
         raise ValueError('launcher fields: label names a post-R9 attempt, for example r11')
+    if not re.fullmatch(r'[A-Za-z0-9_. -]{1,128}', campaign['campaign_name']):
+        raise ValueError('launcher fields: bounded campaign name required')
     literal = {name: repr(value) for name, value in campaign.items()
-               if name not in ('campaign_name', 'original_manifest_sha256')}
+               if name not in ('campaign_name', 'original_manifest_sha256', 'records')}
     fields = {**literal, 'campaign_name': str(campaign['campaign_name']),
               'label': label, 'LABEL': label.upper(),
               'source_head': repr(str(source_head)),
@@ -93,14 +95,14 @@ def recovery_manifest(original, capsule, bound):
     # A chained capsule's older segments are read at their own phases, and
     # every imported capsule is read at load, so each is a head input.
     chain = chain_documents(capsule)
-    for group in (group for segment in chain for group in segment['groups']):
-        for item in group['manifest']['entries']:
-            path = item['destination_path']
+    for records in chain_records(capsule).values():
+        for item in records:
+            path = item['path']
             match = re.fullmatch(r'boundary-(\d+)-(\d+)-at-(\d+)\.pt', Path(path).name)
             if match is None or match[2] != match[3]:
                 raise ValueError('non-boundary in recovery capsule')
             index = len(entries)
-            entries.append({'path': path, 'offset': 0, 'bytes': item['bytes'], 'sha256': item['sha256']})
+            entries.append({'path': path, 'offset': 0, 'bytes': item['file_bytes'], 'sha256': item['sha256']})
             boundaries.setdefault(int(match[2]), []).append((int(match[1]), index))
     capsule_indices = []
     for proof in [bound, *(segment['imported'] for segment in chain[:-1])]:
@@ -174,8 +176,8 @@ def main():
     original, dropped = load_original(args.original_manifest, campaign,
                                       {'path': args.plan, 'sha256': args.plan_sha256})
     manifest = recovery_manifest(original, capsule, bound)
-    from prismaquant.staged_lease import sdk_submodule
-    sdk_submodule('core').validate_data_manifest(manifest)
+    from prismaquant.data_manifest_contract import check_manifest_v2
+    check_manifest_v2(manifest)
     wire = gzip.compress((json.dumps(manifest, sort_keys=True, separators=(',', ':')) + '\n').encode(), mtime=0)
     digest = hashlib.sha256(wire).hexdigest()
     # Render before writing anything, so a field error leaves no package.
@@ -188,6 +190,8 @@ def main():
     for name in names:
         shutil.copyfile(prior / name, root / name)
     template = json.loads((prior / 'stagea-512-template-r7.json').read_text())
+    from prismaquant.stage_a_produced_output import validate_declaration
+    validate_declaration(template)
     template['template_id'] = template['template_id'].removesuffix('-r9') + '-' + label
     (root / 'stagea-512-template-r7.json').write_text(json.dumps(template, sort_keys=True, indent=2) + '\n')
     names.append('stagea-512-template-r7.json')

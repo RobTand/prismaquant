@@ -219,7 +219,7 @@ def test_a_rebuilt_prepared_that_does_not_match_its_binding_refuses(tmp_path, mo
 
 IMPORT_SAFE = ["audit_existing_t4.py", "audit_t4_render_paths.py", "pilot_existing_t4.py",
                "inspect_prepared_cache.py", "inspect_t4_binding.py", "build_t4_overlay_catalog.py",
-               "assemble_t4_overlay.py", "build_t4_logical_request.py", "build_t4_recovery_request.py",
+               "assemble_t4_overlay.py", "build_t4_logical_request.py",
                "rebind_t4_qualified_results.py", "check_t4_overlay_prepare.py"]
 
 
@@ -251,8 +251,7 @@ def test_the_campaign_scripts_do_nothing_at_import(name):
 PREVIOUS_CATALOG_SHA256 = "71238bdab85bdccabed921ce94b03459d5aba3607021b85007bf41f3e376fbc8"
 
 
-@pytest.mark.parametrize("name", ["build_t4_logical_request.py", "build_t4_recovery_request.py",
-                                  "assemble_t4_overlay.py"])
+@pytest.mark.parametrize("name", ["build_t4_logical_request.py", "assemble_t4_overlay.py"])
 def test_request_and_assembly_inputs_are_arguments(name):
     """No checkout, venv or catalog digest is baked in (WS-M finding b)."""
     source = (ROOT / "tools" / name).read_text()

@@ -4,10 +4,8 @@
    tail left ``checkpoints/boundary-045``; R11 would have failed with
    FileExistsError about ten GPU-minutes in. Stage A now refuses at startup,
    before any GPU work, when a checkpoint path it writes is occupied.
-2. ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` must stay strictly below every phase
-   grace the row declares, so a staging stall ends as the reader's staging
-   refusal rather than as PrismaBuild's no-progress kill. R10's spec set
-   900 s against a 900 s chain grace.
+2. Immutable staged reads check coverage immediately. Retired wait settings
+   do not couple dispatch admission to a progress grace.
 
 CPU-only.
 """
@@ -96,6 +94,9 @@ def test_an_empty_space_passes_the_check(tmp_path, monkeypatch):
 
 # ------------------------------------------- 2. staged-range wait vs grace
 
+from stage_a_spool_spec import declared_stage_a_argv  # noqa: E402
+
+
 def _spec(monkeypatch, tmp_path, env):
     spec = tmp_path / "spec.json"
     from stage_a_spool_spec import with_spool
@@ -118,11 +119,10 @@ def campaign(tmp_path):
 
 
 @pytest.mark.parametrize("wait", ["900", "901", "1800", "inf", "soon"])
-def test_a_wait_at_or_above_the_chunk_grace_refuses(tmp_path, monkeypatch, campaign, wait):
+def test_retired_wait_setting_does_not_control_native_staging(tmp_path, monkeypatch, campaign, wait):
     _spec(monkeypatch, tmp_path, {"PRISMAQUANT_STAGED_RANGE_WAIT_S": wait})
     manifest = _adjoint_manifest(tmp_path, campaign)
-    with pytest.raises(dispatch.DispatchRefused, match="PRISMAQUANT_STAGED_RANGE_WAIT_S"):
-        dispatch.stage_a_argv(manifest, campaign)
+    assert declared_stage_a_argv(dispatch.stage_a_argv, manifest, campaign)
 
 
 @pytest.mark.parametrize("env", [{}, {"PRISMAQUANT_STAGED_RANGE_WAIT_S": "600"},
@@ -130,22 +130,12 @@ def test_a_wait_at_or_above_the_chunk_grace_refuses(tmp_path, monkeypatch, campa
 def test_a_wait_below_every_grace_submits(tmp_path, monkeypatch, campaign, env):
     _spec(monkeypatch, tmp_path, env)
     manifest = _adjoint_manifest(tmp_path, campaign)
-    argv = dispatch.stage_a_argv(manifest, campaign)
-    assert "--progress-phase" in argv
+    argv = declared_stage_a_argv(dispatch.stage_a_argv, manifest, campaign)
+    assert argv["progress_phases"] == ["head=1800", "chain-000=900", "chain-001=900"]
 
 
-def test_the_wait_bound_reads_the_sealed_spec_with_the_reader_rules():
-    from prismaquant.residency_shard_reader import (
-        STAGED_RANGE_WAIT_S, staged_range_wait_from_env)
-    assert staged_range_wait_from_env({}) == STAGED_RANGE_WAIT_S
-    assert staged_range_wait_from_env({"PRISMAQUANT_STAGED_RANGE_WAIT_S": "12.5"}) == 12.5
-    with pytest.raises(ValueError):
-        staged_range_wait_from_env({"PRISMAQUANT_STAGED_RANGE_WAIT_S": "inf"})
-    progress = [("head", 1800), ("chain-000", 900)]
-    dispatch.require_staged_wait_below_grace({"env": {}}, progress)
-    with pytest.raises(dispatch.DispatchRefused, match="900"):
-        dispatch.require_staged_wait_below_grace(
-            {"env": {"PRISMAQUANT_STAGED_RANGE_WAIT_S": "900"}}, progress)
+def test_native_dispatch_has_no_wait_vs_grace_coupling():
+    assert not hasattr(dispatch, 'require_staged_wait_below_grace')
 
 
 def test_both_row_builders_check_the_wait_on_the_parse_they_seal():
@@ -160,8 +150,3 @@ def test_both_row_builders_check_the_wait_on_the_parse_they_seal():
         assert len(calls) == 1, name
         keywords = [kw.arg for kw in calls[0].keywords]
         assert "progress" in keywords and None not in keywords, name
-
-
-def test_the_default_wait_is_below_the_chunk_grace():
-    from prismaquant.residency_shard_reader import STAGED_RANGE_WAIT_S
-    assert STAGED_RANGE_WAIT_S < dispatch.CHUNK_PROGRESS_GRACE_S

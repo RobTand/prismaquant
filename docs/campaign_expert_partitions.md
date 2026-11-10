@@ -17,7 +17,7 @@ The shared campaign argv must contain `--rate-band r,r --max-rounds 1`.
 `--experts-per-row` is absent/zero by default. Dense groups keep their original
 rows. Routed rows gain deterministic `-pNNNN` suffixes and contain at most the
 specified number of experts, including every projection of each expert.
-PrismaBuild places, balances and retries the resulting independent rows.
+The execution system places, balances and retries the resulting independent rows.
 No worker is selected by this planner.
 
 Refused combinations: adaptive/unset bands, multiple rounds, stack sampling,
@@ -47,7 +47,7 @@ The legal rate grid is still the intersection over the *full* group's menus,
 not the potentially wider local chunk menu. The existing shape/family menu
 cache supplies metadata-only menus for the full roster. No parallel rendered
 weight cache or residency mechanism is added. Existing own-row demand and
-PrismaBuild data-manifest owners consume the actual priced subset; the same
+Data-manifest owners consume the actual priced subset; the same
 memory-fit guard applies before submission. Streaming proof requirements,
 phase plans, capture bindings and checkpoint/wire validation remain in force.
 
@@ -83,7 +83,7 @@ for both layouts. Inspect terminal/CAS receipts, exact wire bytes and all
 non-timing cost/anchor fields; missing chunks must refuse merge.
 
 GPU execution needs the coordinator's explicit approval in `PENDING-GPU.md`.
-Use PrismaBuild, priority -10, explicit timeouts, no host pin, bounded native
+Use an admitted Flux job, priority -10, explicit timeouts, no host pin, bounded native
 threads and the U4 window guard. A speed claim additionally needs before/after
 in-process profiles and Netdata series on both boxes; on GB10 compare power
 against the ~140 W envelope and work per joule, not GPU utilization.

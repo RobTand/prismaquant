@@ -158,12 +158,9 @@ def _stage_b_progress(tmp_path, monkeypatch, declared):
                 "render_file_upper_bound_bytes": 20, "candidate_count": 1}
                for index in range(5)]
     progress_file = tmp_path / "progress.json"
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(progress_file))
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "token")
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PHASES", json.dumps(declared))
     lines = []
     progress = QuantumProgress(frontier=ChunkFrontier(chunks=chunks, windows=windows),
-                               base_units=3, log=lines.append)
+                               base_units=3, log=lines.append, phases=declared)
     return progress, windows, lines, progress_file
 
 
@@ -177,7 +174,8 @@ def test_an_undeclared_chunk_is_logged_once_under_the_phase_that_commits(
         progress.priced(count)
         progress.window_done(window)
         progress.commit()
-    record = json.loads(progress_file.read_text())
+    assert not progress_file.exists()
+    record = json.loads(lines[-1].split(': ', 1)[1])
     # What commit() did: every window's units, under the last declared phase.
     assert record["phase"] == "render-00" and record["units_completed"] == 3 + 5
     about = {name: [line for line in lines if repr(name) in line]

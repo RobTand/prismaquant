@@ -25,7 +25,7 @@ import sys
 from types import SimpleNamespace
 from pathlib import Path
 
-from test_shape_runtime_prices import checker_sdk_fixture  # noqa: F401
+from test_shape_runtime_prices import checker_native_fixture  # noqa: F401
 
 import pytest
 

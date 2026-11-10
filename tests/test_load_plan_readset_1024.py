@@ -187,20 +187,23 @@ def test_quantum_cli_loads_its_plan_deferred(identity_files, monkeypatch):
 
 
 def test_head_slice_is_read_after_the_manifest_binds(tmp_path, monkeypatch):
-    """The first head read resolves through a bound residency map."""
+    """The first head read resolves through a bound staged manifest."""
     import prismaquant.gpu_guard as gpu_guard
     import prismaquant.joint_stage_b_head as head_mod
     from prismaquant import residency_map
     from prismaquant.joint_cost_quantum import run_layer_quantum
 
-    digest = "d" * 64
+    from staged_native_fixtures import bind, publish_inputs
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"head-slice-fixture")
+    binding = publish_inputs(tmp_path, [source])
+    digest = binding["read_contract_sha256"]
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *a, **k: None)
-    monkeypatch.setenv(residency_map.ENV_VAR, str(tmp_path / "residency-map.json"))
-    residency_map.reset_residency_resolver_for_tests()
+    bind(monkeypatch, binding)
     bound = []
 
     def read_slice(*_args, **_kwargs):
-        bound.append(residency_map.residency_resolver()._manifest_sha256)
+        bound.append(residency_map.residency_resolver().manifest.read_contract_sha256)
         raise _Stop()
 
     monkeypatch.setattr(head_mod, "read_quantum_head_slice", read_slice)

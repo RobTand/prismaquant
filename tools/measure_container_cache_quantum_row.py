@@ -486,7 +486,7 @@ def main(argv=None) -> int:
     # A retry lands on the same host workspace: a stale row-output from an
     # earlier attempt would read as another run's chain state and refuse.
     # Each attempt runs under its own nonce.
-    nonce = os.environ.get("PRISMABUILD_ACTION_NONCE", "local")
+    nonce = os.environ.get("FLUX_JOB_ID", "local")
     attempt_root = workspace / f"row-output-{nonce}"
     command = [sys.executable, "-m", "tools.measure_container_cache_quantum_row",
                "--cache-root", str(cache_root), "--workspace", str(workspace),
@@ -528,8 +528,7 @@ def main(argv=None) -> int:
         "host": socket.gethostname().split(".")[0],
         "runtime": runtime_versions(SCHEMA),
         "device": args.device,
-        "action_key": os.environ.get("PRISMABUILD_ACTION_KEY"),
-        "action_nonce": os.environ.get("PRISMABUILD_ACTION_NONCE"),
+        "job_id": os.environ.get("FLUX_JOB_ID"),
         "row_output": str(attempt_root),
         "cache_env": {name: os.environ.get(name) for name in (
             "HF_HOME", "TRITON_CACHE_DIR", "TORCHINDUCTOR_CACHE_DIR",

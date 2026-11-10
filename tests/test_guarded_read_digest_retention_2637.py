@@ -18,7 +18,7 @@ REVALIDATED_COMMIT = "914bf79807120fa60f433714e95cffd44b917d92"
 
 # Keep the #2540 snapshot immutable. A separately reviewed integration snapshot
 # admits main's surrounding refactors, not arbitrary changes to callers/owners.
-# All six retained source segments are unchanged. The new file-range/JSON
+# All six retained raw-hashlib calls are unchanged. The new file-range/JSON
 # recipes still own none of their acquisition or BLAKE2b result contracts.
 # Each identity is (Git blob, SHA-256); no historical Git objects are needed.
 MANIFEST_SOURCE_BLOBS = {
@@ -39,26 +39,26 @@ MANIFEST_SOURCE_BLOBS = {
         "98406374a7859e9a1b9e490671432372ad5dbe84a7a58c2b3c34377125af2037",
     ),
 }
-CURRENT_SOURCE_BLOBS = {
-    **MANIFEST_SOURCE_BLOBS,
-    # #2638/#3012: additive token recipe; existing owner profiles unchanged.
-    "prismaquant/tensor_digests.py": (
-        "0777758650869edc365cbf545280250e6fa175f2",
-        "8baeaf7541a23481b9d233a7c65ee5f679f4fcc248c004e83ad0ca16ea8ee50a",
-    ),
-    "prismaquant/perturbed_x_cache.py": (
-        "99ed093fdf903ecf0ca8e4023a8c71b252829bea",
-        "4daf929763ce5eefc5c3ed31c0bfaa2489e29b3cf7827b5ecf17fd82b9bfdfbf",
-    ),
-    "prismaquant/tessera_census_cache.py": (
-        "b8158910df6d22720611dd9b8588bf51777170c4",
-        "c67e32264f35f0f1b2ab953e00f4dab8dfb0753ccd6cebf04e613cc4346c90f1",
-    ),
-    "prismaquant/digests.py": (
-        "65c98d3bdeb16035ef4b104dc159e986e2279897",
-        "732c5e8e8774491f190eb866f6005ed3014d4fe16c1f2d837f22a39215e90f18",
-    ),
-}
+# Reviewed native-migration pins, not refreshed historical evidence:
+# perturbed_x_cache: native lifecycle migration in 02c35277f and filename owner
+# extraction in ab18816fd; retained guarded-read scopes remain checked below.
+# afd626d6d adds staged object offsets in the two read scopes, preserving their
+# raw SHA-256 calls and digest comparisons against the logical entry bytes.
+# tessera_census_cache: native result selection replaces the PB service reader.
+# digests: bounded chunks_sha256hex owner supports the native byte writer.
+# tensor_digests: the additive retained token owner route from 58a2db300.
+# G3 re-review against main f6c99e8ed: the six SCOPES/IDS and their raw
+# hashlib calls are identical; no retained site was deleted or archived.
+# Reproducer and per-site evidence: flux-migration/pq-tessera/evidence/p4-gfix/.
+# Future changed pins require a per-file --reason and print the source diff.
+CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('27f4faf97025b1f93639bccbc1c3418457b45274',
+                                      '93c787b84bace425b8e9f966b5ce894cd5491a4a09326966f50f448d72322e82'),
+ 'prismaquant/tessera_census_cache.py': ('b8158910df6d22720611dd9b8588bf51777170c4',
+                                         'c67e32264f35f0f1b2ab953e00f4dab8dfb0753ccd6cebf04e613cc4346c90f1'),
+ 'prismaquant/digests.py': ('1511a8142cca4b1fb9067bb5cbbcf92098f95f69',
+                            'e8ab9ab2d8afd9fcbc3bc6fd57401247405bd17ec850fefb71e4694edb2dbb99'),
+ 'prismaquant/tensor_digests.py': ('0777758650869edc365cbf545280250e6fa175f2',
+                                   '8baeaf7541a23481b9d233a7c65ee5f679f4fcc248c004e83ad0ca16ea8ee50a')}
 
 # The original producer test is archived, not runnable current coverage. Keep its
 # historical evidence string below and check the active calibration-hash oracle.
@@ -322,3 +322,4 @@ def test_retention_pin_rejects_unbound_evidence(field, value):
     row["retention_evidence"][field] = value
     with pytest.raises(AssertionError):
         _assert_retention(row)
+

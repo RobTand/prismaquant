@@ -34,7 +34,7 @@ def _release_process_state_this_file_installs():
     A test that calls ``main`` in-process does not, so the policy it turned
     on stayed on for every file pytest ran afterwards in the same process,
     and every bulk read there refused with no residency map to serve from.
-    Two files were seen failing behind it, in the order pbtest happened to
+    Two files were seen failing behind it, in the order the runner happened to
     group them.
 
     The ``tools/`` path is restored by monkeypatch. A dispatcher already
@@ -443,6 +443,11 @@ def test_stage_a_cli_threads_artifact_flag(tmp_path, monkeypatch):
     assert captured["artifact_budget_bytes"] is None
 
 
+def _declared(builder, manifest, campaign, **kwargs):
+    from stage_a_spool_spec import declared_stage_a_argv
+    return declared_stage_a_argv(builder, manifest, campaign, **kwargs)
+
+
 def _dispatcher_argv_fixture(tmp_path, monkeypatch):
     """Minimal valid manifest + campaign for stage_a_argv budget tests."""
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "tools"))
@@ -495,17 +500,17 @@ def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
 
     manifest, campaign = _dispatcher_argv_fixture(tmp_path, monkeypatch)
 
-    plain = stage_a_argv(manifest, campaign)
-    assert "--artifact-budget-bytes" not in plain
+    plain = _declared(stage_a_argv, manifest, campaign)
+    assert "--artifact-budget-bytes" not in plain["argv"]
 
-    threaded = stage_a_argv(manifest, campaign,
+    threaded = _declared(stage_a_argv, manifest, campaign,
                             artifact_budget_bytes=RUN_640_GIB)
-    assert "--artifact-budget-bytes" in threaded
-    assert str(RUN_640_GIB) in threaded
+    assert "--artifact-budget-bytes" in threaded["argv"]
+    assert str(RUN_640_GIB) in threaded["argv"]
 
     for bad in (True, 0, -5, "8 GiB"):
         with pytest.raises(DispatchRefused):
-            stage_a_argv(manifest, campaign, artifact_budget_bytes=bad)
+            _declared(stage_a_argv, manifest, campaign, artifact_budget_bytes=bad)
 
 
 def test_dispatcher_refuses_non_integer_numerics(tmp_path, monkeypatch):
@@ -521,11 +526,11 @@ def test_dispatcher_refuses_non_integer_numerics(tmp_path, monkeypatch):
 
     for bad in (687194767360.9, 640.0, Decimal("640"), "640.9", "0x10"):
         with pytest.raises(DispatchRefused):
-            stage_a_argv(manifest, campaign, artifact_budget_bytes=bad)
+            _declared(stage_a_argv, manifest, campaign, artifact_budget_bytes=bad)
 
-    threaded = stage_a_argv(manifest, campaign,
+    threaded = _declared(stage_a_argv, manifest, campaign,
                             artifact_budget_bytes=f" {RUN_640_GIB} ")
-    assert threaded[threaded.index("--artifact-budget-bytes") + 1] == str(
+    assert threaded["argv"][threaded["argv"].index("--artifact-budget-bytes") + 1] == str(
         RUN_640_GIB)
 
 
@@ -555,7 +560,7 @@ def test_this_file_leaves_no_process_global_state_behind(
     this runs, the two ``joint_cost_stage_a.main`` calls above have already
     activated the staged-tier policy process-wide. Before the teardown
     fixture at the top of this file, this assertion failed here instead of
-    failing -- as it did on main -- in whichever unrelated file pbtest
+    failing -- as it did on main -- in whichever unrelated file the runner
     happened to group next in the same process.
 
     ``sys.path`` is covered by ``monkeypatch.syspath_prepend`` at the three

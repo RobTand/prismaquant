@@ -31,7 +31,7 @@ no export to the pool behind them, and the roll stages no next layer
 
 Subcommands:
 
-* ``manifest`` (host, before submission) writes the PrismaBuild data
+* ``manifest`` (host, before submission) writes the immutable input data
   manifest the action declares: the head tensors and layer ``--layer``'s
   tensors as byte ranges of the source shards, the calibration rows, and the
   borrowed entries in the order the roll reads them.
@@ -193,10 +193,7 @@ def cmd_spec(args) -> int:
     finally:
         sys.path.pop(0)
     spec = json.loads(Path(args.base_spec).read_text())
-    spool = spec["env"].get("PRISMABUILD_PRODUCED_SPOOL_ROOT")
-    spec["env"] = {key: value for key, value in spec["env"].items()
-                   if not key.startswith("PRISMABUILD_PRODUCED_SPOOL_")}
-    mounts = [m for m in spec["container"]["mounts"] if m["source"] != spool]
+    mounts = list(spec["container"]["mounts"])
     mounts.append({"source": args.scratch, "target": args.scratch, "readonly": False})
     if args.py_spy:
         mounts.append({"source": args.py_spy, "target": "/opt/bench/py-spy",

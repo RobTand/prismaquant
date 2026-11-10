@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+import readset_oracles
+
 from prismaquant import joint_quantum_row as quantum_row
 from prismaquant import joint_layer_quanta as jl
 from prismaquant.layer_streaming import streaming_source_plan
@@ -196,8 +198,6 @@ def _cli_fixture(tmp_path):
 
 
 def test_cli_completes_in_new_generation_preserving_prior_tiling(tmp_path):
-    from fleet_sdk import require_prismabuild_sdk
-    require_prismabuild_sdk()
     import regenerate_joint_quanta as regen
     campaign, receipt_path, spans = _cli_fixture(tmp_path)
     original = tmp_path / "original-records"
@@ -238,15 +238,9 @@ def test_cli_completes_in_new_generation_preserving_prior_tiling(tmp_path):
         assert record["executable_readset"]["head_source"] == {
             "schema": jl.HEAD_SOURCE_SCHEMA, "layers_prefix": PREFIX,
             "tensors": HEAD_TENSORS}
-        # Validate the actual completed v2 document through PB, with portable
-        # fixture paths re-rooted under its declared mount.
-        import prismabuild.core as core
-        import prismabuild.storage_tiers as tiers
-        checked = copy.deepcopy(manifest)
-        for entry in checked["entries"]:
-            entry["path"] = "/mnt/shared/fixture" + entry["path"]
-        normalized = core.validate_data_manifest(checked)
-        assert len(tiers.manifest_phase_ranges(normalized)) == len(manifest["read_plan"]["phases"])
+        # Validate the actual completed v2 document with the independent plan oracle.
+        readset_oracles.validate_plan(manifest)
+        assert len(readset_oracles.phase_ranges(manifest)) == len(manifest["read_plan"]["phases"])
     # First-writer replay is idempotent; it never edits either generation.
     assert regen.main(args) == 0
 

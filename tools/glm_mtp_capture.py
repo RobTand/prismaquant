@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GLM MTP layer calibration capture, in three PrismaBuild actions (PQ #1290, #1319).
+"""GLM MTP layer calibration capture, in three admitted jobs (PQ #1290, #1319).
 
 ``--phase final-hidden`` reads the last backbone layer's input for every
 calibration sequence (Stage A's boundary entries, through a hash-bound

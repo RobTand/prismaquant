@@ -15,7 +15,6 @@ from prismaquant import glm_capture_compatibility as compatibility
 from prismaquant.joint_aura import source_execution_identity
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 from prismaquant.model_profiles.default import DefaultProfile
-from fleet_sdk import installed_client_sdk
 
 EVIDENCE = Path(__file__).resolve().parents[1] / 'experiments/measurements/glm-derivative-contract-20260908'
 DRIVER = Path(__file__).resolve().parents[1] / 'tools/build_glm_derivative_image.py'
@@ -204,8 +203,8 @@ def test_real_image_build_preserves_config_layers_and_source():
     assert len(build['changed_payload_files']) == 1
 
 
-def test_real_pb_receipt_binds_canonical_body_payload_and_source(installed_client_sdk):
-    # The receipt's shape and digests are checked by PB's client SDK (PB #1254).
+def test_recorded_receipt_binds_canonical_body_payload_and_source():
+    # The receipt's shape and digests are checked offline, from the receipt alone.
     audit = json.loads((EVIDENCE/'image-build-audit.json').read_text())
     output = (EVIDENCE/'image-build-output.log').read_bytes()
     compatibility._verify_cas_receipt(audit['receipt'], audit['source_snapshot'], output)
@@ -217,6 +216,22 @@ def test_real_pb_receipt_binds_canonical_body_payload_and_source(installed_clien
     other['input']['sha256'] = '0'*64
     with pytest.raises(ValueError, match='source snapshot input'):
         compatibility._verify_cas_receipt(audit['receipt'], other, output)
+
+
+def test_recorded_receipt_refusals_are_decided_in_order():
+    from prismaquant import recorded_cas_receipt as receipt
+    audit = json.loads((EVIDENCE/'image-build-audit.json').read_text())['receipt']
+    assert receipt.cas_receipt_self_check(audit) is None
+    shape = {key: value for key, value in audit.items() if key != 'schema'}
+    assert receipt.cas_receipt_self_check(shape) == 'cas-receipt-shape'
+    assert receipt.cas_receipt_self_check([]) == 'cas-receipt-shape'
+    body = copy.deepcopy(audit)
+    body['action_manifest_sha256'] = '0'*64
+    assert receipt.cas_receipt_self_check(body) == 'cas-receipt-digest'
+    producer = copy.deepcopy(audit)
+    producer['producer']['action_key'] = '0'*64
+    producer['receipt_sha256'] = receipt._receipt_digest({k: v for k, v in producer.items() if k != 'receipt_sha256'})
+    assert receipt.cas_receipt_self_check(producer) == 'worker-attestation-digest'
 
 
 def test_reviewed_producer_completion_is_python_repr_not_json():

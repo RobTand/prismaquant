@@ -7,13 +7,11 @@ import json
 from pathlib import Path
 import tarfile
 
-from tools.resolve_prismabuild_dev_pin import PIN_NAME, PIN_SOURCE, resolve_literal_pin
 from tools.resolve_tessera_dev_pin import resolve_tessera_dev_pin
 
-PACKAGES = ('prismabuild', 'tessera-quant', 'pytest', 'pytest-timeout',
+PACKAGES = ('tessera-quant', 'pytest', 'pytest-timeout',
             'pytest-xdist', 'execnet', 'pluggy', 'packaging', 'iniconfig', 'pygments')
-PINS = {'prismabuild': resolve_literal_pin(PIN_SOURCE, PIN_NAME),
-        'tessera-quant': resolve_tessera_dev_pin()}
+PINS = {'tessera-quant': resolve_tessera_dev_pin()}
 
 def main():
     p=argparse.ArgumentParser()

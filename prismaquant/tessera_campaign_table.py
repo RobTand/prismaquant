@@ -3018,13 +3018,13 @@ def require_campaign_receipts(workspace: Path, expected: int) -> tuple[str, ...]
     if len(rows) != expected:
         raise MergeRefused(
             f"{path} reports {len(rows)} rows and the plan has {expected}")
-    # ``pbwait.verdict`` is the fleet's own reading of the table: 0 when every
+    # The launcher's verdict is its own reading of the table: 0 when every
     # row's work is done, and a memoized ``cache_hit`` counts as done there.
     # It is the gate, because a re-submitted row that was already priced
     # reports no launcher status of its own and renders ``rc`` as ``-``.
     if receipts.get("returncode") not in {0, "0"}:
         raise MergeRefused(
-            f"{path} records pbcampaign exit {receipts.get('returncode')!r}; "
+            f"{path} records campaign exit {receipts.get('returncode')!r}; "
             "not every row is done")
     failed = [row for row in rows
               if row.get("rc") not in {"0", 0, "-", ""}]

@@ -1,4 +1,5 @@
 """An explicit recovery authority, never reuse of an unfinished generation."""
+from produced_native_fixtures import bound_file as _bound
 from prismaquant import aura_provenance
 import pytest
 import copy
@@ -52,7 +53,9 @@ def identity_document():
            'temperature': 1.0, 'token_scope': 'all',
            'execution_partition': {'partition_count': 5}}
     current = {**old, 'producer_source_sha256': 'd' * 64}
-    doc = {'schema': 'prismaquant.joint_forward_recovery.v1',
+    doc = {'schema': 'prismaquant.joint_forward_recovery.v2',
+        'selection': {'job_id': '123', 'record_dir': '/fixture/record'},
+        'checkpoint_exit': None, 'groups': [],
         'original_bind_identity': old, 'campaign_identity': {'plan': 'e' * 64},
         'implementation_compatibility': {'original': 'a' * 64, 'recovery': 'd' * 64,
                                         'scope': 'forward-identical-memory-only'},
@@ -74,25 +77,11 @@ def test_changed_scientific_or_implementation_identity_refuses(field, value):
         validate_forward_state(doc, bind_identity=current, campaign_identity=doc['campaign_identity'])
 
 
-def test_live_or_uncontained_owner_refuses():
-    from prismaquant.joint_forward_resume import require_contained, ForwardRecoveryRefused
-    queue = SimpleNamespace(item_path=lambda *args: 'claim')
-    instance = {'owner_action_key': 'a' * 64, 'owner_attempt': {'nonce': 'n', 'scope_id': 's'}}
-    client = SimpleNamespace(read_claimed_record=lambda queue, key: {'live': True})
-    sdk = {'client': client, 'reader_lease': SimpleNamespace(
-        containment_certificate_ok=lambda *a: (False, 'scope-not-empty-retain'))}
-    with pytest.raises(ForwardRecoveryRefused, match='still claimed'):
-        require_contained(queue, instance, sdk)
-    client.read_claimed_record = lambda queue, key: None
-    with pytest.raises(ForwardRecoveryRefused, match='not contained'):
-        require_contained(queue, instance, sdk)
-
-
 def test_incomplete_boundary_and_duplicate_coordinates_refuse():
     from prismaquant.joint_forward_resume import _records, ForwardRecoveryRefused
     doc, _ = identity_document()
     doc.update(entry_shape=[1, 4, 8], entry_dtype='torch.float32')
-    entries = [{'destination_path': f'/old/entries/boundary-{i}-{b}-at-{b}.pt',
+    entries = [{'path': f'/old/entries/boundary-{i}-{b}-at-{b}.pt',
                 'sha256': 'f' * 64, 'bytes': 1024}
                for b in range(2) for i in range(5)]
     assert len(_records(doc, entries)['1']) == 5
@@ -105,30 +94,12 @@ def test_hyperconnection_four_dimensional_boundary_geometry():
     from prismaquant.joint_forward_resume import _records
     doc, _ = identity_document()
     doc.update(entry_shape=[1, 512, 4, 4096], entry_dtype='torch.bfloat16')
-    entries = [{'destination_path': f'/old/entries/boundary-{i}-{b}-at-{b}.pt',
+    entries = [{'path': f'/old/entries/boundary-{i}-{b}-at-{b}.pt',
                 'sha256': 'f' * 64, 'bytes': 16779369}
                for b in range(2) for i in range(5)]
     rows = _records(doc, entries)
     assert rows['1'][0]['shape'] == [1, 512, 4, 4096]
     assert rows['1'][0]['tensor_bytes'] == 16777216
-
-
-def test_export_action_must_seal_the_exact_manifest_input():
-    from prismaquant.joint_forward_resume import _checked_group, ForwardRecoveryRefused
-    import hashlib
-    instance = {'owner_action_key': 'a' * 64}
-    manifest = {'batch_id': 'b', 'owner': instance['owner_action_key'],
-                'instance': instance, 'template': {}}
-    raw = json.dumps(manifest)
-    sha = hashlib.sha256(raw.encode()).hexdigest()
-    action = {'action_key': 'c'*64, 'params': {'produced_spool': {
-        'owner': instance['owner_action_key'], 'batch_id': 'b', 'manifest_sha256': sha}},
-        'inputs': [{'id': 'produced-spool-manifest', 'sha256': 'WRONG'}]}
-    group = {'manifest': manifest, 'manifest_raw': raw, 'receipt': {}, 'record': {
-        'export_key': 'c'*64, 'manifest_sha256': sha, 'batch_id': 'b', 'action': action}}
-    sdk = {'core': SimpleNamespace(validate_action=lambda value: value)}
-    with pytest.raises(ForwardRecoveryRefused, match='does not seal'):
-        _checked_group(group, queue=None, instance=instance, template={}, sdk=sdk)
 
 
 def test_recovered_tail_and_reverse_checkpoints_equal_uninterrupted(tmp_path, monkeypatch):
@@ -138,7 +109,14 @@ def test_recovered_tail_and_reverse_checkpoints_equal_uninterrupted(tmp_path, mo
     from prismaquant.joint_adjoint_checkpoints import exact_entry_record, load_adjoint_checkpoint, adjoint_space
     from test_joint_cost_quantum_runtime import _execution, _stage_a
     from test_streamed_cost_checkpoints import _model_identity
+    from produced_native_fixtures import selected_publications, recovery_publication
     import torch
+    identities = []
+    bind = StreamedBoundaryArtifacts.bind
+    def recorded(self, identity, **kw):
+        identities.append(copy.deepcopy(identity))
+        return bind(self, identity, **kw)
+    monkeypatch.setattr(StreamedBoundaryArtifacts, 'bind', recorded)
     def capture(path, bound=None):
         runner, _ = _stage_a(path, monkeypatch)
         runner.context.settle_prefetched_layers = lambda *a, **kw: None
@@ -160,32 +138,20 @@ def test_recovered_tail_and_reverse_checkpoints_equal_uninterrupted(tmp_path, mo
         patch.setattr(StreamedBoundaryArtifacts, 'write', interrupted)
         with pytest.raises(InterruptedError):
             capture(tmp_path / 'interrupted')
-    entries = [{'destination_path': r.path, 'sha256': r.sha256, 'bytes': r.file_bytes}
-               for r in retained.values()]
     first = next(iter(retained.values()))
-    capsule = {'schema': recovery_mod.SCHEMA, 'frontier': 1, 'n_batches': len(draw()),
-        'session': json.loads(first.metadata_json)['identity']['session'],
-        'entry_shape': list(first.shape), 'entry_dtype': first.dtype,
-        'instance': {'owner_action_key': 'a'*64, 'owner_attempt': {'nonce': 'n', 'scope_id': 's'}},
-        'groups': [{'manifest': {'entries': entries}}]}
+    specification = {'original_bind_identity': identities[-1],
+        'campaign_identity': {'unit_roster_sha256': 'a'*64, 'plan_sha256': 'b'*64,
+            'prepared_sha256': 'c'*64, 'read_manifest_sha256': 'd'*64,
+            'campaign_scope': {'fixture': True}},
+        'implementation_compatibility': {'original': 'e'*64, 'recovery': 'e'*64,
+            'scope': 'forward-identical-memory-only'},
+        'n_batches': len(draw()), 'entry_shape': list(first.shape), 'entry_dtype': first.dtype}
+    selection, _pub, _result = recovery_publication(tmp_path / 'publication', retained,
+        specification, selected_publications(monkeypatch))
     capsule_path = tmp_path / 'fixture-capsule.json'
-    capsule_path.write_text(json.dumps(capsule))
-    import hashlib
-    binding = {'schema': recovery_mod.SCHEMA, 'frontier': 1,
-        'original_session': capsule['session'], 'original_owner': 'a'*64,
-        'original_attempt': capsule['instance']['owner_attempt'], 'capsule': {
-            'path': str(capsule_path), 'sha256': hashlib.sha256(capsule_path.read_bytes()).hexdigest()}}
-    recovery = recovery_mod.ForwardRecovery(1, len(draw()),
-        {str(b): [exact_entry_record(retained[b, i]) for i in range(len(draw()))]
-         for b in range(2)}, binding)
-    real_load = recovery_mod.load_forward_recovery
-    def fixture_authority(bound, **kwargs):
-        if bound is None:
-            return real_load(bound, **kwargs)
-        recovery.install(kwargs['storage'])
-        return recovery
-    monkeypatch.setattr(recovery_mod, 'load_forward_recovery', fixture_authority)
-    resumed = capture(tmp_path / 'resumed', {'fixture': 'authority-tested-separately'})
+    recovery_mod.build_forward_recovery(selection=selection, output=capsule_path,
+        specification=specification, frontier=1)
+    resumed = capture(tmp_path / 'resumed', _bound(capsule_path))
     baseline = capture(tmp_path / 'baseline')
     assert resumed['telemetry']['chain_backwards'] == baseline['telemetry']['chain_backwards']
     for new, old in zip(resumed['checkpoints'], baseline['checkpoints']):
@@ -221,10 +187,12 @@ def test_recovered_tail_and_reverse_checkpoints_equal_uninterrupted(tmp_path, mo
 
 
 @pytest.mark.parametrize('frontier', [1, 2])
-def test_recovery_manifest_only_stages_boundaries_in_consuming_phases(tmp_path, frontier):
+def test_recovery_manifest_only_stages_boundaries_in_consuming_phases(tmp_path, monkeypatch, frontier):
     from tools.build_stagea_forward_recovery_package import recovery_manifest
-    path = tmp_path / 'capsule.json'
-    path.write_text('{}')
+    from pathlib import Path
+    prior, top, _ = _chained_pair(tmp_path, monkeypatch)
+    capsule = prior if frontier == 1 else top
+    path = tmp_path / ('prior.json' if frontier == 1 else 'top.json')
     names = ['head', 'forward-000', 'forward-001', 'chain-001', 'chain-000']
     original = {'entries': [{'path': '/input/meta', 'offset': 0, 'bytes': 1, 'sha256': None},
                            {'path': '/input/layer0', 'offset': 0, 'bytes': 3, 'sha256': None},
@@ -232,10 +200,7 @@ def test_recovery_manifest_only_stages_boundaries_in_consuming_phases(tmp_path, 
                 'annotations': {}, 'read_plan': {'phases': [
                     {'name': n, 'entry_indices': [i], 'bytes': 0, 'cumulative_bytes': 0}
                     for n, i in zip(names, [0, 1, 2, 2, 1])]}}
-    capsule = {'frontier': frontier, 'n_batches': 2, 'groups': [{'manifest': {'entries': [
-        {'destination_path': f'/input/old/entries/boundary-{i}-{b}-at-{b}.pt',
-         'bytes': 7, 'sha256': 'a'*64} for b in range(frontier+1) for i in range(2)]}}]}
-    result = recovery_manifest(original, capsule, {'path': str(path), 'sha256': 'b'*64})
+    result = recovery_manifest(original, capsule, _bound(path))
     assert [p['name'] for p in result['read_plan']['phases']] == [
         'head', 'forward-001', 'chain-001', 'chain-000']
     for phase in result['read_plan']['phases']:
@@ -243,79 +208,12 @@ def test_recovery_manifest_only_stages_boundaries_in_consuming_phases(tmp_path, 
         expected = (frontier if phase['name'].startswith('forward') else
                     int(phase['name'].split('-')[1]) if phase['name'].startswith('chain') else None)
         boundary_paths = [p for p in paths if 'boundary-' in p]
-        assert len(boundary_paths) == (0 if expected is None else 2)
+        assert len(boundary_paths) == (0 if expected is None else 5)
         assert all(f'-{expected}-at-{expected}.pt' in p for p in boundary_paths)
 
 
 # --- Chained recovery: a resumed run that is itself contained mid-forward. ---
 
-def _chain_sdk():
-    """PB SDK seams the loader reads, answering from files the fixture wrote."""
-    from pathlib import Path
-    ns = SimpleNamespace
-    return {
-        'pool': ns(PoolQueue=lambda root: ns(root=Path(root),
-                                             item_path=lambda state, key: Path(root) / state / key)),
-        'reader_lease': ns(containment_certificate_ok=lambda queue, cert: (True, 'fixture')),
-        'produced_output': ns(
-            validate_instance=lambda value: value, validate_template=lambda value: value,
-            instance_dir=lambda root, instance: Path(root) / 'instances' / instance['owner_action_key'],
-            batch_record=lambda queue, instance, template, *, batch_id: {'entries': json.loads(
-                (Path(queue.root) / 'instances' / instance['owner_action_key']
-                 / 'commitments.json').read_text())['batches'][batch_id]['descriptors']}),
-        'produced_spool': ns(check_export_receipt=lambda receipt, manifest, record: None),
-        'core': ns(validate_action=lambda value: value),
-        'client': ns(read_claimed_record=lambda queue, key: None)}
-
-
-def _owner_spool(root, owner_key, refs):
-    """File one contained owner's boundary groups the way PB exports them."""
-    import hashlib
-    instance = {'owner_action_key': owner_key,
-                'owner_attempt': {'nonce': owner_key[:8], 'scope_id': 'fixture.slice'}}
-    template = {'template_id': 'fixture-boundary-entries'}
-    spool = root / 'spool' / owner_key[:12]
-    batches = {}
-    for boundary in sorted({b for b, _ in refs}):
-        batch_id = f'stagea-boundary-b{boundary}-g0-fixture'
-        entries = [{'artifact_class': 'payload', 'destination_path': refs[boundary, i].path,
-                    'sha256': refs[boundary, i].sha256, 'bytes': refs[boundary, i].file_bytes}
-                   for i in sorted(i for b, i in refs if b == boundary)]
-        raw = json.dumps({'batch_id': batch_id, 'owner': owner_key, 'instance': instance,
-                          'template': template, 'entries': entries})
-        sha = hashlib.sha256(raw.encode()).hexdigest()
-        export = hashlib.sha256((owner_key + batch_id).encode()).hexdigest()
-        group = spool / batch_id
-        group.mkdir(parents=True)
-        (group / 'manifest.json').write_text(raw)
-        (group / 'receipt.json').write_text('{}')
-        (group / 'export.json').write_text(json.dumps({
-            'export_key': export, 'manifest_sha256': sha, 'batch_id': batch_id, 'action': {
-                'action_key': export, 'inputs': [{'id': 'produced-spool-manifest', 'sha256': sha}],
-                'params': {'produced_spool': {'owner': owner_key, 'batch_id': batch_id,
-                                              'manifest_sha256': sha}}}}))
-        batches[batch_id] = {'descriptors': [
-            {'path': e['destination_path'], 'artifact_class': 'payload',
-             'sha256': e['sha256'], 'bytes': e['bytes']} for e in entries]}
-    directory = root / 'queue' / 'instances' / owner_key
-    directory.mkdir(parents=True)
-    (directory / 'instance.json').write_text(json.dumps(instance))
-    (directory / 'commitments.json').write_text(json.dumps({'batches': batches}))
-    return spool, instance, template
-
-
-def _spool_groups(spool):
-    groups = []
-    for path in sorted(spool.glob('*/manifest.json')):
-        groups.append({'manifest': json.loads(path.read_text()), 'manifest_raw': path.read_text(),
-                       'record': json.loads((path.parent / 'export.json').read_text()),
-                       'receipt': json.loads((path.parent / 'receipt.json').read_text())})
-    return groups
-
-
-def _bound(path):
-    import hashlib
-    return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
 def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
@@ -329,7 +227,8 @@ def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
     from test_streamed_cost_checkpoints import _model_identity
     from pathlib import Path
     import torch
-    monkeypatch.setattr(recovery_mod, '_sdk', _chain_sdk)
+    from produced_native_fixtures import selected_publications, recovery_publication
+    register = selected_publications(monkeypatch)
     campaign = {'plan_sha256': 'b' * 64, 'prepared_sha256': 'c' * 64,
                 'read_manifest_sha256': 'd' * 64, 'unit_roster_sha256': 'a' * 64,
                 'campaign_scope': None}
@@ -369,45 +268,40 @@ def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
     # R9: contained after boundary 1; its prefix is recovered by an ordinary capsule.
     _, first = capture(tmp_path / 'r9', '1' * 64, stop_after=1)
     r9 = identities[-1]
-    spool, instance, template = _owner_spool(tmp_path, 'e' * 64, first)
     ref = first[0, 0]
     capsule = tmp_path / 'r9-to-r10.json'
-    recovery_mod.build_forward_recovery(specification={
-        'schema': recovery_mod.SCHEMA, 'queue_root': str(tmp_path / 'queue'),
-        'instance': instance, 'template': template,
-        'session': json.loads(ref.metadata_json)['identity']['session'],
+    specification = {
         'original_bind_identity': r9, 'campaign_identity': campaign,
         'implementation_compatibility': {'original': '1' * 64, 'recovery': '2' * 64,
                                          'scope': 'forward-identical-memory-only'},
-        'n_batches': len(draw()), 'entry_shape': list(ref.shape), 'entry_dtype': ref.dtype},
-        spool_directory=spool, output=capsule, frontier=1)
+        'n_batches': len(draw()), 'entry_shape': list(ref.shape), 'entry_dtype': ref.dtype}
+    selection, _pub, _selected = recovery_publication(tmp_path / 'r9-publication',
+        first, specification, register, job_id='123')
+    recovery_mod.build_forward_recovery(selection=selection, specification=specification,
+        output=capsule, frontier=1)
     r9_to_r10 = _bound(capsule)
 
     # R10: resumes from that capsule and is contained after boundary 2.
     _, second = capture(tmp_path / 'r10', '2' * 64, bound=r9_to_r10, stop_after=2)
     assert {b for b, _ in second} == {2}, 'R10 wrote only the boundary it replayed'
     r10 = identities[-1]
-    spool, instance, template = _owner_spool(tmp_path, 'f' * 64, second)
-    owner_action = {'action_key': 'f' * 64, 'params': {'command': [
-        'python3', '-m', 'prismaquant.joint_adjoint_capture', '--forward-recovery',
-        r9_to_r10['path'], '--forward-recovery-sha256', r9_to_r10['sha256']]}}
-    chained = {
-        'schema': recovery_mod.SCHEMA, 'queue_root': str(tmp_path / 'queue'),
-        'instance': instance, 'template': template,
-        'session': json.loads(second[2, 0].metadata_json)['identity']['session'],
+    specification = {
         'original_bind_identity': r10, 'campaign_identity': campaign,
         'implementation_compatibility': {'original': '2' * 64, 'recovery': '3' * 64,
                                          'scope': 'forward-identical-memory-only'},
         'n_batches': len(draw()), 'entry_shape': list(ref.shape), 'entry_dtype': ref.dtype,
-        'frontier': 2, 'first_boundary': 2, 'imported': r9_to_r10,
-        'owner_action': owner_action, 'groups': _spool_groups(spool)}
+        'first_boundary': 2, 'imported': r9_to_r10}
+    selection, _pub, _selected = recovery_publication(tmp_path / 'r10-publication',
+        second, specification, register, job_id='456')
     capsule = tmp_path / 'r10-to-r11.json'
-    capsule.write_text(json.dumps(chained))
+    recovery_mod.build_forward_recovery(selection=selection, specification=specification,
+        output=capsule, frontier=2, imported=r9_to_r10)
+    chained = json.loads(capsule.read_text())
 
     # R11: resumes from the chained capsule, reading two contained generations.
     resumed, _ = capture(tmp_path / 'r11', '3' * 64, bound=_bound(capsule))
     baseline, _ = capture(tmp_path / 'baseline', '3' * 64)
-    assert resumed['boundary_storage']['forward_recovery']['original_owner'] == 'f' * 64
+    assert resumed['boundary_storage']['forward_recovery']['producer'] == '456'
     for new, old in zip(resumed['checkpoints'], baseline['checkpoints'], strict=True):
         actual = load_adjoint_checkpoint(adjoint_space(tmp_path / 'r11'), new)[0]
         expected = load_adjoint_checkpoint(adjoint_space(tmp_path / 'baseline'), old)[0]
@@ -432,8 +326,8 @@ def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
         assert attached.get(window, older).shape == older.shape
         assert attached.get(window, newer).shape == newer.shape
 
-    # A second owner attaching the same chain reads no capsule again: the
-    # verified chain is cached by each capsule's (path, sha256).
+    # Every fresh attachment verifies native authority again; no capsule cache
+    # can hide current producer/cleanup changes.
     reads = []
     real_read = recovery_mod._read
     def counted(path, *args, **kwargs):
@@ -443,7 +337,7 @@ def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
     again = StreamedBoundaryArtifacts(settings)
     again.attach(resumed['boundary_storage']['session'], n_probes=4,
                  forward_recovery=resumed['boundary_storage']['forward_recovery'])
-    assert reads == []
+    assert str(capsule) in reads
     assert again._attached_forward_inputs == attached._attached_forward_inputs
     # The cache never skips the session check against the receipt's binding.
     changed = copy.deepcopy(resumed['boundary_storage']['forward_recovery'])
@@ -456,53 +350,63 @@ def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
     # The freezer derives the same chained capsule from the spool and PB records.
     import prismaquant.aura_cost as aura_cost
     monkeypatch.setattr(aura_provenance, 'producer_package_sha256', lambda: '3' * 64)
-    request = tmp_path / 'r10-request.json'
-    request.write_text(json.dumps(owner_action))
     derived = tmp_path / 'r10-to-r11-derived.json'
     summary = recovery_mod.build_forward_recovery(
-        imported=r9_to_r10, owner_request=request, spool_directory=spool,
+        imported=r9_to_r10, selection=selection, specification=specification,
         output=derived, frontier=2, bind_current_implementation=True)
     assert summary['entries'] == 3 * len(draw()) and summary['segments'] == 2
     assert json.loads(derived.read_text()) == json.loads(capsule.read_text())
 
-    # --inspect-live accepts the contained chained owner before any freeze.
-    from tools.stagea_forward_recovery import inspect_owner
-    report = inspect_owner(recovery_mod.chained_specification(
-        r9_to_r10, spool_directory=spool, owner_request=request), spool, sdk=_chain_sdk())
-    assert report == {'schema': recovery_mod.SCHEMA, 'inspect_only': True,
-                      'authority_to_resume': False, 'contained': True,
-                      'first_boundary': 2, 'frontier': 2, 'groups': 1,
-                      'entries': len(draw()), 'segments': 2,
-                      'payload_bytes': sum(r.file_bytes for r in second.values())}
 
 
-def _chained_pair(tmp_path):
+def _chained_pair(tmp_path, monkeypatch):
+    from pathlib import Path
+    import hashlib
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+    from prismaquant.streamed_boundary_artifacts import _write_new_file
+    from prismaquant import joint_forward_resume as recovery
+    from produced_native_fixtures import selected_publications, recovery_publication
+    register = selected_publications(monkeypatch)
     prior, _ = identity_document()
-    prior.update(entry_shape=[1, 4, 8], entry_dtype='torch.float32', queue_root='/q', groups=[],
-                 instance={'owner_action_key': 'a' * 64})
-    path = tmp_path / 'prior.json'
-    path.write_text(json.dumps(prior))
-    bound = _bound(path)
-    old = {**prior['original_bind_identity'], 'producer_source_sha256': 'd' * 64}
-    top = {**copy.deepcopy(prior), 'original_bind_identity': old, 'frontier': 2,
-           'first_boundary': 2, 'imported': bound,
-           'implementation_compatibility': {'original': 'd' * 64, 'recovery': '9' * 64,
-                                            'scope': 'forward-identical-memory-only'},
-           'session': {'generation': 'new', 'run_identity_sha256':
-                       canonical_json_sha256(old, where='fixture')},
-           'instance': {'owner_action_key': 'b' * 64},
-           'owner_action': {'action_key': 'b' * 64, 'params': {'command': [
-               '--forward-recovery', bound['path'], '--forward-recovery-sha256', bound['sha256']]}}}
-    return prior, top
+    prior.update(entry_shape=[1, 4, 8], entry_dtype='torch.float32')
+    state = {key: prior[key] for key in recovery._STATE_KEYS}
+
+    def capsule(name, state, generation, boundaries, frontier, job_id):
+        session = {'generation': generation, 'run_identity_sha256': canonical_json_sha256(
+            state['original_bind_identity'], where='fixture')}
+        directory = tmp_path / generation / 'entries'; directory.mkdir(parents=True)
+        refs = {}
+        for boundary in boundaries:
+            for batch in range(5):
+                path = directory / f'boundary-{batch}-{boundary}-at-{boundary}.pt'
+                raw = f'known byte fixture {generation} {boundary} {batch}'.encode()
+                identity = _write_new_file(path, raw)
+                refs[boundary, batch] = SimpleNamespace(path=str(path),
+                    file_bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest(),
+                    writer_file_identity=identity,
+                    metadata_json=json.dumps({'identity': {'session': session}}))
+        selection, pub, selected = recovery_publication(tmp_path / name,
+            refs, state, register, job_id=job_id)
+        path = tmp_path / (name + '.json')
+        recovery.build_forward_recovery(selection=selection, specification=state,
+            frontier=frontier, imported=state.get('imported'), output=path)
+        return json.loads(path.read_text()), _bound(path), selected
+
+    prior, bound, _ = capsule('prior', state, 'old', range(2), 1, '123')
+    top_state = copy.deepcopy(state)
+    top_state['original_bind_identity']['producer_source_sha256'] = 'd' * 64
+    top_state.update(first_boundary=2, imported=bound,
+        implementation_compatibility={'original': 'd' * 64, 'recovery': '9' * 64,
+            'scope': 'forward-identical-memory-only'})
+    top, _, selected = capsule('top', top_state, 'new', [2], 2, '456')
+    return prior, top, selected
 
 
-def test_chain_links_each_segment_to_the_owner_that_imported_it(tmp_path):
-    from prismaquant.joint_forward_resume import (
-        chain_documents, _require_imported_by_owner)
-    prior, top = _chained_pair(tmp_path)
+def test_chain_links_each_segment_to_the_owner_that_imported_it(tmp_path, monkeypatch):
+    from prismaquant.joint_forward_resume import chain_documents, chain_records
+    prior, top, _ = _chained_pair(tmp_path, monkeypatch)
     assert [d['frontier'] for d in chain_documents(top)] == [2, 1]
-    _require_imported_by_owner(top, _chain_sdk())
+    assert sorted(chain_records(top)) == ['0', '1', '2']
 
 
 @pytest.mark.parametrize('mutate', [
@@ -515,40 +419,31 @@ def test_chain_links_each_segment_to_the_owner_that_imported_it(tmp_path):
     lambda top: top.update(campaign_identity={'plan': '0' * 64}),
     lambda top: top.pop('imported'),
 ])
-def test_broken_chain_links_refuse(tmp_path, mutate):
+def test_broken_chain_links_refuse(tmp_path, monkeypatch, mutate):
     from prismaquant.joint_forward_resume import chain_documents, ForwardRecoveryRefused
-    _, top = _chained_pair(tmp_path)
+    _, top, _ = _chained_pair(tmp_path, monkeypatch)
     mutate(top)
     with pytest.raises(ForwardRecoveryRefused):
         chain_documents(top)
 
 
 @pytest.mark.parametrize('mutate', [
-    lambda action: action.update(action_key='c' * 64),
-    lambda action: action['params']['command'].__setitem__(1, '/other/capsule.json'),
-    lambda action: action['params']['command'].__setitem__(3, '0' * 64),
-    lambda action: action['params']['command'].extend(action['params']['command'][:4]),
+    lambda argv: argv.__setitem__(argv.index('--forward-recovery') + 1, '/other/capsule.json'),
+    lambda argv: argv.__setitem__(argv.index('--forward-recovery-sha256') + 1, '0' * 64),
+    lambda argv: argv.extend(argv[-4:]),
 ])
-def test_owner_that_did_not_import_the_prior_refuses(tmp_path, mutate):
-    from prismaquant.joint_forward_resume import (
-        _require_imported_by_owner, ForwardRecoveryRefused)
-    _, top = _chained_pair(tmp_path)
-    mutate(top['owner_action'])
-    with pytest.raises(ForwardRecoveryRefused):
-        _require_imported_by_owner(top, _chain_sdk())
+def test_owner_that_did_not_import_the_prior_refuses(tmp_path, monkeypatch, mutate):
+    from prismaquant.joint_forward_resume import chain_records, ForwardRecoveryRefused
+    _, top, selected = _chained_pair(tmp_path, monkeypatch)
+    assert len(chain_records(top)['2']) == 5
+    mutate(selected.launch['argv'])
+    with pytest.raises(ForwardRecoveryRefused, match='owner did not import'):
+        chain_records(top)
 
 
-def test_recovery_manifest_stages_every_segment_and_imported_capsule(tmp_path):
+def test_recovery_manifest_stages_every_segment_and_imported_capsule(tmp_path, monkeypatch):
     from tools.build_stagea_forward_recovery_package import recovery_manifest
-    prior, top = _chained_pair(tmp_path)
-    prior['groups'] = [{'manifest': {'entries': [
-        {'destination_path': f'/old/entries/boundary-{i}-{b}-at-{b}.pt', 'bytes': 7, 'sha256': 'a' * 64}
-        for b in range(2) for i in range(5)]}}]
-    (tmp_path / 'prior.json').write_text(json.dumps(prior))
-    top['imported'] = _bound(tmp_path / 'prior.json')
-    top['groups'] = [{'manifest': {'entries': [
-        {'destination_path': f'/new/entries/boundary-{i}-2-at-2.pt', 'bytes': 7, 'sha256': 'b' * 64}
-        for i in range(5)]}}]
+    prior, top, _ = _chained_pair(tmp_path, monkeypatch)
     path = tmp_path / 'top.json'
     path.write_text(json.dumps(top))
     names = ['head', 'forward-000', 'forward-001', 'forward-002',

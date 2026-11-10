@@ -1,37 +1,66 @@
-"""What the Tessera fleet drivers share: a sealed workspace and pbcampaign.
+"""Committed Tessera sources and native Flux stage records.
 
-A driver never builds an action itself. It stages the bytes an action runs
-into a Git workspace, writes one ``pbcampaign`` manifest row per unit of
-work, and runs the published ``pbcampaign.py``. ``pbrun`` seals each row over
-that workspace's snapshot, so the encoder and wrapper bytes are bound into
-every action key without this module knowing how a key is made.
-
-Every stage leaves its manifest and what ``pbcampaign`` printed under the
-workspace's ``.pb-state/``, which is what ``tools.tessera_fleet.status``
-reads back.
+New dispatches keep immutable payloads in source/ and execution records in
+.flux-state/. Historical PB workspaces are neither read nor modified.
 """
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 from pathlib import Path
 import shutil
 import subprocess
-import sys
-from typing import Iterable, Mapping
+from typing import Mapping
 
-from prismaquant.pbwait_table import DONE_STATUSES, parse_pbwait_table
-# The standard-library worker owns the one atomic JSON write; the drivers
-# import it rather than keep a second copy (epic #1295).
+from prismaquant import tessera_campaign_rows as campaign_rows
 from tools.tessera_fleet.model_worker import atomic_json
 
-#: The published PrismaBuild client. A stale checkout must not become a stale
-#: submission client, so the drivers use the generation the fleet runs.
-PUBLISHED_TOOLS = Path("/mnt/shared/prismabuild-fleet/repo/tools")
+SOURCE = "source"
 
-#: The per-workspace directory the drivers write their own records into. The
-#: workspace's Git exclude keeps it out of every sealed snapshot.
-STATE = ".pb-state"
+STATE = ".flux-state"
+
+
+def stage_state(workspace, stage):
+    if not stage or Path(stage).name != stage or stage in {'.', '..'}:
+        raise ValueError('stage must be one path component')
+    return Path(workspace) / STATE / stage
+
+
+EXIT_DONE = 0
+EXIT_FAILED = 1
+EXIT_NOTHING = 3
+EXIT_RUNNING = 4
+
+
+def exit_status(table: list[dict], expected: int) -> int:
+    statuses = [row.get("status", "") for row in table]
+    if len(table) != expected or any(s not in {"succeeded", "running"}
+                                     for s in statuses):
+        return EXIT_FAILED
+    if "running" in statuses:
+        return EXIT_RUNNING
+    return EXIT_DONE
+
+
+def show_status(workspace, stage, *, collect_rows):
+    """Report saved stage IDs using the caller's native collector."""
+    workspace = Path(workspace)
+    state = stage_state(workspace, stage)
+    if not (state / 'manifest.json').exists():
+        print(f"no {stage} submissions recorded under {workspace / STATE}")
+        return EXIT_NOTHING
+    try:
+        table = collect_rows(state, wait=False)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f'native status query failed: {exc}')
+        return EXIT_FAILED
+    expected = len(json.loads((state / 'manifest.json').read_text())['rows'])
+    print(json.dumps(table, indent=2))
+    counts = Counter(row.get("status", "?") for row in table)
+    print(f"{stage}: {expected} recorded, "
+          + ", ".join(f"{n} {status}" for status, n in sorted(counts.items())))
+    return exit_status(table, expected)
 
 
 def shard_range(of_shards: int):
@@ -65,16 +94,12 @@ def shard_range(of_shards: int):
 
 def stage_workspace(workspace: Path, files: Mapping[str, Path], *,
                     message: str) -> None:
-    """Copy ``files`` (relative name to source) into a new Git workspace.
-
-    ``pbrun`` refuses a checkout that is not a Git tree and snapshots its
-    tracked and untracked bytes, so an empty commit is enough: every staged
-    file travels in the snapshot. Nothing here reaches a real repository.
-    """
+    """Copy actual source bytes into a new committed detached shared tree."""
 
     workspace = Path(workspace)
     if workspace.exists():
         raise ValueError(f"workspace {workspace} already exists")
+    workspace = workspace / SOURCE
     workspace.mkdir(parents=True)
     for name, source in sorted(files.items()):
         relative = Path(name)
@@ -88,83 +113,34 @@ def stage_workspace(workspace: Path, files: Mapping[str, Path], *,
 
 def initialize_git(workspace: Path, *, message: str) -> None:
     subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    subprocess.run(["git", "-C", str(workspace), "add", "--all", "--force"], check=True)
     subprocess.run(["git", "-C", str(workspace), "-c", "user.name=PrismaQuant",
                     "-c", "user.email=prismaquant@localhost", "commit",
-                    "--allow-empty", "-qm", message], check=True)
-    (Path(workspace) / ".git" / "info" / "exclude").write_text(f"/{STATE}/\n")
+                    "-qm", message], check=True)
+    subprocess.run(["git", "-C", str(workspace), "checkout", "--detach", "-q"], check=True)
 
 
 def gb10_row(workspace: Path, argv: list, *, demand: Mapping, env: Mapping) -> dict:
-    """One ``pbcampaign`` row over ``workspace``, placed on either GB10."""
-    return {"cwd": str(workspace), "argv": list(argv), "demand": dict(demand),
-            "tags": ["gb10"], "env": dict(env)}
-
-
-def pbcampaign_command(manifest: Path, *, wait_s: float, detach: bool,
-                       tools: Path = PUBLISHED_TOOLS) -> list[str]:
-    command = [sys.executable, str(Path(tools) / "pbcampaign.py"),
-               "--wait-s", str(wait_s)]
-    if detach:
-        command.append("--detach")
-    return command + [str(manifest)]
-
-
-def run_pbcampaign(rows: Iterable[dict], workspace: Path, stage: str, *,
-                   wait_s: float, detach: bool = False) -> tuple[int, str]:
-    """Write ``rows`` as ``<stage>-manifest.json`` and run ``pbcampaign``.
-
-    Returns the exit status and everything it printed, which is also kept as
-    ``<stage>-pbcampaign.txt``. A refusal of any row, and a failed or
-    unfinished action, are a nonzero status; reading the status is the
-    caller's job, because an acknowledgement is not a result.
-    """
-
-    state = Path(workspace) / STATE
-    manifest = state / f"{stage}-manifest.json"
-    atomic_json(manifest, list(rows))
-    command = pbcampaign_command(manifest, wait_s=wait_s, detach=detach)
-    print("[tessera-fleet] " + " ".join(command), flush=True)
-    completed = subprocess.run(command, check=False, text=True,
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    (state / f"{stage}-pbcampaign.txt").write_text(completed.stdout)
-    print(completed.stdout, end="", flush=True)
-    return completed.returncode, completed.stdout
-
-
-def detached_submissions(text: str) -> list[dict]:
-    """The one JSON line per row ``pbcampaign --detach`` prints."""
-
-    found = []
-    for line in text.splitlines():
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(record, dict) and record.get("action_key"):
-                found.append(record)
-    return found
+    """One unqualified GPU intent; baseline native submission refuses it."""
+    return {"cwd": str(Path(workspace) / SOURCE), "argv": list(argv), "demand": dict(demand),
+            "tags": ["gb10"], "env": dict(env), "timeout_s": 1800}
 
 
 def run_stage(rows: list[dict], workspace: Path, stage: str, *,
-              wait_s: float) -> list[dict]:
-    """Run one stage to its endings, and refuse unless every row is done.
+              wait_s: float, afterok=()) -> list[dict]:
+    """Submit or reconnect, then require native success for the whole stage.
 
-    The table is ``pbwait``'s, kept as ``<stage>-endings.json``. A stage that
-    did not finish every row raises, so nothing after it -- an assembly
-    behind the complete-set barrier, say -- starts on a partial set.
+    wait_s chooses a blocking collection or a status query. Each job has its
+    own enforced finite walltime; no local scheduler or watchdog is implied.
     """
-
-    returncode, text = run_pbcampaign(rows, workspace, stage, wait_s=wait_s)
-    table = parse_pbwait_table(text)
-    atomic_json(Path(workspace) / STATE / f"{stage}-endings.json",
-                {"returncode": returncode, "rows": table})
-    done = [row for row in table if row.get("status") in DONE_STATUSES]
-    if returncode != 0 or len(table) != len(rows) or len(done) != len(rows):
-        raise ValueError(
-            f"{stage}: {len(done)} of {len(rows)} action(s) done "
-            f"(pbcampaign exit {returncode}); see {STATE}/{stage}-pbcampaign.txt")
+    state = stage_state(workspace, stage)
+    campaign_rows.submit_rows(rows, state, afterok=afterok)
+    table = campaign_rows.collect_rows(state, wait=wait_s > 0)
+    atomic_json(state / 'endings.json', {'rows': table})
+    done = sum(row['status'] == 'succeeded' and row['payload_exit'] == 0
+               and not row['query_error'] for row in table)
+    if len(table) != len(rows) or done != len(rows):
+        raise ValueError(f'{stage}: {done} of {len(rows)} action(s) done; refusing downstream merge')
     return table
 
 
@@ -187,20 +163,8 @@ def encoder_workspace_files(checkout: Path, wrapper: Path, wrapper_name: str,
 
 
 def submit_detached(rows: list[dict], workspace: Path, stage: str, *,
-                    wait_s: float) -> list[dict]:
-    """Submit ``rows`` and return without waiting; keep the keys it printed.
-
-    ``tools.tessera_fleet.status`` reads ``<stage>-submissions.json`` back and
-    asks ``pbwait`` where each key got to.
-    """
-
-    returncode, text = run_pbcampaign(rows, workspace, stage, wait_s=wait_s,
-                                      detach=True)
-    submitted = detached_submissions(text)
-    atomic_json(Path(workspace) / STATE / f"{stage}-submissions.json",
-                {"returncode": returncode, "rows": submitted})
-    if returncode != 0 or len(submitted) != len(rows):
-        raise ValueError(
-            f"{stage}: {len(submitted)} of {len(rows)} row(s) submitted "
-            f"(pbcampaign exit {returncode}); see {STATE}/{stage}-pbcampaign.txt")
-    return submitted
+                    wait_s: float, afterok=()) -> list[dict]:
+    """Persist every native ID before returning; resume uses exactly those IDs."""
+    from dataclasses import asdict
+    submissions = campaign_rows.submit_rows(rows, stage_state(workspace, stage), afterok=afterok)
+    return [{**asdict(item), 'record_dir': str(item.record_dir)} for item in submissions]

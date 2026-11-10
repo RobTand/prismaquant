@@ -341,15 +341,15 @@ def test_on_durable_reports_a_row_only_after_its_entry_is_renamed_into_place(
     incoming = _incoming(len(batches), N_PROBES)
     layer = 0
     events, written = [], {}
-    replace = os.replace
+    link = os.link
 
     def refusing_replace(source, target, *args, **kwargs):
         if failing is not None and Path(target).name == cache_module.activation_cache_filename(
                 f"cotangent-{failing[0]}-{failing[1]}"):
             raise OSError("rename failed")
-        return replace(source, target, *args, **kwargs)
+        return link(source, target, *args, **kwargs)
 
-    monkeypatch.setattr(os, "replace", refusing_replace)
+    monkeypatch.setattr(os, "link", refusing_replace)
 
     def roll(tensor, batch, probe):
         events.append(("roll", (layer, probe, batch)))

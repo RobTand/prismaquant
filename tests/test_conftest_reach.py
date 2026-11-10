@@ -228,7 +228,7 @@ def test_when_loaded_patches_a_loaded_module_at_once_and_a_later_one_on_load(tmp
             sys.modules.pop(name, None)
 
 
-#: Names that left ``tests/conftest.py`` or ``tests/fleet_sdk.py``, and their
+#: Names that left ``tests/conftest.py``, and their
 #: one home now. A name kept in both places would let a test patch the old
 #: copy and silently miss the code that reads the new one (PrismaBuild #2582's
 #: lesson); with the old name gone, such a patch raises ``AttributeError``.
@@ -243,14 +243,6 @@ MOVED = {
         "project_lane_cells_onto_structures": "lane_table_fixtures",
         "legacy_v4_contract": "lane_table_fixtures",
         "legacy_v5_contract": "lane_table_fixtures",
-        "installed_client_sdk": "fleet_sdk",
-        "installed_helper_sdk": "fleet_sdk",
-        "pinned_pb_source": "fullstack_pb_generation",
-    },
-    "fleet_sdk": {
-        "prismabuild_entries": "prismabuild_imports",
-        "_hosts_prismabuild": "prismabuild_imports",
-        "prismabuild_imports_restored": "prismabuild_imports",
     },
 }
 
@@ -261,14 +253,6 @@ def test_moved_names_have_one_home(old):
     for name, home in MOVED[old].items():
         assert not hasattr(module, name), f"{old}.{name} still exists beside {home}.{name}"
         assert hasattr(importlib.import_module(home), name), f"{home}.{name} is missing"
-
-
-def test_the_restore_names_the_entries_staged_lease_names():
-    from prismabuild_imports import prismabuild_entries
-
-    from prismaquant.staged_lease import _prismabuild_modules
-
-    assert sorted(prismabuild_entries()) == sorted(_prismabuild_modules())
 
 
 def test_conftest_restores_the_activation_scale_variable_the_joint_lease_reads():

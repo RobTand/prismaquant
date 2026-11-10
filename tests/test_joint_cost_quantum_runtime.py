@@ -653,15 +653,11 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     import prismaquant.glm_capture_compatibility as compatibility
 
     # This is an OFFLINE stage-A environment, and the launch context is the
-    # one seam a stub cannot fake: a capture that carries
-    # PRISMABUILD_ACTION_KEY is an admitted produced-output owner and now
-    # binds one unconditionally, refusing if it cannot. Inside pbtest this
-    # process IS admitted, and inherits a key with no residency map, so the
-    # stub would be asked to bind a queue that does not exist. Clearing the
-    # context is what makes this run offline; it does not relax the
-    # production check, which still refuses a half-present launch context.
-    for name in ("PRISMABUILD_ACTION_KEY", "PRISMABUILD_ACTION_NONCE",
-                 "PRISMABUILD_ACTION_SCOPE", "PRISMABUILD_RESIDENCY_MAP"):
+    # one seam a stub cannot fake: a capture inside an admitted native job
+    # (FLUX_JOB_ID) binds a produced-output owner unconditionally, refusing if
+    # it cannot. Clearing the context is what makes this run offline; it does
+    # not relax the production check.
+    for name in ("FLUX_JOB_ID", "PRISMAQUANT_STAGED_MANIFEST"):
         monkeypatch.delenv(name, raising=False)
 
     captured = {}
@@ -1444,21 +1440,17 @@ def test_progress_cadence_at_chunk_granularity(tmp_path, monkeypatch):
                 "render_file_upper_bound_bytes": 40, "candidate_count": 1},
                {"window_index": 1, "names": ["b"], "statistics_bytes": 1,
                 "render_file_upper_bound_bytes": 60, "candidate_count": 1}]
-    progress_file = tmp_path / "progress.json"
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(progress_file))
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "token")
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PHASES", json.dumps(
-        ["head", "layer-001-chunk-000", "layer-001-chunk-001"]))
+    lines = []
     frontier = ChunkFrontier(chunks=chunks, windows=windows)
-    progress = QuantumProgress(frontier=frontier, base_units=3)
+    progress = QuantumProgress(frontier=frontier, base_units=3, log=lines.append,
+                               phases=["head", "layer-001-chunk-000", "layer-001-chunk-001"])
     progress.enter_head(0)
-    assert progress_file.is_file()
-    first = json.loads(progress_file.read_text())
+    first = json.loads(lines[-1].split(': ', 1)[1])
     assert first["phase"] == "head" and first["units_completed"] == 3
     progress.priced(4)
     progress.window_done(windows[0])
     progress.commit()
-    second = json.loads(progress_file.read_text())
+    second = json.loads(lines[-1].split(': ', 1)[1])
     assert second["phase"] == "layer-001-chunk-000"
     # Cumulative across phases, continuing from the head-committed base:
     # 3 head units + 4 quantum-local units.
@@ -1466,7 +1458,7 @@ def test_progress_cadence_at_chunk_granularity(tmp_path, monkeypatch):
     progress.priced(5)
     progress.window_done(windows[1])
     progress.commit()
-    third = json.loads(progress_file.read_text())
+    third = json.loads(lines[-1].split(': ', 1)[1])
     assert third["phase"] == "layer-001-chunk-001"
     assert third["units_completed"] == 8
 
@@ -1618,7 +1610,7 @@ def test_comparison_tool_on_a_synthetic_pair(tmp_path):
     tool = Path(__file__).resolve().parents[1] / "tools" / "compare_joint_layer_gate.py"
     verdict_path = tmp_path / "verdict.json"
     code = subprocess.run(
-        [sys.executable, str(tool), "--single-run", str(left),
+        [sys.executable, '-s', '-B', str(tool), "--single-run", str(left),
          "--quantum", str(right), "--layers", "13", "--json", str(verdict_path)],
         capture_output=True, text=True, check=False).returncode
     assert code == 0
@@ -1630,7 +1622,7 @@ def test_comparison_tool_on_a_synthetic_pair(tmp_path):
     tampered["model.layers.13.proj"] = _unit_state(0.75)
     wrong = _journal(tmp_path / "wrong", tampered, {"side": "quantum"})
     code = subprocess.run(
-        [sys.executable, str(tool), "--single-run", str(left),
+        [sys.executable, '-s', '-B', str(tool), "--single-run", str(left),
          "--quantum", str(wrong), "--layers", "13"],
         capture_output=True, text=True, check=False).returncode
     assert code == 1

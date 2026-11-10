@@ -3514,11 +3514,6 @@ wheels = [
 ]
 
 [[package]]
-name = "prismabuild"
-version = "0.1.0"
-source = { git = "https://github.com/RobTand/prismabuild?rev=027103d9a8417e06c7f13356e58779a313cd7088#027103d9a8417e06c7f13356e58779a313cd7088" }
-
-[[package]]
 name = "prismaquant"
 version = "0.16.2"
 source = { editable = "." }
@@ -3561,11 +3556,6 @@ test = [
     { name = "torch", version = "2.15.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-11-prismaquant-test') or (extra == 'extra-11-prismaquant-serve' and extra == 'extra-11-prismaquant-test') or (extra == 'extra-11-prismaquant-task-suite' and extra == 'extra-11-prismaquant-test')" },
 ]
 
-[package.dev-dependencies]
-pbsdk = [
-    { name = "prismabuild" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=0.30" },
@@ -3591,9 +3581,6 @@ requires-dist = [
     { name = "xxhash", specifier = ">=3.7.0" },
 ]
 provides-extras = ["serve", "task-suite", "test"]
-
-[package.metadata.requires-dev]
-pbsdk = [{ name = "prismabuild", git = "https://github.com/RobTand/prismabuild?rev=027103d9a8417e06c7f13356e58779a313cd7088" }]
 
 [[package]]
 name = "prometheus-client"

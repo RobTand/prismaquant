@@ -332,7 +332,7 @@ def environment_record(*, with_pins):
                   env={k: os.environ.get(k) for k in ('PYTHONPATH', 'TESSERA_REPO', 'TESSERA_WINDOW_BEST_FORM',
                        'TESSERA_WINDOW_BEST_TILE', 'TESSERA_SEAL_PREFETCH', 'PRISMAQUANT_DETERMINISTIC',
                        'PRISMAQUANT_CONTAINER_CONTENT_SHA256', *FUSED_ENV,
-                       'PRISMABUILD_ACTION_KEY', 'CUDA_VISIBLE_DEVICES')})
+                       'CUDA_VISIBLE_DEVICES')})
     if with_pins:
         import prismaquant
         from prismaquant.production_weight_cache import _production_cache_source_sha256

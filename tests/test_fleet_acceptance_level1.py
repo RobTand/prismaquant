@@ -1,90 +1,30 @@
-"""Level-1 connected acceptance: tiny CPU fixture through actual APIs.
+"""Tiny CPU producer, native staged-reader and scientific join contracts.
 
-Two halves, explicitly distinguished:
-
-- Pinned-PB + PQ legs exercise contracts here: real PQ writers, real
-  validation/stage/promotion/map flows from one reviewed source, real PoolQueue
-  lifecycle, real protocol-client refusals, real PQ reads and join
-  gates over the harness's own fixture.
-- Candidate-gated scenarios (broker Authority, SDK acquire/open/release,
-  proof/cleanup/egress flows) execute in
-  ``fleet_acceptance_runner.py`` subprocesses. A ``nonqualified`` result
-  document becomes SKIP with its reason -- machine output, never a green
-  conformance row. ``failed`` fails loudly. Only ``qualified`` asserts
-  evidence.
-
-The connected fixture's source pin may name a staged generation; these
-CPU contracts do not certify activation or the live fleet. Candidate
-scenarios retain their own qualification/refusal results.
+Known fixture bytes and original hash/nonfinite/gap checks remain. PB fleet,
+broker, mover and SDK scenarios are retired, not reimplemented here.
 """
 from __future__ import annotations
-
 import gzip
 import hashlib
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
-
 import pytest
-
-from fleet_sdk import require_prismabuild_sdk
 import torch
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-import fleet_acceptance_pins as pins  # noqa: E402
-import fullstack_pb_generation as published  # noqa: E402
-from test_fullstack_real_chain import (  # noqa: E402
-    _entry,
-    _safetensors_tensor_span,
-    _tensors,
-    _write_shard,
-)
-
-ROOT = Path(__file__).resolve().parents[1]
-RUNNER = Path(__file__).resolve().parent / "fleet_acceptance_runner.py"
-CONSUMER = "cc" * 32
-STAGE_TIER = "prismabuild-stage:dl380g10"
-RAM_TIER = "ram:dl380g10"
-
-
-def _pb():
-    """Published PB modules from the immutable generation (verified)."""
-    require_prismabuild_sdk()
-    info = published.require_paths()
-    import prismabuild.core as core  # noqa: E402
-    import prismabuild.pool as pool  # noqa: E402
-    import prismabuild.residency_map as pmap  # noqa: E402
-    import prismabuild.resource_scope as scopes  # noqa: E402
-    import prismabuild.storage_tiers as tiers  # noqa: E402
-    import stage_move  # noqa: E402
-    import ram_promote  # noqa: E402
-    root = info.get("root") or str(
-        Path(core.__file__).resolve().parents[3])
-    for module in (core, pool, pmap, scopes, tiers, stage_move,
-                   ram_promote):
-        location = Path(module.__file__).resolve()
-        assert location.is_relative_to(Path(root)), (
-            f"{module.__name__} loaded from {location}, not {root}")
-    return {"generation": info["generation"], "root": root, "core": core,
-            "pool": pool, "pmap": pmap, "scopes": scopes, "tiers": tiers,
-            "stage_move": stage_move, "ram_promote": ram_promote}
+from test_fullstack_real_chain import _entry, _tensors, _write_shard
+from staged_native_fixtures import bind, native_staged_state, publish_inputs
+from prismaquant.staged_tier_policy import staged_tier_policy_test_context
 
 
 @pytest.fixture(autouse=True)
-def _reader_sdk_bound():
-    with published.reader_sdk_bound():
+def _native_policy(native_staged_state):
+    with staged_tier_policy_test_context('ssd'):
         yield
 
 
-@pytest.fixture(scope="module")
-def pb():
-    """The module's movers use one authenticated source package."""
-    with published.source_bound():
-        yield _pb()
+@pytest.fixture
+def staged(campaign, tmp_path):
+    files = list(dict.fromkeys(Path(e['path']) for e in campaign['parent']['entries']))
+    return publish_inputs(tmp_path, files)
 
 
 @pytest.fixture(scope="module")
@@ -93,6 +33,7 @@ def probe():
         probe as join_probe_fixture,
     )
     return join_probe_fixture.__wrapped__()
+
 
 
 @pytest.fixture(scope="module")
@@ -156,6 +97,7 @@ def campaign(tmp_path_factory):
             "parent_sha": sealed["parent.json"], "receipt": receipt}
 
 
+
 @pytest.fixture(scope="module")
 def produced(campaign):
     """The real PQ producer on the harness fixture, persisted by digest."""
@@ -193,6 +135,7 @@ def produced(campaign):
     return built
 
 
+
 def _slice_body(campaign, record):
     raw = (campaign["tmp"] / "campaign" / "layer-quanta"
            / record["read_set"]["manifest_path"]).read_bytes()
@@ -200,8 +143,6 @@ def _slice_body(campaign, record):
         hashlib.sha256(raw).hexdigest()
     return json.loads(gzip.decompress(raw).decode())
 
-
-# -- ID-03/ID-04/ACC-01: real-producer parser fixtures ------------------------
 
 
 def test_slice_wire_digests_cover_sealed_bytes(produced, campaign):
@@ -212,6 +153,7 @@ def test_slice_wire_digests_cover_sealed_bytes(produced, campaign):
         assert record["read_set"]["manifest_sha256"] == \
             hashlib.sha256(raw).hexdigest()
         assert len(raw) > 0
+
 
 
 def test_canonical_record_digest_is_stable_and_rejects_nonfinite():
@@ -242,6 +184,7 @@ def test_canonical_record_digest_is_stable_and_rejects_nonfinite():
         canonical_json_sha256(broken, where="nonfinite row")
 
 
+
 def test_gzip_member_parses_and_tamper_refuses(produced, campaign):
     """ACC-01: valid gzip wire parses; flipped bytes refuse."""
     import gzip as gzip_mod
@@ -256,6 +199,7 @@ def test_gzip_member_parses_and_tamper_refuses(produced, campaign):
             record["read_set"]["manifest_sha256"]
         with pytest.raises(Exception):
             json.loads(gzip_mod.decompress(bytes(tampered)).decode())
+
 
 
 def test_produced_records_carry_boundary_derivation_inputs(produced):
@@ -286,284 +230,30 @@ def test_produced_records_carry_boundary_derivation_inputs(produced):
             assert campaign.get(key), (record["quantum_id"], key)
 
 
-# -- published PB: validate, stage, promote, map -----------------------------
-
-
-def test_published_pb_parses_slice_ranges(pb, produced, campaign):
-    """Slice tables parse into stageable ranges with exact tiling."""
-    core, tiers = pb["core"], pb["tiers"]
-    for record in produced["records"]:
-        validated = core.validate_data_manifest(
-            _slice_body(campaign, record))
-        assert validated["entry_count"] == len(validated["entries"])
-        ranges = tiers.manifest_phase_ranges(validated)
-        assert ranges, record["quantum_id"]
-        assert ranges[0]["start_bytes"] == 0
-        assert ranges[-1]["end_bytes"] == validated["total_bytes"]
-
-
-@pytest.fixture(scope="module")
-def staged(pb, produced, campaign):
-    """Real published movers over the parent manifest (whole + split)."""
-    require_prismabuild_sdk()
-    stage_move, ram_promote = pb["stage_move"], pb["ram_promote"]
-    pool = pb["pool"]
-    tmp = campaign["tmp"]
-    queue = pool.PoolQueue(tmp / "pb-queue")
-    queue.ensure_layout()
-    stage = tmp / "stage"
-    stage.mkdir()
-    ram = tmp / "ram"
-    ram.mkdir()
-    from prismabuild import storage_tiers as tiers  # noqa: E402
-    epoch = tiers.ensure_ram_epoch(ram, host="dl380g10")
-    assert epoch is not None
-    manifest_path = tmp / "staging.json"
-    manifest_path.write_text(json.dumps(campaign["parent"], sort_keys=True))
-    total = campaign["parent"]["total_bytes"]
-    split = campaign["parent"]["entries"][0]["bytes"]
-    receipts = {}
-    for mover, start, end in (("aa" * 32, 0, split),
-                              ("ab" * 32, split, total)):
-        args = stage_move.build_parser().parse_args([
-            "--pool-root", str(tmp / "pb-queue"),
-            "--cas-root", str(tmp / "pb-queue" / "cas"),
-            "--action-key", mover,
-            "--consumer-action-key", CONSUMER,
-            "--tier-id", STAGE_TIER,
-            "--stage-root", str(stage),
-            "--manifest-sha256", campaign["parent_sha"],
-            "--range-start-bytes", str(start),
-            "--range-end-bytes", str(end),
-            "--manifest", str(manifest_path),
-            "--residency-root", str(tmp / "pb-queue" / pool.RESIDENCY),
-            "--block", str(1 << 16),
-            "--readers", "1", "--max-readers", "1", "--unpaced",
-        ])
-        receipt = stage_move.move(args)
-        assert receipt["complete"] is True
-        queue.record_move(mover, receipt)
-        receipts[mover] = receipt
-    prom = ram_promote.build_parser().parse_args([
-        "--pool-root", str(tmp / "pb-queue"),
-        "--action-key", "bb" * 32,
-        "--consumer-action-key", CONSUMER,
-        "--tier-id", RAM_TIER,
-        "--ram-root", str(ram),
-        "--source-stage-root", str(stage),
-        "--manifest-sha256", campaign["parent_sha"],
-        "--range-start-bytes", "0",
-        "--range-end-bytes", str(total),
-        "--manifest", str(manifest_path),
-        "--residency-root", str(tmp / "pb-queue" / pool.RESIDENCY),
-    ])
-    promotion = ram_promote.promote(prom)
-    assert promotion["complete"] is True
-    queue.record_move("bb" * 32, promotion)
-    return {"queue": queue, "stage": stage, "ram": ram,
-            "epoch": str(epoch["epoch"]), "receipts": receipts,
-            "promotion": promotion}
-
-
-def test_movers_publish_fragments_with_real_digests(pb, staged, campaign):
-    """SM-02 legs: published map names staged bytes under epoch digests."""
-    pb_map = pb["pmap"]
-    pool = pb["pool"]
-    queue = staged["queue"]
-    frags = [pb_map.validate_fragment(f) for f in
-             pb_map.read_fragments(queue.root / pool.RESIDENCY, CONSUMER)]
-    assert len(frags) == 3
-    composed = pb_map.compose(
-        [f for f in frags if f["tier_id"] == STAGE_TIER])
-    assert composed["manifest_sha256"] == campaign["parent_sha"]
-    for key, entry in composed["entries"].items():
-        data = Path(entry["stage_path"]).read_bytes()
-        assert hashlib.sha256(data).hexdigest() == entry["sha256"], key
-
-
-def test_mover_overrun_refuses_before_copy(pb, staged, campaign):
-    """SM-02 guard: a range smaller than its covering entries refuses."""
-    stage_move, pool = pb["stage_move"], pb["pool"]
-    tmp = campaign["tmp"]
-    total = campaign["parent"]["total_bytes"]
-    args = stage_move.build_parser().parse_args([
-        "--pool-root", str(tmp / "pb-queue"),
-        "--cas-root", str(tmp / "pb-queue" / "cas"),
-        "--action-key", "cc" * 32,
-        "--consumer-action-key", CONSUMER,
-        "--tier-id", STAGE_TIER,
-        "--stage-root", str(tmp / "stage-overrun"),
-        "--manifest-sha256", campaign["parent_sha"],
-        "--range-start-bytes", "1",
-        "--range-end-bytes", str(total),
-        "--manifest", str(tmp / "staging.json"),
-        "--residency-root", str(tmp / "pb-queue" / pool.RESIDENCY),
-        "--block", str(1 << 16),
-        "--readers", "1", "--max-readers", "1", "--unpaced",
-    ])
-    with pytest.raises(SystemExit):
-        stage_move.move(args)
-
-
-def test_ram_overlay_refuses_stale_epoch(pb, staged, campaign):
-    """SM-02 readiness: a prior epoch's fragment never overlays as current."""
-    pb_map = pb["pmap"]
-    pool = pb["pool"]
-    queue = staged["queue"]
-    frags = [pb_map.validate_fragment(f) for f in
-             pb_map.read_fragments(queue.root / pool.RESIDENCY, CONSUMER)]
-    stage_frags = [f for f in frags if f["tier_id"] == STAGE_TIER]
-    ram_frags = [f for f in frags if f["tier_id"] == RAM_TIER]
-    assert ram_frags, "a ram promotion filed"
-    composed = pb_map.compose(stage_frags)
-    with pytest.raises(pb_map.ResidencyMapError):
-        pb_map.overlay_ram(composed, ram_frags, ram_tier_id=RAM_TIER,
-                           ram_root=str(staged["ram"]),
-                           ram_epoch="stale-" + staged["epoch"])
-
-
-# -- published PoolQueue: lifecycle, ledger, finish --------------------------
-
-
-def test_publish_claim_finish_lifecycle(pb, tmp_path):
-    """SM-01/SAFE-03 legs: a real row is published, claimed, finished."""
-    pool = pb["pool"]
-    queue = pool.PoolQueue(tmp_path / "queue")
-    queue.ensure_layout()
-    key = "d" * 64
-    (tmp_path / "cas").mkdir()
-    (tmp_path / "co").mkdir()
-    worker = tmp_path / "worker.py"
-    worker.write_text("import sys\n")
-    queue.publish(action_key=key, cas_root=tmp_path / "cas",
-                  checkout_root=tmp_path / "co", worker_script=worker,
-                  resources={"cpu": 1, "mem_gb": 1},
-                  max_attempts=1, retry_safe=True)
-    assert (queue.root / "ready" / f"{key}.json").is_file()
-    record = queue.claim(owner="fleet-harness:1:lifecycle",
-                         capacity={"cpu": 1, "mem_gb": 1})
-    assert record is not None, "real claim refused a published cpu row"
-    assert record["action_key"] == key
-    assert queue.ledger().held() != {}, "claim committed no local tokens"
-    terminal = queue.finish(key, status="executed",
-                            detail={"acceptance": "lifecycle"},
-                            claim_snapshot=record)
-    assert Path(terminal).is_file()
-    assert queue.ledger().held() == {}, "finish returned no capacity"
-
-
-def test_tier_ledger_concludes_both_sides_once(pb, tmp_path):
-    """INV-01 legs: one release helper concludes holder and free tokens."""
-    pool = pb["pool"]
-    queue = pool.PoolQueue(tmp_path / "queue")
-    queue.ensure_layout()
-    queue.mint_tier_capacity(STAGE_TIER, {"stage_gib": 4})
-    ledger = queue.tier_ledger(STAGE_TIER)
-    assert ledger.acquire("ee" * 32, {"stage_gib": 1}) is True
-    assert ledger.holder_tokens("ee" * 32) == {"stage_gib": 1}
-    queue.release_tier_reservations("ee" * 32)
-    assert ledger.holder_tokens("ee" * 32) == {}
-    assert ledger.available() == {"stage_gib": 4}
-
-
-# -- published protocol client: refusals, never invented replies ------------
-
-
-def test_scope_identity_validates_action_key_and_nonce(pb):
-    """Real constructor refuses malformed identity (no broker needed)."""
-    scopes = pb["scopes"]
-    with pytest.raises(ValueError):
-        scopes.ResourceScope("short", "b" * 32, 64 << 20,
-                             Path("/tmp/x.json"))
-    with pytest.raises(ValueError):
-        scopes.ResourceScope("b" * 64, "short", 64 << 20,
-                             Path("/tmp/x.json"))
-
-
-def test_scope_adoption_refuses_forged_replies(pb, tmp_path):
-    """The client-side acceptance predicate refuses malformed verdicts."""
-    scopes = pb["scopes"]
-    scope = scopes.ResourceScope("b" * 64, "b" * 32, 64 << 20,
-                                 tmp_path / "telemetry.json")
-    good_unit = "prismabuild-job" + hashlib.sha256(
-        ("b" * 64 + "b" * 32).encode()).hexdigest()[:32] + ".slice"
-    good = {"scope_id": good_unit, "token": "c" * 64,
-            "cgroup_path": f"/sys/fs/cgroup/prismabuild.slice/{good_unit}"}
-    scope._adopt_created_scope(dict(good))
-    assert scope.unit == good_unit
-    bad_unit = dict(good, scope_id="prismabuild-job" + "0" * 32 + ".slice")
-    with pytest.raises(OSError):
-        scopes.ResourceScope("b" * 64, "b" * 32, 64 << 20,
-                             tmp_path / "t2.json")._adopt_created_scope(bad_unit)
-    bad_token = dict(good, token="not-hex")
-    with pytest.raises(OSError):
-        scopes.ResourceScope("b" * 64, "b" * 32, 64 << 20,
-                             tmp_path / "t3.json")._adopt_created_scope(bad_token)
-    bad_path = dict(good, cgroup_path="/elsewhere/x.slice")
-    with pytest.raises(OSError):
-        scopes.ResourceScope("b" * 64, "b" * 32, 64 << 20,
-                             tmp_path / "t4.json")._adopt_created_scope(bad_path)
-
-
-def test_broker_request_without_server_is_a_refusal(pb, tmp_path):
-    """No peer, no verdict: the real call fails instead of inventing one."""
-    scopes = pb["scopes"]
-    with pytest.raises(OSError):
-        scopes.broker_request({"op": "status"},
-                              socket_path=tmp_path / "absent.sock")
-
-
-# -- PQ reads + join gates over the harness staged fixture -------------------
-
-
-def _harness_map(pb, staged, campaign):
-    pool, pmap = pb["pool"], pb["pmap"]
-    queue = staged["queue"]
-    frags = [pmap.validate_fragment(f) for f in
-             pmap.read_fragments(queue.root / pool.RESIDENCY, CONSUMER)]
-    stage_frags = [f for f in frags if f["tier_id"] == STAGE_TIER]
-    assert len(stage_frags) == 2
-    composed = pmap.compose(stage_frags)
-    assert composed["manifest_sha256"] == campaign["parent_sha"]
-    maps = campaign["tmp"] / "maps"
-    maps.mkdir(parents=True, exist_ok=True)
-    path = maps / "residency.json"
-    path.write_text(json.dumps(composed))
-    return path
-
 
 def test_staged_reads_are_bit_identical_with_stage_bytes_counted(
-        pb, staged, campaign, monkeypatch):
-    """Real PQ source reads over published-staged bytes; stage serves."""
-    from prismaquant import layer_streaming  # noqa: E402
-    from prismaquant.residency_map import (  # noqa: E402
-        ENV_VAR, bind_residency_manifest, residency_resolver,
-        reset_residency_resolver_for_tests,
-    )
-    from safetensors import safe_open  # noqa: E402
-    tmp = campaign["tmp"]
-    map_path = _harness_map(pb, staged, campaign)
-    monkeypatch.setenv(ENV_VAR, str(map_path))
-    reset_residency_resolver_for_tests()
-    bind_residency_manifest(campaign["parent_sha"])
-    resolver = residency_resolver()
-    assert resolver is not None
-    for entry in campaign["parent"]["entries"]:
-        if not entry["path"].endswith(".safetensors"):
+        staged, campaign, monkeypatch):
+    """Actual immutable staged tensors equal independently known fixture values."""
+    from prismaquant import layer_streaming
+    from test_streamed_metadata_staged_reads import _deny_pool_opens
+
+    resolver = bind(monkeypatch, staged)
+    sources = {Path(e['path']) for e in campaign['parent']['entries']}
+    _deny_pool_opens(monkeypatch, campaign['tmp'] / 'pool' / 'model',
+                     names=tuple(source.name for source in sources))
+    expected = _tensors()
+    for source in sorted(sources):
+        if source.suffix != '.safetensors':
             continue
-        with layer_streaming._source_safe_open(
-                entry["path"], framework="pt") as reader:
-            with safe_open(entry["path"], framework="pt") as reference:
-                for name in reference.keys():
-                    got = reader.get_tensor(name)
-                    want = reference.get_tensor(name)
-                    if got.numel():
-                        assert torch.equal(
-                            got.view(torch.uint8),
-                            want.view(torch.uint8)), name
+        with layer_streaming._source_safe_open(str(source), framework='pt') as reader:
+            assert set(reader.keys()) == set(expected)
+            for name, want in expected.items():
+                got = reader.get_tensor(name)
+                assert got.dtype == want.dtype and got.shape == want.shape
+                assert torch.equal(got.view(torch.uint8), want.view(torch.uint8)), name
     report = resolver.report()
-    assert report["fallback_count"] == 0
-    assert report["bytes_from_stage"] > 0
+    assert report['fallbacks'] == [] and report['bytes_from_pool'] == 0
+    assert report['bytes_from_stage'] > 0 and resolver._windows == 0
 
 
 def test_join_accepts_and_gapped_refuses_downstream(
@@ -664,139 +354,3 @@ def test_join_accepts_and_gapped_refuses_downstream(
     assert results["status"] == "gapped"
     with pytest.raises(GappedPayloadRefused):
         load_joint_cost_for_allocation(out2 / "joint-cost.pkl")
-
-
-# -- candidate-gated scenarios: machine nonqualified output, never green ----
-
-
-@pytest.fixture(scope="module")
-def candidate_work(tmp_path_factory):
-    """One shared resolution dir; scenarios run in fresh subdirs below it."""
-    return tmp_path_factory.mktemp("candidate")
-
-
-def _run_scenario(name: str, tmp_path: Path, scenario_dir: str,
-                  candidate_work=None) -> dict:
-    """Run one runner scenario; skip on named nonqualification."""
-    base = candidate_work if candidate_work is not None else tmp_path
-    work = base / scenario_dir
-    result = base / (scenario_dir + ".json")
-    # The runner nests one level by scenario name under --work.
-    notes = work / name / "notes.json"
-    done = subprocess.run(
-        [sys.executable, str(RUNNER), name, "--work", str(work),
-         "--result", str(result), "--checkout", str(ROOT)],
-        capture_output=True, text=True, timeout=600)
-    assert result.is_file(), (
-        f"runner left no result document: rc={done.returncode}\n"
-        f"{done.stdout[-2000:]}\n{done.stderr[-2000:]}")
-    doc = json.loads(result.read_text())
-    assert doc["schema"] == "prismaquant.fleet_acceptance.result.v1", doc
-    assert doc["scenario"] == name, doc
-    if doc["status"] == "nonqualified":
-        reason = f"nonqualified: {doc['reason']}"
-        detail = doc.get("evidence", {}).get("detail", {})
-        if detail:
-            reason += "; detail=" + json.dumps(detail, sort_keys=True)
-        print(reason)
-        pytest.skip(reason)
-    if doc["status"] != "qualified":
-        print("EVIDENCE " + json.dumps(doc.get("evidence", {}),
-                                       sort_keys=True)[:15000])
-        if notes.is_file():
-            print("NOTES " + notes.read_text()[:8000])
-    assert doc["status"] == "qualified", doc["reason"]
-    return doc
-
-
-def test_resolve_names_the_verified_tree(tmp_path, candidate_work):
-    """The pin resolves to a verified tree or skips with the reason."""
-    doc = _run_scenario("resolve", tmp_path, "resolve", candidate_work)
-    assert doc["evidence"]["rev"] == pins.PB_CANDIDATE_REV
-    assert len(doc["evidence"]["tree_sha256"]) == 64
-
-
-def test_broker_roundtrip_is_real_client_and_authority(tmp_path, candidate_work):
-    """Broker ops go through the real client, socket, and Authority."""
-    doc = _run_scenario("broker-roundtrip", tmp_path, "broker", candidate_work)
-    assert doc["evidence"]["export"]["stopped"] is True
-
-
-def test_sdk_first_release_reclaims_once(tmp_path, candidate_work):
-    """R8 core: DONE terminal, export proof, reclaim-once, idempotent egress."""
-    doc = _run_scenario("sdk-first-release", tmp_path, "first-release", candidate_work)
-    ev = doc["evidence"]
-    # Authoritative DONE terminal + broker export from finish.
-    assert ev["terminal"].endswith(f"done/{'e' * 64}.json"), ev["terminal"]
-    assert ev["released_ok"] is True
-    assert ev["export"]["stopped"] is True
-    assert ev["export"]["empty"] is True
-    assert ev["export"]["tickets_pending"] is False
-    # Served bytes proven against the stage + fixture sources.
-    assert ev["read_matches_stage"] is True
-    assert len(ev["read_sha256"]) == 64
-    assert ev["read_bytes"] > 0
-    # Reclaim-once across the egress sequence: first evict reclaims the
-    # single held ref, same-mover repeat and second mover reclaim nothing.
-    assert isinstance(ev["auto_reclaimed"], list) and len(ev["auto_reclaimed"]) == 3
-    assert len(ev["auto_reclaimed"][0]) == 1
-    assert ev["auto_reclaimed"][1] == []
-    assert ev["auto_reclaimed"][2] == []
-    # Persisted proof the reclaim verified against.
-    assert ev["attestation_empty"] is True
-    assert ev["attestation"]["scope_empty"] is True
-    assert ev["proves_empty"] is True
-
-
-def test_sdk_recovery_reaper_retains_then_settles(tmp_path, candidate_work):
-    """R9 recovery: CLAIMED/finish_pending retained, reaper to DONE, successor isolated."""
-    doc = _run_scenario("sdk-recovery-reaper", tmp_path, "recovery", candidate_work)
-    ev = doc["evidence"]
-    assert ev["read_matches_stage"] is True
-    assert ev["pending_observed"] is True
-    assert ev["retained_proof"] == {
-        "scope_empty": False, "retired": True, "settled": False}
-    assert ev["refs_live"] == "attempt-ref-live"
-    assert ev["charge_cpu"] == 1
-    assert ev["reclaim_refused"] is True
-    assert ev["egress_retained"]["auto_reclaimed"] == []
-    assert len(ev["egress_retained"]["auto_retained"]) == 1
-    assert ev["reaped"] == []
-    assert ev["terminal"].endswith(f"done/{'e' * 64}.json"), ev["terminal"]
-    assert ev["charge_released"] is True
-    assert ev["done_export"]["retired"] is True
-    assert ev["done_export"]["settled"] is True
-    assert ev["done_export"]["tickets_pending"] is False
-    assert ev["proven_proof"] == {
-        "scope_empty": True, "settled": True, "retired": True}
-    assert len(ev["auto_reclaimed"][0]) == 1
-    assert ev["auto_reclaimed"][1] == []
-    assert ev["auto_reclaimed"][2] == []
-    assert ev["refs_released"] == "attempt-refs-released"
-    assert len(ev["successor_old_cert_skipped"]) == 1
-    assert "attempt mismatch" in ev["successor_old_cert_skipped"][0]
-    assert ev["successor_retained"] is True
-
-
-def test_sdk_pending_ticket_flows_or_names_its_gate(tmp_path, candidate_work):
-    """Ticket settle flow; cgroup-gated begin is a named nonqualification."""
-    doc = _run_scenario("sdk-pending-ticket", tmp_path, "pending-ticket", candidate_work)
-    assert doc["evidence"]["retired"] is True
-
-
-def test_sdk_namespace_separation_holds(tmp_path, candidate_work):
-    """Two owners pin separately; one release keeps the other's pin."""
-    doc = _run_scenario("sdk-namespace-separation", tmp_path, "namespaces", candidate_work)
-    assert len(doc["evidence"]["owner_dirs"]) == 2
-
-
-def test_sdk_failure_unwind_releases(tmp_path, candidate_work):
-    """Mid-hold errors unwind exactly; a fresh acquire still works."""
-    doc = _run_scenario("sdk-failure-unwind", tmp_path, "unwind", candidate_work)
-    assert doc["evidence"]["unwound_once"] is True
-
-
-def test_sdk_alias_host_derives_on_real_records(tmp_path, candidate_work):
-    """Holder derivation runs on the live claim; evidence names both."""
-    doc = _run_scenario("sdk-alias-host", tmp_path, "alias", candidate_work)
-    assert doc["evidence"]["derived_host"]

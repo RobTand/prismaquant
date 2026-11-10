@@ -117,69 +117,37 @@ def test_capture_seal_hashes_an_existing_selected_field():
         "schema": "golden", "seal": hashlib.sha256(encoded).hexdigest()}
 
 
-@pytest.mark.parametrize("stdout,returncode,detach", [
-    ('noise\n[]\n{}\n{"action_key":"first"}\n{broken\n'
-     '{"action_key":"last","note":"\\u00e9"}\n', 0,
-     {"action_key": "last", "note": "\u00e9"}),
-    ('{"action_key":null}\n', 0, {"action_key": None}),
-    ("noise\n{}\n", 0, None),
-    (None, 0, None),
-    ('{"action_key":"accepted-but-nonzero"}\n', 3,
-     {"action_key": "accepted-but-nonzero"}),
-])
-def test_capture_submission_record_precedes_native_refusal(
-        tmp_path, monkeypatch, stdout, returncode, detach):
-    completed = SimpleNamespace(stdout=stdout, stderr="error detail", returncode=returncode)
-    calls = []
-    written = []
-    original_writer = dispatch._write_json
-
-    def write(path, value):
-        written.append(path)
-        original_writer(path, value)
-
-    def run(argv, **kwargs):
-        calls.append((argv, kwargs))
-        return completed
-
-    monkeypatch.setattr(dispatch, "_write_json", write)
-    entry = {"name": "prep", "row": {"payload": "\u96ea", "value": float("nan")}}
-    if returncode != 0 or detach is None:
-        with pytest.raises(dispatch.ChainDispatchRefused) as refused:
-            dispatch._submit_row(tmp_path, entry, run=run)
-        assert str(refused.value) == f"row prep was not submitted (exit {returncode}): error detail"
-        assert refused.value.__cause__ is None
-    else:
-        result = dispatch._submit_row(tmp_path, entry, run=run)
-        assert result["detach"] == detach
-    command = [sys.executable, str(dispatch.PBCAMPAIGN), "--detach",
-               str(tmp_path / "manifests/prep.json")]
-    assert calls == [(command, {"capture_output": True, "text": True})]
-    record = {"name": "prep", "argv": command, "returncode": returncode,
-              "stdout": stdout, "stderr": "error detail", "detach": detach}
-    output = dispatch.submission_path(tmp_path, "prep")
-    assert output.read_bytes() == (json.dumps(record, indent=2, sort_keys=True) + "\n").encode()
-    assert written == [tmp_path / "manifests/prep.json", output]
-    assert (tmp_path / "manifests/prep.json").read_bytes() == (
-        b'[\n  {\n    "payload": "\\u96ea",\n    "value": NaN\n  }\n]\n')
+@pytest.mark.parametrize("failure", [ValueError("admission refused"), RuntimeError("submission unknown")])
+def test_capture_submission_intent_precedes_native_refusal(tmp_path, monkeypatch, failure):
+    from prismaquant import tessera_campaign_rows as rows
+    entry = {"name": "prep", "row": {"argv": ["/bin/echo", "雪"], "env": {}}}
+    def submit(application_rows, state_dir, *, afterok):
+        saved = json.loads(dispatch.submission_path(tmp_path, "prep").read_text())
+        assert saved["row"] == entry["row"]
+        assert saved["schema"] == split_dispatch.NATIVE_SUBMISSION_SCHEMA
+        assert "submissions" not in saved
+        raise failure
+    monkeypatch.setattr(rows, "submit_rows", submit)
+    with pytest.raises(split_dispatch.SplitDispatchRefused, match=str(failure)):
+        dispatch.submit_row(tmp_path, entry)
+    saved = json.loads(dispatch.submission_path(tmp_path, "prep").read_text())
+    assert saved["attempt"] == "attempt-1"
+    assert saved["row"]["argv"] == ["/bin/echo", "雪"]
+    assert "submissions" not in saved
 
 
-def test_capture_submission_uses_legacy_path_lookup_before_refusal(tmp_path, monkeypatch):
-    redirected = tmp_path / "redirected/attempt.json"
-    looked_up = []
-
-    def locate(round_dir, name):
-        looked_up.append((round_dir, name))
-        return redirected
-
-    monkeypatch.setattr(dispatch, "submission_path", locate)
-    completed = SimpleNamespace(stdout="no detach", stderr="", returncode=0)
-    with pytest.raises(dispatch.ChainDispatchRefused, match="row prep was not submitted"):
-        dispatch._submit_row(tmp_path, {"name": "prep", "row": {}},
-                             run=lambda *args, **kwargs: completed)
-    assert looked_up == [(tmp_path, "prep")]
-    assert json.loads(redirected.read_text())["stdout"] == "no detach"
-    assert not (tmp_path / "submissions/prep.json").exists()
+def test_capture_submission_persists_native_identity(tmp_path, monkeypatch):
+    from prismaquant import flux_jobs, tessera_campaign_rows as rows
+    state = tmp_path / "native/prep/attempt-1"
+    def submit(application_rows, state_dir, *, afterok):
+        assert Path(state_dir) == state
+        assert afterok == ()
+        return [flux_jobs.FluxSubmission("native-fixture-id", state / "rows/00000", "a" * 64)]
+    monkeypatch.setattr(rows, "submit_rows", submit)
+    result = dispatch.submit_row(tmp_path, {"name": "prep", "row": {"argv": ["/bin/true"]}})
+    assert result["submissions"] == [{"job_id": "native-fixture-id",
+        "record_dir": str(state / "rows/00000"), "launch_sha256": "a" * 64}]
+    assert json.loads(dispatch.submission_path(tmp_path, "prep").read_text()) == result
 
 
 def test_legacy_capture_aliases_retain_function_identity():

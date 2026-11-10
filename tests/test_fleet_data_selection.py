@@ -3,7 +3,7 @@
 A test that reads fleet-local campaign data or live PrismaBuild state that
 no PB action declares is marked ``fleet_data``. ``tests/conftest.py`` skips
 it by default with a reason that names the opt-in, and runs it when ``-m``
-names the mark (the switch ``pbtest --pytest-args`` accepts) or when
+names the mark (the switch the runner's pytest arguments accept) or when
 ``PQ_FLEET_DATA_TESTS=1``. A session of nothing but such tests exits 0, under
 xdist too. These tests drive real pytest sessions over
 ``tests/fleet_data_samples``.
@@ -64,7 +64,7 @@ def test_fleet_data_runs_when_asked_for(tmp_path, extra, environ):
 
 
 #: The decorator this test looks for, spelled as its dotted parts.
-#: ``pbtest`` decides fleet data per file by a textual search for the mark,
+#: the sharded runner decides fleet data per file by a textual search for the mark,
 #: so writing the dotted name out here would make it leave this hermetic
 #: file out of every unmarked run (PQ #1954).
 FLEET_DATA_DECORATOR = ["pytest", "mark", "fleet_data"]
@@ -77,13 +77,10 @@ MARKED_FILES = {
         "test_glm53_probe_expands_onto_the_census_roster"},
     "test_glm_joint_data_manifest_at_submit_fleet_data.py": {
         "test_the_real_joint_pass_read_set_is_terabytes_in_bounded_phases"},
-    "test_dispatch_shared_tag_placement_fleet_data.py": {
-        "test_dispatcher_tags_are_placeable_on_the_live_gb10_fleet"},
 }
 
 #: The hermetic halves the reads were split out of: they mark nothing.
-SPLIT_FROM = ("test_glm_joint_data_manifest_at_submit.py",
-              "test_dispatch_shared_tag_placement.py")
+SPLIT_FROM = ("test_glm_joint_data_manifest_at_submit.py",)
 
 
 def _marked_tests(name):
@@ -105,13 +102,13 @@ def _test_names(name):
 
 
 def test_the_marked_real_data_tests_carry_the_mark():
-    """The three reads #1014 names are marked, each alone in its file."""
+    """The two reads #1014 still names are marked, each alone in its file."""
     for name, expected in MARKED_FILES.items():
         assert _marked_tests(name) == expected, name
         tree_tests = _test_names(name)
         assert tree_tests == expected, (
             f"{name} holds unmarked tests {sorted(tree_tests - expected)}: "
-            "pbtest leaves the whole file out of an unmarked run")
+            "the runner leaves the whole file out of an unmarked run")
     for name in SPLIT_FROM:
         assert _marked_tests(name) == set(), name
 

@@ -1,6 +1,5 @@
 """A durable reverified prefix needs one cumulative publication, not N writes."""
 import json
-import os
 from functools import partial
 
 from prismaquant import tessera_joint_aura as bridge
@@ -14,19 +13,14 @@ def _case(tmp_path, monkeypatch):
     journal = tmp_path / 'head-walk'
     bridge.load_measured_anchor_input(config, verify_payloads=False,
                                      head_checkpoint=journal, progress_phase=None)
-    progress = tmp_path / 'progress.json'
-    monkeypatch.setenv('PRISMABUILD_ACTION_PROGRESS_PATH', str(progress))
-    monkeypatch.setenv('PRISMABUILD_ACTION_PROGRESS_TOKEN', 'test-token')
-    monkeypatch.delenv('PRISMAQUANT_DEV_PROGRESS_STAMP', raising=False)
     writes = []
-    replace = os.replace
+    log_progress = bridge.log_progress
 
-    def record_replace(source, target):
-        replace(source, target)
-        if str(target) == str(progress):
-            writes.append(json.loads(progress.read_text()))
+    def observe(units, phase, unit=None):
+        log_progress(units, phase, unit,
+                     log=lambda line: writes.append(json.loads(line.split(': ', 1)[1])))
 
-    monkeypatch.setattr(os, 'replace', record_replace)
+    monkeypatch.setattr(bridge, 'log_progress', observe)
     return config, sorted(names), fmt, journal, writes
 
 
@@ -98,8 +92,7 @@ def test_replay_longer_than_the_cadence_commits_during_the_drive(tmp_path, monke
     # #1518: a --head-resume replay that outlives its cadence reports its
     # cumulative verified prefix while the drive runs, not only at its end.
     config, names, _, journal, writes = _case(tmp_path, monkeypatch)
-    allowance_s = 0.2
-    cadence_s = allowance_s / bridge.PROGRESS_CADENCE_SAFETY_FACTOR
+    cadence_s = 0.05
     clock = [0.0]
     monkeypatch.setattr(bridge, "_ProgressCadence", partial(
         bridge._ProgressCadence, clock=lambda: clock[0]))
@@ -115,7 +108,7 @@ def test_replay_longer_than_the_cadence_commits_during_the_drive(tmp_path, monke
     during = _replay_drive_writes(monkeypatch, writes)
     resumed = bridge.load_measured_anchor_input(
         config, verify_payloads=False, head_checkpoint=journal, head_resume=True,
-        head_walk_workers=1, progress_allowance_s=allowance_s)
+        head_walk_workers=1, progress_interval_s=cadence_s)
     assert resumed.head_walk_resumed_units == len(names)
     units = [r['units_completed'] for r in writes]
     assert during[0] >= 2, f'the replay drive committed {during[0]} times while it ran'
@@ -125,25 +118,35 @@ def test_replay_longer_than_the_cadence_commits_during_the_drive(tmp_path, monke
     assert resumed.progress_committed == len(names)
 
 
-def test_replay_cadence_is_the_allowance_over_the_stated_factor():
+def test_replay_cadence_uses_the_explicit_local_interval():
     cadence = bridge._ProgressCadence('synthesize', 600)
-    assert bridge.PROGRESS_CADENCE_SAFETY_FACTOR == 4
-    assert cadence.cadence_s == 600 / bridge.PROGRESS_CADENCE_SAFETY_FACTOR == 150.0
+    assert cadence.cadence_s == 600.0
     assert not bridge._ProgressCadence('synthesize', None).active
     assert not bridge._ProgressCadence(None, 600).active
     import pytest
     for bad in (0, -1, float('inf'), float('nan'), '600', True):
-        with pytest.raises(ValueError, match='progress_allowance_s'):
+        with pytest.raises(ValueError, match='progress_interval_s'):
             bridge._ProgressCadence('synthesize', bad)
+
+
+def test_retired_watchdog_allowance_refuses_before_input_reads(monkeypatch):
+    import pytest
+
+    def refuse(*args, **kwargs):
+        raise AssertionError('retired allowance reached input reads')
+
+    monkeypatch.setattr(bridge, '_head_walk_worker_count', refuse)
+    with pytest.raises(ValueError, match='retired PB no-progress watchdog'):
+        bridge.load_measured_anchor_input({}, progress_allowance_s=60)
 
 
 def test_replay_inside_one_window_writes_its_first_and_final_count_only(tmp_path, monkeypatch):
     # O(1) writes per window (#822's substance): a fast replay under a long
-    # allowance commits the first verified unit and the final count, nothing per unit.
+    # interval logs the first verified unit and the final count, nothing per unit.
     config, names, _, journal, writes = _case(tmp_path, monkeypatch)
     resumed = bridge.load_measured_anchor_input(
         config, verify_payloads=False, head_checkpoint=journal, head_resume=True,
-        head_walk_workers=1, progress_allowance_s=600)
+        head_walk_workers=1, progress_interval_s=600)
     assert resumed.head_walk_resumed_units == len(names)
     assert [(r['units_completed'], r['unit']) for r in writes] == [(1, names[0]), (len(names), names[-1])]
 
@@ -154,8 +157,7 @@ def test_overlay_fence_continues_the_count_on_the_cadence(tmp_path, monkeypatch)
     # cadence, and progress_committed carries the final count onward.
     from prismaquant import joint_catalog_extension as jce
     config, names, _, journal, writes = _case(tmp_path, monkeypatch)
-    allowance_s = 0.2
-    cadence_s = allowance_s / bridge.PROGRESS_CADENCE_SAFETY_FACTOR
+    cadence_s = 0.05
     overlay_cells = 3
     calls = []
     clock = [0.0]
@@ -177,7 +179,7 @@ def test_overlay_fence_continues_the_count_on_the_cadence(tmp_path, monkeypatch)
     before = len(writes)
     resumed = bridge.load_measured_anchor_input(
         config, verify_payloads=False, head_checkpoint=journal, head_resume=True,
-        head_walk_workers=1, progress_allowance_s=allowance_s)
+        head_walk_workers=1, progress_interval_s=cadence_s)
     # The overlay's hash concurrency is the IO engine's, not the walk's (#1531).
     assert calls and 'hash_workers' not in calls[0]
     overlay = [r['units_completed'] for r in writes[before:] if r['units_completed'] > len(names)]

@@ -74,7 +74,7 @@ from prismaquant.stage_a_head import drop_source_head_walk_reads  # noqa: E402
 from tools.build_stagea_seed_package import (  # noqa: E402
     _checkpoint_files,
     _entry,
-    _pb_validate,
+    _manifest_validator,
     assemble_phases,
     manifest_wire,
     peak_consecutive_bytes,
@@ -425,7 +425,7 @@ def forward_main(argv=None) -> int:
         original_manifest_sha256=args.original_manifest_sha256,
         plan={"path": args.plan, "sha256": args.plan_sha256}, ranges=ranges,
         n_batches=args.n_batches, group_size=args.group_size, output=args.output,
-        validate=_pb_validate())
+        validate=_manifest_validator())
     print(indent2_json_file_bytes({key: value for key, value in package.items()
                                    if key not in ("prep", "quanta")}).decode(), end="")
     return 0
@@ -465,7 +465,7 @@ def main(argv=None) -> int:
         plan={"path": args.plan, "sha256": args.plan_sha256},
         output_root=args.output_root, chain_state_sha256=args.chain_state_sha256,
         checkpoint_sha256=args.checkpoint_sha256, through=args.through, ranges=ranges,
-        output=args.output, validate=_pb_validate())
+        output=args.output, validate=_manifest_validator())
     print(DIRECT_ASCII_SPACED_LAX.text({key: value for key, value in package.items()
                       if key not in ("prep", "quanta")}))
     return 0

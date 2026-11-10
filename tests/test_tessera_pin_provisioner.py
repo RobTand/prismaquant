@@ -28,7 +28,7 @@ def test_the_provisioner_reads_the_commit_the_ci_resolver_prints():
     mod = _load()
     commit, sha = mod.reviewed_pin()
     printed = subprocess.run(
-        [sys.executable, str(RESOLVER)],
+        [sys.executable, '-s', str(RESOLVER)],
         capture_output=True, text=True, check=True,
     ).stdout.strip()
     assert commit == printed
@@ -106,7 +106,7 @@ def test_check_only_refuses_an_interpreter_that_is_not_on_the_pin(tmp_path):
     _load().materialise(new, clone, tmp_path / "pins")
 
     completed = subprocess.run(
-        [sys.executable, str(TOOL), "--python", str(python),
+        [sys.executable, '-s', str(TOOL), "--python", str(python),
          "--pin-source", str(pin), "--clone", str(clone),
          "--pins-root", str(tmp_path / "pins"), "--check-only"],
         capture_output=True, text=True, check=False,

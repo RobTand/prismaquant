@@ -25,10 +25,11 @@ python_runner = load('bazel_python_runner', 'tools/bazel/python_runner.py')
 runtime = load('bazel_runtime', 'tools/bazel/runtime.py')
 
 
-def test_sdk_admission_state_uses_the_actions_private_local_scratch(tmp_path):
-    environ = runtime.gate_environment({'PRISMABUILD_BOX_STATE_ROOT': '/ambient/state'},
-                                       ROOT, tmp_path)
-    assert environ['PRISMABUILD_BOX_STATE_ROOT'] == str(tmp_path / 'pb-box-state')
+def test_the_gate_environment_is_private_scratch_and_names_no_box_state(tmp_path):
+    environ = runtime.gate_environment({'PATH': '/usr/bin', 'TEST_TMPDIR': '/bazel/tmp'}, ROOT, tmp_path)
+    assert environ['TMPDIR'] == environ['HOME'] == str(tmp_path)
+    assert 'TEST_TMPDIR' not in environ
+    assert not [name for name in environ if name.startswith('PRISMABUILD_')]
 
 
 def test_every_generated_input_has_a_check_and_one_fix():
@@ -98,13 +99,14 @@ def test_a_fully_deselected_file_passes_and_a_failed_node_fails():
 
 def test_shards_partition_the_collected_tests(tmp_path):
     module = tmp_path / 'test_many.py'
-    module.write_text(''.join(f'def test_{index}():\n    pass\n' for index in range(7)))
+    module.write_text('import sys\nassert sys.flags.no_user_site\n' +
+                      ''.join(f'def test_{index}():\n    pass\n' for index in range(7)))
     (tmp_path / 'bazel_shard.py').write_text(python_runner.SHARD_PLUGIN)
     seen = []
     for index in range(3):
         environment = dict(os.environ, PQ_BAZEL_SHARD_INDEX=str(index), PQ_BAZEL_TOTAL_SHARDS='3',
                            PYTHONPATH=str(tmp_path))
-        result = subprocess.run([sys.executable, '-m', 'pytest', str(module), '-p', 'bazel_shard',
+        result = subprocess.run([sys.executable, '-s', '-m', 'pytest', str(module), '-p', 'bazel_shard',
                                  '-q', '--collect-only', '--rootdir=' + str(tmp_path), '-p', 'no:cacheprovider'],
                                 cwd=tmp_path, env=environment, capture_output=True, text=True, check=True)
         seen.append({line for line in result.stdout.splitlines() if '::test_' in line})
@@ -170,7 +172,7 @@ def test_no_credential_reaches_a_test_on_any_lane(tmp_path):
     assert environment['PATH'] == '/usr/bin'
 
 
-def test_the_export_tracks_the_project_lock_and_sdk_pin(tmp_path):
+def test_the_export_tracks_the_project_lock(tmp_path):
     for name in requirements.SOURCES:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,27 +180,10 @@ def test_the_export_tracks_the_project_lock_and_sdk_pin(tmp_path):
     before = requirements.source_digest(tmp_path)
     (tmp_path / 'uv.lock').write_text((ROOT / 'uv.lock').read_text() + '\n')
     assert requirements.source_digest(tmp_path) != before
-    assert 'prismaquant/staged_lease.py' in requirements.SOURCES
+    assert not hasattr(requirements, 'SDK_PROVENANCE')
 
 
-def test_the_registry_export_contains_the_reviewed_hashed_sdk_archive():
-    from prismaquant.staged_lease import PB_READER_LEASE_PIN_COMMIT
+def test_the_registry_export_pins_no_retired_client():
     for platform in requirements.PLATFORMS:
         export = (ROOT / requirements.EXPORT.format(platform)).read_text()
-        assert requirements.pins(export)['prismabuild'] == (
-            'https://github.com/RobTand/prismabuild/archive/' + PB_READER_LEASE_PIN_COMMIT + '.tar.gz')
-        sdk = next(block for block in export.split('\n\n') if block.startswith('prismabuild @'))
-        assert '--hash=sha256:e2f64a500db635dcc619338e3ced8bfff14f28d23a588a4a01897a944f712970' in sdk
-
-
-def test_sdk_import_graph_child_declares_its_selected_test_modules():
-    from types import SimpleNamespace
-
-    control = load('sdk_import_graph_control', 'tests/test_prismabuild_import_leak_1281.py')
-    families, _ = control._source_refusal_representatives(ROOT / 'tests')
-    required = {target.split('::', 1)[0] for target in families.values()}
-    scope = {'struct': SimpleNamespace}
-    exec((ROOT / 'tools/bazel/test_inputs.bzl').read_text(), scope)
-    entry = scope['TEST_INPUTS'].get('//tests:test_prismabuild_import_leak_1281')
-    declared = set(getattr(entry, 'modules', []))
-    assert required <= declared, sorted(required - declared)
+        assert 'prismabuild' not in {name.replace('_', '-') for name in requirements.pins(export)}

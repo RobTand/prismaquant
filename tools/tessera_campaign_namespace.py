@@ -9,12 +9,12 @@ import stat
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
 
-from tools.pq_profile_digest import canonical_json_bytes, canonical_json_sha256
-from tools.pq_admitted_profile import (
+from tools.pq_profile_artifact import canonical_json_bytes, canonical_json_sha256
+from tools.pq_profile_artifact import (
     profile_local_destination, profiled_row_command, profiled_workload_parts,
 )
 
-SCHEMA = "prismaquant.tessera_campaign_namespace.v1"
+SCHEMA = "prismaquant.tessera_campaign_namespace.v2"
 PROFILE_SCHEMA = "prismaquant.tessera_namespace_profile.v1"
 RECONCILIATION_SCHEMA = "prismaquant.tessera_namespace_reconciliation.v1"
 OUTPUTS = {"--out": "cost.pkl", "--cache-dir": "cache", "--checkpoint": "cost.anchors.json"}
@@ -213,10 +213,19 @@ def prepare_namespace_requests(*, requests: list[dict], selected: list[str],
         raise RuntimeError("namespace may select only reconciled unfinished requests")
     if provenance != expected_provenance:
         raise RuntimeError("namespace independent dependency provenance differs")
-    if (set(provenance) != {"tessera_commit", "prismabuild_commit", "container_content_sha256"}
+    profile = provenance.get("native_profile") if isinstance(provenance, dict) else None
+    if (not isinstance(provenance, dict)
+            or set(provenance) != {"tessera_commit", "container_content_sha256",
+                                   "native_profile", "native_runtime_sha256"}
+            or not isinstance(profile, dict)
+            or set(profile) != {"profile", "config_sha256", "r_sha256"}
+            or not isinstance(profile["profile"], str) or not profile["profile"]
             or any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{" + str(size) + r"}", value) is None
-                   for name, size in (("tessera_commit", 40), ("prismabuild_commit", 40),
-                                      ("container_content_sha256", 64)) for value in (provenance[name],))):
+                   for value, size in ((provenance["tessera_commit"], 40),
+                                       (provenance["container_content_sha256"], 64),
+                                       (provenance["native_runtime_sha256"], 64),
+                                       (profile["config_sha256"], 64),
+                                       (profile["r_sha256"], 64)))):
         raise RuntimeError("namespace requires exact dependency provenance")
     if set(readsets) != set(selected):
         raise RuntimeError("namespace selected readset roster differs")

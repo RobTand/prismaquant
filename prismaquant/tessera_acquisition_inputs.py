@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 if __package__:
-    from . import digests as _digests, file_identity as _file_identity, schemas as _schemas
+    from . import digests as _digests, file_identity as _file_identity, contract_checks as _contracts
 else:
     # CPU metadata builders load exact adjacent stdlib owners by source file,
     # like their existing selection/phase owners; never fabricate a package.
@@ -16,7 +16,7 @@ else:
     import sys
 
     _owners = {}
-    for _name in ("digests", "file_identity", "schemas"):
+    for _name in ("digests", "file_identity", "contract_checks"):
         _spec = importlib.util.spec_from_file_location(
             "tessera_acquisition_" + _name, Path(__file__).with_name(_name + ".py"))
         if _spec is None or _spec.loader is None:
@@ -29,10 +29,10 @@ else:
             sys.modules.pop(_spec.name, None)
             raise
         _owners[_name] = _owner
-    _digests, _file_identity, _schemas = (_owners[name] for name in (
-        "digests", "file_identity", "schemas"))
+    _digests, _file_identity, _contracts = (_owners[name] for name in (
+        "digests", "file_identity", "contract_checks"))
 
-_require = _schemas.Contract(ValueError).require
+_require = _contracts.Contract(ValueError).require
 # One metadata pair only: no request/cost payload bytes or scientific result.
 # Every reuse checks both stat fences; runtime readers retain their own cache.
 _VERIFIED_CONTROL_INPUTS = None
@@ -70,7 +70,7 @@ def read_joint_campaign_acquisition_document(binding: dict, *, reader=None) -> t
         _, raw = _metadata_input(binding, "joint acquisition request", retain_bytes=True)
     else:
         raw = reader(binding, "joint acquisition request")
-    document = _schemas.strict_json_loads(
+    document = _contracts.strict_json_loads(
         raw, duplicate=lambda key: ValueError(f"joint acquisition duplicate JSON key: {key}"),
         constant=lambda value: ValueError(f"joint acquisition nonfinite JSON value: {value}"))
     _require(isinstance(document, dict) and document.get("schema") ==

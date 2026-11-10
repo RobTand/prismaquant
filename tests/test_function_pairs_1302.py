@@ -292,7 +292,6 @@ def test_gold_provenance(monkeypatch, runner, case):
 
 @pytest.mark.parametrize("ref", [
     "tools.render_window_bench._drop_pages",
-    "tools.pwc_window_load_bench._drop_client_pages",
     "tools.staged_exact_read_bench.drop_client_cache",
     "tools.staged_read_stream_ab.drop_client_cache",
 ])

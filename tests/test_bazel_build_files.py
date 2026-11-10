@@ -70,7 +70,7 @@ def generate_graph_json(root, output):
     return output.read_bytes()
 
 
-@pytest.mark.parametrize('name', ['.pbrun-closure.x.json', 'pbrun_result.x.txt'])
+@pytest.mark.parametrize('name', ['.closure.x.json', 'result.x.txt'])
 def test_untracked_root_files_leave_the_graph_json_byte_identical(indexed_repository, tmp_path, name):
     root = indexed_repository
     output = tmp_path / 'graph.json'  # Not an input to the miniature repository.

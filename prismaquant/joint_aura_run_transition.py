@@ -15,8 +15,8 @@ admits it, closed:
   ``implementation_sha256``. One byte anywhere else refuses.
 * The receipt binds the plan, the prepared record, its production cache and
   the campaign identity by digest, and the actual new package by its complete
-  content hash. It binds bytes, not a Git commit: PrismaBuild seals a distinct
-  snapshot commit for every submission (the pbrun closure file is in the
+  content hash. It binds bytes, not a Git commit: the execution system seals a distinct
+  snapshot commit for every submission (the closure file is in the
   sealed tree), so the executing commit is recorded as an observation. In the
   campaign image there is no git binary, so that observation is the sealed
   checkout's HEAD read as a file, and the checkpoint identity's commit

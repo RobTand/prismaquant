@@ -20,7 +20,7 @@ from .digests import (
     bytes_sha256hex,
     indent2_json_file_bytes,
 )
-from .staged_lease import client_sdk
+from .recorded_cas_receipt import POOL_OUTCOME_SCHEMA, cas_receipt_self_check
 
 SCHEMA = 'prismaquant.glm_capture_derivative_compatibility.v1'
 CAPTURE_ACTION = '8740a0b3456bb6cb334ae80b0e35fc3da31c62918abdda8c41ad226020c4e88a'
@@ -51,8 +51,8 @@ def _completion_literal(text):
     return value
 
 
-#: This module's message for each ``prismabuild.client.cas_receipt_self_check``
-#: refusal, in PB's check order (``RECEIPT_REFUSALS``).
+#: This module's message for each ``recorded_cas_receipt.cas_receipt_self_check``
+#: refusal, in its check order (``RECEIPT_REFUSALS``).
 _RECEIPT_REFUSAL_MESSAGES = {
     'cas-receipt-shape': 'canonical v3 CAS receipt required',
     'cas-receipt-digest': 'CAS receipt body digest differs',
@@ -61,14 +61,13 @@ _RECEIPT_REFUSAL_MESSAGES = {
 
 
 def _verify_cas_receipt(receipt, snapshot, output):
-    """PB's receipt self-check, then this capture's own bindings.
+    """The recorded receipt's own-digest check, then this capture's own bindings.
 
-    The receipt's shape and both digests are PrismaBuild's to define, so they
-    are checked by PB's client SDK (``cas_receipt_self_check``, PB #1254),
-    never restated here. What is this module's is what the receipt must bind:
-    the reviewed source snapshot input and these exact output bytes.
+    The receipt's shape and both digests are checked offline by
+    ``recorded_cas_receipt``. What is this module's is what the receipt must
+    bind: the reviewed source snapshot input and these exact output bytes.
     """
-    refusal = client_sdk().cas_receipt_self_check(receipt)
+    refusal = cas_receipt_self_check(receipt)
     _require(refusal is None, _RECEIPT_REFUSAL_MESSAGES.get(refusal, f'CAS receipt refused: {refusal}'))
     producer = receipt['producer']
     _require(snapshot['input'] in producer.get('inputs', []), 'CAS producer does not bind the reviewed source snapshot input')
@@ -87,7 +86,7 @@ def _producer(evidence, capture):
     output = _bytes(evidence['output'], 'original capture CAS output')
     _require(request.get('action_key') == terminal.get('action_key') == receipt.get('action_key') == CAPTURE_ACTION,
              'original producer action differs')
-    _require(terminal.get('schema') == client_sdk().POOL_OUTCOME_SCHEMA_V1 and terminal.get('status') == 'executed' and
+    _require(terminal.get('schema') == POOL_OUTCOME_SCHEMA and terminal.get('status') == 'executed' and
              type(terminal.get('detail', {}).get('returncode')) is int and terminal['detail']['returncode'] == 0 and
              terminal.get('resource_scope_cleanup', {}).get('complete') is True, 'original capture has not completed successfully')
     snapshot = request['params']['checkout_snapshot']

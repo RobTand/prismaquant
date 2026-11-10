@@ -31,9 +31,8 @@ def test_each_byte_hash_routes_and_retains_its_refusal(tmp_path, monkeypatch, ra
     source.write_bytes(raw)
     binding = dict(path=str(source), sha256=digest)
     snapshot = dict(input="fixture-snapshot", parent=compatibility.CAPTURE_SOURCE)
-    sdk = SimpleNamespace(POOL_OUTCOME_SCHEMA_V1="fixture-terminal",
-                          cas_receipt_self_check=lambda receipt: None)
-    monkeypatch.setattr(compatibility, "client_sdk", lambda: sdk)
+    monkeypatch.setattr(compatibility, "POOL_OUTCOME_SCHEMA", "fixture-terminal")
+    monkeypatch.setattr(compatibility, "cas_receipt_self_check", lambda receipt: None)
     capture = dict(path="fixture-capture", sha256="c" * 64)
     output = ("[campaign] complete streamed calibration capture: " + repr(capture) + "\n" +
               json.dumps(dict(schema="prismaquant.tessera_campaign_container.v1",
@@ -53,7 +52,7 @@ def test_each_byte_hash_routes_and_retains_its_refusal(tmp_path, monkeypatch, ra
             checkout_snapshot=snapshot, command=["python3", "-m", "tools.tessera_campaign_container",
                 "--spec", json.dumps(dict(container=dict(
                     content_sha256=compatibility.ORIGINAL_IMAGE_CONTENT_SHA256)))])),
-        terminal=dict(action_key=compatibility.CAPTURE_ACTION, schema=sdk.POOL_OUTCOME_SCHEMA_V1,
+        terminal=dict(action_key=compatibility.CAPTURE_ACTION, schema=compatibility.POOL_OUTCOME_SCHEMA,
                       status="executed", detail=dict(returncode=0),
                       resource_scope_cleanup=dict(complete=True), checkout_snapshot=snapshot),
         receipt=dict(action_key=compatibility.CAPTURE_ACTION, producer=dict(inputs=[snapshot["input"]]),

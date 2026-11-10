@@ -81,9 +81,8 @@ SEED_GENERATION = 2002
 def _capsule(base, monkeypatch, *, frontier):
     """R9's forward pass, contained after boundary ``frontier``, frozen into a capsule."""
     from prismaquant import joint_forward_resume as recovery_mod
-    from test_joint_forward_resume import _bound, _chain_sdk, _owner_spool
-
-    monkeypatch.setattr(recovery_mod, "_sdk", _chain_sdk)
+    from test_joint_forward_resume import _bound
+    from produced_native_fixtures import selected_publications, recovery_publication
     base.mkdir(parents=True, exist_ok=True)
     refs, identities = {}, []
     last = len(draw()) - 1
@@ -91,19 +90,18 @@ def _capsule(base, monkeypatch, *, frontier):
                  identities=identities,
                  interrupt=lambda kw: kw.get("probe_index") is None and (
                      kw["boundary_index"], kw["batch_index"]) == (frontier, last))
-    spool, instance, template = _owner_spool(base, "e" * 64, refs)
     ref = refs[0, 0]
     capsule = base / "r9-capsule.json"
-    recovery_mod.build_forward_recovery(specification={
-        "schema": recovery_mod.SCHEMA, "queue_root": str(base / "queue"),
-        "instance": instance, "template": template,
-        "session": json.loads(ref.metadata_json)["identity"]["session"],
+    specification = {
         "original_bind_identity": identities[-1],
         "campaign_identity": {**CAMPAIGN, "campaign_scope": None},
         "implementation_compatibility": {"original": ONE, "recovery": TWO,
                                          "scope": "forward-identical-memory-only"},
-        "n_batches": len(draw()), "entry_shape": list(ref.shape), "entry_dtype": ref.dtype},
-        spool_directory=spool, output=capsule, frontier=frontier)
+        "n_batches": len(draw()), "entry_shape": list(ref.shape), "entry_dtype": ref.dtype}
+    selection, _pub, _selected = recovery_publication(base / 'publication', refs,
+        specification, selected_publications(monkeypatch))
+    recovery_mod.build_forward_recovery(selection=selection, specification=specification,
+        output=capsule, frontier=frontier)
     return _bound(capsule)
 
 

@@ -1,23 +1,22 @@
-"""PB's launch-bound staged ranges, translated through G3 container mounts.
+"""G3's reads of immutable staged ranges, translated through the G3 container mounts.
 
-Only the admitted helper tree owns map validation, pinning and release. A map
-miss reads the declared origin. A named range never uses an origin fallback.
-Each phase holds batched tier leases until all its descriptors close.
-Unavailable RAM covers or acquisition can select published stage covers.
-Integrity and unknown refusals never select another copy.
+The bound staged manifest (``prismaquant.staged_launch``) is the only authority: the
+existing resolver answers each declared range and a ``LeaseWindow`` holds the
+phase's descriptors until the phase finishes. A range the manifest does not declare
+reads its declared origin. A declared range that fails an integrity check raises and
+never reads another copy.
 """
 import json
 import os
 from pathlib import Path
-import sys
 import threading
 import time
-import uuid
 from g3_pq_policy.digests import bytes_sha256hex
-from g3_pq_policy.staged_lease import classify_refusal
+from g3_pq_policy.staged_manifest import PATH_ENV, SHA_ENV, MAX_BYTES, load_staged_manifest, read_document
 
 _LOCK = threading.Lock()
 _READER = None
+PLAN_SCHEMA = 'prismaquant.prismabuild.data_manifest.v2'
 
 
 def resolve_g3_origin(path, mounts=None):
@@ -42,24 +41,17 @@ def read_fd(fd, offset, size):
 
 class StagedReader:
     def __init__(self):
-        helper = os.environ['PRISMABUILD_READER_HELPER_ROOT']
-        sys.path.insert(0, str(Path(helper) / 'src'))
-        from prismabuild import client
-        self.lease, self.maps = client, client
-        context = client.injected_context(env=os.environ)
-        if not context['ok']:
-            raise RuntimeError(f'PB staged reader context: {context["refusal"]}')
-        self.ctx = context['ctx']
-        self.queue = client.PoolQueue(self.ctx['queue_root'])
-        self.root = Path(self.ctx['queue_root']) / 'residency'
-        self.stats = {"staged_bytes": 0, "staged_reads": 0, "read_s": 0.0, "tiers": {},
-                      "map_parses": 0, "phase_acquires": 0}
+        from g3_pq_policy import residency_map as maps
+        from g3_pq_policy import staged_lease as lease
+        self.resolver = maps.residency_resolver()
+        if self.resolver is None:
+            raise RuntimeError('G3 staged reader requires an explicit staged manifest')
+        self.maps, self.lease = maps, lease
+        self.stats = {"staged_bytes": 0, "staged_reads": 0, "read_s": 0.0, "tiers": {}, "phase_acquires": 0}
         self.lock = threading.RLock()
-        self.mapping = None
-        self.map_identity = None
         self.windows = {}
         self.closed_phases = set()
-        self.phase_keys, self.key_phases = {}, {}
+        self.phase_keys, self.key_phases, self.extents = {}, {}, {}
         if os.environ.get("G3_READ_PLAN"):
             plan = json.loads(Path(os.environ["G3_READ_PLAN"]).read_bytes())
             prefix = os.environ.get("G3_PHASE_PREFIX", "")
@@ -67,85 +59,51 @@ class StagedReader:
                 if prefix and not phase["name"].startswith(prefix):
                     continue
                 name = phase["name"][len(prefix):]
-                keys = [self.maps.residency_map_key(plan["entries"][i]["path"], plan["entries"][i]["offset"])
-                        for i in phase["entry_indices"]]
+                keys = []
+                for i in phase["entry_indices"]:
+                    row = plan["entries"][i]
+                    key = self.maps.residency_map_key(row["path"], row["offset"])
+                    self.extents[key] = (row["path"], row["offset"], row["bytes"])
+                    keys.append(key)
                 self.phase_keys[name] = keys
                 for key in keys:
                     self.key_phases.setdefault(key, name)
 
-    def _map(self):
-        stat = os.stat(self.ctx["map_path"])
-        identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
-        if identity != self.map_identity:
-            # RAM overlays can change without a new fragment-count generation.
-            # Cache the atomic file identity, not only mapping["generation"].
-            self.mapping = self.maps.read_residency_map(self.ctx["map_path"])
-            self.map_identity = identity
-            self.stats["map_parses"] = self.stats.get("map_parses", 0) + 1
-        return self.mapping
+    def _declared(self, key):
+        path, offset, size = self.extents[key]
+        entry, verdict = self.resolver.staged_range_outcome(path, offset, offset + size)
+        if verdict != self.maps.RANGE_HIT or entry["offset"] != offset or entry["bytes"] != size:
+            return None
+        return path, entry
 
-    def _window(self, mapping, key, phase):
+    def _window(self, key, declared, entry, phase):
         for window in self.windows.get(phase, []):
             if key in window["entries"]:
                 return window
-        entry = mapping["entries"][key]
-        tier = mapping["ram_tier_id"] if "ram_path" in entry else mapping["tier_id"]
-        epoch = mapping["ram_epoch"] if "ram_path" in entry else ""
         pinned = {k for window in self.windows.get(phase, []) for k in window["entries"]}
-        keys = self.phase_keys.get(phase, mapping["entries"])
-        selected = {k: mapping["entries"][k] for k in keys if k in mapping["entries"] and k not in pinned
-                    and ("ram_path" in mapping["entries"][k]) == ("ram_path" in entry)}
-        covers = self.lease.covers_for_keys(self.root, self.ctx["action_key"], list(selected), tier_id=tier,
-                                          manifest_sha256=mapping["manifest_sha256"], epoch=epoch)
-        if not covers["ok"] and "ram_path" in entry and classify_refusal(covers["refusal"]) == "availability":
-            # PB permits unavailable RAM covers to select the same bytes on stage.
-            # Integrity and unknown refusals never select another copy.
-            tier, epoch = mapping["tier_id"], ""
-            covers = self.lease.covers_for_keys(self.root, self.ctx["action_key"], list(selected), tier_id=tier,
-                                              manifest_sha256=mapping["manifest_sha256"], epoch=epoch)
-        if not covers["ok"]:
-            raise RuntimeError(f'{phase}: PB covering material: {covers["refusal"]}')
-        acq = self.lease.acquire_for(
-            self.ctx, tier_id=tier, epoch=epoch, covers=covers["covers"],
-            expected={k: {"bytes": e["bytes"], "sha256": e["sha256"]} for k, e in selected.items()},
-            span={"start_bytes": 0, "end_bytes": sum(e["bytes"] for e in selected.values())},
-            acquire_token=uuid.uuid4().hex, residency_root=self.root)
-        if not acq["ok"] and "ram_path" in entry and tier != mapping["tier_id"] \
-                and classify_refusal(acq["refusal"]) == "availability":
-            # PB acquire proves availability after covers did: the RAM epoch
-            # moved or the fragment dropped between the two calls (pinned SDK
-            # reader_lease.acquire: unpublished, stale-epoch, retiring). The
-            # failed acquire files no pin, so re-cover the same bytes on stage.
-            # Integrity and unknown refusals never select another copy.
-            tier, epoch = mapping["tier_id"], ""
-            covers = self.lease.covers_for_keys(self.root, self.ctx["action_key"], list(selected), tier_id=tier,
-                                              manifest_sha256=mapping["manifest_sha256"], epoch=epoch)
-            if not covers["ok"]:
-                raise RuntimeError(f'{phase}: PB covering material: {covers["refusal"]}')
-            acq = self.lease.acquire_for(
-                self.ctx, tier_id=tier, epoch=epoch, covers=covers["covers"],
-                expected={k: {"bytes": e["bytes"], "sha256": e["sha256"]} for k, e in selected.items()},
-                span={"start_bytes": 0, "end_bytes": sum(e["bytes"] for e in selected.values())},
-                acquire_token=uuid.uuid4().hex, residency_root=self.root)
-        if not acq["ok"]:
-            raise RuntimeError(f'{phase}: PB reader lease: {acq["refusal"]}')
-        window = {"acq": acq, "entries": selected, "active": 0}
+        items, keys = [(declared, entry)], [key]
+        for other in self.phase_keys.get(phase, []):
+            if other == key or other in pinned or other not in self.extents:
+                continue
+            found = self._declared(other)
+            if found is not None:
+                items.append(found)
+                keys.append(other)
+        lease, keys = self.lease.acquire_entries_window(self.resolver, items, tier='ssd')
+        lease.__enter__()
+        window = {"lease": lease, "entries": dict(zip(keys, (e for _, e in items))), "active": 0}
         self.windows.setdefault(phase, []).append(window)
-        self.stats["phase_acquires"] = self.stats.get("phase_acquires", 0) + 1
+        self.stats["phase_acquires"] += 1
         return window
 
     def finish_phase(self, phase):
         with self.lock:
             windows = self.windows.get(phase, [])
             if any(window["active"] for window in windows):
-                raise RuntimeError(f"{phase}: PB phase still has open descriptors")
+                raise RuntimeError(f"{phase}: staged phase still has open descriptors")
             self.closed_phases.add(phase)
             for window in list(windows):
-                acq = window["acq"]
-                released = self.lease.release(self.queue, acq["pin_id"], acq["ref_id"],
-                                              consumer_action_key=self.ctx["action_key"], residency_root=self.root)
-                if not released:
-                    raise RuntimeError(f"{phase}: PB reader release failed: {released}")
+                window["lease"].__exit__(None, None, None)
                 windows.remove(window)
 
     def close(self):
@@ -153,49 +111,48 @@ class StagedReader:
             self.finish_phase(phase)
 
     def read(self, path, offset, size):
-        key = self.maps.residency_map_key(resolve_g3_origin(path), offset)
+        declared = resolve_g3_origin(path)
+        key = self.maps.residency_map_key(declared, offset)
         with self.lock:
-            # A map miss reads the declared origin, so it never raises:
-            # the default phase below only labels mapped keys with no
-            # tracked phase, and unmapped keys return before this check.
-            mapping = self._map()
-            entry = mapping["entries"].get(key)
+            # An undeclared range reads its declared origin and never raises; a declared
+            # range never reads another copy.
+            entry, verdict = self.resolver.staged_range_outcome(declared, offset, offset + size)
             if entry is None:
                 return None
+            if entry["offset"] != offset or entry["bytes"] != size:
+                raise RuntimeError(f"{key}: staged range differs from requested {size} bytes at {offset}")
+            self.extents.setdefault(key, (declared, offset, size))
             phase = self.key_phases.get(key, "setup" if self.phase_keys else "smoke")
             if phase in self.closed_phases:
                 raise RuntimeError(f"{key}: read from completed phase {phase}")
-            if entry["bytes"] != size:
-                raise RuntimeError(f"{key}: staged range length differs from requested {size}")
-            window = self._window(mapping, key, phase)
+            window = self._window(key, declared, entry, phase)
             entry = window["entries"][key]
-            acq = window["acq"]
             window["active"] += 1
         start = time.perf_counter()
         fd = None
         try:
-            fd, serving = self.lease.open_pinned(self.queue, acq['pin'], acq['ref_id'], key, residency_root=self.root)
-            raw = read_fd(fd, 0, size)
-            if bytes_sha256hex(raw) != entry['sha256']:
-                raise RuntimeError(f'{key}: staged bytes differ from their own digest')
+            fd, serving = window["lease"].open(key)
+            raw = read_fd(fd, entry["object_offset"], size)
+            if bytes_sha256hex(raw) != entry["sha256"]:
+                raise RuntimeError(f"{key}: staged bytes differ from their own digest")
             with self.lock:
-                self.stats['staged_bytes'] += size
-                self.stats['staged_reads'] += 1
-                self.stats['read_s'] += time.perf_counter() - start
-                tier_stats = self.stats["tiers"].setdefault(serving["tier_id"], {"reads": 0, "bytes": 0})
+                self.stats["staged_bytes"] += size
+                self.stats["staged_reads"] += 1
+                self.stats["read_s"] += time.perf_counter() - start
+                tier_stats = self.stats["tiers"].setdefault("stage", {"reads": 0, "bytes": 0})
                 tier_stats["reads"] += 1
                 tier_stats["bytes"] += size
             return raw
         finally:
             if fd is not None:
-                os.close(fd)
+                window["lease"].close_fd(fd)
             with self.lock:
                 window["active"] -= 1
 
 
 def staged_range(path, offset, size):
     global _READER
-    if not os.environ.get('PRISMABUILD_RESIDENCY_MAP'):
+    if not os.environ.get(PATH_ENV):
         return None
     with _LOCK:
         if _READER is None:
@@ -216,7 +173,7 @@ def read_g3_input(path, size=None):
 
 
 def receipt():
-    return {'map': os.environ.get('PRISMABUILD_RESIDENCY_MAP'),
+    return {'staged_manifest': os.environ.get(PATH_ENV), 'manifest_sha256': os.environ.get(SHA_ENV),
             **(_READER.stats if _READER is not None else {'staged_bytes': 0, 'staged_reads': 0})}
 
 
@@ -230,35 +187,46 @@ def close_reader():
         _READER.close()
 
 
-def launch_read_plan():
-    """Read the claimed manifest through the public, admitted PB client."""
-    from g3_pq_policy.staged_lease import load_claimed_manifest
-    helper = os.environ["PRISMABUILD_READER_HELPER_ROOT"]
-    sys.path.insert(0, str(Path(helper) / "src"))
-    from prismabuild import client
-    context = client.injected_context(env=os.environ)
-    if not context["ok"]:
-        raise RuntimeError(f'PB staged reader context: {context["refusal"]}')
-    return load_claimed_manifest(client, context["ctx"])
+def launch_read_plan(path, sha256):
+    """The application read plan, by explicit path and digest, equal to the bound manifest's extents."""
+    import gzip
+    from g3_pq_policy import residency_map as maps
+    from g3_pq_policy.staged_lease import ReadsetUnbound
+    raw, _ = read_document(path, MAX_BYTES)
+    if bytes_sha256hex(raw) != sha256:
+        raise ReadsetUnbound(f'read plan {path} does not hash to its sha256')
+    plan = json.loads(gzip.decompress(raw) if raw[:2] == b'\x1f\x8b' else raw)
+    if (not isinstance(plan, dict) or plan.get('schema') != PLAN_SCHEMA
+            or not isinstance(plan.get('entries'), list) or not plan['entries']
+            or not isinstance(plan.get('read_plan', {}).get('phases'), list)):
+        raise ReadsetUnbound('the G3 read plan schema or phases are unsupported')
+    resolver = maps.residency_resolver()
+    if resolver is None:
+        raise ReadsetUnbound('G3 read plan requires an explicit staged manifest')
+    declared = {(e.source_path, e.source_offset, e.length) for e in resolver.manifest.extents}
+    wanted = {(row['path'], row['offset'], row['bytes']) for row in plan['entries']}
+    if wanted != declared:
+        raise ReadsetUnbound('the staged manifest does not equal the read plan extents')
+    return plan
 
 
 def container_contract():
-    """Exact paths and launch context forwarded by g3_launch (queue is writable)."""
-    if not os.environ.get('PRISMABUILD_RESIDENCY_MAP'):
+    """Readonly mounts for the bound manifest and read contract, and the container refusal.
+
+    The adapter forwards the five native names and binds the phase namespace readonly.
+    A host-local manifest cannot cross the container boundary.
+    """
+    named = os.environ.get(PATH_ENV)
+    if not named:
         return [], {}
-    names = ['PRISMABUILD_RESIDENCY_MAP', 'PRISMABUILD_ACTION_KEY', 'PRISMABUILD_ACTION_NONCE',
-             'PRISMABUILD_ACTION_SCOPE', 'PRISMABUILD_QUEUE_ROOT', 'PRISMABUILD_READER_HELPER_ROOT']
-    env = {name: os.environ[name] for name in names}
-    map_path = Path(env["PRISMABUILD_RESIDENCY_MAP"])
-    # The published map lives inside queue/residency. A readonly bind there
-    # would mask queue/residency/leases even when queue itself is writable.
-    # Bind the directory at a separate readonly view so atomic map updates
-    # remain visible and the SDK writes pins through the original queue.
-    map_target = "/g3-pb-residency-map"
-    env["PRISMABUILD_RESIDENCY_MAP"] = str(Path(map_target) / map_path.name)
-    mounts = [{"source": str(map_path.parent), "target": map_target, "readonly": True}]
-    for path, readonly in [(env["PRISMABUILD_READER_HELPER_ROOT"], True),
-                           (env["PRISMABUILD_QUEUE_ROOT"], False),
-                           ("/stage/prewarm", True), ("/ram/prewarm", True)]:
-        mounts.append({"source": path, "target": path, "readonly": readonly})
-    return mounts, env
+    manifest = load_staged_manifest(named, os.environ[SHA_ENV])
+    if manifest.lifetime['mode'] != 'retained_shared_phase':
+        raise RuntimeError('a host_local_cache staged manifest cannot cross the container boundary; '
+                           'the descriptor transfer is an unbuilt unit 4D obligation')
+    seen, mounts = set(), []
+    for filename in (named, os.environ['PRISMAQUANT_READ_CONTRACT_PATH']):
+        directory = str(Path(filename).parent)
+        if directory not in seen:
+            seen.add(directory)
+            mounts.append({"source": directory, "target": directory, "readonly": True})
+    return mounts, {}

@@ -9,15 +9,13 @@ the first CSA forward dies with "Cannot copy out of meta tensor"
 and materializes every instance.
 """
 import pytest
-from fullstack_pb_generation import pinned_pb_source
 
 torch = pytest.importorskip("torch")
 
 # Own the DSv4 namespace in a shared session: an earlier test that imports
 # transformers' native deepseek_v4 makes register_deepseek_v4() refuse (#2279).
 # The refusal itself stays visible in its own controls.
-pytestmark = [pytest.mark.own_process,
-              pytest.mark.usefixtures("pinned_pb_source")]
+pytestmark = [pytest.mark.own_process]
 
 
 def _tiny_cfg():

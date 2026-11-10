@@ -1,17 +1,16 @@
 # Inspect export structure without loading weights
 
 Use the offline diagnostic after the exporter has stopped writing. Run it as a
-separate PrismaBuild action so a diagnostic failure does not require repeating
+separate admitted Flux job so a diagnostic failure does not require repeating
 expensive encoding. The module uses only stdlib and the existing shipcard header
 validator, but the `prismaquant` package initializer requires a PQ environment.
 
-For example, using an existing worker-side PQ interpreter:
+For example, as the `argv` of a one-CPU, two-GB admitted job (submitted with
+`prismaquant/flux_jobs.py` `submit_job`; read the result with
+`prismaquant/native_results.py`), using an existing worker-side PQ interpreter:
 
 ```bash
-python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
-  --cwd /path/to/prismaquant --cpus 1 --demand mem_gb=2 --priority -10 \
-  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
-  --timeout-s 300 -- \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   /path/to/pq-venv/bin/python -m prismaquant.export_structure \
   /path/to/exported --expect-shards 120 --index-size-basis file
 ```

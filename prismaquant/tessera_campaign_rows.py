@@ -1,9 +1,9 @@
-"""PrismaBuild rows for a Tessera campaign spec.
+"""Scientific row intent and native execution for Tessera campaign callers.
 
 One owner for what every campaign and materialization row shares: the run spec,
 its row classes and their placement attestations, the census-derived memory
-demand a row is admitted with, and the PrismaBuild row itself. Fleet tools keep
-argv, submission and printing; package planners build rows here.
+demand a row is admitted with, and the scientific row itself. Native execution binds that intent to saved
+Flux IDs; scientific validation and native completion are independent gates.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import json
 import math
 from pathlib import Path
 
-from .campaign_container_spec import admission_image_reference, validate_container
+from .campaign_container_spec import validate_container
 from .tessera_campaign_cli import campaign_argument_parser, explicit_campaign_options
 
 
@@ -41,7 +41,7 @@ ROW_CLASS_FIELDS = frozenset({
 
 #: Where the placement facts live: ISA, container GPU runtime and the host
 #: interpreters actually observed running work under each tag, each with the
-#: PrismaBuild action key that ran it.  Fleet data maintained beside the
+#: recorded producer job identity that ran it.  Fleet data maintained beside the
 #: fleet tools; this owner reads it and imports nothing from ``tools``.
 FLEET_INTERPRETERS = (Path(__file__).resolve().parents[1] / "tools"
                       / "fleet_interpreters.json")
@@ -97,7 +97,7 @@ def load_fleet_interpreters(path=None) -> dict:
                         record.get("attested_by"), str) or not record["attested_by"]:
                     raise RowClassRefused(
                         f"{source}: interpreter {interpreter} on tag {tag!r} names no "
-                        "PrismaBuild action key that ran it")
+                        "recorded producer job identity that ran it")
         overlap = shape["interpreters"].keys() & shape.get("retired_interpreters", {}).keys()
         if overlap:
             raise RowClassRefused(
@@ -214,8 +214,8 @@ def _attest_placement(resolved: dict, fleet: dict) -> None:
                     f"row class {resolved['name']!r} runs {resolved['python']}, "
                     f"which is not attested on tag {tag!r}; that tag attests "
                     f"{attested or 'no host interpreter'}. Run it there once and "
-                    f"add it to {FLEET_INTERPRETERS.name} with the PrismaBuild "
-                    f"action key, or give the class a container.{history}"))
+                    f"add it to {FLEET_INTERPRETERS.name} with the recorded "
+                    f"producer job identity, or give the class a container.{history}"))
 
 
 def validate_row_classes(spec: dict, *, fleet=None, where="spec") -> list[dict]:
@@ -307,8 +307,8 @@ def load_spec(path: Path) -> dict:
         # The in-process deadline stops a run mid-round, in the sorted-key
         # order the round's pending list happens to have; two rows stopped that
         # way price different anchor sets than one run would have. A row's
-        # deadline is PrismaBuild's ``timeout_s`` and its retry, which restarts
-        # the row against its own journal.
+        # deadline belongs to the fleet contract. Native launch currently
+        # refuses unenforced progress-stall policies rather than replacing them.
         raise RuntimeError(
             f"{path}: campaign_argv sets --deadline-seconds; a fanned-out row "
             "takes its deadline from the fleet, not from inside the round loop")
@@ -591,11 +591,12 @@ def row_head_dependency(argv):
 #: run having committed nothing -- less than half the 14,400 s that killed
 #: row-0050 and row-0065 while they were committing anchors every 18 s.
 #:
+#: Historical progress measurements retained for payload planning. Native row
+#: builders omit progress-stall metadata because no watchdog is qualified.
 #: There is no flag to override this, on purpose: the number is a measurement
 #: of one workload and a flag would invite a guess.  A campaign whose rows
-#: measurably behave differently edits its planned manifest -- ``plan`` writes
-#: ``progress_phases`` into every row and ``submit`` reads it back -- or
-#: re-fits this constant against its own terminal records.
+#: measurably behave differently re-fits this constant against its own
+#: terminal records.
 CAMPAIGN_PROGRESS_PHASES = (("startup", 3600), ("pricing", 900), ("finalize", 1800))
 
 
@@ -616,22 +617,19 @@ def row_is_bounded(argv: list[str], *, where: str = "campaign row") -> bool:
                 'streaming', 'units', 'calibration_cache', 'calibration_cache_sha256')))
 
 
-def prismabuild_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
+def campaign_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
          progress_phases: tuple[tuple[str, int], ...] = CAMPAIGN_PROGRESS_PHASES,
          module: str = "prismaquant.tessera_campaign",
          row_class_name: str = DEFAULT_ROW_CLASS) -> dict:
-    """One PrismaBuild row, built for one class of the spec.
+    """One scientific row intent, built for one class of the spec.
 
     The class supplies the interpreter, the environment, the placement tags,
     the CPU count and the container; the default class supplies exactly the
     spec-level values, so a row built for it is byte-identical to the row this
     function returned before classes existed.  Nothing about the class is
-    written INTO the row: ``submit`` re-run is the resume, a finished row is a
-    CAS hit on its action key, and a key that moved is a row that re-runs.
-    Nothing records the class either: every subcommand today builds the
-    ``default`` class, so there is no second class in any plan to record, and
-    the first row kind that is built for another one records it in its own
-    plan entry when it lands.
+    written into the row. The container specification stays in argv, and the
+    row retains its image admission intent. Native execution still refuses
+    this unqualified GPU row before submission.
     """
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     resolved = row_class(spec, row_class_name)
@@ -659,7 +657,6 @@ def prismabuild_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int 
         env = {**BOUNDED_CAPTURE_ENV, **env}
         require_bounded_capture_environment(env)
     command = [resolved["python"], "-u", "-m", module, *argv]
-    container_image = None
     if "container" in resolved:
         container_spec = {"container": resolved["container"], "env": env}
         if resolved.get("container_admission_reference") is not None:
@@ -667,33 +664,20 @@ def prismabuild_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int 
         validate_container(container_spec, bounded=bounded)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
                    DIRECT_ASCII_SPACED_LAX.text(container_spec), "--", *command]
-        # The class owns the image: whatever container this row resolved runs
-        # is what PrismaBuild must find on the claiming box before the claim
-        # (RobTand/prismabuild#714). Without an explicit portable override,
-        # an archive-backed class declares nothing: its loader establishes
-        # the image inside the action rather than requiring local presence.
-        container_image = admission_image_reference(container_spec)
+    from .campaign_container_spec import admission_image_reference
+    image = admission_image_reference(container_spec) if "container" in resolved else None
     row = {
         "argv": command,
         "cwd": spec["cwd"],
         "demand": {"gpu": 1, "cpu": int(resolved["cpus"]), "mem_gb": int(mem_gb)},
         "env": env,
         "tags": list(resolved["tags"]),
-        # A row is one memoized action and a retry re-runs the same argv over
-        # the same checkpoint, which is exactly what the journal is for.  The
-        # policy is sealed into the action key, so it is spelled even though
-        # pbcampaign submits every row detached and cannot retry one itself.
+        # Checkpoint retry intent is preserved. Native execution never retries
+        # or adopts a result by key; reconnect uses the saved native ID.
         "retry_safe": True,
     }
-    if container_image is not None:
-        row["container_images"] = [container_image]
-    if progress_phases:
-        # What bounds this row is whether it is still committing anchors, not
-        # how long it has been running.  ``tessera_campaign`` reports each
-        # journal flush through ``prismaquant.prismabuild_progress``; PB then
-        # applies no total-duration limit while the count advances, and ends
-        # the row within the declared allowance when it stops.
-        row["progress_phases"] = [f"{name}={grace}" for name, grace in progress_phases]
+    if image is not None:
+        row["container_images"] = [image]
     if timeout_s is not None:
         # Only when somebody asked for one.  A blanket default here is what
         # sealed 14,400 s into every pricing row and killed two of them mid
@@ -701,3 +685,170 @@ def prismabuild_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int 
         # dispatcher.
         row["timeout_s"] = int(timeout_s)
     return row
+
+
+# Native execution of the application-owned scientific row intent.
+NATIVE_ROWS_SCHEMA = 'pq.tessera.native-rows.v1'
+
+
+def _row_resources(row):
+    from prismaquant.flux_jobs import FluxResources
+    demand = row['demand']
+    if set(demand) - {'cpu', 'mem_gb', 'gpu'}:
+        raise ValueError('unsupported resource demand')
+    tags = row.get('tags', [])
+    if not isinstance(tags, list) or len(tags) > 1:
+        raise ValueError('native baseline accepts one explicit placement constraint')
+    placement = tags[0] if tags else 'portable'
+    if placement in {'sparky', 'sparklina', 'dl380g10'}:
+        placement = 'host:' + placement
+    return FluxResources(demand['cpu'], demand['mem_gb'], demand.get('gpu', 0),
+                         row['timeout_s'], placement)
+
+
+def validate_row(row):
+    """Admit one CPU row without dropping scientific or execution requirements."""
+    from prismaquant.flux_jobs import validate_job
+    allowed = {'argv', 'cwd', 'demand', 'env', 'tags', 'retry_safe', 'timeout_s',
+               'progress_phases', 'container_images', 'data_manifest', 'residency',
+               'gpu_memory_gb', 'priority', 'produced_outputs', 'pilot', 'staged_input'}
+    if not isinstance(row, dict) or set(row) - allowed:
+        raise ValueError('unsupported native row fields; requirements cannot be discarded')
+    # Report the actual qualification hold for every production GPU builder,
+    # before inspecting transport-specific requirements that cannot run yet.
+    if row.get('demand', {}).get('gpu', 0):
+        raise ValueError('GPU lane not qualified; requires plan step P-7')
+    for field in ('pilot',):
+        if field in row:
+            raise ValueError(f'{field}: strict staging/publication/pilot contract is unqualified (units 2/4)')
+    if 'produced_outputs' in row:
+        raise ValueError('legacy produced_outputs cannot authorize native publication; bind a declaration in argv')
+    if 'data_manifest' in row:
+        from .staged_launch import validate_read_contract
+        if 'staged_input' not in row:
+            raise ValueError('data_manifest: strict staging is unqualified without a bound staged_input')
+        validate_read_contract(row['staged_input'], row['data_manifest'])
+    if 'residency' in row and (row['residency'] != 'stage' or 'staged_input' not in row):
+        raise ValueError('residency requires the validated immutable stage contract')
+    if row.get('progress_phases'):
+        raise ValueError('progress-stall enforcement is unqualified; a walltime is not a stall watchdog')
+    if row.get('container_images') or 'gpu_memory_gb' in row:
+        raise ValueError('container/device admission is unqualified')
+    if row.get('priority', 0) != 0:
+        raise ValueError('queue priority mapping is unqualified')
+    resources = _row_resources(row)
+    source = Path(row['cwd']).resolve()
+    if not source.is_relative_to('/mnt/shared'):
+        raise ValueError('payload source must be shared on every eligible worker')
+    argv = row['argv']
+    if not isinstance(argv, list) or not argv or any(not isinstance(a, str) or '\0' in a for a in argv):
+        raise ValueError('row argv must be a nonempty string list')
+    # Applications with additional settings must qualify a finite versioned
+    # environment contract. Nothing is read from the submitter's environment.
+    identity = validate_job(checkout=source, resources=resources, environment=row.get('env'),
+                            staged_input=row.get('staged_input'))
+    return source, resources, identity
+
+
+def submit_rows(rows, state_dir, *, afterok=()):
+    """Submit each row once, or reattach its saved ID under the identical intent.
+
+    State is outside every committed payload source. No cache, retry loop,
+    name adoption, stage scheduler or historical PB record is consulted.
+    Dependencies are saved FluxSubmission objects, never discovered by name.
+    """
+    import os
+    from prismaquant import flux_jobs
+    state = Path(state_dir).resolve()
+    rows = json.loads(json.dumps(list(rows)))
+    if not rows:
+        raise ValueError('a native stage must contain at least one row')
+    producers = []
+    for submission in afterok:
+        if flux_jobs.load_submission(submission.record_dir) != submission:
+            raise ValueError('producer differs from saved native submission')
+        flux_jobs.validate_dependency(submission)
+        producers.append({'job_id': submission.job_id,
+                          'record_dir': str(submission.record_dir),
+                          'launch_sha256': submission.launch_sha256})
+    # Preflight the whole stage before submitting any row.
+    prepared = [validate_row(row) for row in rows]
+    if not state.is_relative_to('/mnt/shared') or any(state.is_relative_to(source) for source, _, _ in prepared):
+        raise ValueError('native state must be shared and outside every payload source')
+    intent = {'schema': NATIVE_ROWS_SCHEMA, 'rows': rows, 'producers': producers,
+              'sources': [identity for _, _, identity in prepared]}
+    state.mkdir(parents=True, exist_ok=True)
+    manifest = state / 'manifest.json'
+    from .digests import DIRECT_ASCII_INDENT2_LAX
+    data = DIRECT_ASCII_INDENT2_LAX.encoded(intent) + b'\n'
+    try:
+        with manifest.open('xb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        descriptor = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    except FileExistsError:
+        if manifest.is_symlink() or manifest.read_bytes() != data:
+            raise ValueError('native stage intent differs; use a fresh workspace')
+    submissions = []
+    for index, (row, (source, resources, identity)) in enumerate(zip(rows, prepared)):
+        record = state / 'rows' / f'{index:05d}'
+        if record.exists():
+            submission = flux_jobs.load_submission(record)
+        else:
+            submission = flux_jobs.submit_job(row['argv'], checkout=source, resources=resources,
+                record_dir=record, afterok=[p['job_id'] for p in producers], environment=row.get('env'),
+                staged_input=row.get('staged_input'))
+        # Cross-check saved execution facts against the app intent on resume.
+        flux_jobs.validate_launch(submission, argv=row['argv'], source=identity, resources=resources,
+                                  afterok=[p['job_id'] for p in producers], environment=row.get('env'),
+                                  staged_input=row.get('staged_input'))
+        submissions.append(submission)
+    return submissions
+
+
+def collect_rows(state_dir, *, wait=False):
+    """Collect every known row even if another row is failed or unknown."""
+    from dataclasses import asdict
+    from prismaquant import flux_jobs
+    state = Path(state_dir).resolve()
+    intent = json.loads((state / 'manifest.json').read_bytes())
+    if intent.get('schema') != NATIVE_ROWS_SCHEMA or not intent.get('rows'):
+        raise ValueError('invalid native stage manifest')
+    results = []
+    for index, row in enumerate(intent['rows']):
+        record = state / 'rows' / f'{index:05d}'
+        submission = None
+        try:
+            submission = flux_jobs.load_submission(record)
+            identity = intent['sources'][index]
+            if str(Path(row['cwd']).resolve()) != identity['checkout']:
+                raise ValueError('row source differs from saved source')
+            flux_jobs.validate_launch(submission, argv=row['argv'], source=identity,
+                                      resources=_row_resources(row),
+                                      afterok=[p['job_id'] for p in intent['producers']],
+                                      environment=row.get('env'), staged_input=row.get('staged_input'))
+            result = asdict(flux_jobs.collect_job(submission, wait=wait))
+            result['record_dir'] = str(result['record_dir'])
+        except (OSError, ValueError, RuntimeError, KeyError, IndexError, TypeError) as exc:
+            result = {'status': 'unknown', 'job_id': submission.job_id if submission else None, 'record_dir': str(record),
+                      'payload_exit': None, 'query_error': str(exc)}
+        results.append(result)
+    return results
+
+
+def require_native_success(state_dir, expected, *, rows=None):
+    """Native completion barrier; scientific output validation remains separate."""
+    if rows is not None:
+        intent = json.loads((Path(state_dir) / 'manifest.json').read_bytes())
+        if intent['rows'] != rows:
+            raise RuntimeError('native intent differs from the submitted scientific manifest')
+    results = collect_rows(state_dir, wait=False)
+    if len(results) != expected or any(row['status'] != 'succeeded' or row['payload_exit'] != 0
+                                      or row['query_error'] for row in results):
+        raise RuntimeError('native rows failed, incomplete or unknown; refusing downstream merge')
+    return results

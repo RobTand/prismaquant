@@ -1,154 +1,199 @@
-"""The Stage B preparation's outputs as real PrismaBuild produced output (PQ #1070).
+"""Actual generator metadata publication under an immutable native declaration.
 
-The generator runs with the preparation's options and ``--produced-output``
-under a real admitted owner on a private queue: the owner's sealed request
-declares the write-only template the submission tool wrote, the queue claims
-it, and the generator binds from the launch environment exactly as it does in
-production (the queue root from ``PRISMABUILD_RESIDENCY_MAP``). What
-PrismaBuild then holds is checked against the metadata root on disk:
-
-* every file the run wrote is in a committed origin batch, with its bytes and
-  digest, and nothing else is;
-* a replay over the same root writes nothing and commits nothing;
-* a path outside the template's prefix, a template over another root and a
-  second group of one kind refuse before a byte is written.
-
-PrismaBuild comes from the published runtime generation pinned in
-``pb_runtime_generation_pin.json`` (shared, PQ #1084): the Stage A pin predates the write-only
-template (PB #912). Marked ``own_process`` because resolving a pinned
-candidate leaves ``prismabuild`` in ``sys.modules`` (PQ #1008).
+The execution context is an offline fixture. Every generated file, descriptor,
+prewrite and application manifest is real; native execution is proved separately.
 """
-from __future__ import annotations
-
 import hashlib
-import json
-import sys
 from pathlib import Path
-
+import sys
 import pytest
-
-# PQ #1008: one pinned prismabuild per process (tests/conftest.py).
-pytestmark = pytest.mark.own_process
-
 ROOT = Path(__file__).resolve().parents[1]
-for _entry in (ROOT, ROOT / "tools"):
-    if str(_entry) not in sys.path:
-        sys.path.insert(0, str(_entry))
-
-import test_stage_a_produced_boundary_chain as chain  # noqa: E402
-from test_stage_a_produced_boundary_chain import (  # noqa: E402,F401
-    _isolated_launch_context)
-from test_stage_b_prep_io_1070 import (  # noqa: E402
-    generator_args, prep_fixture, write_submission)
-
-PIN_PATH = chain.PB_GENERATION_PIN
+sys.path.insert(0, str(ROOT / 'tools'))
+from prismaquant import stage_b_prep_io as io, native_results
+from prismaquant.stage_a_produced_output import publish_document, read_bound_document
+from test_stage_b_prep_io_1070 import generator_args, prep_fixture, write_submission
+from produced_native_fixtures import selected_publications
 
 
-def _pb(monkeypatch):
-    monkeypatch.setattr(chain, "PIN_PATH", PIN_PATH)
-    _src, pb_repo = chain._pb_source()
-    from prismaquant.staged_lease import set_lease_helper_root
-    set_lease_helper_root(str(pb_repo))
-    from prismabuild import produced_output as po
-    if not callable(getattr(po, "commit_origin_batch", None)):
-        pytest.fail("the pinned PrismaBuild has no commit_origin_batch")
-    return pb_repo
+def admitted_owner(tmp_path, declaration, monkeypatch):
+    binding = publish_document(tmp_path / 'declaration.json', declaration)
+    record = tmp_path / 'record'; record.mkdir()
+    producer = {'schema': 'prismaquant.flux_result_producer.v1', 'job_id': '123',
+        'record_dir': str(record), 'launch_sha256': 'a' * 64,
+        'argv': ['fixture', '--produced-declaration', binding['path'],
+            '--produced-declaration-sha256', binding['sha256']]}
+    monkeypatch.setattr(native_results, 'execution_context', lambda: producer)
+    register = selected_publications(monkeypatch)
+    # The only terminal publication seam. Scientific metadata below is real.
+    from prismaquant.stage_a_produced_output import BoundaryProducedPublication
+    monkeypatch.setattr(BoundaryProducedPublication, 'finalize', lambda pub, *a, **k: register(pub))
+    return producer
 
 
-def admitted_owner(tmp_path, pb_repo, template, monkeypatch):
-    """A real owner that declared ``template``, claimed, in this process's env."""
-    from prismabuild import produced_output as po
-
-    cas_root = tmp_path / "cas"
-    q = chain._queue(tmp_path, gib=4)
-    owner = chain._sealed_producer_request(tmp_path, cas_root, pb_repo, template)
-    q.publish(action_key=owner, cas_root=str(cas_root),
-              worker_script=str(pb_repo / "tools" / "prismabuild_worker.py"),
-              checkout_root=str(tmp_path / "mover-checkout"),
-              resources={"cpu": 1, "mem_gb": 1, **po.owner_demand_terms(template)},
-              produced_output_template=template)
-    claimed = q.claim(owner="w-owner", capacity=chain._FIXTURE_HOST_CAPACITY)
-    assert claimed is not None and claimed["action_key"] == owner
-    control = chain._broker_control(q, owner)
-    po.declare_template(q.root, template)
-    chain._announce_tier(q, tmp_path / "stage", pb_repo)
-    # The launcher's own variables: the queue root is derived from the map's
-    # path, which need not exist for a write-only owner.
-    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", owner)
-    monkeypatch.setenv("PRISMABUILD_ACTION_NONCE", control["nonce"])
-    monkeypatch.setenv("PRISMABUILD_ACTION_SCOPE", control["scope_id"])
-    monkeypatch.setenv("PRISMABUILD_RESIDENCY_MAP",
-                       str(q.root / "residency" / f"{owner}.json"))
-    return q, owner
-
-
-def _files_under(root: Path) -> dict[str, bytes]:
-    return {str(path): path.read_bytes() for path in sorted(root.rglob("*"))
-            if path.is_file()}
+def _files_under(root):
+    return {str(path): path.read_bytes() for path in root.rglob('*') if path.is_file()}
 
 
 def test_the_generator_commits_every_file_it_writes(tmp_path, monkeypatch):
-    pb_repo = _pb(monkeypatch)
-    from prismabuild import produced_output as po
     import regenerate_joint_quanta as regen
-    from prismaquant import stage_b_prep_io as io
-
-    campaign, receipt_path, _spans = prep_fixture(tmp_path)
-    metadata = tmp_path / "metadata-generation"
-    _submission, _manifest, template = write_submission(
-        tmp_path, campaign, receipt_path, metadata, tier=chain.TIER)
-    q, owner = admitted_owner(tmp_path, pb_repo, template, monkeypatch)
+    campaign, receipt_path, _ = prep_fixture(tmp_path)
+    metadata = tmp_path / 'metadata-generation'
+    _, _, declaration = write_submission(tmp_path, campaign, receipt_path, metadata)
+    producer = admitted_owner(tmp_path, declaration, monkeypatch)
     io.reset_preparation_publications_for_tests()
+    try:
+        argv = generator_args(tmp_path, campaign, receipt_path, metadata) + ['--produced-output']
+        assert regen.main(argv) == 0
+        publication = io._BOUND[producer['launch_sha256']]
+        assert [batch['kind'] for batch in publication.batches] == ['manifests', 'records']
+        index_path = Path(producer['record_dir']) / 'produced' / 'index.json'
+        assert index_path.is_file()
+        entries = [entry for batch in publication.batches
+            for entry in read_bound_document(batch['ref'])['entries']]
+        written = _files_under(metadata)
+        assert written and {entry['path'] for entry in entries} == set(written)
+        for entry in entries:
+            raw = written[entry['path']]
+            assert entry['bytes'] == len(raw)
+            assert entry['sha256'] == hashlib.sha256(raw).hexdigest()
+        before = list(publication.batches)
+        assert regen.main(argv) == 0
+        assert publication.batches == before and _files_under(metadata) == written
+    finally:
+        io.reset_preparation_publications_for_tests()
 
-    argv = generator_args(tmp_path, campaign, receipt_path, metadata) + ["--produced-output"]
-    assert regen.main(argv) == 0
-    publication = io._BOUND[owner]
-    assert [batch["kind"] for batch in publication.batches] == ["manifests", "records"]
-    refs = [batch["ref"] for batch in publication.batches]
-    committed = po.origin_batch_manifest(q.root, refs)
 
-    written = _files_under(metadata)
-    assert written, "the generator wrote nothing"
-    assert {entry["path"] for entry in committed["entries"]} == set(written)
-    for entry in committed["entries"]:
-        payload = written[entry["path"]]
-        assert entry["bytes"] == len(payload)
-        assert entry["sha256"] == hashlib.sha256(payload).hexdigest()
-    assert sum(batch["files"] for batch in publication.batches) == len(written)
-
-    # A replay over the same root: every file is present with its bytes, so
-    # nothing is written, prewritten or committed.
-    assert regen.main(argv) == 0
-    assert [batch["kind"] for batch in publication.batches] == ["manifests", "records"]
-    assert _files_under(metadata) == written
+def test_composed_generator_defers_finalization_until_launch_recipe(tmp_path, monkeypatch):
+    import regenerate_joint_quanta as regen
+    from prismaquant.stage_a_produced_output import decode_produced_document
+    campaign, receipt_path, _ = prep_fixture(tmp_path)
+    metadata = tmp_path / 'metadata-generation'
+    _, _, declaration = write_submission(tmp_path, campaign, receipt_path, metadata)
+    producer = admitted_owner(tmp_path, declaration, monkeypatch)
+    io.reset_preparation_publications_for_tests()
+    try:
+        argv = generator_args(tmp_path, campaign, receipt_path, metadata) + ['--produced-output']
+        assert regen.main(argv, finalize_publication=False) == 0
+        publication = io._BOUND[producer['launch_sha256']]
+        index_path = Path(producer['record_dir']) / 'produced' / 'index.json'
+        assert not index_path.exists()
+        generated = _files_under(metadata)
+        assert generated and (metadata / 'records' / 'records.json').is_file()
+        launch = metadata / 'launch.json'
+        payload = b'{"known": "enclosing preparation launch"}\n'
+        assert io.publish_files(publication, 'launch', [(launch, payload, 'launch')]) == [launch]
+        publication.finalize(Path(producer['record_dir']) / 'produced-result.json')
+        index = decode_produced_document(index_path.read_bytes())
+        assert index['groups'] == [publication.publication._groups[key]
+                                  for key in sorted(publication.publication._groups)]
+        entries = [entry for binding in index['groups']
+                   for entry in read_bound_document(binding)['entries']]
+        expected = {**generated, str(launch): payload}
+        assert {entry['path'] for entry in entries} == set(expected)
+        for entry in entries:
+            raw = expected[entry['path']]
+            assert Path(entry['path']).read_bytes() == raw
+            assert entry['sha256'] == hashlib.sha256(raw).hexdigest()
+            assert entry['bytes'] == len(raw)
+    finally:
+        io.reset_preparation_publications_for_tests()
 
 
 def test_a_bound_publication_refuses_before_writing(tmp_path, monkeypatch):
-    pb_repo = _pb(monkeypatch)
-    from prismaquant import stage_b_prep_io as io
-
-    metadata = tmp_path / "metadata"
-    template = io.build_preparation_template(
-        metadata_root=metadata, tier=chain.TIER,
+    metadata = tmp_path / 'metadata'
+    declaration = io.build_preparation_template(metadata_root=metadata,
         payload_max_bytes=io.preparation_payload_ceiling(1))
-    _q, owner = admitted_owner(tmp_path, pb_repo, template, monkeypatch)
+    admitted_owner(tmp_path, declaration, monkeypatch)
     io.reset_preparation_publications_for_tests()
+    try:
+        with pytest.raises(io.PreparationPublicationRefused, match='metadata root differs'):
+            io.bind_preparation_publication(tmp_path / 'elsewhere', required=True)
+        publication = io.bind_preparation_publication(metadata, required=True)
+        assert io.bind_preparation_publication(metadata, required=True) is publication
+        outside = tmp_path / 'outside.json'
+        with pytest.raises(io.PreparationPublicationRefused, match="outside the template"):
+            io.publish_files(publication, 'stray', [(outside, b'known bytes', 'stray')])
+        assert not outside.exists()
+        metadata.mkdir()
+        inside = metadata / 'a.json'
+        assert io.publish_files(publication, 'one', [(inside, b'independent A', 'a')]) == [inside]
+        assert inside.read_bytes() == b'independent A'
+        with pytest.raises(io.PreparationPublicationRefused, match='once per launch'):
+            io.publish_files(publication, 'one', [(metadata / 'b.json', b'independent B', 'b')])
+        assert not (metadata / 'b.json').exists()
+    finally:
+        io.reset_preparation_publications_for_tests()
 
-    with pytest.raises(io.PreparationPublicationRefused, match="declares"):
-        io.bind_preparation_publication(tmp_path / "elsewhere", required=True)
-    publication = io.bind_preparation_publication(metadata, required=True)
-    assert io.bind_preparation_publication(metadata, required=True) is publication
 
-    outside = tmp_path / "outside.json"
-    with pytest.raises(io.PreparationPublicationRefused, match="outside the template"):
-        io.publish_files(publication, "stray", [(outside, b"x", "stray")])
-    assert not outside.exists()
+@pytest.mark.parametrize('replace', [False, True])
+def test_preparation_retains_first_writer_identity_until_commit(tmp_path, monkeypatch, replace):
+    from prismaquant import cost_stage_checkpoint as writer
+    from prismaquant.stage_a_produced_output import BoundaryProducedPublicationFailed
+    metadata = tmp_path / 'metadata'
+    declaration = io.build_preparation_template(metadata_root=metadata,
+        payload_max_bytes=io.preparation_payload_ceiling(1))
+    admitted_owner(tmp_path, declaration, monkeypatch)
+    io.reset_preparation_publications_for_tests()
+    actual = writer.publish_new_bytes
+    saved = metadata / 'first-original'
+    def publish(path, payload, **kwargs):
+        result = actual(path, payload, **kwargs)
+        if replace and path.name == 'first.json':
+            path.rename(saved)
+            path.write_bytes(payload)
+        return result
+    monkeypatch.setattr(writer, 'publish_new_bytes', publish)
+    files = [(metadata / 'first.json', b'independent metadata one', 'first'),
+             (metadata / 'second.json', b'independent metadata two', 'second')]
+    try:
+        publication = io.bind_preparation_publication(metadata, required=True)
+        if replace:
+            with pytest.raises(BoundaryProducedPublicationFailed, match='writer destination identity changed'):
+                io.publish_files(publication, 'known', files)
+            assert saved.read_bytes() == files[0][0].read_bytes() == files[0][1]
+            assert not publication.publication._groups
+        else:
+            assert io.publish_files(publication, 'known', files) == [path for path, _, _ in files]
+            rows = read_bound_document(publication.batches[0]['ref'])['entries']
+            assert [Path(row['path']).read_bytes() for row in rows] == [raw for _, raw, _ in files]
+            assert [row['sha256'] for row in rows] == [hashlib.sha256(raw).hexdigest() for _, raw, _ in files]
+    finally:
+        io.reset_preparation_publications_for_tests()
 
-    inside = metadata / "a.json"
-    metadata.mkdir()
-    assert io.publish_files(publication, "one", [(inside, b"A", "a")]) == [inside]
-    with pytest.raises(io.PreparationPublicationRefused, match="once per action"):
-        io.publish_files(publication, "one", [(metadata / "b.json", b"B", "b")])
-    assert not (metadata / "b.json").exists()
-    assert publication.batches[-1]["kind"] == "one"
-    assert owner
+
+@pytest.mark.parametrize('replacement', ['directory', 'symlink'])
+def test_preparation_parent_replacement_precedes_second_write(tmp_path, monkeypatch, replacement):
+    from prismaquant import cost_stage_checkpoint as writer
+    metadata = tmp_path / 'metadata'
+    declaration = io.build_preparation_template(metadata_root=metadata,
+        payload_max_bytes=io.preparation_payload_ceiling(1))
+    admitted_owner(tmp_path, declaration, monkeypatch)
+    io.reset_preparation_publications_for_tests()
+    original, foreign = tmp_path / 'original', tmp_path / 'foreign'
+    foreign.mkdir()
+    (foreign / 'sentinel').write_bytes(b'foreign bytes')
+    actual = writer.publish_new_bytes
+    before = {}
+    def publish(path, payload, **kwargs):
+        result = actual(path, payload, **kwargs)
+        if path.name == 'first.json':
+            metadata.rename(original)
+            if replacement == 'directory':
+                metadata.mkdir()
+                (metadata / 'sentinel').write_bytes(b'replacement bytes')
+            else:
+                metadata.symlink_to(foreign, target_is_directory=True)
+            before.update(original=_files_under(original), foreign=_files_under(foreign), replaced=_files_under(metadata))
+        return result
+    monkeypatch.setattr(writer, 'publish_new_bytes', publish)
+    try:
+        publication = io.bind_preparation_publication(metadata, required=True)
+        with pytest.raises((OSError, ValueError, RuntimeError)):
+            io.publish_files(publication, 'known', [(metadata / 'first.json', b'first', 'first'),
+                                                   (metadata / 'second.json', b'second', 'second')])
+        assert not publication.publication._groups and before
+        assert _files_under(original) == before['original']
+        assert _files_under(foreign) == before['foreign']
+        assert _files_under(metadata) == before['replaced']
+    finally:
+        io.reset_preparation_publications_for_tests()

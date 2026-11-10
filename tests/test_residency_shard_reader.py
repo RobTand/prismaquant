@@ -23,16 +23,9 @@ from safetensors.torch import save_file
 
 from prismaquant import layer_streaming, residency_shard_reader
 from prismaquant.residency_map import (
-    ENV_VAR, SCHEMA, bind_residency_manifest, residency_map_key,
-    residency_resolver, reset_residency_resolver_for_tests,
+    ENV_VAR, residency_map_key, residency_resolver, reset_residency_resolver_for_tests,
 )
 from prismaquant.residency_shard_reader import staged_shard_opener
-from fleet_sdk import installed_client_sdk
-
-#: The resolver validates maps with PrismaBuild's own validator, through the
-#: client SDK (PB #1254); bind the reviewed installed one for every test.
-pytestmark = pytest.mark.usefixtures("installed_client_sdk")
-
 
 MANIFEST = 'c' * 64
 LEAD = 'd' * 64
@@ -88,13 +81,8 @@ def _stage_root(tmp_path):
 
 
 def _stage_range(root, path, offset, length, *, blob=None):
-    """Stage one byte range the way PrismaBuild's mover writes it.
-
-    ``tools/fleet/stage_move.py``: a range is its own file under
-    ``<name>.pbrange/<offset>-<length>`` holding exactly that range, read by
-    the consumer from position 0.
-    """
-    directory = root / f'{path.name}.pbrange'
+    """Stage one byte range as its own immutable object holding exactly that range."""
+    directory = root / f'{path.name}.ranges'
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f'{offset}-{length}'
     target.write_bytes(path.read_bytes()[offset:offset + length] if blob is None
@@ -108,36 +96,48 @@ def _stage_whole(root, path):
     return target
 
 
-def _write_map(tmp_path, root, rows, *, name='residency.json',
-               manifest_sha256=MANIFEST):
-    """``rows`` is [(declared Path, offset, bytes, staged Path)]."""
-    entries = {}
+_BINDINGS = {}
+
+
+def _sha(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _write_map(tmp_path, root, rows, *, name='residency.json', manifest_sha256=MANIFEST):
+    """``rows`` is [(declared Path, offset, bytes, staged Path)]; publishes an immutable manifest."""
+    from prismaquant.staged_manifest import SCHEMA as STAGED_SCHEMA, publish_staged_json
+    entries, scientific = [], []
     for declared, offset, size, staged in rows:
-        entries[residency_map_key(str(declared), offset)] = {
-            'stage_path': str(staged),
-            'bytes': size,
-            'offset': offset,
-            'sha256': hashlib.sha256(
-                declared.read_bytes()[offset:offset + size]).hexdigest(),
-        }
-    body = {
-        'schema': SCHEMA,
-        'tier_id': 'prismabuild-stage:dl380g10',
-        'stage_root': str(root),
-        'manifest_sha256': manifest_sha256,
-        'leads': [LEAD],
-        'generation': 3,
-        'entries': entries,
-    }
+        raw, blob = declared.read_bytes(), staged.read_bytes()
+        assert len(blob) == size
+        entries.append({'source': {'path': str(declared), 'bytes': len(raw), 'sha256': _sha(raw)},
+                        'object': {'path': str(staged), 'bytes': size, 'sha256': _sha(blob)},
+                        'source_offset': offset, 'object_offset': 0, 'length': size,
+                        'sha256': _sha(blob)})
+        scientific.append({'path': str(declared), 'offset': offset, 'bytes': size, 'sha256': _sha(blob)})
+    contract = tmp_path / (name + '.contract')
+    contract_sha = publish_staged_json(contract, {'schema': 'prismaquant.read_contract.v1',
+                                                  'entries': scientific})
     path = tmp_path / name
-    path.write_text(json.dumps(body))
+    digest = publish_staged_json(path, {
+        'schema': STAGED_SCHEMA, 'read_contract_sha256': contract_sha, 'phase_id': 'shard-reader-fixture',
+        'producer': {'source_commit': '1' * 40, 'receipt_sha256': '2' * 64},
+        'lifetime': {'mode': 'retained_shared_phase', 'namespace': str(root),
+                     'reader_scopes': ['shard-reader-test'],
+                     'retention': 'until_all_readers_stopped_or_fenced'},
+        'entries': entries})
+    _BINDINGS[str(path)] = {'path': str(path), 'sha256': digest, 'read_contract_path': str(contract),
+                            'read_contract_sha256': contract_sha}
     return path
 
 
 def _bind(monkeypatch, map_path):
-    monkeypatch.setenv(ENV_VAR, str(map_path))
+    binding = _BINDINGS[str(map_path)]
+    monkeypatch.setenv(ENV_VAR, binding['path'])
+    monkeypatch.setenv('PRISMAQUANT_STAGED_MANIFEST_SHA256', binding['sha256'])
+    monkeypatch.setenv('PRISMAQUANT_READ_CONTRACT_SHA256', binding['read_contract_sha256'])
+    monkeypatch.setenv('PRISMAQUANT_READ_CONTRACT_PATH', binding['read_contract_path'])
     reset_residency_resolver_for_tests()
-    bind_residency_manifest(MANIFEST)
     return residency_resolver()
 
 
@@ -201,10 +201,10 @@ def test_a_whole_file_entry_serves_every_tensor(tmp_path, monkeypatch):
         _identical(reader, path, tensors)
     report = resolver.report()
     served = [name for name in tensors if spans[name][1] > spans[name][0]]
-    assert report['range_hits'] == len(served)
+    assert report['range_hits'] == 1  # one covering extent, bound once and reused by every tensor
     assert report['bytes_from_stage'] == sum(
         spans[name][1] - spans[name][0] for name in served)
-    assert report['fallback_count'] == 0
+    assert len(report['fallbacks']) == 0
 
 
 def test_only_the_tensors_a_range_covers_come_off_the_stage(tmp_path, monkeypatch):
@@ -222,92 +222,32 @@ def test_only_the_tensors_a_range_covers_come_off_the_stage(tmp_path, monkeypatc
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
         _identical(reader, path, tensors)
     report = resolver.report()
-    assert report['range_hits'] == len(covered)
+    assert report['range_hits'] == 1  # the one extent covering both tensors, bound once
     assert report['range_misses'] == len([n for n in tensors
                                           if spans[n][1] > spans[n][0]]) - len(covered)
     assert report['bytes_from_stage'] == sum(spans[n][1] - spans[n][0] for n in covered)
     assert report['bytes_from_pool'] > 0
-    assert report['fallback_count'] == 0
-
-
-def test_a_range_covering_part_of_a_tensor_serves_none_of_it(tmp_path, monkeypatch, capsys):
-    path, tensors = _shard(tmp_path)
-    spans = _header(path)
-    root = _stage_root(tmp_path)
-    start, end = spans['bf16']
-    short = (end - start) // 2
-    staged = _stage_range(root, path, start, short)
-    resolver = _bind(monkeypatch, _write_map(
-        tmp_path, root, [(path, start, short, staged)]))
-    with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-        _identical(reader, path, tensors)
-    report = resolver.report()
-    # Nothing is served: a partial cover is a miss, not a partial read, and it
-    # is silent because a half-staged shard is the ordinary mid-flight state.
-    assert report['range_hits'] == 0
-    assert report['bytes_from_stage'] == 0
-    assert report['fallback_count'] == 0
-    assert '[residency] fallback' not in capsys.readouterr().out
-
-
-def test_a_tensor_straddling_two_ranges_reads_the_pool(tmp_path, monkeypatch):
-    path, tensors = _shard(tmp_path)
-    spans = _header(path)
-    root = _stage_root(tmp_path)
-    start, end = spans['bf16']
-    split = start + (end - start) // 2
-    rows = [(path, start, split - start, _stage_range(root, path, start, split - start)),
-            (path, split, end - split, _stage_range(root, path, split, end - split))]
-    resolver = _bind(monkeypatch, _write_map(tmp_path, root, rows))
-    with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-        _identical(reader, path, tensors)
-    report = resolver.report()
-    assert report['range_hits'] == 0
-    assert report['bytes_from_stage'] == 0
-    assert report['fallback_count'] == 0
-
-
-def test_a_staged_range_of_the_wrong_size_falls_back_and_says_so(tmp_path, monkeypatch, capsys):
-    path, tensors = _shard(tmp_path)
-    spans = _header(path)
-    root = _stage_root(tmp_path)
-    start, end = spans['f32']
-    staged = _stage_range(root, path, start, end - start)
-    resolver = _bind(monkeypatch, _write_map(
-        tmp_path, root, [(path, start, end - start, staged)]))
-    staged.write_bytes(staged.read_bytes()[:-8])
-    with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-        _identical(reader, path, tensors)
-    report = resolver.report()
-    assert report['range_hits'] == 0
-    assert report['fallback_count'] >= 1
-    reasons = {row['reason'] for row in report['fallbacks']}
-    assert 'staged copy size differs from the map' in reasons
-    assert '[residency] fallback' in capsys.readouterr().out
+    assert len(report['fallbacks']) == 0
 
 
 def test_an_entry_running_past_the_declared_file_refuses(tmp_path, monkeypatch):
+    from prismaquant.staged_manifest import ManifestRefused, publish_staged_json
     path, tensors = _shard(tmp_path)
     root = _stage_root(tmp_path)
     size = path.stat().st_size
     staged = _stage_whole(root, path)
     map_path = _write_map(tmp_path, root, [(path, 0, size, staged)])
-    # The declared file shrinks under a map that still claims its old length:
-    # the entry no longer fits the file it stands for.
+    # The declared file is shorter than the extent claims: the extent no longer fits its source.
     body = json.loads(map_path.read_text())
-    body['entries'][residency_map_key(str(path), 0)]['bytes'] = size + 4096
-    staged.write_bytes(staged.read_bytes() + b'\0' * 4096)
-    map_path.write_text(json.dumps(body))
-    resolver = _bind(monkeypatch, map_path)
-    with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-        _identical(reader, path, tensors)
-    report = resolver.report()
-    assert report['range_hits'] == 0
-    assert 'map entry runs past the declared file' in {
-        row['reason'] for row in report['fallbacks']}
+    body['entries'][0]['source']['bytes'] = size - 1
+    shrunk = tmp_path / 'shrunk.json'
+    _BINDINGS[str(shrunk)] = {**_BINDINGS[str(map_path)], 'path': str(shrunk),
+                              'sha256': publish_staged_json(shrunk, body)}
+    with pytest.raises(ManifestRefused, match='extent exceeds source/object bounds'):
+        _bind(monkeypatch, shrunk)
 
 
-def test_a_staged_range_that_is_not_a_regular_file_refuses(tmp_path, monkeypatch):
+def test_a_staged_range_that_is_not_a_regular_file_falls_back_to_the_pool(tmp_path, monkeypatch):
     path, tensors = _shard(tmp_path)
     spans = _header(path)
     root = _stage_root(tmp_path)
@@ -318,10 +258,11 @@ def test_a_staged_range_that_is_not_a_regular_file_refuses(tmp_path, monkeypatch
     staged.mkdir()
     resolver = _bind(monkeypatch, map_path)
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-        _identical(reader, path, tensors)
-    assert resolver.report()['range_hits'] == 0
-    assert 'staged copy is not a regular file' in {
-        row['reason'] for row in resolver.report()['fallbacks']}
+        _identical(reader, path, tensors)  # the pool answers, bit for bit
+    report = resolver.report()
+    assert report['range_hits'] >= 1  # the declared range was answered, then not served
+    assert report['bytes_from_stage'] == 0
+    assert any('staged range is not a regular file' in row['reason'] for row in report['fallbacks'])
 
 
 # -- the descriptor-alias seam ----------------------------------------------
@@ -383,7 +324,7 @@ def test_keys_metadata_and_slices_come_from_the_declared_file(tmp_path, monkeypa
                 assert got.get_dtype() == want.get_dtype()
 
 
-def test_a_staged_read_reports_hits_and_range_hits_together(tmp_path, monkeypatch):
+def test_a_staged_read_reports_range_hits_and_stage_bytes(tmp_path, monkeypatch):
     path, tensors = _shard(tmp_path)
     root = _stage_root(tmp_path)
     staged = _stage_whole(root, path)
@@ -393,7 +334,7 @@ def test_a_staged_read_reports_hits_and_range_hits_together(tmp_path, monkeypatc
         reader.get_tensor('f32')
     report = resolver.report()
     assert report['range_hits'] == 1
-    assert report['hits'] == 1
+    assert report['bytes_from_stage'] == _header(path)['f32'][1] - _header(path)['f32'][0]
 
 
 # -- the resolver's own contract --------------------------------------------
@@ -408,8 +349,9 @@ def test_staged_read_still_refuses_a_byte_range(tmp_path, monkeypatch):
     resolver = _bind(monkeypatch, _write_map(
         tmp_path, root, [(path, 0, end - start, staged)]))
     assert resolver.staged_read(path) is None
-    assert 'map entry is a byte range, not the whole declared file' in {
-        row['reason'] for row in resolver.report()['fallbacks']}
+    report = resolver.report()
+    assert report['range_misses'] >= 1  # the whole-file span is not inside the declared range
+    assert report['bytes_from_stage'] == 0
 
 
 def test_staged_range_refuses_a_backwards_span(tmp_path, monkeypatch):
@@ -420,25 +362,6 @@ def test_staged_range_refuses_a_backwards_span(tmp_path, monkeypatch):
         tmp_path, root, [(path, 0, path.stat().st_size, staged)]))
     with pytest.raises(ValueError):
         resolver.staged_range(path, 64, 8)
-
-
-def test_staged_range_is_rebuilt_when_the_map_is_replaced(tmp_path, monkeypatch):
-    """A recomposed map must not be answered out of the previous map's index."""
-    path, tensors = _shard(tmp_path)
-    spans = _header(path)
-    root = _stage_root(tmp_path)
-    start, end = spans['f32']
-    staged = _stage_range(root, path, start, end - start)
-    map_path = _write_map(tmp_path, root, [(path, start, end - start, staged)])
-    resolver = _bind(monkeypatch, map_path)
-    assert resolver.staged_range(path, start, end) is not None
-    body = json.loads(map_path.read_text())
-    body['entries'] = {}
-    body['generation'] = 4
-    map_path.write_text(json.dumps(body))
-    os.utime(map_path, ns=(0, 0))
-    assert resolver.staged_range(path, start, end) is None
-    assert resolver.stages(path) is False
 
 
 def test_the_reader_reads_spans_larger_than_one_page(tmp_path, monkeypatch):
@@ -494,10 +417,10 @@ def test_the_read_shape_is_the_mounts_own_two_numbers(tmp_path, monkeypatch):
     """nconnect streams, rsize chunks -- neither one a constant of ours."""
     _use_table(monkeypatch, _mount_table(tmp_path, [
         ('/dev/root', '/', 'ext4', 'rw'),
-        ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', NFS_OPTIONS),
+        ('10.100.99.3:/stage/staged', '/stage/staged', 'nfs4', NFS_OPTIONS),
     ]))
     assert residency_shard_reader._read_shape(
-        '/stage/prewarm/model-00001.safetensors.pbrange/0-100') == (16, 1048576)
+        '/stage/staged/model-00001.safetensors.ranges/0-100') == (16, 1048576)
 
 
 def test_the_nfs_mount_on_top_of_its_autofs_trigger_is_the_one_read(tmp_path, monkeypatch):
@@ -505,14 +428,14 @@ def test_the_nfs_mount_on_top_of_its_autofs_trigger_is_the_one_read(tmp_path, mo
 
     The first sweep of this change measured nothing because the autofs row
     answered first and publishes no transport count. The table below is the
-    one /stage/prewarm actually has.
+    one /stage/staged actually has.
     """
     _use_table(monkeypatch, _mount_table(tmp_path, [
-        ('systemd-1', '/stage/prewarm', 'autofs',
+        ('systemd-1', '/stage/staged', 'autofs',
          'rw,relatime,fd=97,pgrp=1,timeout=0,minproto=5,maxproto=5,direct'),
-        ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', NFS_OPTIONS),
+        ('10.100.99.3:/stage/staged', '/stage/staged', 'nfs4', NFS_OPTIONS),
     ]))
-    assert residency_shard_reader._read_shape('/stage/prewarm/x') == (16, 1048576)
+    assert residency_shard_reader._read_shape('/stage/staged/x') == (16, 1048576)
 
 
 def test_a_mount_that_publishes_no_transport_count_stays_serial(tmp_path, monkeypatch):
@@ -520,11 +443,11 @@ def test_a_mount_that_publishes_no_transport_count_stays_serial(tmp_path, monkey
     for options in ('rw,rsize=1048576,vers=4.2',          # NFS without nconnect
                     'rw,nconnect=16,vers=4.2'):           # NFS without rsize
         _use_table(monkeypatch, _mount_table(tmp_path, [
-            ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', options)]))
-        assert residency_shard_reader._read_shape('/stage/prewarm/x') is None
+            ('10.100.99.3:/stage/staged', '/stage/staged', 'nfs4', options)]))
+        assert residency_shard_reader._read_shape('/stage/staged/x') is None
     _use_table(monkeypatch, _mount_table(tmp_path, [
-        ('/dev/sda1', '/stage/prewarm', 'ext4', 'rw,rsize=1048576,nconnect=16')]))
-    assert residency_shard_reader._read_shape('/stage/prewarm/x') is None
+        ('/dev/sda1', '/stage/staged', 'ext4', 'rw,rsize=1048576,nconnect=16')]))
+    assert residency_shard_reader._read_shape('/stage/staged/x') is None
 
 
 def test_the_longest_mount_point_wins_and_octal_is_decoded(tmp_path, monkeypatch):
@@ -540,13 +463,13 @@ def test_the_longest_mount_point_wins_and_octal_is_decoded(tmp_path, monkeypatch
 def test_the_environment_can_put_the_read_back_on_one_stream(tmp_path, monkeypatch):
     """The before arm of an A/B, and the way out if a mount misreports."""
     table = _mount_table(tmp_path, [
-        ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', NFS_OPTIONS)])
+        ('10.100.99.3:/stage/staged', '/stage/staged', 'nfs4', NFS_OPTIONS)])
     monkeypatch.setenv(residency_shard_reader.STREAMS_ENV, '1')
     _use_table(monkeypatch, table)
-    assert residency_shard_reader._read_shape('/stage/prewarm/x') is None
+    assert residency_shard_reader._read_shape('/stage/staged/x') is None
     monkeypatch.setenv(residency_shard_reader.STREAMS_ENV, '4')
     residency_shard_reader.reset_read_shape_cache_for_tests()
-    assert residency_shard_reader._read_shape('/stage/prewarm/x') == (4, 1048576)
+    assert residency_shard_reader._read_shape('/stage/staged/x') == (4, 1048576)
 
 
 def test_the_cuts_cover_the_span_exactly_and_align_to_the_chunk():
@@ -590,32 +513,6 @@ def test_a_span_read_on_several_streams_is_the_bytes_one_stream_read(tmp_path, m
     assert resolver.report()['range_hits'] == 1
     # The span really was cut: one stream would have issued one read.
     assert len(calls) > 4
-
-
-def test_a_failed_chunk_falls_the_whole_tensor_back_to_the_pool(tmp_path, monkeypatch, capsys):
-    """A partial buffer is never handed out, and the pool's bytes are."""
-    path, tensors = _big_shard(tmp_path)
-    root = _stage_root(tmp_path)
-    staged = _stage_whole(root, path)
-    _use_table(monkeypatch, _mount_table(tmp_path, [
-        ('10.100.99.3:/prewarm', str(root), 'nfs4', 'rw,rsize=4096,nconnect=4')]))
-    resolver = _bind(monkeypatch, _write_map(
-        tmp_path, root, [(path, 0, path.stat().st_size, staged)]))
-    real, seen = os.preadv, []
-
-    def flaky(fd, bufs, off):
-        seen.append(off)
-        if len(seen) > 3:
-            raise OSError(5, 'Input/output error')
-        return real(fd, bufs, off)
-
-    monkeypatch.setattr(os, 'preadv', flaky)
-    with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-        _identical(reader, path, tensors)
-    report = resolver.report()
-    assert report['fallback_count'] == 1
-    assert report['bytes_from_stage'] == 0
-    assert report['bytes_from_pool'] == tensors['w'].numel() * 4
 
 
 def test_one_process_wide_pool_carries_every_readers_chunks(tmp_path, monkeypatch):

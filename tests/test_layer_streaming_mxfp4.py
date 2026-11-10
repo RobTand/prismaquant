@@ -30,14 +30,12 @@ from prismaquant.layer_streaming import (
     _build_fp8_scale_inv_map,
     _check_mxfp4_packed_grid,
 )
-from fullstack_pb_generation import pinned_pb_source
 
 # Unsupported AutoModel config refusals enumerate Transformers' lazy mapping,
 # importing native DSv4 before these tests detect their synthetic checkpoints.
 # Reuse the suite's existing child-process isolation rather than weaken that
 # correctly fatal vendor-identity guard or rewrite another module's imports.
-pytestmark = [pytest.mark.own_process,
-              pytest.mark.usefixtures("pinned_pb_source")]
+pytestmark = [pytest.mark.own_process]
 
 CPU = torch.device("cpu")
 

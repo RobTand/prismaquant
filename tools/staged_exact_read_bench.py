@@ -7,7 +7,7 @@ bytes, in one admitted action, on one box, alternating the arms so a drift in
 the tier cannot land on one of them.
 
 Run it as a PrismaBuild action whose data manifest names the entries it reads
-(``pbrun --data-manifest ... --residency stage``); the action's injected
+(a staged-residency launch); the action's injected
 reader context is what the strict tier policy leases through. The driver:
 
 1. waits until every declared entry has landed on the tier, and lists the
@@ -53,7 +53,7 @@ import time
 from pathlib import Path
 
 MARKER = "STAGED-EXACT-READ-BENCH "
-MOUNTS = ("/mnt/shared", "/stage/prewarm", "/ram/prewarm")
+MOUNTS = ("/mnt/shared", "/stage/staged", "/ram/staged")
 OPS = ("READ", "LOOKUP", "GETATTR", "ACCESS", "OPEN", "CLOSE", "WRITE",
        "COMMIT", "READDIR", "READDIRPLUS", "LOCK", "LOCKU", "SETATTR", "RENAME",
        "REMOVE", "CREATE", "OPEN_NOATTR", "DELEGRETURN", "TEST_STATEID",
@@ -162,9 +162,9 @@ def _all_records(slice_doc: dict, space: str) -> list[dict]:
 
 
 def child_paths(args, slice_doc) -> dict:
-    """Wait for every declared entry to land; list the staged copies."""
+    """Check immutable coverage and list the staged copies."""
     from prismaquant.residency_shard_reader import await_staged_spans
-    from prismaquant.staged_lease import stage_covers_are_published
+    from prismaquant.staged_lease import stage_cover_is_published
     resolver = _bind(args.manifest_sha256, args.allowed_tiers)
     rows = _all_records(slice_doc, args.space)
     wanted = []
@@ -173,8 +173,8 @@ def child_paths(args, slice_doc) -> dict:
             os.lstat(row["path"]).st_size
         wanted.append((row["path"], 0, size, size))
     started = time.monotonic()
-    verdict = await_staged_spans(resolver, wanted, deadline=started + args.land_wait_s,
-                                 published_batch=stage_covers_are_published)
+    verdict = await_staged_spans(resolver, wanted,
+                                 published=stage_cover_is_published)
     waited = time.monotonic() - started
     # The ram leg promotes each landed stage range afterwards; wait for it
     # too, so the first arm does not read a tier the later arms do not.
@@ -867,7 +867,7 @@ def _residency(resolver):
     out = {key: report.get(key) for key in keep if key in report}
     tiers = {}
     for row in report.get("serving_tiers") or ():
-        tier = row["serving_tier"]
+        tier = row["tier"]
         tiers[tier] = tiers.get(tier, 0) + 1
     out["serving_tier_rows"] = tiers
     return out
@@ -907,8 +907,6 @@ def run_child(args, mode: str, *, tree: str, sdk_root: str | None, out: Path,
     env.update(arm_env or {})
     env["PYTHONPATH"] = tree + (os.pathsep + env["PYTHONPATH"]
                                 if env.get("PYTHONPATH") else "")
-    if sdk_root:
-        env["PRISMABUILD_READER_HELPER_ROOT"] = sdk_root
     command = [sys.executable, str(Path(__file__).resolve()), "--child", mode,
                *args.child_argv, *extra]
     if profile:
@@ -972,8 +970,7 @@ def driver_main(args) -> int:
         matched[0]["env"][key] = value
     own_tree = str(Path(__file__).resolve().parents[1])
     report = {"schema": "prismaquant.staged_exact_read_bench.v1",
-              "host": os.uname().nodename, "action_key": os.environ.get(
-                  "PRISMABUILD_ACTION_KEY"), "arms": arms, "argv": sys.argv,
+              "host": os.uname().nodename, "arms": arms, "argv": sys.argv,
               "runs": []}
     # Local workloads read nothing staged, so they wait for no landing.
     staged = [w for arm in arms for w in arm["workloads"] if w not in LOCAL_WORKLOADS]

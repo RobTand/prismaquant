@@ -13,6 +13,7 @@ These tests build the environment and working directory from the launcher's
 own argv builder, then let a real interpreter resolve the import. They prove
 the property on this runner's Python, not on the container's.
 """
+from container_admission import ADMISSION, CIDFILE
 import importlib
 import json
 import os
@@ -68,9 +69,9 @@ def resolved_origin(environment, cwd):
 
 def test_the_pinned_tree_is_what_the_launched_environment_imports(tmp_path):
     pinned, checkout = trees(tmp_path)
-    argv = runner().docker_command(spec(pinned), ["python3", "-u", "-m",
+    argv = runner().podman_command(spec(pinned), ["python3", "-u", "-m",
                                                   "prismaquant.tessera_campaign"],
-                                   cwd=str(checkout), uid=1000, gid=1000,
+                                   cwd=str(checkout), admission=ADMISSION, cidfile=CIDFILE,
                                    image_id="sha256:" + "a" * 64)
     environment = launched_environment(argv)
     assert resolved_origin(environment, checkout).startswith(str(pinned))
@@ -80,9 +81,9 @@ def test_without_the_guard_the_sealed_checkout_wins(tmp_path):
     """The defect itself, so the guard above is load-bearing and not the fixture."""
 
     pinned, checkout = trees(tmp_path)
-    argv = runner().docker_command(spec(pinned), ["python3", "-u", "-m",
+    argv = runner().podman_command(spec(pinned), ["python3", "-u", "-m",
                                                   "prismaquant.tessera_campaign"],
-                                   cwd=str(checkout), uid=1000, gid=1000,
+                                   cwd=str(checkout), admission=ADMISSION, cidfile=CIDFILE,
                                    image_id="sha256:" + "a" * 64)
     environment = launched_environment(argv)
     environment.pop("PYTHONSAFEPATH")
@@ -91,8 +92,8 @@ def test_without_the_guard_the_sealed_checkout_wins(tmp_path):
 
 def test_the_launched_argv_carries_the_guard(tmp_path):
     pinned, checkout = trees(tmp_path)
-    argv = runner().docker_command(spec(pinned), ["python3"], cwd=str(checkout),
-                                   uid=1000, gid=1000, image_id="sha256:" + "a" * 64)
+    argv = runner().podman_command(spec(pinned), ["python3"], cwd=str(checkout),
+                                   admission=ADMISSION, cidfile=CIDFILE, image_id="sha256:" + "a" * 64)
     assert "PYTHONSAFEPATH=1" in argv
     assert argv[argv.index("--workdir") + 1] == "/workspace"
 
@@ -117,7 +118,7 @@ def test_the_replay_agrees_with_a_real_interpreter(tmp_path, safe_path):
     roots = module.import_search_roots(data, cwd=str(checkout), safe_path=safe_path)
     predicted = module._package_root(roots)[1]
     environment = launched_environment(
-        module.docker_command(data, ["python3"], cwd=str(checkout), uid=1, gid=1,
+        module.podman_command(data, ["python3"], cwd=str(checkout), admission=ADMISSION, cidfile=CIDFILE,
                               image_id="sha256:" + "a" * 64))
     if not safe_path:
         environment.pop("PYTHONSAFEPATH")
@@ -248,8 +249,9 @@ def test_main_refuses_a_shadowed_launch_before_it_execs(tmp_path, monkeypatch):
         / "experiments/measurements/glm-derivative-contract-20260908"
         / "image-build-result.json").read_text())["original_image"]
     monkeypatch.setattr(module, "inspect_or_load", lambda container: [image])
-    monkeypatch.setattr(module.os, "execvp",
-                        lambda file, argv: launched.setdefault("argv", argv))
+    monkeypatch.setattr(module, "native_admission", lambda environ: ADMISSION)
+    monkeypatch.setattr(module, "run_owned_container",
+                        lambda *args, **kwargs: launched.setdefault("argv", args))
     monkeypatch.chdir(checkout)
     data = spec(pinned, pythonpath="." + os.pathsep + str(pinned))
     with pytest.raises(RuntimeError, match="not from the pinned mount"):

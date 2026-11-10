@@ -49,6 +49,8 @@ Byte profiles, lowercase-hex SHA-256 except the native Git SHA-1 profile:
   header and exact owned payload, for independently published auxiliary IDs.
 - ``bytes_sha256hex``: the bytes as given (``bytes``, ``bytearray`` or
   ``memoryview``).
+- ``chunks_sha256hex``: caller-ordered byte chunks as one unframed stream,
+  without collecting the chunks in memory.
 - ``text_sha256hex``: the text encoded as strict UTF-8, so a lone surrogate
   raises ``UnicodeEncodeError``.
 - ``newline_utf8_bytes`` / ``newline_utf8_sha256``: strings in caller order,
@@ -524,6 +526,14 @@ def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def chunks_sha256hex(chunks: Iterable[bytes | bytearray | memoryview]) -> str:
+    """Hash exactly the concatenation while the caller supplies each chunk."""
+    digest = hashlib.sha256()
+    for chunk in chunks:
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def text_sha256hex(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -590,7 +600,7 @@ def file_range_sha256hex(path: str | os.PathLike, offset: int, size: int) -> str
     return digest.hexdigest()
 
 
-def file_digest_sha256hex(handle: BinaryIO) -> str:
+def file_digest_sha256hex(handle: BinaryIO, *, max_bytes: int | None = None) -> str:
     """Digest an already-open, stat-fenced file handle in one stream.
 
     ``file_sha256hex`` opens the path itself; a site that fenced its read with
@@ -598,8 +608,26 @@ def file_digest_sha256hex(handle: BinaryIO) -> str:
     descriptor and must not reopen the path. This is the one spelling for that
     shape: the stdlib streaming ``file_digest`` over the caller's handle,
     reading it from its current position to EOF.
+
+    ``max_bytes`` bounds consumption, including a one-byte overflow probe.
+    Reads allocate at most ``FILE_BLOCK_BYTES``; short streams retain their
+    ordinary digest and the caller owns any exact-length/stat checks.
     """
-    return hashlib.file_digest(handle, "sha256").hexdigest()
+    if max_bytes is None:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+    if type(max_bytes) is not int or max_bytes < 0:
+        raise ValueError("invalid stream byte ceiling")
+    digest = hashlib.sha256()
+    remaining = max_bytes
+    while remaining:
+        chunk = handle.read(min(remaining, FILE_BLOCK_BYTES))
+        if not chunk:
+            break
+        digest.update(chunk)
+        remaining -= len(chunk)
+    if handle.read(1):
+        raise ValueError("file stream exceeds byte ceiling")
+    return digest.hexdigest()
 
 
 def indent2_json_file_bytes(value: object) -> bytes:
