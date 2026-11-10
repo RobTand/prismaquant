@@ -212,7 +212,8 @@ def test_pra_remeasurement_is_a_one_shot_transition(mutation, monkeypatch):
     from tools.ci import graph_impact_pq as pq
 
     current = json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text())
-    # This transition predates subsequent shrink-only baseline records.
+    # Main 9fb507d69a13dc058e731f039bf445e84e4b5d3a recorded 174 and 889
+    # under the PR-A analyzer transition, before later shrink-only records.
     current['figures']['scc_max'] = 174
     current['test_to_test_count'] = 889
     previous = deepcopy(current)

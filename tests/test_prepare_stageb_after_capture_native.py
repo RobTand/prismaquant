@@ -1,5 +1,6 @@
 """The Stage B preparation wrapper submits one native CPU job and refuses an unbound staged input (the retired wrapper's progress-phase test is gone with progress phases)."""
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -66,4 +67,5 @@ def test_the_resources_are_a_native_cpu_profile():
 
 def test_no_retired_submitter_or_progress_phase_remains():
     source = (ROOT / "tools" / "prepare_stageb_after_capture.py").read_text()
-    assert "--progress-phase" not in source and "--tag" not in source
+    assert re.search(r'--progress-(?:phase|grace-s)\b', source) is None
+    assert '--tag' not in source
