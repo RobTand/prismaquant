@@ -11,7 +11,7 @@ import json
 import math
 from pathlib import Path
 
-from .campaign_container_spec import admission_image_reference, validate_container
+from .campaign_container_spec import validate_container
 from .tessera_campaign_cli import campaign_argument_parser, explicit_campaign_options
 
 

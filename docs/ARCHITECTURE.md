@@ -38,7 +38,9 @@ landing wait, poll deadline or progress-grace coupling. One resolver entry must
 cover the requested span; adjacent objects do not form a synthetic entry.
 The row builders omit retired progress-phase and container-image admission
 metadata; the container specification remains bound in argv. Capture chains
-emit no queue priority field and refuse an explicit nonzero priority. Production GPU rows
+emit no queue priority field and refuse an explicit nonzero priority.
+Post-campaign native rows apply the same metadata rule and refuse unqualified
+GPU-memory requests at construction. Production GPU rows
 refuse with `GPU lane not qualified; requires plan step P-7` before CPU admission.
 
 The dated entries below preserve earlier designs and measurements. Their

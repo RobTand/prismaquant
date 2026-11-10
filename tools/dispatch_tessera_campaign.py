@@ -97,7 +97,6 @@ from prismaquant import campaign_data_manifests
 from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant.campaign_container_spec import (
     BOUNDED_CAPTURE_ENV,
-    admission_image_reference,
     container_memory_budget_gb,
     validate_container,
 )
@@ -1589,7 +1588,11 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
 def _native_action_row(args, *, manifest: Path, inner: list[str],
                        progress_phases=(), gpu_memory_gb=None, container_spec=None,
                        residency=None) -> dict:
-    """Preserve post-campaign intent; unqualified requirements refuse at launch."""
+    """Build native metadata; refuse unsupported explicit scheduling intent."""
+    if args.priority != 0:
+        raise ValueError("queue priority mapping is unqualified; priority must be 0")
+    if gpu_memory_gb is not None:
+        raise ValueError("GPU lane not qualified; requires plan step P-7")
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     parsed = json.loads(Path(args.spec).read_text()) if container_spec is None else container_spec
     command = ['python3', '-m', 'tools.tessera_campaign_container',
@@ -1599,13 +1602,8 @@ def _native_action_row(args, *, manifest: Path, inner: list[str],
         demand['cpu'] = args.cpus
     row = {'argv': command, 'cwd': parsed.get('cwd', str(Path.cwd())),
            'demand': demand, 'env': dict(parsed.get('env', {})),
-           'tags': [args.tag] if args.tag else [], 'priority': args.priority,
+           'tags': [args.tag] if args.tag else [],
            'data_manifest': str(manifest), 'timeout_s': args.timeout_s}
-    image = admission_image_reference(parsed)
-    if image is not None:
-        row['container_images'] = [image]
-    if gpu_memory_gb is not None:
-        row['gpu_memory_gb'] = gpu_memory_gb
     if residency is not None:
         row['residency'] = residency
     return row
