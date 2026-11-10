@@ -2380,7 +2380,7 @@ def _io_counters() -> dict:
 def bind_stage_a_produced_output(*, artifact_max_bytes):
     """Use the shared launch binding and effective artifact ceiling check."""
     from .joint_quantum_handoff import bind_stage_a_publication
-    return bind_stage_a_publication(artifact_max_bytes=artifact_max_bytes)
+    return bind_stage_a_publication(boundary_storage={'max_artifact_bytes': artifact_max_bytes})
 
 
 def _stage_a_device_envelope(config, *, environ=None):

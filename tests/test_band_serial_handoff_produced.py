@@ -231,3 +231,9 @@ def test_shared_stage_a_binding_preserves_handoff_policy(monkeypatch, native, ma
         else:
             assert invoke() is publication
     assert len(calls) == (2 if native else 0)
+
+
+def test_unadmitted_handoff_never_reads_the_declaration_budget(monkeypatch):
+    from prismaquant.joint_quantum_handoff import bind_handoff_publication
+    monkeypatch.delenv('FLUX_JOB_ID', raising=False)
+    assert bind_handoff_publication(boundary_storage={}) is None
