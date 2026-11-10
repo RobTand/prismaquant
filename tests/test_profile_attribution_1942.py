@@ -122,18 +122,25 @@ print('stdlib owner loaded')
     assert result.stdout.strip()=='stdlib owner loaded'
 
 
-@pytest.mark.parametrize('source', ['unknown', '../digests', '/owned/digests.py',
-                                     'prismaquant/digests.py', 'pq_profile_shared_digest_owner'])
-def test_profile_source_refuses_unknown_owner_or_path(source):
-    from tools.pq_profile_artifact import profile_source_owner
+@pytest.mark.parametrize('name', ['unknown', '../digests', '/owned/digests.py', 'digests'])
+def test_profile_source_refuses_unknown_owner_or_path(name):
+    from tools.pq_profile_artifact import load_profile_source
     with pytest.raises(KeyError) as refused:
-        profile_source_owner(source)
-    assert refused.value.args == (source,)
+        load_profile_source(name, Path('/foreign/digests.py'))
+    assert refused.value.args == (name,)
 
 
-@pytest.mark.parametrize('source', ['digests', 'io_spans', 'file_identity'])
-def test_profile_source_uses_only_fixed_snapshot_owners(source):
-    from tools.pq_profile_artifact import profile_source_owner
-    owner = profile_source_owner(source)
-    assert Path(owner.__file__).resolve() == Path(__file__).resolve().parents[1] / 'prismaquant' / (source + '.py')
-    assert profile_source_owner(source) is owner
+@pytest.mark.parametrize('source,name', [
+    ('digests', 'pq_profile_shared_digest_owner'),
+    ('io_spans', 'pq_profile_shared_sampler_owner'),
+    ('file_identity', 'pq_profile_shared_file_identity_owner'),
+])
+def test_profile_source_uses_only_fixed_snapshot_owners(source, name, tmp_path):
+    from tools.pq_profile_artifact import load_profile_source
+    path = Path(__file__).resolve().parents[1].joinpath('prismaquant', source + '.py')
+    owner = load_profile_source(name, path)
+    assert Path(owner.__file__).resolve() == path
+    assert load_profile_source(name, path) is owner
+    # Check before consulting the module cache, even for a known loaded owner.
+    with pytest.raises(KeyError):
+        load_profile_source(name, tmp_path / (source + '.py'))
