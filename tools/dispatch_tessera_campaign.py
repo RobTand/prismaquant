@@ -1588,7 +1588,7 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
 def _native_action_row(args, *, manifest: Path, inner: list[str],
                        progress_phases=(), gpu_memory_gb=None, container_spec=None,
                        residency=None) -> dict:
-    """Build native metadata; refuse unsupported explicit scheduling intent."""
+    """Retain scientific row intent for review and native admission."""
     if args.priority != 0:
         raise ValueError("queue priority mapping is unqualified; priority must be 0")
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
@@ -1609,7 +1609,11 @@ def _native_action_row(args, *, manifest: Path, inner: list[str],
     if gpu_memory_gb is not None:
         row['gpu_memory_gb'] = gpu_memory_gb
     if progress_phases:
-        row['progress_phases'] = [f'{name}={(getattr(args, "head_grace_s", None) or 1800) if name == "head" else 900}' for name in progress_phases]
+        head_grace = getattr(args, "head_grace_s", None)
+        if head_grace is None:
+            head_grace = 1800
+        row['progress_phases'] = [
+            f'{name}={head_grace if name == "head" else 900}' for name in progress_phases]
     if residency is not None:
         row['residency'] = residency
     return row
