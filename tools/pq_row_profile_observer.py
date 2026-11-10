@@ -9,7 +9,7 @@ import argparse
 from tools.pq_profile_artifact import file_sha256hex
 from tools.pq_profile_artifact import publish_profile, validate_netdata_window
 from tools.pq_admitted_profile import PROFILE_LOCAL_ROOT
-from tools.pq_profile_artifact import load_profile_source
+from tools.pq_profile_artifact import profile_source_owner
 import json
 import math
 import os
@@ -23,9 +23,7 @@ import urllib.parse
 import urllib.request
 
 # The host observer needs the existing stdlib sampler, not production init.
-PeriodicSampler = load_profile_source(
-    'pq_profile_shared_sampler_owner',
-    Path(__file__).resolve().parents[1] / 'prismaquant/io_spans.py').PeriodicSampler
+PeriodicSampler = profile_source_owner('io_spans').PeriodicSampler
 
 p = argparse.ArgumentParser()
 p.add_argument('--out', required=True)

@@ -23,7 +23,7 @@ cutoff that could terminate a live row.
 
 ## Explicit dependencies and outputs
 
-Host startup needs only the standard library. `tools.pq_profile_source` loads
+Host startup needs only the standard library. `tools.pq_profile_artifact` loads
 only the existing digest and IO-span source owners from the same snapshot;
 it does not execute `prismaquant.__init__` or install a replacement package
 namespace. The observer uses the authoritative `io_spans.PeriodicSampler`,

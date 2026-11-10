@@ -120,3 +120,20 @@ print('stdlib owner loaded')
                           capture_output=True,text=True,timeout=30)
     assert result.returncode==0,result.stderr
     assert result.stdout.strip()=='stdlib owner loaded'
+
+
+@pytest.mark.parametrize('source', ['unknown', '../digests', '/owned/digests.py',
+                                     'prismaquant/digests.py', 'pq_profile_shared_digest_owner'])
+def test_profile_source_refuses_unknown_owner_or_path(source):
+    from tools.pq_profile_artifact import profile_source_owner
+    with pytest.raises(KeyError) as refused:
+        profile_source_owner(source)
+    assert refused.value.args == (source,)
+
+
+@pytest.mark.parametrize('source', ['digests', 'io_spans', 'file_identity'])
+def test_profile_source_uses_only_fixed_snapshot_owners(source):
+    from tools.pq_profile_artifact import profile_source_owner
+    owner = profile_source_owner(source)
+    assert Path(owner.__file__).resolve() == Path(__file__).resolve().parents[1] / 'prismaquant' / (source + '.py')
+    assert profile_source_owner(source) is owner

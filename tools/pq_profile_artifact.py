@@ -9,12 +9,21 @@ from types import ModuleType
 from typing import TypeGuard
 
 
-def load_profile_source(owner_name: str, path: Path) -> ModuleType:
-    """Load the caller's explicit stdlib owner once without package initialization."""
+_PROFILE_OWNERS = {
+    'digests': 'pq_profile_shared_digest_owner',
+    'io_spans': 'pq_profile_shared_sampler_owner',
+    'file_identity': 'pq_profile_shared_file_identity_owner',
+}
+
+
+def profile_source_owner(source: str) -> ModuleType:
+    """Reuse only the profiler's three stdlib owners from this source snapshot."""
+    owner_name = _PROFILE_OWNERS[source]
     if owner_name not in sys.modules:
+        path = Path(__file__).resolve().parents[1] / 'prismaquant' / (source + '.py')
         spec = importlib.util.spec_from_file_location(owner_name, path)
         if spec is None or spec.loader is None:
-            raise RuntimeError('profile source owner unavailable: ' + str(path))
+            raise RuntimeError('profile source owner unavailable: ' + source)
         module = importlib.util.module_from_spec(spec)
         sys.modules[owner_name] = module
         try:
@@ -26,8 +35,7 @@ def load_profile_source(owner_name: str, path: Path) -> ModuleType:
 
 
 def profile_digest_owner():
-    path = Path(__file__).resolve().parents[1] / 'prismaquant/digests.py'
-    return load_profile_source('pq_profile_shared_digest_owner', path)
+    return profile_source_owner('digests')
 
 
 bytes_sha256hex = profile_digest_owner().bytes_sha256hex
