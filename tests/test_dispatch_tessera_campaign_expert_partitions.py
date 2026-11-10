@@ -65,7 +65,7 @@ def test_real_pricing_builder_reaches_the_named_native_gpu_hold(planned):
     assert dispatch.cmd_plan(_plan_args(spec, workspace, experts_per_row=2)) == 0
     for row in json.loads((workspace / "manifest.json").read_text()):
         assert "progress_phases" not in row
-        with pytest.raises(ValueError, match="GPU lane not qualified"):
+        with pytest.raises(ValueError) as gpu_refused:
             campaign_rows.validate_row(row)
 
 
@@ -242,8 +242,9 @@ def test_native_post_campaign_builder_retains_requirements_and_refuses_execution
     assert row["container_images"] == [spec["container"]["image"]]
     assert row["progress_phases"] == ["head=1800", "layer-0=900"]
     state = tmp_path / "never-submitted"
-    with pytest.raises(ValueError, match="strict staging is unqualified"):
+    with pytest.raises(ValueError) as refused:
         campaign_rows.submit_rows([row], state)
+    assert str(refused.value) == "data_manifest: strict staging is unqualified without a bound staged_input"
     assert not state.exists()
     assert json.loads(row["argv"][row["argv"].index("--spec") + 1]) == spec
     args.priority = -10
@@ -256,6 +257,14 @@ def test_native_post_campaign_builder_retains_requirements_and_refuses_execution
                                          inner=["true"], container_spec=spec, gpu_memory_gb=1)
     assert gpu_row["gpu_memory_gb"] == 1
     assert gpu_row["container_images"] == row["container_images"]
-    with pytest.raises(ValueError, match="GPU lane not qualified"):
+    with pytest.raises(ValueError) as gpu_refused:
         campaign_rows.submit_rows([gpu_row], state)
+    assert str(gpu_refused.value) == 'GPU lane not qualified; requires plan step P-7'
+    assert not state.exists()
+    # Exercise the GPU refusal alone as well as its precedence above staging.
+    gpu_only = {key: value for key, value in gpu_row.items()
+                if key not in {'data_manifest', 'container_images', 'progress_phases', 'gpu_memory_gb'}}
+    with pytest.raises(ValueError) as gpu_refused:
+        campaign_rows.submit_rows([gpu_only], state)
+    assert str(gpu_refused.value) == 'GPU lane not qualified; requires plan step P-7'
     assert not state.exists()
