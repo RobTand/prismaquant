@@ -27,9 +27,9 @@ FP32_STREAM_LIST_GOLDEN = "b9c80b5adeca450753a16950c3cc655d271f7bef7a485bc83f112
 
 REPO = Path(__file__).resolve().parents[1]
 TOKEN_SCOPE = "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256"
-# Canonical JSON identity after the token route and authorized PB retirement.
-# Retired adapter scopes disappeared; retained byte-contract goldens stay fixed.
-TOKEN_ONLY_BASELINE_SHA256 = "2062c270a775feee5ab366372df09fca9434f5fe55a75d83d393282bf530dfb7"
+# Canonical JSON identity after the token route, native migration, and sealed
+# buffer digest consolidation. Retained byte-contract goldens stay fixed.
+TOKEN_ONLY_BASELINE_SHA256 = "2662654100cf87703aa743a859684263f60163540efc7674ed14e7cb4bbce3da"
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(
     not torch.cuda.is_available(), reason="needs CUDA"))]
 
