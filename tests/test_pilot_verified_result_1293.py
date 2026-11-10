@@ -9,7 +9,10 @@ These tests establish no genuine GPU pilot qualification.
 """
 from __future__ import annotations
 
+import builtins
+import io
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -25,13 +28,38 @@ def _refuse_fleet_spec_reads(monkeypatch, _pilot_spec):
     A fleet mount on the verification worker must not conceal a missing
     fixture. Guard reads as well as replacing the dispatcher's spec root.
     """
-    read_text = Path.read_text
+    def guard(reader, *, opens=False):
+        def portable_read(path, *args, **kwargs):
+            mode = args[0] if args else kwargs.get('mode', 'r')
+            reads = not opens or 'r' in mode or '+' in mode
+            if reads and not isinstance(path, int):
+                absolute = os.path.abspath(os.fsdecode(path))
+                assert absolute != '/mnt/shared' and not absolute.startswith('/mnt/shared/'), (
+                    'pilot read escaped its hermetic fixture')
+            return reader(path, *args, **kwargs)
+        return portable_read
 
-    def portable_read(path, *args, **kwargs):
-        assert not str(path).startswith('/mnt/shared/'), 'pilot read escaped its hermetic fixture'
-        return read_text(path, *args, **kwargs)
+    for name in ('read_text', 'read_bytes', 'open'):
+        monkeypatch.setattr(Path, name, guard(getattr(Path, name), opens=name == 'open'))
+    monkeypatch.setattr(builtins, 'open', guard(builtins.open, opens=True))
+    monkeypatch.setattr(io, 'open', guard(io.open, opens=True))
 
-    monkeypatch.setattr(Path, 'read_text', portable_read)
+
+@pytest.mark.parametrize('path', [
+    '/mnt/shared', '/mnt/shared/fixture.json', '/mnt//shared/fixture.json',
+    '/mnt/shared/../shared/fixture.json',
+])
+@pytest.mark.parametrize('reader', ['read_text', 'read_bytes', 'path_open', 'builtin_open', 'io_open'])
+def test_shared_read_guard_refuses_every_reader(path, reader):
+    with pytest.raises(AssertionError, match='pilot read escaped its hermetic fixture'):
+        if reader == 'path_open':
+            Path(path).open('rb')
+        elif reader == 'builtin_open':
+            builtins.open(path, 'rb')
+        elif reader == 'io_open':
+            io.open(path, 'rb')
+        else:
+            getattr(Path(path), reader)()
 
 
 class _ProductionPilotGateway(dispatch.FakeGateway):
