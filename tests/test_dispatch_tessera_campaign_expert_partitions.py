@@ -230,21 +230,32 @@ def test_partition_merge_checks_actual_group_and_priced_rung(partition_payloads,
                                 plan_coverage=coverage)
 
 
-def test_native_post_campaign_builder_omits_unqualified_scheduler_fields(tmp_path):
+def test_native_post_campaign_builder_retains_requirements_and_refuses_execution(tmp_path):
     from types import SimpleNamespace
     args = SimpleNamespace(container_arg=[], demand="cpu=1,mem_gb=1", cpus=None,
                            tag=None, priority=0, timeout_s=60)
     spec = {"cwd": str(tmp_path), "env": {}, "container": {"image": "qualified:fixed"}}
     row = dispatch._native_action_row(args, manifest=tmp_path / "manifest.json",
                                      inner=["python3", "payload.py"], container_spec=spec,
-                                     progress_phases=(("old", 300),))
-    assert not set(row) & {"priority", "container_images", "gpu_memory_gb", "progress_phases"}
+                                     progress_phases=("head", "layer-0"))
+    assert "priority" not in row and "gpu_memory_gb" not in row
+    assert row["container_images"] == [spec["container"]["image"]]
+    assert row["progress_phases"] == ["head=1800", "layer-0=900"]
+    state = tmp_path / "never-submitted"
+    with pytest.raises(ValueError, match="strict staging is unqualified"):
+        campaign_rows.submit_rows([row], state)
+    assert not state.exists()
     assert json.loads(row["argv"][row["argv"].index("--spec") + 1]) == spec
     args.priority = -10
     with pytest.raises(ValueError, match="queue priority mapping is unqualified"):
         dispatch._native_action_row(args, manifest=tmp_path / "manifest.json",
                                    inner=["true"], container_spec=spec)
     args.priority = 0
+    args.demand = "gpu=1,cpu=1,mem_gb=1"
+    gpu_row = dispatch._native_action_row(args, manifest=tmp_path / "manifest.json",
+                                         inner=["true"], container_spec=spec, gpu_memory_gb=1)
+    assert gpu_row["gpu_memory_gb"] == 1
+    assert gpu_row["container_images"] == row["container_images"]
     with pytest.raises(ValueError, match="GPU lane not qualified"):
-        dispatch._native_action_row(args, manifest=tmp_path / "manifest.json",
-                                   inner=["true"], container_spec=spec, gpu_memory_gb=1)
+        campaign_rows.submit_rows([gpu_row], state)
+    assert not state.exists()
