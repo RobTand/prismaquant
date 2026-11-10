@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import fcntl
-import hashlib
 import io
 import mmap
 import os
 from pathlib import Path
+
+from .digests import bytes_sha256hex
 
 # The memfd seal numbers are Linux UAPI and ABI-fixed since kernel 3.11
 # (uapi/asm-generic/fcntl.h, uapi/linux/memfd.h). CPython defines the
@@ -140,17 +141,18 @@ class SealedBuffer:
 
     def seal(self) -> str:
         """Hash the bytes read, drop the writable mapping and seal; the SHA-256 hex."""
-        digest = hashlib.sha256()
-        if self._map is not None:
+        if self._map is None:
+            digest = bytes_sha256hex(b"")
+        else:
             view = memoryview(self._map)
             try:
-                digest.update(view)
+                digest = bytes_sha256hex(view)
             finally:
                 view.release()
             self._map.close()
             self._map = None
         fcntl.fcntl(self._fd, _F_ADD_SEALS, _SEALS)
-        return digest.hexdigest()
+        return digest
 
     def require_sealed(self) -> None:
         """Require actual kernel write/grow/shrink/seal protection, not a flag."""
