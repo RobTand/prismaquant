@@ -229,7 +229,7 @@ def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_o
     """Write ``round_dir`` (templates and ``round.json``); submit nothing.
 
     ``priority`` is the requested queue priority band of every row (an integer
-    string, ``-10`` by default).
+    string, ``0`` by default).
     """
     from prismaquant.joint_adjoint_checkpoints import adjoint_space
     from prismaquant.stage_a_chain_resume import load_chain_state, resume_records
