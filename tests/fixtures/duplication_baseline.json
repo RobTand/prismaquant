@@ -8,7 +8,6 @@
   "hashlib:prismaquant/container_runtime_identity.py::prismaquant_source_sha256",
   "hashlib:prismaquant/export_gguf.py::export_gguf",
   "hashlib:prismaquant/glm_routing_replay.py::glm_route_record",
-  "hashlib:prismaquant/io_engine.py::SealedBuffer.seal",
   "hashlib:prismaquant/joint_prewarm_phases.py::load_prepare_read_set",
   "hashlib:prismaquant/joint_replay_frontier.py::_framed",
   "hashlib:prismaquant/joint_replay_frontier.py::roster_sha256",
