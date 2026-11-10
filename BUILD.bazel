@@ -8842,7 +8842,6 @@ pq_py_library(
         "prismaquant/streamed_model_identity.py",
         "prismaquant/streaming_model.py",
         "prismaquant/streaming_production_cache.py",
-        "prismaquant/tessera_acquisition_inputs.py",
         "prismaquant/tessera_allocator.py",
         "prismaquant/tessera_calibration_cache.py",
         "prismaquant/tessera_calibration_forward.py",
@@ -8919,7 +8918,6 @@ pq_py_library(
         "prismaquant/serving_profiles.py",
         "prismaquant/shape_runtime_prices.py",
         "prismaquant/shipcard.py",
-        "prismaquant/tessera_acquisition_inputs.py",
         "prismaquant/tessera_campaign_reseal.py",
         "prismaquant/tessera_campaign_rows.py",
         "prismaquant/tessera_joint_aura.py",
@@ -9019,6 +9017,7 @@ pq_py_library(
         ":prismaquant/staged_whole_file",
         ":prismaquant/streaming_initialization",
         ":prismaquant/tensor_digests",
+        ":prismaquant/tessera_acquisition_inputs",
         ":prismaquant/tessera_campaign_requests",
         ":prismaquant/tessera_campaign_selection",
         ":prismaquant/tessera_hessian",
@@ -9287,6 +9286,7 @@ pq_py_library(
         ":prismaquant/joint_retained_window_plan",
         ":prismaquant/joint_run_progress",
         ":prismaquant/render_cache_paths",
+        ":prismaquant/tessera_acquisition_inputs",
         ":prismaquant/tessera_campaign_selection",
         "@pq_pip//torch",
     ],
@@ -11039,6 +11039,22 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "prismaquant/tessera_acquisition_inputs",
+    srcs = [
+        "prismaquant/tessera_acquisition_inputs.py",
+    ],
+    data = [
+        "prismaquant/tessera_acquisition_inputs.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/contract_checks",
+        ":prismaquant/digests",
+        ":prismaquant/file_identity",
+    ],
+)
+
+pq_py_library(
     name = "prismaquant/tessera_anchored_surface",
     srcs = [
         "prismaquant/tessera_anchored_surface.py",
@@ -12520,6 +12536,7 @@ pq_py_library(
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/dev_mode",
         ":prismaquant/digests",
+        ":prismaquant/tessera_acquisition_inputs",
         ":prismaquant/tessera_campaign_selection",
         ":tools/__init__",
         ":tools/tessera_campaign_container",
