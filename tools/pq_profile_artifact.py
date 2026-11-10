@@ -1,12 +1,13 @@
 """Validate workload-attributed samples and atomically publish their bytes."""
 import importlib.util
 import json
-import sys
-from types import ModuleType
 import math
 from pathlib import Path
 import re
+import sys
+from types import ModuleType
 from typing import TypeGuard
+
 
 def load_profile_source(owner_name: str, path: Path) -> ModuleType:
     """Load the caller's explicit stdlib owner once without package initialization."""

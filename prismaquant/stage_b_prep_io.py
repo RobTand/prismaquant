@@ -5,12 +5,11 @@ Read-set/template builders retain their scientific wire formats. Launch-bound ou
 """
 from __future__ import annotations
 
-from .file_identity import WriterIdentities
-
 import os
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from .file_identity import WriterIdentities
 from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_range_sha256hex, text_sha256hex
 
 #: The template slot every Stage B preparation output is filed under.

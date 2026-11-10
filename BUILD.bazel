@@ -4509,6 +4509,17 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tools/native_result_cpu_proof",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tools/native_result_cpu_proof.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/native_results",
+    ],
+)
+
+pq_py_library(
     name = "archive/pq_experiments_2026-11-09/tools/submit_quantum_cache_row",
     srcs = [
         "archive/pq_experiments_2026-11-09/tools/submit_quantum_cache_row.py",
@@ -4522,6 +4533,23 @@ pq_py_library(
         ":prismaquant/digests",
         ":tools/__init__",
         ":tools/tessera_campaign_container",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tools/unit2_staged_proof",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tools/unit2_staged_proof.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/digests",
+        ":prismaquant/flux_jobs",
+        ":prismaquant/io_engine",
+        ":prismaquant/residency_map",
+        ":prismaquant/staged_manifest",
+        ":prismaquant/staged_whole_file",
     ],
 )
 
@@ -7194,13 +7222,25 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "experiments/original_cuda_artifacts",
+    srcs = [
+        "experiments/original_cuda_artifacts.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/native_results",
+    ],
+)
+
+pq_py_library(
     name = "experiments/original_cuda_control",
     srcs = [
         "experiments/original_cuda_control.py",
     ],
     deps = [
+        ":experiments/original_cuda_artifacts",
         ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/native_results",
     ],
 )
@@ -9324,7 +9364,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/dev_mode",
         ":prismaquant/digests",
-        ":prismaquant/file_identity",
+        ":prismaquant/io_buffers",
     ],
 )
 
@@ -10489,6 +10529,7 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/digests",
+        ":prismaquant/file_identity",
         ":prismaquant/flux_jobs",
         ":prismaquant/native_results",
         ":prismaquant/staged_launch",
@@ -10927,6 +10968,7 @@ pq_py_library(
         ":prismaquant/digests",
         ":prismaquant/file_identity",
         ":prismaquant/io_buffers",
+        ":prismaquant/staged_tier_policy",
     ],
 )
 
@@ -10934,10 +10976,6 @@ pq_py_library(
     name = "prismaquant/staged_tier_policy",
     srcs = [
         "prismaquant/staged_tier_policy.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/staged_manifest",
     ],
 )
 
@@ -13072,17 +13110,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/native_result_cpu_proof",
-    srcs = [
-        "tools/native_result_cpu_proof.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/native_results",
-    ],
-)
-
-pq_py_library(
     name = "tools/nvfp4_served_qdq_bench",
     srcs = [
         "tools/nvfp4_served_qdq_bench.py",
@@ -13326,9 +13353,12 @@ pq_py_library(
     srcs = [
         "tools/pq_profile_artifact.py",
     ],
+    data = [
+        "prismaquant/digests.py",
+        "tools/pq_profile_artifact.py",
+    ],
     deps = [
-        ":tools/__init__",
-        ":tools/pq_profile_source",
+        ":prismaquant/digests",
     ],
 )
 
@@ -13344,28 +13374,18 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/pq_profile_source",
-    srcs = [
-        "tools/pq_profile_source.py",
-    ],
-    data = [
-        "tools/pq_profile_source.py",
-    ],
-)
-
-pq_py_library(
     name = "tools/pq_row_profile_observer",
     srcs = [
         "tools/pq_row_profile_observer.py",
     ],
     data = [
+        "prismaquant/io_spans.py",
         "tools/pq_row_profile_observer.py",
     ],
     deps = [
         ":tools/__init__",
         ":tools/pq_admitted_profile",
         ":tools/pq_profile_artifact",
-        ":tools/pq_profile_source",
     ],
 )
 
@@ -13836,6 +13856,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/digests",
         ":prismaquant/file_identity",
+        ":prismaquant/io_buffers",
         ":prismaquant/produced_output_spool",
         ":prismaquant/stage_a_produced_output",
     ],
@@ -13928,7 +13949,6 @@ pq_py_library(
     deps = [
         ":tools/__init__",
         ":tools/pq_profile_artifact",
-        ":tools/pq_profile_source",
     ],
 )
 
@@ -14088,23 +14108,6 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/tessera_census_union",
-    ],
-)
-
-pq_py_library(
-    name = "tools/unit2_staged_proof",
-    srcs = [
-        "tools/unit2_staged_proof.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
-        ":prismaquant/flux_jobs",
-        ":prismaquant/io_engine",
-        ":prismaquant/residency_map",
-        ":prismaquant/staged_manifest",
-        ":prismaquant/staged_whole_file",
     ],
 )
 

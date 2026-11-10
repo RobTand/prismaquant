@@ -1,8 +1,6 @@
 """Finite prefill documents; native execution remains with the shared Flux owner."""
 from __future__ import annotations
 
-from .file_identity import WriterIdentities
-
 from dataclasses import asdict
 import os
 from pathlib import Path
@@ -14,6 +12,7 @@ from . import flux_jobs, native_results
 from . import quality_prefill_contract as scientific
 from .cost_stage_checkpoint import publish_new_bytes
 from .digests import bytes_sha256hex
+from .file_identity import WriterIdentities
 from .flux_jobs import FluxResources
 from .native_results import _owned, validate_runtime
 from .schemas import Contract
