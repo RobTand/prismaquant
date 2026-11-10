@@ -29,28 +29,11 @@ HISTORY_PREFIXES = (
     "prismaquant/serving_runtime_patches/", "tests/g3job/data-manifest.json",
 )
 BAN_DEFINITIONS = ("tests/test_prismabuild_ban.py", "tests/test_prismabuild_boundary.py")
-# Recorded kernel evidence is immutable; these are not execution instructions.
+# Recorded kernel evidence and dated design history are retained, not execution instructions.
 RECORDED_EVIDENCE = (
     "docs/design/distributed_campaign_2026-09-19.md",
     "docs/design/domain_numerics_census_1303_20261002.md",
-    "docs/design/embedded_native_weight_coding_2026-08-31.md",
-    "docs/design/embedded_native_weight_coding_2026-08-31_codex_round4_review.md",
-    "docs/design/embedded_native_weight_coding_2026-08-31_codex_round5_review.md",
-    "docs/design/embedded_native_weight_coding_2026-08-31_codex_round6_review.md",
-    "docs/design/embedded_native_weight_coding_2026-08-31_codex_round7_review.md",
-    "docs/design/embedded_native_weight_coding_2026-08-31_codex_round8_review.md",
-    "docs/design/format_menu_2026-08-29.md",
     "docs/design/joint_quanta_765_688_2026-09-19.md",
-    "docs/design/joint_resume_empty_lease_2026-09-07.md",
-    "docs/design/joint_resume_source_transition_2026-09-07.md",
-    "docs/design/joint_run_source_transition_2026-09-18.md",
-    "docs/design/native_panel_served_quantizer_identity_2026-09-19.md",
-    "docs/design/quantum_metadata_generation_2026-09-21.md",
-    "docs/design/routed_executed_scale_grouping_2026-09-14.md",
-    "docs/design/stage_a_artifact_budget_2026-09-21.md",
-    "docs/design/trellis_e2m1_lane_2026-08-29.md",
-    "docs/design/trellis_e4m3_lane_2026-08-29.md",
-    "docs/design/trellis_serving_gap_2026-08-29.md",
 
     "prismaquant/kernels/kda_chunk_qualification.json",
     "prismaquant/kernels/joint_projection_reduce_qualification.json",
@@ -61,7 +44,7 @@ REFUSAL_TOKENS = {
     "prismaquant/campaign_container_spec.py": ('"PRISMABUILD_PRODUCED_"', '"PRISMABUILD_"'),
     "prismaquant/shipcard_slots.py": ('producer_id = matched[0].get("pb_action")',),
     "experiments/build_kda_kernel_qualification.py": ('"pb_action": key',),
-    "tests/test_graph_shipcard_receipt.py": ('arm.pop("pb_action")',),
+    "tests/test_graph_shipcard_receipt.py": ('arm.pop("pb_action")', 'arm["pb_action"] = recorded_id if mismatch else "different-recorded-id"'),
     "tests/graph_receipt_fixtures.py": ('"pb_action": "fixture-equality-action"', 'graph["pb_action"]'),
     "tests/test_pq1317_gpu_qualification_package.py": ('["pb_action"]',),
     "tests/test_bazel_inputs.py": ("'PRISMABUILD_'",),
@@ -211,3 +194,10 @@ def test_token_carveouts_still_name_existing_source():
         assert text is not None
         for token in tokens:
             assert token in text, (path, token)
+
+
+def test_recorded_evidence_exemptions_still_have_mechanism_hits():
+    for path in RECORDED_EVIDENCE:
+        text = read_text(path)
+        assert text is not None, path
+        assert mechanisms(text), path

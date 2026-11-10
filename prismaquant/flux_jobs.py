@@ -105,18 +105,18 @@ def _client_environment():
 
 def _instance_uri():
     """Use explicit coordinator intent, otherwise the fleet's host resolver."""
-    if 'FLUX_URI' in os.environ:
-        uri = os.environ['FLUX_URI']
-        if not uri or any(character.isspace() or character == '\0' for character in uri):
+    uri = os.environ.get('FLUX_URI')
+    if uri:
+        if any(character.isspace() or character == '\0' for character in uri):
             raise ValueError('coordinator FLUX_URI must name the intended Flux instance')
         return uri
     try:
         result = subprocess.run([_URI_RESOLVER], capture_output=True, text=True,
                                 env={'PATH': '/usr/bin:/bin'}, timeout=5, check=False)
     except (OSError, subprocess.SubprocessError) as exc:
-        raise ValueError('FLUX_URI is unset and the fleet URI resolver is unavailable') from exc
+        raise ValueError(f'FLUX_URI is unset or empty; fleet URI resolver is unavailable: {_URI_RESOLVER}; tried both sources') from exc
     if result.returncode or re.fullmatch(r'local:///[^\s\x00]+\n?', result.stdout) is None:
-        raise ValueError('FLUX_URI is unset and the fleet URI resolver failed or returned an invalid URI')
+        raise ValueError(f'FLUX_URI is unset or empty; fleet URI resolver failed or returned an invalid URI: {_URI_RESOLVER}; tried both sources')
     return result.stdout.removesuffix('\n')
 
 
@@ -232,7 +232,7 @@ def job_unit_name(job_id):
 
 
 def _environment(record_dir, supplied):
-    environment = {**_client_environment(), 'PATH': '/usr/bin:/bin',
+    environment = {'PATH': '/usr/bin:/bin', 'HOME': '/home/rob',
                    'OUT': str(record_dir),
                    'PYTHONDONTWRITEBYTECODE': '1', **dict.fromkeys(_THREADS, '1')}
     # No general application environment passthrough. Add a versioned setting

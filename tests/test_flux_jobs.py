@@ -91,7 +91,8 @@ class FluxJobsTests(unittest.TestCase):
         self.assertIn('--dependency=afterok:456', command)
         self.assertFalse(any(a.startswith(('-N', '--nodes', '--requires')) for a in command))
         exported = [a for a in command if a.startswith('--env=')][1:]
-        self.assertEqual(len(exported), 9)
+        self.assertEqual(len(exported), 8)
+        self.assertFalse(any(a.startswith('--env=LD_LIBRARY_PATH=') for a in exported))
         self.assertIn('--env=OMP_NUM_THREADS=1', exported)
         self.assertIn('--env=OUT=' + str(self.record), exported)
         self.assertEqual(jobs.load_submission(self.record), submission)
@@ -508,7 +509,7 @@ class FluxJobsTests(unittest.TestCase):
         self.assertFalse(self.record.exists())
 
     def test_missing_uri_and_missing_or_repeated_live_ranks_refuse(self):
-        for uri in ('', 'local:///bad uri', 'local:///bad\0uri'):
+        for uri in ('local:///bad uri', 'local:///bad\0uri'):
             with patch.object(os, 'environ', {'FLUX_URI': uri}), self.assertRaises(ValueError):
                 jobs._instance_uri()
         for rows in ([], [{'rank': '0-2'}, {'rank': '2'}], [{'rank': ''}]):
@@ -590,6 +591,16 @@ class FluxJobsTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs['env'], {'PATH': '/usr/bin:/bin'})
         self.assertEqual(run.call_args.kwargs['timeout'], 5)
 
+    def test_empty_uri_tries_resolver(self):
+        with patch.object(os, 'environ', {'FLUX_URI': ''}), \
+                patch.object(subprocess, 'run', return_value=self.completed('local:///fleet/local-2\n')) as run:
+            self.assertEqual(jobs._instance_uri(), 'local:///fleet/local-2')
+        run.assert_called_once()
+        with patch.object(os, 'environ', {'FLUX_URI': ''}), \
+                patch.object(subprocess, 'run', side_effect=FileNotFoundError()), \
+                self.assertRaisesRegex(ValueError, 'FLUX_URI.*resolver.*tried both sources'):
+            jobs._instance_uri()
+
     def test_explicit_uri_does_not_call_resolver(self):
         with patch.object(os, 'environ', {'FLUX_URI': 'local:///chosen'}), \
                 patch.object(subprocess, 'run') as run:
@@ -639,6 +650,7 @@ class FluxJobsTests(unittest.TestCase):
             environment = jobs._environment(self.record, None)
         self.assertEqual(environment['PATH'], '/usr/bin:/bin')
         self.assertNotIn('FLUX_SCRATCH', environment)
+        self.assertNotIn('LD_LIBRARY_PATH', environment)
 
     def test_instance_scratch_is_qualified_used_and_removed(self):
         scratch_root = self.root / 'instance-scratch'

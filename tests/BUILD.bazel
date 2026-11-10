@@ -37167,6 +37167,7 @@ pq_py_library(
         ":files",
     ],
     deps = [
+        "//:prismaquant/activation_fair_pricing_cycle",
         "//:tools/smoke_graph_memory",
     ],
 )
