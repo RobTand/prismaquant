@@ -4,10 +4,8 @@
    tail left ``checkpoints/boundary-045``; R11 would have failed with
    FileExistsError about ten GPU-minutes in. Stage A now refuses at startup,
    before any GPU work, when a checkpoint path it writes is occupied.
-2. ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` must stay strictly below every phase
-   grace the row declares, so a staging stall ends as the reader's staging
-   refusal rather than as PrismaBuild's no-progress kill. R10's spec set
-   900 s against a 900 s chain grace.
+2. Immutable staged reads check coverage immediately. Retired wait settings
+   do not couple dispatch admission to a progress grace.
 
 CPU-only.
 """

@@ -162,9 +162,9 @@ def _all_records(slice_doc: dict, space: str) -> list[dict]:
 
 
 def child_paths(args, slice_doc) -> dict:
-    """Wait for every declared entry to land; list the staged copies."""
+    """Check immutable coverage and list the staged copies."""
     from prismaquant.residency_shard_reader import await_staged_spans
-    from prismaquant.staged_lease import stage_covers_are_published
+    from prismaquant.staged_lease import stage_cover_is_published
     resolver = _bind(args.manifest_sha256, args.allowed_tiers)
     rows = _all_records(slice_doc, args.space)
     wanted = []
@@ -174,7 +174,7 @@ def child_paths(args, slice_doc) -> dict:
         wanted.append((row["path"], 0, size, size))
     started = time.monotonic()
     verdict = await_staged_spans(resolver, wanted,
-                                 published_batch=stage_covers_are_published)
+                                 published=stage_cover_is_published)
     waited = time.monotonic() - started
     # The ram leg promotes each landed stage range afterwards; wait for it
     # too, so the first arm does not read a tier the later arms do not.

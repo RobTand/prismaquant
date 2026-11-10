@@ -175,11 +175,8 @@ class FluxJobsTests(unittest.TestCase):
             submission = jobs.load_submission(self.record)
             self.assertEqual(submission.job_id, 'ƒBqv3wNoLK')
             self.assertTrue((self.record / 'submitted-job.json').exists())
-            with patch.object(jobs, '_flux_run', return_value=self.completed('123.5\n')) as run:
-                result = jobs.collect_job(submission, wait=False)
-            self.assertEqual(result.status, 'unknown')
-            self.assertNotIn('invalid', result.query_error)
-            self.assertTrue(all(call.args[0][0] != 'submit' for call in run.call_args_list))
+            result = self.collect_fixture(submission=submission)
+            self.assertEqual((result.status, result.payload_exit, result.query_error), ('succeeded', 0, None))
 
     def test_modified_launch_and_foreign_handle_refuse(self):
         submission, _ = self.submit_fixture()
@@ -237,8 +234,10 @@ class FluxJobsTests(unittest.TestCase):
             jobs.load_submission(self.record)
 
     def collect_fixture(self, *, finish=0, result=1, exception=None, malformed=None,
-                        clean=True, allocated=True, status_rc=None, wrong_id=False, cleanup_ok=True):
-        submission, _ = self.submit_fixture()
+                        clean=True, allocated=True, status_rc=None, wrong_id=False, cleanup_ok=True,
+                        submission=None):
+        if submission is None:
+            submission, _ = self.submit_fixture()
         events = [{'name': 'submit'}]
         if allocated:
             events += [{'name': 'alloc'}, {'name': 'start'}]
@@ -520,6 +519,7 @@ class FluxJobsTests(unittest.TestCase):
             self.resources, self.record, [], jobs._environment(self.record, None), None,
             profile=jobs._LEGACY_PROFILE)
         # An actual old receipt has no extra profile evidence member.
+        (self.record / 'submitted-job.json').unlink()
         jobs._publish_flux_json(self.record / 'launch.json', launch)
         jobs._publish_flux_json(self.record / 'submission.json', {
             'schema': 'pq.flux.submission.v1', 'state': 'submitted', 'job_id': submission.job_id,

@@ -323,12 +323,12 @@ def _r13_grace(name, *, phase_bytes, entries, context=V7_CONTEXT):
 
 def test_the_r13_row_shape_derives_from_the_built_in_measurements():
     bound = _r13_grace("chain-044-bound", phase_bytes=8_591_036_928, entries=512)
-    assert (bound["mode"], bound["grace_s"]) == ("derived", 300 + 137 + 1686)
+    assert (bound["mode"], bound["grace_s"]) == ("derived", 137 + 1686)
     spill = _r13_grace("spill-p0", phase_bytes=8_591_036_928, entries=512)
     assert [term["grace_s"] for term in spill["compute"]] == [4393, 1800]
-    assert (spill["mode"], spill["grace_s"]) == ("blanket", 300 + 137 + 4393 + 1800)
+    assert (spill["mode"], spill["grace_s"]) == ("blanket", 137 + 4393 + 1800)
     render = _r13_grace("render-01", phase_bytes=5_940_033_993, entries=354)
-    assert (render["mode"], render["grace_s"]) == ("blanket", 300 + 95 + 1800)
+    assert (render["mode"], render["grace_s"]) == ("blanket", 95 + 1800)
     # Layer 43 spills less per batch than the measured layer 44: in scope.
     smaller = {**V7_CONTEXT, "spill.geometry.batch_bytes": 545259520,
                "spill.geometry.batch_x_bytes": 243269632}

@@ -222,7 +222,7 @@ def test_a_filtered_dispatch_counts_only_its_own_rows(tmp_path, monkeypatch):
     argv = _by_id(gateway)["layer-003"]["row"]
     phase_bytes = _checkpoint_bytes(bound[3])
     assert phase_bytes > 0
-    expected = 300 + -(-phase_bytes // FLOOR)
+    expected = -(-phase_bytes // FLOOR)
     assert _graces(argv)["checkpoint-load"] == expected
     (stamp,) = _load_stamps(argv)
     assert (stamp["mode"], stamp["readers"], stamp["grace_s"]) == (

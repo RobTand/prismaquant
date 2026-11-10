@@ -591,11 +591,12 @@ def row_head_dependency(argv):
 #: run having committed nothing -- less than half the 14,400 s that killed
 #: row-0050 and row-0065 while they were committing anchors every 18 s.
 #:
+#: Historical progress measurements retained for payload planning. Native row
+#: builders omit progress-stall metadata because no watchdog is qualified.
 #: There is no flag to override this, on purpose: the number is a measurement
 #: of one workload and a flag would invite a guess.  A campaign whose rows
-#: measurably behave differently edits its planned manifest -- ``plan`` writes
-#: ``progress_phases`` into every row and ``submit`` reads it back -- or
-#: re-fits this constant against its own terminal records.
+#: measurably behave differently re-fits this constant against its own
+#: terminal records.
 CAMPAIGN_PROGRESS_PHASES = (("startup", 3600), ("pricing", 900), ("finalize", 1800))
 
 
@@ -626,7 +627,8 @@ def campaign_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | N
     the CPU count and the container; the default class supplies exactly the
     spec-level values, so a row built for it is byte-identical to the row this
     function returned before classes existed.  Nothing about the class is
-    written into the row. Native callers retain the whole intent and refuse unqualified requirements.
+    written into the row. The container specification stays in argv. Native
+    scheduler metadata contains no progress watchdog or image admission fields.
     """
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     resolved = row_class(spec, row_class_name)
@@ -654,7 +656,6 @@ def campaign_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | N
         env = {**BOUNDED_CAPTURE_ENV, **env}
         require_bounded_capture_environment(env)
     command = [resolved["python"], "-u", "-m", module, *argv]
-    container_image = None
     if "container" in resolved:
         container_spec = {"container": resolved["container"], "env": env}
         if resolved.get("container_admission_reference") is not None:
@@ -662,12 +663,6 @@ def campaign_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | N
         validate_container(container_spec, bounded=bounded)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
                    DIRECT_ASCII_SPACED_LAX.text(container_spec), "--", *command]
-        # The class owns the image: whatever container this row resolved runs
-        # remains explicit container-admission intent; native launch refuses it
-        # (RobTand/prismabuild#714). Without an explicit portable override,
-        # an archive-backed class declares nothing: its loader establishes
-        # the image inside the action rather than requiring local presence.
-        container_image = admission_image_reference(container_spec)
     row = {
         "argv": command,
         "cwd": spec["cwd"],
@@ -678,8 +673,6 @@ def campaign_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | N
         # or adopts a result by key; reconnect uses the saved native ID.
         "retry_safe": True,
     }
-    if container_image is not None:
-        row["container_images"] = [container_image]
     if timeout_s is not None:
         # Only when somebody asked for one.  A blanket default here is what
         # sealed 14,400 s into every pricing row and killed two of them mid

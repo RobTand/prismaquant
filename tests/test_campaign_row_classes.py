@@ -437,7 +437,7 @@ def test_attested_train_layers_validate_in_certified_mode(python, monkeypatch):
 @pytest.mark.parametrize("dev_env", [None, "0"])
 @pytest.mark.parametrize("history, message", [
     (None, "retired_interpreters mapping"),
-    ({SDK3_PYTHON: {}}, "names no PrismaBuild action key"),
+    ({SDK3_PYTHON: {}}, "names no recorded producer job identity"),
     ({SDK4_TRAIN_PYTHON: {"attested_by": "0" * 64}}, "both active and retired"),
 ])
 def test_invalid_retired_inventory_is_refused(

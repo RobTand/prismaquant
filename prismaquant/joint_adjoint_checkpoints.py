@@ -1438,7 +1438,8 @@ class AdjointCheckpointAttempt:
             {key: record[key] for key in
              ("schema", "boundary", "session", "activation_entries",
               "shared_state_entries")},
-            where="adjoint checkpoint")
+            where="adjoint checkpoint",
+        )
         with self.owner.hold_transient_metadata(
                 self.manifest_envelope, "checkpoint manifest"):
             manifest_payload = checkpoint_manifest_bytes(record)
@@ -2868,7 +2869,8 @@ def _roll_group(runner, group, *, batches, layer, probe_index, cotangents,
 def _render_free_fused_passes(
     runner, *, storage, batches, layer, cotangents, n_probes,
     incoming_entries, incoming_tensor, pipeline, min_free_gib, then=None,
-    batch_size=1, layer_pass=None) -> int:
+    batch_size=1, layer_pass=None,
+) -> int:
     """The fused roll: one forward per batch group, one backward per probe.
 
     Sample-major (``prefetched_fused_boundary_windows``). Every probe's

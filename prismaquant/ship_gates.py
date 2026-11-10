@@ -58,16 +58,21 @@ def _submits_nested_job(argv: list[str]) -> bool:
             return True
         if word == "-m" and index + 1 < len(argv) and argv[index + 1] == "prismaquant.flux_jobs":
             return True
-    if argv and Path(argv[0]).name in {"sh", "bash", "dash", "zsh"}:
-        for index, word in enumerate(argv[1:], 1):
-            if word.startswith("-") and "c" in word[1:] and index + 1 < len(argv):
+    for shell_index, shell in enumerate(argv):
+        if Path(shell).name not in {"sh", "bash", "dash", "zsh"}:
+            continue
+        for index in range(shell_index + 1, len(argv) - 1):
+            word = argv[index]
+            if word.startswith("-") and "c" in word[1:]:
                 try:
                     lexer = shlex.shlex(argv[index + 1], posix=True, punctuation_chars=True)
                     lexer.whitespace_split = True
                     tokens = list(lexer)
                 except ValueError as exc:
                     raise ValueError("invalid shell stage command") from exc
-                return _submits_nested_job(tokens)
+                if _submits_nested_job(tokens):
+                    return True
+                break
     return False
 
 

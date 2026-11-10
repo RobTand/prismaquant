@@ -20,6 +20,9 @@ def test_host_local_launch_refuses_an_unpinned_cache_helper(tmp_path, monkeypatc
     monkeypatch.setattr(staged_launch.os, "execv", lambda *args: calls.append(args))
     binding = {"path": "manifest", "sha256": "a" * 64, "read_contract_sha256": "b" * 64,
                "read_contract_path": "contract", "allowed_tiers": "ssd"}
+    for name in (staged_launch.PATH_ENV, staged_launch.SHA_ENV, staged_launch.READ_ENV,
+                 "PRISMAQUANT_READ_CONTRACT_PATH", "PRISMAQUANT_STAGED_ALLOWED_TIERS"):
+        monkeypatch.setenv(name, "")
     with pytest.raises(ValueError, match="cache helper sha256"):
         staged_launch.launch(binding, ["/bin/true"])
     assert calls == []
@@ -39,6 +42,8 @@ def test_missing_stage_mount_refuses_instead_of_inventing_measurements():
     ["python3", "-m", "prismaquant.flux_jobs"],
     ["sh", "-c", "python3 -m prismaquant.flux_jobs"],
     ["bash", "-c", "sh -c 'flux submit true'"],
+    ["sh", "-c", 'true; bash -c "flux submit true"'],
+    ["env", "SETTING=1", "sh", "-c", "flux submit true"],
 ])
 def test_stage_commands_refuse_nested_submission_forms(argv):
     assert ship_gates._submits_nested_job(argv)
@@ -63,7 +68,7 @@ def test_tensor_span_crossing_adjacent_extents_requires_one_covering_object(tmp_
     from safetensors.torch import save
     import torch
     from prismaquant.residency_shard_reader import staged_shard_opener
-    from prismaquant.staged_tier_policy import staged_tier_policy_test_context
+    from prismaquant.staged_tier_policy import staged_tier_policy_test_context, TierPolicyRefused
     from staged_native_fixtures import fixture, bind
     raw = save({"weight": torch.arange(8, dtype=torch.float32)})
     base = 8 + int.from_bytes(raw[:8], "little")
@@ -78,7 +83,7 @@ def test_tensor_span_crossing_adjacent_extents_requires_one_covering_object(tmp_
             raise AssertionError("canonical source must not be opened")
         with staged_tier_policy_test_context("ssd"):
             with staged_shard_opener(source, no_pool)(str(source), framework="pt") as reader:
-                with pytest.raises(RuntimeError, match="not.staged|undeclared|cover"):
+                with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
                     reader.get_tensor("weight")
     finally:
         from prismaquant.residency_map import reset_residency_resolver_for_tests

@@ -41,6 +41,8 @@ def test_container_row_keeps_row_arguments_and_declared_runtime():
     assert json.loads(row["argv"][4])["container"] == spec()["container"]
     assert row["demand"] == {"gpu": 1, "cpu": 4, "mem_gb": 48}
     assert row["retry_safe"] is True
+    assert "container_images" not in row
+    assert "progress_phases" not in row
 
 
 def test_container_uses_worker_snapshot_and_native_cpuset_without_shell():

@@ -1,7 +1,7 @@
 """Seal and dispatch a streamed calibration capture as native Flux rows.
 
 Prep, layer quanta and join retain the campaign class, source/read bindings,
-resource demands, storage, progress and priority intent. Every predecessor
+resource demands and storage intent. Every predecessor
 must have native success and independently verified scientific outputs.
 Resume validates the same saved launch; only an explicit terminal failure
 permits a requested retry, with the earlier attempt retained. Unsupported
@@ -37,10 +37,8 @@ from prismaquant.tessera_campaign_rows import (  # noqa: E402
 
 ROUND_SCHEMA = "prismaquant.capture_chain_round.v2"
 ROUND_NAME = "round.json"
-#: The agent band, as ``dispatch_tessera_campaign --priority``: agent and
-#: post-campaign work never displaces campaign rows. A gate-critical chain
-#: passes ``--priority 0`` (PQ #1918).
-PRIORITY = -10
+#: Stock Flux has no qualified application priority mapping.
+PRIORITY = 0
 #: The phase a capture chain quantum reports its journalled layers in.
 QUANTUM_PROGRESS_PHASE = "capture"
 
@@ -64,8 +62,8 @@ def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_t
     for value, flag in ((timeout_s, "--timeout-s"), (bookend_timeout_s, "--bookend-timeout-s")):
         if type(value) is not int or value <= 0:
             raise ChainDispatchRefused(f"every chain row needs an explicit positive {flag}")
-    if type(priority) is not int:
-        raise ChainDispatchRefused("a chain's priority is an integer queue band")
+    if type(priority) is not int or priority != 0:
+        raise ChainDispatchRefused("queue priority mapping is unqualified; priority must be 0")
     spec = load_spec(Path(spec_path))
     if "--streaming" not in spec["campaign_argv"]:
         raise ChainDispatchRefused("a capture chain is a streamed capture: the spec's "
@@ -90,7 +88,6 @@ def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_t
                 "--cache-dir", str(round_dir / "cache" / name), *common,
                 "--capture-chain", kind, *extra]
         row = campaign_row(spec, argv, mem_gb=mem_gb, timeout_s=timeout, progress_phases=phases)
-        row["priority"] = priority
         if not gpu:
             row["demand"] = {**row["demand"], "gpu": 0}
         rows.append({"name": name, "kind": kind, "layers": layers, "row": row})
@@ -237,8 +234,7 @@ def main(argv=None) -> int:
     sealing.add_argument("--progress-grace-s", type=int, default=None,
                          help="opt-in: declare each quantum's progress phase capture=SECONDS")
     sealing.add_argument("--priority", type=int, default=PRIORITY,
-                         help="every row's queue band; -10 is the agent band, and a chain "
-                              "that feeds a gate is campaign work and runs at 0")
+                         help="native default 0; other queue priorities are unqualified")
     planning = sub.add_parser("plan", help="print the sealed rows")
     planning.add_argument("--workspace", required=True)
     submitting = sub.add_parser("submit", help="submit the next row once its predecessor finished")

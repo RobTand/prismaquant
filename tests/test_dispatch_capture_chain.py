@@ -47,7 +47,7 @@ def sealed(tmp_path, monkeypatch):
     return fixture, spec, document, dispatch.round_directory(tmp_path), FakeNative(monkeypatch)
 
 
-def test_the_sealed_rows_run_in_chain_order_at_priority_minus_ten(sealed):
+def test_the_sealed_rows_run_in_chain_order_without_scheduler_metadata(sealed):
     fixture, _spec, document, round_dir, _fleet = sealed
     assert [entry["name"] for entry in document["rows"]] == [
         "prep", "capture-000-001", "capture-001-002", "join"]
@@ -55,7 +55,8 @@ def test_the_sealed_rows_run_in_chain_order_at_priority_minus_ten(sealed):
     for entry in document["rows"]:
         row = entry["row"]
         argv = row["argv"]
-        assert row["priority"] == -10
+        assert "priority" not in row
+        assert "container_images" not in row
         assert "progress_phases" not in row
         assert argv[argv.index("--capture-chain") + 1] == entry["kind"]
         assert argv[argv.index("--capture-calibration-out") + 1] == str(fixture.root)
@@ -69,8 +70,8 @@ def test_the_sealed_rows_run_in_chain_order_at_priority_minus_ten(sealed):
     assert json.loads((round_dir / "round.json").read_text()) == document
 
 
-def test_a_gate_critical_chain_seals_every_row_in_the_band_it_is_given(tmp_path, monkeypatch):
-    """PQ #1918: a chain that feeds a gate is campaign work and runs at 0, not -10."""
+def test_a_gate_critical_chain_accepts_the_native_default_priority(tmp_path, monkeypatch):
+    """The native default emits no unqualified priority requirement."""
     fixture = _Chain(tmp_path, root=tmp_path / "calibration-cache", prepare=False)
     spec = tmp_path / "spec.json"
     spec.write_text(json.dumps({"model": str(fixture.source), "campaign_argv": ["--streaming"],
@@ -82,7 +83,7 @@ def test_a_gate_critical_chain_seals_every_row_in_the_band_it_is_given(tmp_path,
                           "--timeout-s", str(TIMEOUT), "--bookend-timeout-s", str(BOOKEND),
                           "--priority", "0"]) == 0
     document = dispatch.load_round(dispatch.round_directory(tmp_path))
-    assert [entry["row"]["priority"] for entry in document["rows"]] == [0, 0, 0, 0]
+    assert all("priority" not in entry["row"] for entry in document["rows"])
 
 
 def test_native_chain_builder_omits_retired_progress_even_when_requested(tmp_path, monkeypatch):
@@ -106,6 +107,7 @@ def test_native_chain_builder_omits_retired_progress_even_when_requested(tmp_pat
 
 
 @pytest.mark.parametrize("change, message", [
+    (dict(priority=-10), "queue priority mapping is unqualified"),
     (dict(ranges="0:1,2:3"), "uncovered"),
     (dict(ranges="0:2,1:3"), "overlaps"),
     (dict(timeout_s=None), "--timeout-s"),

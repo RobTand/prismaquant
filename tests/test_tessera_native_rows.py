@@ -130,10 +130,17 @@ class NativeRowsTests(unittest.TestCase):
                 'rows': [row], 'sources': [identity], 'producers': []}))
             record = state / 'rows' / '00000'
             record.mkdir(parents=True)
-            (record / 'launch.json').write_text(json.dumps({'argv': ['/bin/true'],
+            launch = {'schema': 'pq.flux.launch.v1', 'record_dir': str(record),
+                'argv': ['/bin/true'],
                 'source': identity, 'resources': {'cores': 1, 'memory_gib': 1, 'gpus': 0,
-                'walltime_s': 60, 'placement': 'portable'}, 'afterok': [], 'native_argv': []}))
-            submission = jobs.FluxSubmission('123', record, 'fixture')
+                'walltime_s': 60, 'placement': 'portable'}, 'afterok': [], 'native_argv': []}
+            raw = jobs._json_bytes(launch)
+            (record / 'launch.json').write_bytes(raw)
+            digest = jobs.bytes_sha256hex(raw)
+            (record / 'submission.json').write_text(json.dumps({
+                'schema': 'pq.flux.submission.v1', 'launch_sha256': digest,
+                'state': 'submitted', 'job_id': '123'}))
+            submission = jobs.FluxSubmission('123', record, digest)
             with patch.object(jobs, 'load_submission', return_value=submission), \
                     patch.object(jobs, 'collect_job') as collect:
                 result = rows.collect_rows(state)
