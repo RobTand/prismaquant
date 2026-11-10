@@ -8561,11 +8561,6 @@ filegroup(
 )
 
 filegroup(
-    name = "files/prismaquant/vendored",
-    srcs = glob(["prismaquant/vendored/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
-)
-
-filegroup(
     name = "files/prismaquant/vendored/transformers_deepseek_v4",
     srcs = glob(["prismaquant/vendored/transformers_deepseek_v4/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
 )
@@ -13377,6 +13372,8 @@ pq_py_library(
     ],
     data = [
         "prismaquant/digests.py",
+        "prismaquant/file_identity.py",
+        "prismaquant/io_spans.py",
         "tools/pq_profile_artifact.py",
     ],
     deps = [
