@@ -22,7 +22,7 @@ import time
 import pytest
 import torch
 
-from prismaquant import io_buffers, io_engine
+from prismaquant import io_engine
 from prismaquant import memory_management as mm
 from prismaquant import joint_statistics_replay as replay
 from prismaquant.joint_statistics_replay import GuardReadBudget
@@ -368,9 +368,9 @@ def test_seal_constants_resolve_without_cpython_build_time_names():
 
     # Drift guard, no reload: whatever this interpreter exposed, the engine's
     # module constants are the pinned UAPI numbers and nothing else.
-    assert io_buffers._SEALS == 0b1111
-    assert io_buffers._F_ADD_SEALS == 1033
-    assert io_buffers._F_GET_SEALS == 1034
+    assert io_engine._SEALS == 0b1111
+    assert io_engine._F_ADD_SEALS == 1033
+    assert io_engine._F_GET_SEALS == 1034
     for name, value in (('F_SEAL_SEAL', 0x0001), ('F_SEAL_SHRINK', 0x0002),
                         ('F_SEAL_GROW', 0x0004), ('F_SEAL_WRITE', 0x0008)):
         if hasattr(fcntl, name):
@@ -397,11 +397,11 @@ def test_seal_constants_resolve_without_cpython_build_time_names():
             if hasattr(os, name):
                 delattr(os, name)
 
-        from prismaquant import io_buffers, io_engine
+        import prismaquant.io_engine as io_engine
 
-        assert io_buffers._SEALS == 0b1111
-        assert io_buffers._F_ADD_SEALS == 1033
-        assert io_buffers._F_GET_SEALS == 1034
+        assert io_engine._SEALS == 0b1111
+        assert io_engine._F_ADD_SEALS == 1033
+        assert io_engine._F_GET_SEALS == 1034
         buffer = io_engine.SealedBuffer(16)
         buffer.fill_bytes(b'pq-io-sealed' + b'x' * 4)
         assert len(buffer.seal()) == 64
