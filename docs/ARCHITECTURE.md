@@ -1,5 +1,26 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-10, stock Flux slot shape and runtime instance resolution, P-3.
+Source: `prismaquant/flux_jobs.py`, `tests/test_flux_jobs.py`, based on `cb07374d5`.
+The native CPU profile is `pq.flux.stock-slot.v3`. It submits
+`slot/[core=N;memory=M]`, with a GPU child only when requested by a future
+qualified profile. Today's gate still permits zero GPUs only. Core class is
+chosen by the loaded topology; allocation authentication counts core, memory
+and GPU leaves and preserves physical core/PU/affinity checks.
+The coordinator must set `FLUX_URI` to the intended live instance before
+submission. There is no implicit run-name or newest-run discovery. Use the
+native local socket or coordinator URI described by the Flux skill's
+"Reach the instance" instructions. Every rank declared in live `resource.R`
+must be online and have a full broker overlay. Live config and R response
+SHA256 values, URI and broker starttime are recorded in both launch and
+submission receipts as observations, without config or model hash pins.
+Collection, cancellation and native verification use the saved URI and require
+the same broker starttime, so a restarted instance cannot reuse a saved job ID.
+Saved `pq.flux.fv1-model.perf-memory.v2` launches retain their original shape
+when authenticated on resume; no launch is rewritten. Lost acknowledgements
+remain unknown and are never retried. CPU limits remain four cores, 16 GiB and
+1800 seconds. No GPU, numerical, serving or performance qualification follows.
+
 As of: 2026-11-09, PB-zero closure of the remaining experiment, tool and test surfaces, slice6.
 Source: `tools/prepare_stageb_after_capture.py`, `tests/test_prismabuild_ban.py`, `archive/pq_experiments_2026-11-09/README.md`, based on `b78164ab5`. The shrink-only 4C-14 list and its loader are gone: the ban has no allowlist and its only live finding is the CI workflow line owned outside this repository.
 `tools/prepare_stageb_after_capture.py` replaces the shell wrapper: it writes the preparation submission, requires an explicit staged launch binding for that submission's read manifest, passes the submission's own produced-output declaration and strict read flags, and submits one native CPU job (`--dry-run` only validates);
@@ -580,7 +601,7 @@ Native rows may bind explicit staged-manifest and scientific read-contract
 paths, their separate SHA256 values and a finite SSD policy through
 `prismaquant.staged_launch.v1`. Source/read bindings are
 retained and rechecked on resume and collection. Scheduling remains in the
-single fv1-model baseline profile. Arbitrary environments, GPU/container,
+stock-slot CPU profile described by the P-3 stamp above. Arbitrary environments, GPU/container,
 progress-stall, pilot and authenticated publication requirements still refuse.
 The immutable `prismaquant.staged_input_manifest.v1` separates source identity,
 extent digest and object identity. An extent reads at object_offset + requested
@@ -721,10 +742,10 @@ As of: 2026-11-07, native Flux executor core, migration unit 1.
 Source: `prismaquant/flux_jobs.py` and `tests/test_flux_jobs.py`, based on
 main `f6c99e8edb5e05fbf2d21d6240cd3df407ee7867`.
 The opt-in stdlib/CLI module owns submit, collect, cancel and saved-ID reconnect.
-Its versioned fv1-model baseline profile requests fixed core/perf and GiB memory
-leaves, finite walltime, a clean allowlisted environment and job-ID scratch.
+Its current stock-slot profile requests core and GiB memory leaves without a
+core-class marker, finite walltime, a clean allowlisted environment and job-ID scratch.
 Launch/submission/result records bind a clean detached source commit, exact
-intent and current profile/config identity to native job facts. Ambiguous
+intent and observed instance identity to native job facts. Ambiguous
 submission refuses reuse; query failure remains separate from payload exit.
 The profile qualifies CPU jobs only, at most four cores, 16 GiB and 30 minutes.
 At this core checkpoint campaign, joint, Stage A, capture and fleet callers

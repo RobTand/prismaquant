@@ -15,7 +15,7 @@ ADMISSION = {
     "record_dir": "/mnt/shared/records/job",
     "affinity": [21, 22, 23, 30],
     "cores": 4, "memory_gib": 16, "gpus": 0, "walltime_s": 1800,
-    "profile": {"profile": "pq.flux.fv1-model.perf-memory.v2",
+    "profile": {"profile": "pq.flux.stock-slot.v3",
                 "config_sha256": "4" * 64, "model_sha256": "5" * 64},
 }
 CIDFILE = "/mnt/shared/records/job/container.cid"

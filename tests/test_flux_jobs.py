@@ -1,8 +1,10 @@
 """Stdlib boundary tests; run directly in admitted Flux, without PB conftest."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 import tempfile
 import unittest
@@ -54,7 +56,7 @@ class FluxJobsTests(unittest.TestCase):
         self.checkout.mkdir()
         self.record = self.root / 'record'
         self.source = {'checkout': str(self.checkout), 'commit': 'a' * 40, 'tree': 'b' * 40}
-        self.profile = {'profile': jobs._PROFILE, 'uri': jobs._URI, 'broker_starttime': '123.5'}
+        self.profile = {'profile': jobs._PROFILE, 'uri': 'local:///fixture/run/local-0', 'broker_starttime': '123.5'}
         self.resources = jobs.FluxResources(2, 3, 0, 60)
 
     def completed(self, stdout='', rc=0, stderr=''):
@@ -70,11 +72,11 @@ class FluxJobsTests(unittest.TestCase):
                                          resources=self.resources, record_dir=self.record, **kwargs)
         return submission, run
 
-    def test_profile_renders_real_perf_and_memory_and_portability(self):
+    def test_profile_renders_stock_slot_and_memory_and_portability(self):
         submission, run = self.submit_fixture(afterok=('123', '456'))
         command = run.call_args.args[0]
         self.assertEqual(command[:2], ['submit', '--env=-*'])
-        self.assertIn('--resources-shape=node/slot/[core=2/perf=1;memory=3]', command)
+        self.assertIn('--resources-shape=slot/[core=2;memory=3]', command)
         self.assertIn('--time-limit=60s', command)
         self.assertIn('--dependency=afterok:123', command)
         self.assertIn('--dependency=afterok:456', command)
@@ -340,16 +342,161 @@ class FluxJobsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'clean'):
             jobs._source_identity(self.checkout)
 
-    def test_profile_drift_fails_closed(self):
-        with patch.object(jobs, '_CONFIG', self.root / 'config'), patch.object(jobs, '_MODEL', self.root / 'model'):
-            (self.root / 'config').write_text('{}')
-            (self.root / 'model').write_text('{}')
-            with patch.object(jobs, '_flux_run') as run, self.assertRaisesRegex(ValueError, 'profile revision'):
-                jobs._profile_identity()
-            run.assert_not_called()
+    def test_stock_shape_includes_only_requested_resources(self):
+        self.assertEqual(jobs._shape(self.resources), 'slot/[core=2;memory=3]')
+        self.assertEqual(jobs._shape(jobs.FluxResources(1, 1, 0, 120)), 'slot/[core=1;memory=1]')
+        # Rendering supports GPUs while the qualified resources gate still refuses them.
+        self.assertEqual(jobs._shape(SimpleNamespace(cores=4, memory_gib=8, gpus=2)),
+                         'slot/[core=4;memory=8;gpu=2]')
+
+    def instance_query(self, args, **kwargs):
+        if args[0] == 'getattr':
+            return self.completed('900.5\n')
+        if args[0] == 'config':
+            return self.completed(self.live_config)
+        if args[0] == 'kvs':
+            return self.completed(self.live_r)
+        if args[0] == 'resource':
+            return self.completed(self.online)
+        if args[0] == 'overlay':
+            return self.completed(self.overlay)
+        if args[0] == 'submit':
+            return self.completed('12345\n')
+        self.fail('unexpected query')
+
+    def live_instance(self):
+        self.live_config = '{"sched-fluxion-resource":{"policy":"low"}}\n'
+        self.live_r = json.dumps({'version': 1, 'execution': {'R_lite': [
+            {'rank': '0-1'}, {'rank': '4-5'}]}}) + '\n'
+        self.online = '0-1,4-5\n'
+        self.overlay = '0 coordinator: full\n1 worker1: full\n4 worker4: full\n5 worker5: full\n'
+
+    def test_changed_instance_identity_submits_and_records_observations(self):
+        self.live_instance()
+        hashes = []
+        for index in range(2):
+            self.record = self.root / f'new-instance-{index}'
+            if index:
+                self.live_config = '{"sched-fluxion-resource":{"policy":"high"}}\n'
+                self.live_r = self.live_r.replace('4-5', '7-8')
+                self.online = '0-1,7-8\n'
+                self.overlay = self.overlay.replace('4 worker4', '7 worker7').replace('5 worker5', '8 worker8')
+            uri = f'local:///coordinator/run-{index}/local-0'
+            with patch.dict(os.environ, {'FLUX_URI': uri}), \
+                    patch.object(jobs, '_source_identity', return_value=self.source), \
+                    patch.object(jobs, '_flux_run', side_effect=self.instance_query) as run:
+                submission = jobs.submit_job(['/bin/true'], checkout=self.checkout,
+                    resources=self.resources, record_dir=self.record)
+            receipt = json.loads((self.record / 'submission.json').read_text())
+            profile = receipt['profile']
+            self.assertEqual(profile, json.loads((self.record / 'launch.json').read_text())['profile'])
+            self.assertEqual((profile['uri'], profile['broker_starttime']), (uri, '900.5'))
+            self.assertEqual(profile['config_sha256'], hashlib.sha256(self.live_config.encode()).hexdigest())
+            self.assertEqual(profile['r_sha256'], hashlib.sha256(self.live_r.encode()).hexdigest())
+            self.assertEqual(submission.job_id, '12345')
+            self.assertEqual(sum(call.args[0][0] == 'submit' for call in run.call_args_list), 1)
+            self.assertTrue(all(call.kwargs['uri'] == uri for call in run.call_args_list))
+            hashes.append((profile['config_sha256'], profile['r_sha256']))
+        self.assertNotEqual(hashes[0][0], hashes[1][0])
+        self.assertNotEqual(hashes[0][1], hashes[1][1])
+
+    def test_offline_rank_and_unhealthy_or_ambiguous_overlay_refuse_before_submit(self):
+        for online, overlay in (
+                ('0-1,4', None), ('', None), ('0-1,4-6', None),
+                (None, '0 coordinator: full\n1 worker1: full\n4 worker4: full\n5 worker5: offline\n'),
+                (None, '0 coordinator: full\n1 worker1: full\n4 worker4: full\n'),
+                (None, '0 coordinator: full\n1 worker1: full\n4 worker4: full\n4 worker4: full\n')):
+            self.live_instance()
+            if online is not None:
+                self.online = online
+            if overlay is not None:
+                self.overlay = overlay
+            with self.subTest(online=online, overlay=overlay), \
+                    patch.dict(os.environ, {'FLUX_URI': self.profile['uri']}), \
+                    patch.object(jobs, '_source_identity', return_value=self.source), \
+                    patch.object(jobs, '_flux_run', side_effect=self.instance_query) as run, \
+                    self.assertRaises(ValueError):
+                jobs.submit_job(['/bin/true'], checkout=self.checkout,
+                    resources=self.resources, record_dir=self.record)
+            self.assertFalse(any(call.args[0][0] == 'submit' for call in run.call_args_list))
+            self.assertFalse(self.record.exists())
+
+    def test_missing_uri_and_missing_or_repeated_live_ranks_refuse(self):
+        for uri in ('', 'local:///bad uri', 'local:///bad\0uri'):
+            with patch.dict(os.environ, {'FLUX_URI': uri}), self.assertRaises(ValueError):
+                jobs._instance_uri()
+        for rows in ([], [{'rank': '0-2'}, {'rank': '2'}], [{'rank': ''}]):
+            with self.subTest(rows=rows), self.assertRaises(ValueError):
+                jobs._instance_ranks({'version': 1, 'execution': {'R_lite': rows}})
+
+    def allocation(self, core_class=None):
+        cores = [{'type': 'core', 'id': i, 'rank': 5,
+                  'properties': {'os-pus': str(i + 20)}} for i in (0, 1)]
+        if core_class is not None:
+            for core in cores:
+                core['properties']['core-type'] = core_class
+        nodes = cores + [{'type': 'memory', 'id': i, 'rank': 5} for i in (0, 1, 2)]
+        if core_class:
+            nodes += [{'type': core_class, 'id': i, 'rank': 5} for i in (0, 1)]
+        return {'version': 1, 'execution': {'R_lite': [{'rank': '5', 'children': {'core': '0-1'}}],
+                'nodelist': ['worker5']}, 'scheduling': {'graph': {'nodes': [
+                    {'metadata': node} for node in nodes]}}}
+
+    def test_allocation_accepts_any_core_class_and_ranks_from_live_R(self):
+        ranks = jobs._instance_ranks({'version': 1, 'execution': {'R_lite': [{'rank': '0-1,4-5'}]}})
+        with patch.object(jobs.socket, 'gethostname', return_value='worker5'), \
+                patch.object(os, 'sched_getaffinity', return_value={20, 21}):
+            for core_class in ('eff', 'perf', None):
+                with self.subTest(core_class=core_class):
+                    jobs._require_allocation(self.allocation(core_class), self.resources, ranks)
+
+    def test_allocation_refuses_counts_rank_core_ids_and_physical_affinity_mismatch(self):
+        mutations = {
+            'missing-core': lambda a: a['scheduling']['graph']['nodes'].pop(0),
+            'missing-memory': lambda a: a['scheduling']['graph']['nodes'].pop(),
+            'extra-gpu': lambda a: a['scheduling']['graph']['nodes'].append({'metadata': {'type': 'gpu', 'rank': 5, 'id': 0}}),
+            'foreign-leaf': lambda a: a['scheduling']['graph']['nodes'][0]['metadata'].update(rank=1),
+            'core-ids': lambda a: a['execution']['R_lite'][0]['children'].update(core='1-2'),
+            'pu': lambda a: a['scheduling']['graph']['nodes'][0]['metadata']['properties'].update({'os-pus': '19'}),
+        }
+        with patch.object(jobs.socket, 'gethostname', return_value='worker5'), \
+                patch.object(os, 'sched_getaffinity', return_value={20, 21}):
+            for label, mutate in mutations.items():
+                allocation = self.allocation()
+                mutate(allocation)
+                with self.subTest(label=label), self.assertRaises(ValueError):
+                    jobs._require_allocation(allocation, self.resources, {0, 1, 5})
+            with self.assertRaisesRegex(ValueError, 'rank differs'):
+                jobs._require_allocation(self.allocation(), self.resources, {0, 1, 4})
+
+    def test_legacy_profile_launch_still_validates_and_collects_without_rewriting(self):
+        self.profile['profile'] = jobs._LEGACY_PROFILE
+        submission, _ = self.submit_fixture()
+        launch = json.loads((self.record / 'launch.json').read_text())
+        launch['native_argv'] = jobs._native_arguments(launch['argv'], self.source,
+            self.resources, self.record, [], jobs._environment(self.record, None), None,
+            profile=jobs._LEGACY_PROFILE)
+        # An actual old receipt has no extra profile evidence member.
+        jobs._publish_flux_json(self.record / 'launch.json', launch)
+        jobs._publish_flux_json(self.record / 'submission.json', {
+            'schema': 'pq.flux.submission.v1', 'state': 'submitted', 'job_id': submission.job_id,
+            'launch_sha256': hashlib.sha256(jobs._json_bytes(launch)).hexdigest()})
+        submission = jobs.load_submission(self.record)
+        before = (self.record / 'launch.json').read_bytes()
+        jobs.validate_launch(submission, argv=launch['argv'], source=self.source, resources=self.resources)
+        with patch.dict(os.environ, {'FLUX_URI': 'local:///different-coordinator'}), \
+                patch.object(jobs, '_flux_run', return_value=self.completed('123.5\n')) as run:
+            jobs._validate_submission(submission)
+            with self.assertRaisesRegex(RuntimeError, 'another Flux instance'):
+                jobs.validate_dependency(submission)
+        self.assertEqual(run.call_args.kwargs['uri'], self.profile['uri'])
+        self.assertEqual((self.record / 'launch.json').read_bytes(), before)
+        self.record = self.root / 'legacy-terminal'
+        result = self.collect_fixture()
+        self.assertEqual((result.status, result.payload_exit, result.query_error), ('succeeded', 0, None))
 
     def test_client_never_inherits_ambient_environment(self):
-        with patch.dict(os.environ, {'PB_ACTION_KEY': 'fixture', 'API_TOKEN': 'fixture', 'FLUX_KVS_NAMESPACE': 'fixture'}), \
+        with patch.dict(os.environ, {'FLUX_URI': self.profile['uri'], 'PB_ACTION_KEY': 'fixture', 'API_TOKEN': 'fixture', 'FLUX_KVS_NAMESPACE': 'fixture'}), \
                 patch.object(subprocess, 'run', return_value=self.completed()) as run:
             jobs._flux_run(['resource', 'list'])
         self.assertEqual(set(run.call_args.kwargs['env']), {'PATH', 'HOME', 'LD_LIBRARY_PATH', 'FLUX_URI'})

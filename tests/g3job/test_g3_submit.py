@@ -25,7 +25,7 @@ def test_a_gpu_request_is_refused_at_the_native_profile_with_its_real_text(tmp_p
     assert g3_submit.main(arguments(tmp_path, "--cpus", "4", "--mem-gb", "16", "--gpu-memory-gb", "80")) == 2
     assert capsys.readouterr().err.strip() == (
         "G3 submission refused at the native profile: gpus must be an integer in [0, 0] "
-        "for pq.flux.fv1-model.perf-memory.v2")
+        "for pq.flux.stock-slot.v3")
 
 
 def test_an_oversized_memory_request_is_refused_with_its_real_text(tmp_path, capsys, monkeypatch):
@@ -34,7 +34,7 @@ def test_an_oversized_memory_request_is_refused_with_its_real_text(tmp_path, cap
     assert g3_submit.main(arguments(tmp_path, "--cpus", "4", "--mem-gb", "104")) == 2
     assert capsys.readouterr().err.strip() == (
         "G3 submission refused at the native profile: memory_gib must be an integer in [1, 16] "
-        "for pq.flux.fv1-model.perf-memory.v2")
+        "for pq.flux.stock-slot.v3")
 
 
 def test_a_cpu_request_submits_once_over_the_staged_binding(tmp_path, capsys, monkeypatch):

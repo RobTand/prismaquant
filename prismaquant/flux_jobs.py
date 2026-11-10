@@ -1,4 +1,4 @@
-"""Native Flux CPU executor, baseline fv1-model profile v2.
+"""Native Flux CPU executor with stock slot resources and runtime instance evidence.
 
 Callers own campaign scheduling, pinned numerical runtimes and scientific
 input/output gates. Finite immutable staged inputs are admitted through the
@@ -21,14 +21,10 @@ from .digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_LAX, bytes_sha256hex
 
 _PREFIX = Path('/home/rob/flux-vanilla/0.91.0-0.56.0')
 _CLI = str(_PREFIX / 'install/bin/flux')
-_URI = f'local://{_PREFIX}/runs/fv1-model/run/local-0'
 _PATH = f'{_PREFIX}/install/bin:{_PREFIX}/deps/bin:/usr/bin:/bin'
 _LIB = f'{_PREFIX}/install/lib:{_PREFIX}/deps/lib'
-_CONFIG = _PREFIX / 'runs/fv1-model/config.json'
-_MODEL = _PREFIX / 'config/R-model.json'
-_PROFILE = 'pq.flux.fv1-model.perf-memory.v2'
-_CONFIG_SHA = 'ff9384f0aaede8d07499e43da400123a4e6afbcce05f52042244a3c78995fa08'
-_MODEL_SHA = '261a084b72cb3a0c5055816f642f51ccbf473d3373876f34e67be55d5b5221a8'
+_PROFILE = 'pq.flux.stock-slot.v3'
+_LEGACY_PROFILE = 'pq.flux.fv1-model.perf-memory.v2'
 _THREADS = ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'TORCH_NUM_THREADS')
 _PROPERTIES = frozenset(('x86_64', 'aarch64', 'gb10', 'unified-memory'))
 _HOSTS = frozenset(('dl380g10', 'sparky', 'sparklina'))
@@ -94,12 +90,20 @@ def _publish_flux_json(path, value):
         os.close(descriptor)
 
 
-def _flux_run(args, *, timeout=30):
+def _instance_uri():
+    """The coordinator must supply FLUX_URI; never guess a standing run."""
+    uri = os.environ.get('FLUX_URI', '')
+    if not uri or any(character.isspace() or character == '\0' for character in uri):
+        raise ValueError('coordinator FLUX_URI must name the intended Flux instance')
+    return uri
+
+
+def _flux_run(args, *, timeout=30, uri=None):
     # Never inherit CLI plugins, job KVS namespaces, credentials, or PB context.
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
         result = subprocess.run([_CLI, *args], stdout=stdout, stderr=stderr,
                                 env={'PATH': _PATH, 'HOME': '/home/rob', 'LD_LIBRARY_PATH': _LIB,
-                                     'FLUX_URI': _URI}, timeout=timeout, check=False)
+                                     'FLUX_URI': _instance_uri() if uri is None else uri}, timeout=timeout, check=False)
         for stream in (stdout, stderr):
             if stream.tell() > 16 << 20:
                 raise ValueError('native query output exceeds evidence bound')
@@ -108,31 +112,50 @@ def _flux_run(args, *, timeout=30):
                                            stdout.read().decode(), stderr.read().decode())
 
 
-def _checked(args):
-    result = _flux_run(args)
+def _checked(args, *, uri=None):
+    result = _flux_run(args, uri=uri)
     if result.returncode:
         raise RuntimeError(f'Flux query failed: {args[0]} {args[1] if len(args) > 1 else ""}')
     return result.stdout
 
 
+def _instance_ranks(model):
+    if model['version'] != 1 or not model['execution']['R_lite']:
+        raise ValueError('live Flux R has no ranks')
+    ranks = set()
+    for row in model['execution']['R_lite']:
+        members = _allocation_ids(row['rank'])
+        if ranks & members:
+            raise ValueError('live Flux R repeats ranks')
+        ranks.update(members)
+    return ranks
+
+
 def _profile_identity():
-    config_bytes, model_bytes = _CONFIG.read_bytes(), _MODEL.read_bytes()
-    if bytes_sha256hex(config_bytes) != _CONFIG_SHA or bytes_sha256hex(model_bytes) != _MODEL_SHA:
-        raise ValueError('unsupported Flux config/resource model; profile revision required')
-    config, model = json.loads(config_bytes), json.loads(model_bytes)
-    for section in ('resource', 'exec', 'sched-fluxion-resource', 'sched-fluxion-qmanager'):
-        if json.loads(_checked(['config', 'get', section])) != config[section]:
-            raise ValueError('loaded Flux config differs from baseline')
-    live = json.loads(_checked(['kvs', 'get', 'resource.R']))
-    if live['scheduling'] != model['scheduling']:
-        raise ValueError('loaded resource graph differs from baseline')
-    if _checked(['resource', 'status', '-s', 'online', '-n', '-o', '{ranks}']).strip() != '0-2':
-        raise ValueError('all three Flux hosts must be online')
-    overlay = _checked(['overlay', 'status'])
-    if sum(line.endswith(': full') for line in overlay.splitlines()) != 3:
-        raise ValueError('all three Flux brokers must be healthy')
-    return {'profile': _PROFILE, 'config_sha256': _CONFIG_SHA, 'model_sha256': _MODEL_SHA,
-            'uri': _URI, 'broker_starttime': _checked(['getattr', 'broker.starttime']).strip()}
+    uri = _instance_uri()
+    start = _checked(['getattr', 'broker.starttime'], uri=uri).strip()
+    config_raw = _checked(['config', 'get'], uri=uri)
+    model_raw = _checked(['kvs', 'get', 'resource.R'], uri=uri)
+    config, model = _native_document(config_raw), _native_document(model_raw)
+    if not isinstance(config, dict) or not config or not start:
+        raise ValueError('missing live Flux config or broker identity')
+    ranks = _instance_ranks(model)
+    online = _checked(['resource', 'status', '-s', 'online', '-n', '-o', '{ranks}'], uri=uri).strip()
+    if _allocation_ids(online) != ranks:
+        raise ValueError('every rank in live Flux R must be online')
+    overlay = _checked(['overlay', 'status', '--no-pretty', '--color=never'], uri=uri)
+    healthy = []
+    for line in overlay.splitlines():
+        match = re.fullmatch(r'([0-9]+) \S+: full', line)
+        if match is None:
+            raise ValueError('every live Flux broker overlay must be full')
+        healthy.append(int(match[1]))
+    if len(healthy) != len(ranks) or set(healthy) != ranks:
+        raise ValueError('every live Flux broker overlay must be full')
+    if _checked(['getattr', 'broker.starttime'], uri=uri).strip() != start:
+        raise ValueError('Flux instance changed during preflight')
+    return {'profile': _PROFILE, 'config_sha256': bytes_sha256hex(config_raw.encode()),
+            'r_sha256': bytes_sha256hex(model_raw.encode()), 'uri': uri, 'broker_starttime': start}
 
 
 def _source_git(checkout, *args):
@@ -212,7 +235,8 @@ def validate_job(*, checkout: Path, resources: FluxResources, environment=None, 
 
 
 def _shape(resources):
-    return f'node/slot/[core={resources.cores}/perf=1;memory={resources.memory_gib}]'
+    return (f'slot/[core={resources.cores};memory={resources.memory_gib}'
+            + (f';gpu={resources.gpus}]' if resources.gpus else ']'))
 
 
 _PAYLOAD = r'''
@@ -275,13 +299,20 @@ sys.exit(128 - code if code < 0 else code)
 '''
 
 
-def _native_arguments(argv, source, resources, record_dir, dependencies, environment, staged_input):
+def _native_arguments(argv, source, resources, record_dir, dependencies, environment, staged_input,
+                      *, profile=_PROFILE):
+    if profile == _PROFILE:
+        shape = _shape(resources)
+    elif profile == _LEGACY_PROFILE:
+        shape = f'node/slot/[core={resources.cores}/perf=1;memory={resources.memory_gib}]'
+    else:
+        raise ValueError('unsupported saved Flux profile')
     command = list(argv)
     if staged_input is not None:
         command = ['/usr/bin/python3', '-s', '-m', 'prismaquant.staged_launch',
                    DIRECT_ASCII_SPACED_LAX.text(staged_input), *command]
     args = ['submit', '--env=-*', *(f'--env={key}={value}' for key, value in sorted(environment.items())),
-            f'--resources-shape={_shape(resources)}', f'--time-limit={resources.walltime_s}s',
+            f'--resources-shape={shape}', f'--time-limit={resources.walltime_s}s',
             f'--cwd={source["checkout"]}', '--input=/dev/null', f'--output={record_dir}/stdout',
             f'--error={record_dir}/stderr', f'--job-name=pq-{record_dir.name}']
     if resources.placement != 'portable':
@@ -297,7 +328,8 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
 
     ``afterok`` contains saved native ID strings. ``host:NAME`` is reserved for
     a caller's justified data-owner/runtime dependency. Only CPU validation is
-    qualified in profile v2. Unsupported input/output safety settings refuse.
+    qualified in profile v3. The coordinator supplies ``FLUX_URI``. Unsupported
+    input/output safety settings refuse.
     """
     if isinstance(argv, (str, bytes)):
         raise ValueError('argv must be a sequence, not a shell string')
@@ -331,10 +363,10 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     # Publish unknown durably BEFORE handing the intent to Flux. A crash at
     # any subsequent point must not make this directory eligible for retry.
     receipt = {'schema': 'pq.flux.submission.v1', 'launch_sha256': launch_sha,
-               'state': 'unknown', 'job_id': None}
+               'state': 'unknown', 'job_id': None, 'profile': profile}
     _publish_flux_json(record_dir / 'submission.json', receipt)
     try:
-        result = _flux_run(args)
+        result = _flux_run(args, uri=profile['uri'])
         (record_dir / 'submit.stdout').write_text(result.stdout)
         (record_dir / 'submit.stderr').write_text(result.stderr)
         if result.returncode:
@@ -391,14 +423,17 @@ def _validate_submission(submission):
     if intent.get('staged_input') is not None:
         from .staged_launch import validate_binding
         validate_binding(intent['staged_input'], placement=intent['resources']['placement'])
-    if intent['profile']['uri'] != _URI or intent['profile']['broker_starttime'] != _checked(['getattr', 'broker.starttime']).strip():
+    if intent['profile']['broker_starttime'] != _checked(
+            ['getattr', 'broker.starttime'], uri=intent['profile']['uri']).strip():
         raise RuntimeError('Flux instance changed; saved job identity cannot be assumed')
     return intent
 
 
 def validate_dependency(submission: FluxSubmission):
     """Require a saved producer ID from the current standing instance."""
-    _validate_submission(submission)
+    launch = _validate_submission(submission)
+    if launch['profile']['uri'] != _instance_uri():
+        raise RuntimeError('saved dependency belongs to another Flux instance')
 
 
 def validate_launch(submission: FluxSubmission, *, argv, source, resources,
@@ -416,7 +451,7 @@ def validate_launch(submission: FluxSubmission, *, argv, source, resources,
         raise ValueError('saved dependencies differ from application intent')
     expected = _native_arguments(argv, source,
                                  resources, submission.record_dir,
-                                 launch['afterok'], env, staged_input)
+                                 launch['afterok'], env, staged_input, profile=launch['profile']['profile'])
     if (launch['argv'] != list(argv) or launch['source'] != source
             or launch['resources'] != asdict(resources)
             or launch['native_argv'] != expected):
@@ -435,8 +470,9 @@ def verify_native_launch(submission: FluxSubmission, *, max_evidence_bytes, **in
     if _validate_submission(submission) != launch:
         raise ValueError('saved launch changed during native verification')
     args = launch['native_argv']
-    expected = decode_document(_checked([args[0], '--dry-run', *args[1:]]))
-    actual_raw = _checked(['job', 'info', '--original', submission.job_id, 'jobspec'])
+    uri = launch['profile']['uri']
+    expected = decode_document(_checked([args[0], '--dry-run', *args[1:]], uri=uri))
+    actual_raw = _checked(['job', 'info', '--original', submission.job_id, 'jobspec'], uri=uri)
     if len(actual_raw.encode()) > max_evidence_bytes:
         raise ValueError('original native jobspec exceeds evidence bound')
     actual = decode_document(actual_raw)
@@ -468,6 +504,32 @@ def _allocation_ids(value):
     return result
 
 
+def _require_allocation(allocation, resources, ranks):
+    """Bind admitted counts and physical CPU identity without reading core class."""
+    execution = allocation['execution']
+    if (allocation['version'] != 1 or len(execution['R_lite']) != 1 or
+            execution['nodelist'] != [socket.gethostname().split('.')[0]]):
+        raise ValueError('current native allocation host/rank differs')
+    row = execution['R_lite'][0]
+    rank = int(row['rank'])
+    if str(rank) != row['rank'] or rank not in ranks:
+        raise ValueError('current native allocation rank differs')
+    nodes = [node['metadata'] for node in allocation['scheduling']['graph']['nodes']]
+    leaves = {kind: [node for node in nodes if node['type'] == kind]
+              for kind in ('core', 'memory', 'gpu')}
+    if any(len(leaves[kind]) != expected for kind, expected in
+           (('core', resources.cores),
+            ('memory', resources.memory_gib), ('gpu', resources.gpus))):
+        raise ValueError('current native allocation differs from admitted resources')
+    if any(node['rank'] != rank for members in leaves.values() for node in members):
+        raise ValueError('current native resource leaves span ranks')
+    core_ids = {node['id'] for node in leaves['core']}
+    pus = set().union(*(_allocation_ids(node['properties']['os-pus']) for node in leaves['core']))
+    if (len(core_ids) != resources.cores or core_ids != _allocation_ids(row['children']['core'])
+            or row['children'].get('gpu') is not None or pus != set(os.sched_getaffinity(0))):
+        raise ValueError('current native allocation/affinity differs')
+
+
 def verify_current_job(*, job_id, record_dir, source):
     """Authenticate current CPU admission before using saved resource claims.
 
@@ -483,8 +545,9 @@ def verify_current_job(*, job_id, record_dir, source):
     verify_native_launch(saved, max_evidence_bytes=16 << 20, argv=launch['argv'], source=source,
         resources=resources, afterok=launch['afterok'], environment=settings,
         staged_input=launch.get('staged_input'))
+    uri = launch['profile']['uri']
     events = [_native_document(line) for line in
-              _checked(['job', 'eventlog', '--format=json', saved.job_id]).splitlines()]
+              _checked(['job', 'eventlog', '--format=json', saved.job_id], uri=uri).splitlines()]
     if not events or any(not isinstance(event, dict) or not isinstance(event.get('name'), str)
                          for event in events):
         raise ValueError('current native execution events unavailable')
@@ -495,29 +558,9 @@ def verify_current_job(*, job_id, record_dir, source):
     if not any(line.split(':', 2)[-1].endswith(scope)
                for line in Path('/proc/self/cgroup').read_text().splitlines()):
         raise ValueError('current native process scope differs from selected job')
-    allocation = decode_document(_checked(['job', 'info', saved.job_id, 'R']))
-    execution = allocation['execution']
-    if (allocation['version'] != 1 or len(execution['R_lite']) != 1 or
-            execution['nodelist'] != [socket.gethostname().split('.')[0]]):
-        raise ValueError('current native allocation host/rank differs')
-    row = execution['R_lite'][0]
-    rank = int(row['rank'])
-    if str(rank) != row['rank'] or not 0 <= rank <= 2:
-        raise ValueError('current native allocation rank differs')
-    nodes = [node['metadata'] for node in allocation['scheduling']['graph']['nodes']]
-    leaves = {kind: [node for node in nodes if node['type'] == kind]
-              for kind in ('core', 'perf', 'memory', 'gpu')}
-    if any(len(leaves[kind]) != expected for kind, expected in
-           (('core', resources.cores), ('perf', resources.cores),
-            ('memory', resources.memory_gib), ('gpu', resources.gpus))):
-        raise ValueError('current native allocation differs from admitted resources')
-    if any(node['rank'] != rank for members in leaves.values() for node in members):
-        raise ValueError('current native resource leaves span ranks')
-    core_ids = {node['id'] for node in leaves['core']}
-    pus = set().union(*(_allocation_ids(node['properties']['os-pus']) for node in leaves['core']))
-    if (len(core_ids) != resources.cores or core_ids != _allocation_ids(row['children']['core'])
-            or row['children'].get('gpu') is not None or pus != set(os.sched_getaffinity(0))):
-        raise ValueError('current native allocation/affinity differs')
+    allocation = decode_document(_checked(['job', 'info', saved.job_id, 'R'], uri=uri))
+    ranks = _instance_ranks(decode_document(_checked(['kvs', 'get', 'resource.R'], uri=uri)))
+    _require_allocation(allocation, resources, ranks)
     retained = saved.record_dir / 'active-allocation.json'
     try:
         publish_staged_json(retained, allocation)
@@ -529,7 +572,7 @@ def verify_current_job(*, job_id, record_dir, source):
 
 def _query(submission, name, args, errors, *, required=True, timeout=30, preserve=False):
     try:
-        result = _flux_run(args, timeout=timeout)
+        result = _flux_run(args, timeout=timeout, uri=_saved_launch(submission)['profile']['uri'])
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         errors.append(f'{name}: {type(exc).__name__}')
         return None
