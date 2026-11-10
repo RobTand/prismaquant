@@ -20,7 +20,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-from staged_native_fixtures import empty_native_staged_inputs, native_staged_state
+from cpu_staged_fixtures import empty_native_staged_inputs, native_staged_state
 import torch
 
 from prismaquant import aura_provenance
