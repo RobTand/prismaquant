@@ -13103,6 +13103,24 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "tools/refresh_hosted_migration_pins",
+    srcs = [
+        "tools/refresh_hosted_migration_pins.py",
+    ],
+    data = [
+        "//tests:fixtures/duplication_baseline.json",
+        "//tests:test_guarded_read_digest_retention_2637.py",
+        "//tests:test_no_new_seals.py",
+        "//tests:test_tensor_digest_owner_recipes_2638.py",
+        "tools/refresh_hosted_migration_pins.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
+    ],
+)
+
+pq_py_library(
     name = "tools/regenerate_joint_quanta",
     srcs = [
         "tools/regenerate_joint_quanta.py",

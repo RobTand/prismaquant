@@ -17,7 +17,9 @@ Importing the module never reads shared storage. Every CLI call resolves the
 current prefix; no run name or install prefix is embedded in live launch code.
 The CPU profile permits at most four cores, 16 GiB and
 1800 seconds. Consumer rules in `/mnt/shared/flux-migration/CAPS.md` also apply.
-Scientific row builders retain image admission intent, with neutral queue priority by default. GPU rows still refuse native execution at P-7. Namespace provenance binds the admitting profile's `config_sha256` and `r_sha256`.
+Scientific row builders retain image admission intent, with neutral queue priority
+by default. GPU rows still refuse native execution at P-7. Namespace provenance
+binds the admitting profile's `config_sha256` and `r_sha256`.
 Memory is declared to Flux. The container sets `--cgroups=disabled` and runs
 inside the Flux job's cgroup; it does not enforce the declared per-job memory
 size. The job unit and aggregate fleet cgroup caps remain separate host bounds.
@@ -69,12 +71,12 @@ before executing those verified bytes with Python isolated mode, excluding cwd
 imports. Immutable staged coverage checks run once. They have no
 landing wait, poll deadline or progress-grace coupling. One resolver entry must
 cover the requested span; adjacent objects do not form a synthetic entry.
-The row builders omit retired progress-phase and container-image admission
-metadata; the container specification remains bound in argv. Capture chains
-emit no queue priority field and refuse an explicit nonzero priority.
-Post-campaign native rows apply the same metadata rule and refuse unqualified
-GPU-memory requests at construction. Production GPU rows
-refuse with `GPU lane not qualified; requires plan step P-7` before CPU admission.
+Scientific rows retain container-image, device-memory, residency and phase-grace
+intent for review. The container specification remains bound in argv. Post-campaign
+rows record the declared head grace and 900-second layer phases. These fields do
+not qualify native enforcement: native submission refuses unsupported requirements.
+Capture chains emit no queue priority field and refuse an explicit nonzero priority.
+Production GPU rows refuse with `GPU lane not qualified; requires plan step P-7` before CPU admission.
 
 The dated entries below preserve earlier designs and measurements. Their
 execution-service descriptions are historical; this section and §7.0.2 describe
