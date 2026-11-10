@@ -15,4 +15,3 @@ def publish_control_artifacts(node_id, out, profile_evidence, *, inputs, max_art
     return publish_result(out / 'publication.json', producer_id=node_id, inputs=inputs,
                           artifacts=paths, dependencies=ORIGINAL_RUNTIME_DEPENDENCIES,
                           max_artifact_bytes=max_artifact_bytes)
-
