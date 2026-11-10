@@ -108,6 +108,8 @@ RESOURCE = "resource"
 ALLOWLIST = {
     # Native migration: these checks authenticate owned bytes, launch geometry,
     # and containment. They are independent of dev-mode resume compatibility.
+    ("prismaquant/joint_quantum_handoff.py", "bind_handoff_publication"): (
+        1, RESOURCE, "the native declaration payload ceiling equals the effective Stage A budget"),
     ("prismaquant/stage_a_chain_resume.py", "require_producer_contained"): (
         1, STRUCTURE, "the stopped producer names the saved native job and immutable launch"),
     ("prismaquant/streamed_boundary_artifacts.py", "StreamedBoundaryArtifacts.bind_produced_output"): (

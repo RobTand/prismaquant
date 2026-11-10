@@ -40,8 +40,8 @@ MANIFEST_SOURCE_BLOBS = {
     ),
 }
 # Current native-migration sources; historical manifest pins above remain unchanged.
-CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('6b58ca7366fd5a95757ad6d5154f06a1a1f2679f',
-                                      '0f0737ab9ca2ca9baa916846a124b3cdf88d08f08791045d3d4e31bd272c73f4'),
+CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('27f4faf97025b1f93639bccbc1c3418457b45274',
+                                      '93c787b84bace425b8e9f966b5ce894cd5491a4a09326966f50f448d72322e82'),
  'prismaquant/tessera_census_cache.py': ('b8158910df6d22720611dd9b8588bf51777170c4',
                                          'c67e32264f35f0f1b2ab953e00f4dab8dfb0753ccd6cebf04e613cc4346c90f1'),
  'prismaquant/digests.py': ('1511a8142cca4b1fb9067bb5cbbcf92098f95f69',
