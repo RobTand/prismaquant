@@ -12,7 +12,7 @@ HISTORY_PREFIXES = (
     "prismaquant/serving_runtime_patches/", "tests/g3job/data-manifest.json",
 )
 
-BAN_DEFINITIONS = ("tests/test_prismabuild_ban.py", "tests/test_prismabuild_boundary.py")
+BAN_DEFINITIONS = ("tests/test_prismabuild_ban.py",)
 
 RECORDED_EVIDENCE = (
     "docs/design/distributed_campaign_2026-09-19.md",

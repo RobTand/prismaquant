@@ -64,10 +64,6 @@ NONHERMETIC = {
         tags = ["runner"],
         reason = "Its helper CLI qualifies the real checkout through fleet_acceptance_runner and record_snapshots, which require git; remote runfiles have no .git. Existing absent-PB-bundle skips remain. The amd64 runner covers it; arm64 action coverage is excluded.",
     ),
-    "//tests:test_fleet_acceptance_pins": struct(
-        tags = ["runner"],
-        reason = "It qualifies the real checkout through fleet_acceptance_pins.record_snapshots, which requires git; remote runfiles have no .git. Existing absent-PB-bundle skips remain. The amd64 runner covers it; arm64 action coverage is excluded.",
-    ),
     "//tests:test_fp8_batched_midpoint_parity_audit": struct(
         tags = ["gpu"],
         reason = "1 of its test functions (4 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",

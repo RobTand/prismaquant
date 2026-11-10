@@ -53,10 +53,6 @@ TEST_INPUTS = {
         data = ["//:files/prismaquant", "//:files/tools", "//tests:files"],
         reason = "it scans the live source tree for retired execution-system mechanisms.",
     ),
-    "//tests:test_prismabuild_boundary": struct(
-        data = ["//:files/prismaquant", "//:files/tools", "//tests:files"],
-        reason = "it scans the live Python modules for loads of the retired package.",
-    ),
     "//tests:test_serving_runtime_patch_set": struct(
         data = ["//:files/prismaquant/serving_runtime_patches"],
         reason = "it reads each patch set's MANIFEST.json through SERVING_RUNTIME_PATCH_SETS_DIR, a path imported from the module.",

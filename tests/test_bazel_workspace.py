@@ -131,7 +131,6 @@ def test_graph_impact_keeps_the_git_checkout_on_the_runner():
 
 @pytest.mark.parametrize('name', [
     'test_no_secret_on_command_line',
-    'test_fleet_acceptance_pins',
     'test_fleet_acceptance_level1',
 ])
 def test_checkout_sweep_targets_keep_the_real_git_checkout_on_runner(name):
