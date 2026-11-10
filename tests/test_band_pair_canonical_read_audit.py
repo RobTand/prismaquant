@@ -23,10 +23,14 @@ from test_quantum_executable_readset import (
 )
 
 
-@pytest.fixture
-def observed_consumer(tmp_path, monkeypatch):
+@pytest.fixture(autouse=True)
+def owned_execution_context(monkeypatch):
     from prismaquant import native_results
     monkeypatch.setattr(native_results, "execution_context", lambda: {"fixture": "nonqualifying CPU control"})
+
+
+@pytest.fixture
+def observed_consumer(tmp_path, monkeypatch):
     head = tmp_path / "head.bin"
     head_bytes = b"independently bound setup head"
     head.write_bytes(head_bytes)

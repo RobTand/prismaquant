@@ -7,7 +7,6 @@ import copy
 from dataclasses import replace
 import gc
 import hashlib
-import os
 from pathlib import Path
 
 import pytest
@@ -24,6 +23,11 @@ from test_original_source_admission import (  # noqa: F401
 pytestmark = pytest.mark.own_process
 
 
+def _running_control(directory):
+    """Nonterminal join input, with no native execution or source authority."""
+    return ExecutionResult('running', '1', Path(directory))
+
+
 def reader_domain_case(case):
     authority = case['authority']
     runtime = case['packet']['runtime']
@@ -31,9 +35,8 @@ def reader_domain_case(case):
     inputs = {role: {**binding, 'bytes': Path(binding['path']).stat().st_size}
               for role, binding in (('observed-runtime', authority['runtime']),
                                     ('selected-runtime', expected))}
-    # Join-only fixture. Execution is truthfully still running in this admitted
-    # test job, so this object cannot satisfy read_selected_result.
-    execution = ExecutionResult('running', os.environ['FLUX_JOB_ID'], Path(os.environ['OUT']))
+    # A join-only input cannot satisfy read_selected_result or issue source authority.
+    execution = _running_control(case['tmp'])
     witness = case['owner'].receipt()['deliveries'][0]['native_delivery']
     staged = {'sha256': witness['staged_manifest_sha256'],
               'read_contract_sha256': witness['read_contract_sha256']}
@@ -200,7 +203,7 @@ def test_scientific_artifact_consumer_checks_selected_node_roles_and_binding(tmp
     path.write_bytes(raw)
     binding = {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
     measured = nr.bind_result_artifact(path, max_bytes=128)
-    execution = ExecutionResult('running', os.environ['FLUX_JOB_ID'], Path(os.environ['OUT']))
+    execution = _running_control(tmp_path)
     selected = nr.SelectedResult({'producer_id': 'nonqualifying-artifact-control',
         'artifacts': {'control': measured}}, {'control': raw}, {}, {}, execution)
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
