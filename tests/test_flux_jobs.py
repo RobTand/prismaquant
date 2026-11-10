@@ -42,12 +42,21 @@ class FluxJobsTests(unittest.TestCase):
 
     def test_ascii_and_unicode_f58_are_one_saved_identity(self):
         submission, _ = self.submit_fixture(self.completed('fBqv3wNoLK\n'))
-        self.assertEqual(submission.job_id, 'ƒBqv3wNoLK')
+        self.assertEqual(submission.job_id, 'fBqv3wNoLK')
         self.assertEqual(jobs.load_submission(self.record), submission)
         self.assertEqual(jobs.job_id_number('fBqv3wNoLK'),
                          jobs.job_id_number('ƒBqv3wNoLK'))
         # Independently captured native status from the pre-fix admitted run.
         self.assertEqual(jobs.job_id_number('fE23pNdDTV'), 1667135277367296)
+
+    def test_saved_unicode_receipt_still_loads(self):
+        submission, _ = self.submit_fixture()
+        for name in ('submission.json', 'submitted-job.json'):
+            path = self.record / name
+            receipt = json.loads(path.read_text())
+            receipt['job_id'] = 'ƒBqv3wNoLK'
+            path.write_text(json.dumps(receipt))
+        self.assertEqual(jobs.load_submission(self.record), submission)
 
     def test_launch_encoding_keeps_exact_utf8_lax_identity_bytes(self):
         self.assertEqual(jobs._json_bytes({'n': float('nan'), 'a': 'ƒ'}),
@@ -96,8 +105,9 @@ class FluxJobsTests(unittest.TestCase):
         self.assertIn('--dependency=afterok:456', command)
         self.assertFalse(any(a.startswith(('-N', '--nodes', '--requires')) for a in command))
         exported = [a for a in command if a.startswith('--env=')][1:]
-        self.assertEqual(len(exported), 8)
+        self.assertEqual(len(exported), 9)
         self.assertFalse(any(a.startswith('--env=LD_LIBRARY_PATH=') for a in exported))
+        self.assertIn('--env=FLUX_F58_FORCE_ASCII=1', exported)
         self.assertIn('--env=OMP_NUM_THREADS=1', exported)
         self.assertIn('--env=OUT=' + str(self.record), exported)
         self.assertEqual(jobs.load_submission(self.record), submission)
@@ -214,7 +224,7 @@ class FluxJobsTests(unittest.TestCase):
                 with self.assertRaisesRegex(jobs.SubmissionUnknown, 'submitted as'):
                     self.submit_fixture()
             submission = jobs.load_submission(self.record)
-            self.assertEqual(submission.job_id, 'ƒBqv3wNoLK')
+            self.assertEqual(submission.job_id, 'fBqv3wNoLK')
             self.assertTrue((self.record / 'submitted-job.json').exists())
             result = self.collect_fixture(submission=submission)
             self.assertEqual((result.status, result.payload_exit, result.query_error), ('succeeded', 0, None))
@@ -425,6 +435,8 @@ class FluxJobsTests(unittest.TestCase):
             return self.completed(self.live_r)
         if args[0] == 'resource':
             return self.completed(self.online)
+        if args[0] == 'hostlist':
+            return self.completed('dl380g10 sparky sparklina unknown\n')
         if args[0] == 'overlay':
             return self.completed(self.overlay)
         if args[0] == 'submit':
@@ -434,7 +446,8 @@ class FluxJobsTests(unittest.TestCase):
     def live_instance(self):
         self.live_config = '{"sched-fluxion-resource":{"policy":"low"}}\n'
         self.live_r = json.dumps({'version': 1, 'execution': {'R_lite': [
-            {'rank': '0-1'}, {'rank': '4-5'}]}}) + '\n'
+            {'rank': '0-1'}, {'rank': '4-5'}],
+            'nodelist': ['dl380g10,sparky,sparklina,unknown']}}) + '\n'
         self.online = '0-1,4-5\n'
         self.overlay = '0 coordinator: full\n1 worker1: full\n4 worker4: full\n5 worker5: full\n'
 
@@ -469,8 +482,25 @@ class FluxJobsTests(unittest.TestCase):
         self.live_config = '{}\n'
         with patch.dict(os.environ, {'FLUX_URI': self.profile['uri']}), \
                 patch.object(jobs, '_flux_run', side_effect=self.instance_query):
-            profile = jobs._profile_identity()
+            profile = jobs._profile_identity(self.resources)
         self.assertEqual(profile['config_sha256'], hashlib.sha256(b'{}\n').hexdigest())
+
+    def test_unbound_identity_records_health_without_imposing_portable_placement(self):
+        self.live_instance()
+        self.online = '0'
+        self.overlay = self.overlay.replace('worker1: full', 'worker1: offline').replace('worker4: full', 'worker4: offline').replace('worker5: full', 'worker5: offline')
+        with patch.dict(os.environ, {'FLUX_URI': self.profile['uri']}), \
+                patch.object(jobs, '_source_identity', return_value=self.source), \
+                patch.object(jobs, '_flux_run', side_effect=self.instance_query):
+            profile = jobs._profile_identity()
+            self.assertTrue(all(row['eligible'] is None for row in profile['rank_health']))
+            self.assertEqual([row['rank'] for row in profile['rank_health'] if not row['online']], [1, 4, 5])
+            jobs.validate_job(checkout=self.checkout,
+                              resources=jobs.FluxResources(1, 1, 0, 30, 'host:dl380g10'))
+            for online in ('0', ''):
+                self.online = online
+                with self.subTest(online=online), self.assertRaises(ValueError):
+                    jobs.validate_job(checkout=self.checkout, resources=self.resources)
 
     def test_changed_instance_identity_submits_and_records_observations(self):
         self.live_instance()
@@ -503,9 +533,9 @@ class FluxJobsTests(unittest.TestCase):
 
     def test_offline_rank_and_unhealthy_or_ambiguous_overlay_refuse_before_submit(self):
         for online, overlay in (
-                ('0-1,4', None), ('', None), ('0-1,4-6', None),
-                (None, '0 coordinator: full\n1 worker1: full\n4 worker4: full\n5 worker5: offline\n'),
-                (None, '0 coordinator: full\n1 worker1: full\n4 worker4: full\n'),
+                ('0-1', None), ('', None), ('0-1,4-6', None),
+                (None, '0 coordinator: full\n1 worker1: full\n4 worker4: full\n4 worker4: offline\n'),
+                (None, '0 coordinator: full\n1 worker1: full\n'),
                 (None, '0 coordinator: full\n1 worker1: full\n4 worker4: full\n4 worker4: full\n')):
             self.live_instance()
             if online is not None:
@@ -521,6 +551,38 @@ class FluxJobsTests(unittest.TestCase):
                     resources=self.resources, record_dir=self.record)
             self.assertFalse(any(call.args[0][0] == 'submit' for call in run.call_args_list))
             self.assertFalse(self.record.exists())
+
+    def test_health_is_scoped_to_placement_and_records_offline_ranks(self):
+        for placement, online, succeeds in (
+                ('host:dl380g10', '0', True), ('x86_64', '0', True),
+                ('portable', '0-1,4', True), ('portable', '5', False),
+                ('portable', '', False), ('aarch64', '0', False)):
+            self.live_instance()
+            model = json.loads(self.live_r)
+            model['execution']['properties'] = {'x86_64': '0', 'aarch64': '1,4'}
+            self.live_r = json.dumps(model)
+            self.online = online
+            self.overlay = '0 coordinator: full\n1 worker1: offline\n4 worker4: offline\n5 worker5: offline\n'
+            if placement == 'portable' and succeeds:
+                self.overlay = self.overlay.replace('worker1: offline', 'worker1: full').replace('worker4: offline', 'worker4: full')
+            self.record = self.root / ('health-' + placement.replace(':', '-') + '-' + str(succeeds) + '-' + online)
+            resources = jobs.FluxResources(1, 1, 0, 30, placement)
+            with self.subTest(placement=placement, online=online), \
+                    patch.dict(os.environ, {'FLUX_URI': self.profile['uri']}), \
+                    patch.object(jobs, '_source_identity', return_value=self.source), \
+                    patch.object(jobs, '_flux_run', side_effect=self.instance_query):
+                if succeeds:
+                    jobs.validate_job(checkout=self.checkout, resources=resources)
+                    jobs.submit_job(['/bin/true'], checkout=self.checkout,
+                                    resources=resources, record_dir=self.record)
+                    health = json.loads((self.record / 'submission.json').read_text())['profile']['rank_health']
+                    self.assertEqual([row['rank'] for row in health if not row['online']],
+                                     [rank for rank in (0, 1, 4, 5)
+                                      if rank not in jobs._allocation_ids(online)])
+                    self.assertFalse(health[-1]['eligible'])
+                else:
+                    with self.assertRaises(ValueError):
+                        jobs.validate_job(checkout=self.checkout, resources=resources)
 
     def test_instance_restarting_during_preflight_refuses_submission(self):
         self.live_instance()
@@ -683,6 +745,12 @@ class FluxJobsTests(unittest.TestCase):
         self.assertNotIn('LD_LIBRARY_PATH', environment)
 
     def test_instance_scratch_is_qualified_used_and_removed(self):
+        self.run_payload_memory_case(False)
+
+    def test_unreadable_memory_peak_is_nonfatal(self):
+        self.run_payload_memory_case(True)
+
+    def run_payload_memory_case(self, unreadable):
         scratch_root = self.root / 'instance-scratch'
         scratch_root.mkdir()
         self.record.mkdir()
@@ -691,17 +759,37 @@ class FluxJobsTests(unittest.TestCase):
                 self.assertEqual(args[-1], str(scratch_root))
                 return 'xfs\n'
             return self.source['commit'] if args[1:] == ['rev-parse', 'HEAD'] else ''
+        fake_cgroup = self.root / 'proc-self-cgroup'
+        fake_cgroup.write_text('0::/user.slice/shell-f123:sys.service\n')
+        fake_peak = self.root / 'sys-fs-cgroup/user.slice/shell-f123:sys.service/memory.peak'
+        fake_peak.parent.mkdir(parents=True)
+        if not unreadable:
+            fake_peak.write_text('123456\n')
+        original_read = Path.read_text
+        def read(path, *args, **kwargs):
+            if str(path) == '/proc/self/cgroup':
+                return original_read(fake_cgroup)
+            if str(path) == '/sys/fs/cgroup/user.slice/shell-f123:sys.service/memory.peak':
+                return original_read(fake_peak)
+            return original_read(path, *args, **kwargs)
         environment = {'OUT': str(self.record), 'FLUX_SCRATCH': str(scratch_root), 'FLUX_JOB_ID': 'ƒ123'}
         with patch.dict(os.environ, environment, clear=True), \
-                patch.object(sys, 'argv', ['payload', self.source['commit'], '/bin/true']), \
+                patch.object(sys, 'argv', ['payload', self.source['commit'], '3', '/bin/true']), \
                 patch.object(jobs.socket, 'gethostname', return_value='dl380g10'), \
                 patch.object(subprocess, 'check_output', side_effect=query), \
                 patch.object(subprocess, 'Popen', return_value=SimpleNamespace(pid=123, wait=lambda: 0)), \
                 patch.object(os, 'killpg', side_effect=ProcessLookupError()), \
+                patch.object(Path, 'read_text', read), \
                 patch('signal.signal'), self.assertRaises(SystemExit) as exit:
             exec(jobs._PAYLOAD, {})
         self.assertEqual(exit.exception.code, 0)
         observation = json.loads((self.record / 'scratch.json').read_text())
+        self.assertEqual(observation['memory_gib'], 3)
+        self.assertEqual(observation['memory_peak_bytes'], None if unreadable else 123456)
+        if unreadable:
+            self.assertEqual(observation['memory_peak_error'], 'FileNotFoundError')
+        else:
+            self.assertNotIn('memory_peak_error', observation)
         self.assertEqual(observation['root_source'], 'instance')
         self.assertEqual(observation['path'], str(scratch_root / 'f123'))
         self.assertFalse((scratch_root / 'f123').exists())

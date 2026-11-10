@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-10, P-4 hosted repair. Sources below describe the current implementation.
+As of: 2026-11-10, P-4F Flux receipts and placement health. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -28,7 +28,8 @@ The limits in `CAPS.md` are consumer rules, not stock Flux enforcement.
 Payloads use `PATH=/usr/bin:/bin`, so Torch Inductor selects the system compiler
 with its multiarch includes. Coordinator CLI invocations retain the Flux
 install and dependency tool directories on PATH and the Flux library search
-path for native client calls. Payloads carry no `LD_LIBRARY_PATH`. No coordinator
+path for native client calls. Payloads carry no `LD_LIBRARY_PATH`. Every submitted environment includes
+`FLUX_F58_FORCE_ASCII=1`; saved Unicode f58 IDs still load as equivalent ASCII IDs. No coordinator
 `FLUX_SCRATCH` is exported. The wrapper uses an instance-provided job value when
 present, otherwise the existing host table: XFS
 `/home/rob/tl-gates/flux-validation` on dl380g10, ext4 `/tmp/flux-vanilla` on
@@ -36,7 +37,11 @@ either Spark.
 Each selected root must pass the host filesystem qualification. Scratch lives under the exact
 `$FLUX_SCRATCH/$FLUX_JOB_ID`, with the payload ID normalized to its equivalent
 ASCII f58 spelling for scientific path contracts. Scratch is removed on exit.
-Its source and filesystem are retained with cleanup evidence. The staged proof uses `TMPDIR`
+Its source and filesystem are retained with cleanup evidence. As its final step,
+the wrapper records declared `memory_gib` and observed `memory_peak_bytes` in
+`scratch.json`, reading `memory.peak` under the full unified cgroup path from
+`/proc/self/cgroup`, including colons in unit names. An unavailable peak records
+`null` and `memory_peak_error` without failing the job. This observation adds no gate. The staged proof uses `TMPDIR`
 inside that same owned directory. Launcher allow-lists contain no variable
 names with KEY, TOKEN, SECRET, PASS or AUTH substrings; quality prefill shares
 the executor's allow-list, and container/staged names are checked alongside it.
@@ -112,8 +117,8 @@ jobs; retained schema identifiers remain byte-for-byte unchanged. Numerical and
 serving gates remain independent.
 <!-- flux-current-end -->
 
-As of: 2026-11-10, stock Flux slot shape and runtime instance resolution, P-3.
-Source: `prismaquant/flux_jobs.py`, `tests/test_flux_jobs.py`, based on `cb07374d5`.
+As of: 2026-11-10, Flux receipts and placement-scoped health, P-4F.
+Source: `prismaquant/flux_jobs.py`, `tests/test_flux_jobs.py`, based on `2c0c028d2`.
 The native CPU profile is `pq.flux.stock-slot.v3`. It submits
 `slot/[core=N;memory=M]`, with a GPU child only when requested by a future
 qualified profile. Today's gate still permits zero GPUs only. Core class is
@@ -122,8 +127,15 @@ and GPU leaves and preserves physical core/PU/affinity checks.
 The coordinator may set `FLUX_URI` explicitly; otherwise the fleet URI resolver
 selects its host-local socket. The client prefix comes from `INSTANCE` as
 described in the current execution section. There is no run-name guessing or
-newest-run discovery. Every rank declared in live `resource.R`
-must be online and have a full broker overlay. Live config and R response
+newest-run discovery. Every eligible rank in live `resource.R` must be online
+and have a full broker overlay. Portable jobs consider only hosts supported by
+the executor; `host:NAME` selects that host's rank, and property placement uses
+R's property membership. Empty eligibility refuses. Other ranks, including
+unknown hosts, do not block portable jobs. The identity evidence records every
+rank's eligibility, online state and overlay state in `rank_health`.
+Unbound identity observations record null eligibility without imposing a job
+placement. Both `validate_job` and `submit_job` enforce health from the job's
+resources, so phase preflight cannot add a portable-only health restriction. Live config and R response
 SHA256 values, URI and broker starttime are recorded in both launch and
 submission receipts as observations, without config or model hash pins.
 Collection, cancellation and native verification use the saved URI and require

@@ -155,7 +155,23 @@ def _instance_ranks(model):
     return ranks
 
 
-def _profile_identity():
+def _eligible_ranks(model, resources, uri):
+    ranks = sorted(_instance_ranks(model))
+    hosts = _checked(['hostlist', '--expand',
+                      ','.join(model['execution']['nodelist'])], uri=uri).split()
+    if len(hosts) != len(ranks) or len(set(hosts)) != len(hosts):
+        raise ValueError('live Flux R host/rank mapping is ambiguous')
+    placement = resources.placement
+    if placement == 'portable':
+        return {rank for rank, host in zip(ranks, hosts) if host in _HOSTS}
+    if placement.startswith('host:'):
+        return {rank for rank, host in zip(ranks, hosts) if host == placement[5:]}
+    members = model['execution'].get('properties', {}).get(placement)
+    return set() if members is None else _allocation_ids(members) & set(ranks)
+
+
+def _profile_identity(resources=None):
+    """Observe identity; enforce placement health only for a concrete job."""
     uri = _instance_uri()
     start = _checked(['getattr', 'broker.starttime'], uri=uri).strip()
     config_raw = _checked(['config', 'get'], uri=uri)
@@ -164,22 +180,29 @@ def _profile_identity():
     if not isinstance(config, dict) or not start:
         raise ValueError('missing live Flux config or broker identity')
     ranks = _instance_ranks(model)
-    online = _checked(['resource', 'status', '-s', 'online', '-n', '-o', '{ranks}'], uri=uri).strip()
-    if _allocation_ids(online) != ranks:
-        raise ValueError('every rank in live Flux R must be online')
+    eligible = None if resources is None else _eligible_ranks(model, resources, uri)
+    online_raw = _checked(['resource', 'status', '-s', 'online', '-n', '-o', '{ranks}'], uri=uri).strip()
+    online = _allocation_ids(online_raw) if online_raw else set()
+    if not online <= ranks:
+        raise ValueError('online ranks differ from live Flux R')
+    if eligible is not None and (not eligible or not eligible <= online):
+        raise ValueError('every eligible rank in live Flux R must be online')
     overlay = _checked(['overlay', 'status', '--no-pretty', '--color=never'], uri=uri)
-    healthy = []
+    states = {}
     for line in overlay.splitlines():
-        match = re.fullmatch(r'([0-9]+) \S+: full', line)
-        if match is None:
-            raise ValueError('every live Flux broker overlay must be full')
-        healthy.append(int(match[1]))
-    if len(healthy) != len(ranks) or set(healthy) != ranks:
-        raise ValueError('every live Flux broker overlay must be full')
+        match = re.fullmatch(r'([0-9]+) \S+: (.+)', line)
+        if match is None or int(match[1]) in states:
+            raise ValueError('ambiguous live Flux broker overlay')
+        states[int(match[1])] = match[2]
+    if eligible is not None and any(states.get(rank) != 'full' for rank in eligible):
+        raise ValueError('every eligible Flux broker overlay must be full')
     if _checked(['getattr', 'broker.starttime'], uri=uri).strip() != start:
         raise ValueError('Flux instance changed during preflight')
     return {'profile': _PROFILE, 'config_sha256': bytes_sha256hex(config_raw.encode()),
-            'r_sha256': bytes_sha256hex(model_raw.encode()), 'uri': uri, 'broker_starttime': start}
+            'r_sha256': bytes_sha256hex(model_raw.encode()), 'uri': uri, 'broker_starttime': start,
+            'rank_health': [{'rank': rank, 'eligible': None if eligible is None else rank in eligible,
+                             'online': rank in online, 'overlay': states.get(rank)}
+                            for rank in sorted(ranks)]}
 
 
 def _source_git(checkout, *args):
@@ -207,7 +230,7 @@ def _source_identity(checkout):
 
 def _job_id(value):
     job_id_number(value)
-    return 'ƒ' + value[1:] if value.startswith('f') else value
+    return 'f' + value[1:] if value.startswith('ƒ') else value
 
 
 def job_id_number(value):
@@ -234,7 +257,7 @@ def job_unit_name(job_id):
 
 def _environment(record_dir, supplied):
     environment = {'PATH': '/usr/bin:/bin', 'HOME': '/home/rob',
-                   'OUT': str(record_dir),
+                   'OUT': str(record_dir), 'FLUX_F58_FORCE_ASCII': '1',
                    'PYTHONDONTWRITEBYTECODE': '1', **dict.fromkeys(_THREADS, '1')}
     # No general application environment passthrough. Add a versioned setting
     # here only when its owning contract has migrated and can be validated.
@@ -255,7 +278,7 @@ def validate_job(*, checkout: Path, resources: FluxResources, environment=None, 
     if staged_input is not None:
         from .staged_launch import validate_binding
         validate_binding(staged_input, placement=resources.placement)
-    _profile_identity()
+    _profile_identity(resources)
     return source
 
 
@@ -267,7 +290,7 @@ def _shape(resources):
 _PAYLOAD = r'''
 import json, os, pathlib, shutil, signal, socket, subprocess, sys
 out = pathlib.Path(os.environ['OUT'])
-expected_commit, command = sys.argv[1], sys.argv[2:]
+expected_commit, memory_gib, command = sys.argv[1], int(sys.argv[2]), sys.argv[3:]
 def git(*args):
     return subprocess.check_output(['/usr/bin/git', *args], text=True).strip()
 if git('rev-parse', 'HEAD') != expected_commit or git('status', '--porcelain', '--untracked-files=all', '--ignored') or git('branch', '--show-current'):
@@ -328,6 +351,18 @@ finally:
     (out / 'cleanup.json').write_text(json.dumps({'schema': 'pq.flux.cleanup.v1',
         'job_id': os.environ['FLUX_JOB_ID'], 'path': str(scratch), 'removed': not scratch.exists(),
         'process_group_empty': process_group_empty, 'signal': received}))
+    observation['memory_gib'] = memory_gib
+    observation['memory_peak_bytes'] = None
+    try:
+        cgroup = pathlib.Path('/proc/self/cgroup').read_text().splitlines()
+        unit_path = next(line.split(':', 2)[2] for line in cgroup if line.startswith('0::'))
+        peak = int((pathlib.Path('/sys/fs/cgroup') / unit_path.lstrip('/') / 'memory.peak').read_text())
+        if peak < 0:
+            raise ValueError('negative memory peak')
+        observation['memory_peak_bytes'] = peak
+    except (OSError, ValueError, StopIteration, IndexError) as exc:
+        observation['memory_peak_error'] = type(exc).__name__
+    (out / 'scratch.json').write_text(json.dumps(observation))
 sys.exit(128 - code if code < 0 else code)
 '''
 
@@ -351,7 +386,7 @@ def _native_arguments(argv, source, resources, record_dir, dependencies, environ
     if resources.placement != 'portable':
         args.append(f'--requires={resources.placement}')
     args.extend(f'--dependency=afterok:{value}' for value in dependencies)
-    args.extend(['/usr/bin/python3', '-s', '-c', _PAYLOAD, source['commit'], *command])
+    args.extend(['/usr/bin/python3', '-s', '-c', _PAYLOAD, source['commit'], str(resources.memory_gib), *command])
     return args
 
 
@@ -381,7 +416,7 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     if staged_input is not None:
         from .staged_launch import validate_binding
         validate_binding(staged_input, placement=resources.placement)
-    source, profile = _source_identity(checkout), _profile_identity()
+    source, profile = _source_identity(checkout), _profile_identity(resources)
     args = _native_arguments(argv, {**source, 'checkout': str(checkout)}, resources,
                              record_dir, dependencies, env, staged_input)
     intent = {'schema': 'pq.flux.launch.v1', 'source': source, 'profile': profile,
