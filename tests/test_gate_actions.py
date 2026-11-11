@@ -179,10 +179,8 @@ def test_failure_evidence_from_either_attempt_overrides_a_passing_attempt(code, 
 
 
 def test_label_changes_do_not_rerun_the_gate_workflow():
-    # Mergify adds and removes its own labels (queued, dequeued) on queued pull
-    # requests. A label trigger reran pr-gate on each of them while the queue
-    # requires pr-gate to succeed, so a queued pull request could fall out of
-    # the queue during the rerun. gate-canary takes effect on the next push.
+    # Mergify changes queued and dequeued labels. These changes must not rerun CI.
+    # gate-canary takes effect on the next push.
     import yaml
     workflow = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
     types = set(workflow['on']['pull_request']['types'])
@@ -190,11 +188,8 @@ def test_label_changes_do_not_rerun_the_gate_workflow():
 
 
 def test_a_superseded_run_stops_its_jobs():
-    # A new push cancels the PR's previous run (cancel-in-progress), but GitHub
-    # keeps running any job whose condition calls always(). A cancelled pr-gate
-    # kept testing a stale head for up to 30 minutes and held the concurrency
-    # slot the current head was waiting for. !cancelled() still runs a job after
-    # a failed dependency, which is what these conditions need.
+    # A new push cancels the previous run. always() would keep stale jobs active.
+    # !cancelled() lets the gate report a failed dependency without ignoring cancellation.
     import yaml
     workflow = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
     assert workflow['concurrency']['cancel-in-progress'] is True

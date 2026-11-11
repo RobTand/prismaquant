@@ -1,9 +1,7 @@
 # Mergify merge queue for PrismaQuant. Tracking: #3180.
 #
-# Two steps keep per-PR feedback separate from testing the integrated SHA:
-# - "pr-gate" selects tests from each pull request's changes before queueing.
-# - "gate" tests the full gate population on Mergify's temporary draft batch
-#   pull request before the original pull requests merge into main.
+# "gate" tests the full gate population on Mergify's temporary draft batch
+# pull request before the original pull requests merge into main.
 #
 # max_parallel_checks: 2 forces draft batch PRs. In-place checks could rewrite
 # the original branch and invalidate the head TL3 approved. Serial mode keeps
@@ -16,9 +14,8 @@
 # "@mergifyio queue"; toggling the label does not reset a dequeued PR.
 # TL3 tests and reviews each change, posts its "TL3
 # approval" check on the reviewed head, then adds "tl3-queue". TL3 follows
-# Mergify's queue check on the PR head and never reads pr-gate, so a pr-gate
-# condition would leave a failing TL3 PR unqueued without TL3 noticing. The
-# batch's full "gate" still decides every merge. The issue-link check stays:
+# Mergify's queue check on the PR head. The batch's full "gate" decides every
+# merge. The issue-link check stays:
 # TL3's branch names and "Refs #<issue>." bodies pass it. TL3 finds its rule's
 # check by name, so keep "Queue TL3-approved PRs".
 # TL3's App needs an explicit command allowance because installation does not
@@ -61,7 +58,6 @@ queue_rules:
       - label = release
       - -draft
       - check-success = linked issue
-      - check-success = pr-gate
     merge_conditions:
       - check-success = gate
     merge_method: merge
@@ -76,7 +72,6 @@ queue_rules:
           - and:
               - label = queue
               - check-success = linked issue
-              - check-success = pr-gate
           - and:
               - label = tl3-queue
               - check-success = @tl3-robtand/TL3 approval
@@ -87,7 +82,7 @@ queue_rules:
     batch_size:
       min: 1
       max: 7
-    batch_max_wait_time: 2 minutes
+    batch_max_wait_time: 10 minutes
     max_checks_retries: 0
     checks_timeout: 30 minutes
 

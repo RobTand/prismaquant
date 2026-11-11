@@ -19,7 +19,7 @@ def test_gate_uses_authenticated_batch_heads_and_no_label_events():
     for required in ('head.repo.full_name == github.repository', 'mergify/merge-queue/',
                      "user.login == 'mergify[bot]'", 'user.id == 37929162', 'gate-canary'):
         assert required in gate['env']['GATE_MODE']
-    assert {'pr-gate', 'gate', 'graph-impact', 'remote', 'hosted'} <= gate['jobs'].keys()
+    assert {'gate', 'graph-impact', 'remote', 'hosted'} <= gate['jobs'].keys()
     assert not {'retry-plan', 'retry-shards', 'shards'} & gate['jobs'].keys()
 
 
@@ -46,7 +46,10 @@ def test_job_environment_does_not_reference_runtime_only_contexts():
 
 
 def test_remote_planner_uses_queue_aware_refs_and_requires_scope_upload():
-    remote = workflows()['gate.yml']['jobs']['remote']
+    jobs = workflows()['gate.yml']['jobs']
+    remote = jobs['remote']
+    assert remote['if'] == jobs['gate']['if']
+    assert jobs['hosted']['if'] == "${{ !cancelled() && needs.remote.result == 'success' }}"
     steps = {step.get('id'): step for step in remote['steps']}
     assert steps['refs']['with']['action'] == 'scopes-git-refs'
     assert steps['scopes']['with']['action'] == 'scopes-upload'
@@ -123,8 +126,7 @@ def test_graph_check_remains_parallel_and_requires_exactly_one_pass():
     check=next(s for s in graph['steps'] if s.get('id')=='check')
     assert 'tests/test_graph_impact.py::test_graph_impact_gate' in check['run']
     assert '--noconftest' in check['run']
-    for name in ('pr-gate','gate'):
-        assert 'graph-impact' in jobs[name]['needs']
+    assert 'graph-impact' in jobs['gate']['needs']
 
 
 @pytest.mark.parametrize('cases,passes', [
