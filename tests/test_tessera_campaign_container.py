@@ -353,18 +353,18 @@ def _runner():
 
 def test_a_cpu_admission_withholds_the_device_whatever_the_spec_says():
     """Only the native admission decides. An empty or granting CUDA_VISIBLE_DEVICES is not consulted."""
-    for visible in (None, '', '0'):
-        data = spec()
-        if visible is not None:
-            data['env']['CUDA_VISIBLE_DEVICES'] = visible
-        attached, reason = _runner().gpu_attachment(ADMISSION)
+    for environ in ({}, {'CUDA_VISIBLE_DEVICES': ''}, {'CUDA_VISIBLE_DEVICES': '0'}):
+        attached, reason = _runner().gpu_attachment(ADMISSION, environ)
         assert attached is False and 'no GPU' in reason
 
 
-def test_a_gpu_admission_attaches_the_cdi_device():
-    argv = _runner().podman_command(spec(), ['python3'], cwd='/checkout',
-        image_id='sha256:' + 'a' * 64, admission=with_admission(gpus=1), cidfile='/cid')
-    assert argv[argv.index('--device') + 1] == 'nvidia.com/gpu=all'
+def test_a_gpu_admission_attaches_only_the_assigned_cdi_device():
+    argv = _runner().podman_command(spec(), ['python3'], cwd='/checkout', image_id='sha256:' + 'a' * 64,
+        admission=with_admission(gpus=1), cidfile='/cid', environ={'CUDA_VISIBLE_DEVICES': '1'})
+    assert argv[argv.index('--device') + 1] == 'nvidia.com/gpu=1'
+    for environ in ({}, {'CUDA_VISIBLE_DEVICES': ''}, {'CUDA_VISIBLE_DEVICES': '0,1'}):
+        with pytest.raises(RuntimeError, match='exactly one CUDA_VISIBLE_DEVICES index'):
+            _runner().gpu_attachment(with_admission(gpus=1), environ)
 
 
 def test_a_malformed_admission_is_refused():
@@ -372,7 +372,7 @@ def test_a_malformed_admission_is_refused():
     for bad in ({}, {**ADMISSION, 'schema': 'other'}, {**ADMISSION, 'affinity': []},
                 {**ADMISSION, 'affinity': [3, 1]}, {k: v for k, v in ADMISSION.items() if k != 'gpus'}):
         with pytest.raises(RuntimeError, match='admission is missing or malformed'):
-            runner.gpu_attachment(bad)
+            runner.gpu_attachment(bad, {})
 
 
 def test_main_withholds_the_device_and_launches_with_the_native_cpuset(monkeypatch, tmp_path):
