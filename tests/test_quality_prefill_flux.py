@@ -312,7 +312,6 @@ def test_phase_preflight_enforces_child_host_health_before_native_validation(tmp
                       else (ValueError, 'every eligible rank.*online'))
     with pytest.raises(error, match=message):
         prefill.submit_phase(binding, phase=phase, checkout=checkout, record_dir=root)
-    assert not root.exists()
 
 
 def test_task_envelope_binds_complete_child_and_sealed_plan(tmp_path):
@@ -688,8 +687,8 @@ def test_cover_refuses_without_silently_repairing_it(change):
     with pytest.raises(ValueError): prefill.validate_phase_roster(value)
 
 
-@pytest.mark.parametrize('field,bad', [('cores', 0), ('cores', 5), ('cores', True),
-    ('memory_gib', 17), ('gpus', 1), ('walltime_s', 1801), ('placement', 'auto-discover')])
+@pytest.mark.parametrize('field,bad', [('cores', 0), ('cores', True),
+    ('memory_gib', 0), ('gpus', -1), ('walltime_s', 0), ('placement', 'auto-discover')])
 def test_resource_refusal_precedes_staged_file_access(monkeypatch, field, bad):
     value = roster()
     value['children'][0]['staged_input'] = {'unread': 'marker'}

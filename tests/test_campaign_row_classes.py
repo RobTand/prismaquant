@@ -335,7 +335,7 @@ def podman_argv(container: dict, *, admission=ADMISSION) -> list[str]:
     return container_tool.podman_command(
         {"container": container, "env": {}}, ["python3", "-c", "pass"],
         cwd="/home/rob/example", admission=admission, cidfile=CIDFILE,
-        image_id="sha256:" + "0" * 64, environ={})
+        image_id="sha256:" + "0" * 64, environ={"CUDA_VISIBLE_DEVICES": "0"})
 
 
 def test_a_cpu_admission_attaches_nothing_under_either_declared_runtime():
@@ -347,7 +347,7 @@ def test_a_cpu_admission_attaches_nothing_under_either_declared_runtime():
 
 def test_a_gpu_admission_attaches_the_cdi_device():
     argv = podman_argv({"image": "example:pinned"}, admission=with_admission(gpus=1))
-    assert argv[argv.index("--device") + 1] == "nvidia.com/gpu=all"
+    assert argv[argv.index("--device") + 1] == "nvidia.com/gpu=0"
 
 
 def test_an_unknown_gpu_runtime_is_refused():

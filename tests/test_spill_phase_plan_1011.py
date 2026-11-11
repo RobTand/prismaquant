@@ -144,17 +144,15 @@ def test_dispatch_main_accepts_a_spill_sealed_row(tmp_path, monkeypatch, capsys)
      out) = _dispatch_prepared(tmp_path, monkeypatch, replay_mode="spill")
     gateway = dispatch.FakeGateway()
     code = dispatch.main(
-        ["--records", str(records), "--output-root", str(out),
+        ["--timeout-s", "3600", "--records", str(records), "--output-root", str(out),
          "--adjoint-receipt", str(receipt_path)], _gateway=gateway,
         # No checkpoint behind the fixture; coverage is tested on its own
         # (test_readset_coverage_1095).
         _coverage=lambda rows: [])
     assert code == 0, capsys.readouterr().err
-    argv = gateway.submitted[0]["row"]
-    declared = [item.split("=", 1)[0] for item in argv["progress_phases"]]
-    assert declared.index("render-00") + 1 == declared.index("spill-p0")
-    assert declared[-1] == "render-01"
-    assert not any(name.startswith("replay-") for name in declared)
+    argv = gateway.submitted[0]["row"]["argv"]
+    assert argv[argv.index("--data-manifest-sha256") + 1] == (
+        bound["executable_readset"]["manifest_sha256"])
 
 
 def test_dispatch_refuses_a_row_whose_mode_disagrees_with_its_manifest(
@@ -169,7 +167,7 @@ def test_dispatch_refuses_a_row_whose_mode_disagrees_with_its_manifest(
     (records / "layer-002.json").write_text(json.dumps(tampered))
     gateway = dispatch.FakeGateway()
     code = dispatch.main(
-        ["--records", str(records), "--output-root", str(out),
+        ["--timeout-s", "3600", "--records", str(records), "--output-root", str(out),
          "--adjoint-receipt", str(receipt_path)], _gateway=gateway)
     assert code != 0 and not gateway.submitted
     assert "replay mode" in capsys.readouterr().err

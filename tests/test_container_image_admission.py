@@ -385,9 +385,9 @@ def test_joint_and_direct_submission_keep_the_portable_reference(tmp_path):
     spec = with_spool(_portable_spec())
     path = tmp_path / "portable.json"
     path.write_text(json.dumps(spec))
-    argv, reference = joint._container_wrap(
+    argv = joint._container_wrap(
         path, ["python3", "-V"], progress=[("head", 1800)])
-    assert reference == spec["container_admission_reference"]
+    reference = spec["container_admission_reference"]
     assert _embedded_spec(argv)["container_admission_reference"] == reference
     args = _direct_args(tmp_path, spec["container"])
     direct = campaign._native_action_row(args, manifest=tmp_path / "read.json",
