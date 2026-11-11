@@ -12546,8 +12546,6 @@ pq_py_library(
     ],
 )
 
-
-
 pq_py_test(
     name = "test_build_rtn_cache",
     path = "tests/test_build_rtn_cache.py",
@@ -17425,8 +17423,6 @@ pq_py_library(
         "@pq_pip//pytest",
     ],
 )
-
-
 
 pq_py_test(
     name = "test_campaign_image_content",
@@ -27852,10 +27848,6 @@ pq_py_library(
         "@pq_pip//pyyaml",
     ],
 )
-
-
-
-
 
 pq_py_test(
     name = "test_col_weights_render_identity",
@@ -93072,24 +93064,6 @@ pq_py_library(
         "@pq_pip//torch",
     ],
 )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 pq_py_test(
     name = "test_probe_followup_reuse_audit",

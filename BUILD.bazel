@@ -7705,7 +7705,6 @@ pq_py_library(
         ":experiments/workspace_netdata",
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/joint_run_progress",
         ":prismaquant/memory_management",
         ":prismaquant/residency_map",

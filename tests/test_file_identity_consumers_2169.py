@@ -1,4 +1,4 @@
-"""Dataset file identities and identifier fallback."""
+"""Load-bearing file identities and caller-owned fallback/classification."""
 import hashlib
 import subprocess
 import sys

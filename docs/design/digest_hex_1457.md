@@ -23,8 +23,7 @@ uses the latter.
 
 ## Evidence
 
-`tests/test_digest_hex_1457.py` retains the artifact-collection and prepriced-cost outcomes in
-`tests/fixtures/digest_hex_1457.json` after PrismaSnap removal. It compares exception type/text/cause and accepted return
+`tests/test_digest_hex_1457.py` compares exception type/text/cause and accepted return
 type/value/object identity. Cases include lengths 0/63/64/65, case, Unicode,
 LF/NUL/space, non-string values and subclasses overriding length, iteration,
 string conversion and truthiness. An added owner-binding test checks the

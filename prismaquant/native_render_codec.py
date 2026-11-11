@@ -1590,12 +1590,6 @@ def render_nvfp4_dequant(
 ) -> torch.Tensor:
     """Render a 2-D weight through the exact production NVFP4 codec.
 
-    Unlike the historical private RTN helper, every scale-plane choice is an
-    explicit argument.  Offline selectors must be
-    reproducible from their receipt and therefore cannot inherit either
-    ``PRISMAQUANT_NVFP4_SCALE_RULE`` or the research-only snapped-scale
-    scoring switch from the process environment.  Callers holding a complete
-    recorded recipe pass that ``NativeRenderLevers`` to the codec instead.
     """
     recipe = _explicit_nvfp4_recipe(
         scale_rule, snapped_scale_scoring, joint_scale_levels)

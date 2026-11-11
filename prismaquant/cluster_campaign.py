@@ -6,11 +6,7 @@ from pathlib import Path
 import tempfile
 
 
-class ClusterCampaignV2Error(RuntimeError):
-    """Base error retained for artifact publication callers."""
-
-
-class CampaignContractError(ClusterCampaignV2Error, ValueError):
+class CampaignContractError(RuntimeError, ValueError):
     """An artifact publication conflicts with an existing output."""
 
 
