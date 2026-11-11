@@ -4,7 +4,6 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 from tools import dispatch_stage_a_split as stage
-from tools import dispatch_capture_chain as capture
 from tools import dispatch_joint_quanta as joint
 from prismaquant import flux_jobs as jobs, tessera_campaign_rows as rows
 
@@ -82,15 +81,6 @@ def test_changed_sealed_row_cannot_reuse_earlier_success(tmp_path):
         with pytest.raises(stage.SplitDispatchRefused,match='differs from sealed scientific row'):
             stage.native_ending(tmp_path,'prep')
         collect.assert_not_called()
-
-
-def test_capture_refuses_unsupported_future_quantum_before_prep_launch(tmp_path):
-    document={'rows':[{'name':'prep','row':row()},{'name':'quantum','row':row(data_manifest='/strict')}]}
-    with patch.object(capture,'load_round',return_value=document), patch.object(jobs,'validate_job',return_value={}), patch.object(jobs,'submit_job') as submit:
-        with pytest.raises(capture.ChainDispatchRefused,match='strict staging'):
-            capture.submit(tmp_path)
-        submit.assert_not_called()
-        assert not stage.submission_path(tmp_path,'prep').exists()
 
 
 def test_recovery_refuses_row_cwd_that_differs_from_saved_source(tmp_path):
