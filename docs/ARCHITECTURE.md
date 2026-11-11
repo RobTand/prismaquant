@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-10, P-4F review follow-up on Flux receipts and placement health. Sources below describe the current implementation.
+As of: 2026-11-11, P-7 GPU admission and explicit dispatch walltimes. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -15,10 +15,11 @@ including inside a job. Client paths are read lazily from the fleet-owned
 `/mnt/shared/flux-migration/INSTANCE`, strictly one absolute `PREFIX RUN` line.
 Importing the module never reads shared storage. Every CLI call resolves the
 current prefix; no run name or install prefix is embedded in live launch code.
-The CPU profile permits at most four cores, 16 GiB and
-1800 seconds. Consumer rules in `/mnt/shared/flux-migration/CAPS.md` also apply.
-Scientific row builders retain image admission intent, with neutral queue priority
-by default. GPU rows still refuse native execution at P-7. Namespace provenance
+Flux admits declared CPU, memory and GPU counts without application profile caps.
+Every job requires a positive integer walltime. Both joint dispatch CLIs require `--timeout-s`.
+Consumer rules in `/mnt/shared/flux-migration/CAPS.md` also apply. Stage A/B use the source
+read path and keep their digest checks. Their container spec names the image; GPU admission
+attaches `--device nvidia.com/gpu=all`. Namespace provenance
 binds the admitting profile's `config_sha256` and `r_sha256`.
 Memory is declared to Flux. The container sets `--cgroups=disabled` and runs
 inside the Flux job's cgroup; it does not enforce the declared per-job memory
@@ -94,8 +95,8 @@ producer field remains a read-only fallback for recorded receipts that lack
 `tessera_campaign_container` authenticates admission before namespace setup.
 Its explicit container environment forwards `FLUX_JOB_ID` and `OUT` for pilot
 publication and Stage A produced-output binding. This fixes the argv contract;
-it does not qualify publication inside a real GPU container. The GPU lane
-remains held for P-7. `native_results` owns authenticated result selection;
+it does not qualify publication inside a real GPU container. GPU admission now
+permits device attachment. `native_results` owns authenticated result selection;
 `quality_prefill_flux` owns the declared phase DAG. There is no live client for
 the retired execution service.
 
@@ -104,12 +105,12 @@ before executing those verified bytes with Python isolated mode, excluding cwd
 imports. Immutable staged coverage checks run once. They have no
 landing wait, poll deadline or progress-grace coupling. One resolver entry must
 cover the requested span; adjacent objects do not form a synthetic entry.
-Scientific rows retain container-image, device-memory, residency and phase-grace
-intent for review. The container specification remains bound in argv. Post-campaign
+Stage A/B rows omit image, device-memory, residency and phase-grace admission fields.
+The container specification remains bound in argv. Post-campaign
 rows record the declared head grace and 900-second layer phases. These fields do
 not qualify native enforcement: native submission refuses unsupported requirements.
 Capture chains emit no queue priority field and refuse an explicit nonzero priority.
-Production GPU rows refuse with `GPU lane not qualified; requires plan step P-7` before CPU admission.
+GPU rows use the same native resource and allocation checks as CPU rows.
 
 The dated entries below preserve earlier designs and measurements. Their
 execution-service descriptions are historical; this section and §7.0.2 describe
@@ -13226,11 +13227,9 @@ for **strict staged-tier enforcement on GPU-consumed bulk inputs** (PQ
 bulk reads no longer fall back to pool/HDD: `prismaquant/staged_tier_policy.py`
 is the one shared policy (explicit sealed `--allowed-tiers`, comma subset
 of `{ram,ssd}`, default `ram,ssd`; no ambient fallback; process-global so
-prefetch threads see it; explicitly test-only monotonic scopes). The joint entrypoints (`joint_cost_quantum`,
-`joint_cost_stage_a`) activate it from sealed args and the dispatcher
-threads the flag as a payload binding on quantum and Stage A rows
-(`tools/dispatch_joint_quanta.py:STAGED_ALLOWED_TIERS`, part of the action
-key). Under policy the source-shard reader builds no pool `safe_open`
+prefetch threads see it; explicitly test-only monotonic scopes). Stage A/B no
+longer activate this policy or bind a residency manifest. Other staged tools
+retain it. Under policy the source-shard reader builds no pool `safe_open`
 handle (keys/metadata/shapes/dtypes from the bounded header parse;
 `get_slice` is a header-only proxy whose indexing materializes staged;
 empty tensors built locally), PWC bounded loads require the caller's
@@ -30572,8 +30571,8 @@ The ship-gates runner retains its per-stage exits, outputs, hashes and logs.
 A final pass still needs every quality criterion and required card slot, and
 `publish_artifact` remains the publication gate.
 
-GPU submission, the G3 GPU smoke and GPU quality-prefill are held until P-7
-qualifies the GPU lane. CPU preflight does not grant GPU, serving or multi-host
+GPU submission accepts declared resources and attaches the admitted device through CDI.
+The G3 GPU smoke and GPU quality-prefill still need measured qualification. CPU preflight does not grant GPU, serving or multi-host
 qualification. The runner refuses multi-host execution without the complete
 rank lifecycle and peer teardown. The HF-only task backend cannot establish
 native Tessera task quality; that requires the serving backend with the pinned
@@ -34099,10 +34098,9 @@ Current execution debt, recorded 2026-11-10:
   Restore it by running the checker through Flux admission, independently
   reviewing its source, argv and authenticated result, and adding the reviewed
   v2 checker pin. Do not restore the retired v1 receipt.
-- A5: G3 and the GPU quality-prefill arm refuse because the current Flux profile
-  permits zero GPUs. Plan step P-7 must qualify GPU admission, container device
-  attachment and the required smoke before either arm can run. CPU tests do
-  not close this debt.
+- A5: P-7 permits GPU admission and container device attachment. G3 and GPU
+  quality-prefill still need their required smoke evidence. Syntax checks and CPU
+  tests do not establish GPU execution or quality.
 
 Honest register, code-cited, as of 2026-08-03 (`release/prismaquant-0.8.0`, implementation
 baseline commit `7183d21`; external Gridbook pin

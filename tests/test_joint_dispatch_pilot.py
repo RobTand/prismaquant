@@ -54,7 +54,7 @@ def _selection(directory, job_id):
 def _argv(records_dir, output_root, receipt, extra=()):
     # No implicit override: unlike legacy dispatcher behavior tests, these
     # calls exercise the production pilot gate.
-    return ["--records", str(records_dir), "--output-root", str(output_root),
+    return ["--timeout-s", "3600", "--records", str(records_dir), "--output-root", str(output_root),
             "--adjoint-receipt", str(receipt), *extra]
 
 
@@ -186,8 +186,7 @@ def _published_pilots(tmp_path, records_dir, monkeypatch, mutate=None, *,
         if mutate_completion is not None:
             completion = mutate_completion(completion) or completion
         selector = PilotSelector(selection)
-        row_argv = dispatch.quantum_argv(
-            record, record_path=record_path, output_root=tmp_path / "out")
+        row_argv = dispatch.quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=tmp_path / "out")
         command = row_argv["argv"]
         # This review input is supplied independently of the result and
         # counter bytes. Its source/entry/spec are the planned ones.

@@ -121,7 +121,7 @@ def initialize_git(workspace: Path, *, message: str) -> None:
 
 
 def gb10_row(workspace: Path, argv: list, *, demand: Mapping, env: Mapping) -> dict:
-    """One unqualified GPU intent; baseline native submission refuses it."""
+    """One GPU row with the declared resources and environment."""
     return {"cwd": str(Path(workspace) / SOURCE), "argv": list(argv), "demand": dict(demand),
             "tags": ["gb10"], "env": dict(env), "timeout_s": 1800}
 

@@ -7,10 +7,8 @@ facts bind the same intent to saved IDs. Reconnect validates that intent and
 never blindly resubmits an ambiguous attempt. Native producer success is required
 before downstream reuse, including when scientific artifacts appeared early.
 
-The current CPU-only executor refuses strict staging, authenticated publication
-and pilots, containers, GPU demands and unenforced progress requirements before
-launch. Scientific pilot verification remains testable with explicit fake evidence;
-production native pilot authority belongs to unit 4. Dry-run prints neutral rows.
+Flux admits GPU rows with an explicit walltime. The container wrapper owns the
+image and device attachment. Dry-run prints neutral rows without submission.
 """
 from __future__ import annotations
 
@@ -62,16 +60,6 @@ from prismaquant import joint_quantum_row as quantum_row
 CONSUMER_TAGS = ("gb10",)
 SUBMISSION_PRIORITY = 0
 ADJOINT_TAG = "sparky"
-DEV_MODE_ENV = "PRISMAQUANT_DEV_MODE=1"
-
-#: The sealed staged-tier declaration every campaign row carries as the
-#: payload ``--allowed-tiers`` flag (never ambient env: the container
-#: forwards no ambient action environment into the payload). RAM first,
-#: SSD explicitly emitted; pool/HDD bulk opens refuse under it. The value
-#: must equal ``prismaquant.staged_tier_policy.DEFAULT_ALLOWED_TIERS``
-#: and the joint entrypoints' parser default — pinned by
-#: ``tests/test_dispatch_joint_quanta.py``.
-STAGED_ALLOWED_TIERS = "ram,ssd"
 
 #: §5.2: each chunk's progress phase seals a 900-second stall allowance.
 #: An executable row's phases inherited it; its compute phases now derive
@@ -1585,7 +1573,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                     spill_bound: Mapping | None = None,
                     spec: dict | None = None,
                     handoff_chain_batch_size: int | None = None,
-                    ) -> tuple[list[str], str | None]:
+                    ) -> list[str]:
     """Run a payload inside the qualified campaign container.
 
     The projection backend's runtime identity check (and the workload's own
@@ -1594,12 +1582,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     command in ``tools.tessera_campaign_container`` with the campaign spec;
     the distributed rows are the same workload and take the same wrapper.
 
-    Returns the wrapped payload and the image reference native admission must
-    admit the row against, derived from ONE parse of the spec -- the same
-    parse whose bytes are serialized into ``--spec``.  A second read could
-    race a spec rewrite and seal one image while declaring another; the
-    caller retains the reference in the row's ``container_images`` intent.
-    The current native profile refuses container admission.
+    The wrapped payload carries the validated container spec.
 
     ``progress`` describes the payload phases; it is independent of staging.
 
@@ -1672,7 +1655,8 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     argv = ["python3", "-m", "tools.tessera_campaign_container",
             "--spec", DIRECT_ASCII_SPACED_LAX.text(spec),
             "--", *payload]
-    return argv, admission_image_reference(spec, portable_refusal=DispatchRefused)
+    admission_image_reference(spec, portable_refusal=DispatchRefused)
+    return argv
 
 #: A checkpoint's shard index, by model directory. A band publishes many rows
 #: of one model; the dispatcher reads the index once.
@@ -1831,7 +1815,7 @@ def _sealed_spill_bound(record: Mapping) -> Mapping | None:
     return bound
 
 
-def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
+def quantum_argv(record: dict, *, record_path: Path, output_root: Path, timeout_s: int,
                  priority: int = SUBMISSION_PRIORITY,
                  head_grace_s: int = HEAD_PROGRESS_GRACE_S,
                  consumer_tags: Sequence[str] = CONSUMER_TAGS,
@@ -1950,7 +1934,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                 progress.append((name, CHUNK_PROGRESS_GRACE_S
                                  if grace is None else grace))
         else:
-            manifest, staged_sha256, progress = _executable_row_parts(
+            _, staged_sha256, progress = _executable_row_parts(
                 record, output_root=output_root, head_grace_s=head_grace_s,
                 load_grace=load_grace, compute_grace=compute_grace)
         if compute_stamps:
@@ -1958,9 +1942,6 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             grace_stamps.append(compute_grace_basis(
                 compute_stamps, ceilings=ceiling_docs, link=link))
     else:
-        manifest = Path(record["read_set"]["manifest_path"])
-        if not manifest.is_absolute():
-            manifest = output_root / manifest
         staged_sha256 = _slice_manifest_digest(record, output_root=output_root)
         progress = [("head", head_grace_s)]
         for chunk in record.get("chunks", []):
@@ -2054,8 +2035,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         quantum_row.QuantumFileBinding(str(campaign["prepared_path"]), prepared_sha256),
         quantum_row.QuantumFileBinding(str(slice_path), slice_sha256),
         staged_sha256, str(output_root))
-    wrapped, container_image = _container_wrap(
-        SPEC_PATH, inputs.argv(allowed_tiers=STAGED_ALLOWED_TIERS, band=band_arguments),
+    wrapped = _container_wrap(
+        SPEC_PATH, inputs.argv(band=band_arguments),
         progress=progress, resource_policy=resource_policy,
         spill_bound=_sealed_spill_bound(record), spec=spec_parse.get("spec"),
         handoff_chain_batch_size=handoff_chain_batch_size)
@@ -2064,17 +2045,16 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         resource_policy, environment=sealed_spec.get("env", {}),
         source_prefetch=plan["source_prefetch"] if resource_policy is not None else None,
         operator_prefetch=plan["execution"]["operator_windows"] if resource_policy is not None else None)
-    environment = [*local_scratch_request_environment(sealed_spec).items(),
-                   ("PRISMAQUANT_DEV_MODE", "1")]
+    environment = list(local_scratch_request_environment(sealed_spec).items())
     return quantum_row.QuantumRow(
-        str(manifest), progress, demand, consumer_tags, priority, wrapped, environment,
-        produced_declaration=emit_template, container_image=container_image,
+        demand, consumer_tags, priority, wrapped, timeout_s, environment,
+        produced_declaration=emit_template,
         produced_declaration_wire=(band or {}).get("emit_template_wire")).row(
             checkout=sealed_spec.get("cwd", str(Path(__file__).resolve().parents[1])))
 
 
 def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
-                 *, tag: str = ADJOINT_TAG,
+                 *, timeout_s: int, tag: str = ADJOINT_TAG,
                  prefetch_override: Path | None = None,
                  artifact_budget_bytes: int | str | None = None,
                  produced_declaration: Path | None = None,
@@ -2082,7 +2062,7 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
                  batch_range: Sequence[int] | None = None) -> dict:
     """Build a neutral Stage A row, preserving every scientific and resource input.
 
-    The payload binds plan/prepared/read digests, tier policy, resume, prefetch
+    The payload binds plan/prepared/read digests, resume, prefetch
     and artifact-budget overrides. Demand and spool windows retain their existing
     derivations, including per-range windows. The immutable produced declaration
     is bound in argv and authenticated again by the native producer."""
@@ -2127,7 +2107,6 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         "--prepared-sha256", _argv_file_sha256(campaign, "prepared", where="stage-A"),
         "--data-manifest-sha256", binding["data_manifest_sha256"],
         "--read-manifest-sha256", binding["read_manifest_sha256"],
-        "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--output-root", str(_plan_output_root(campaign)),
         "--resume"]
     if prefetch_override is not None:
@@ -2138,20 +2117,17 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
                  else CHUNK_PROGRESS_GRACE_S) for phase in binding["phases"]]
     # The native produced declaration owns spool bounds. Retired produced
     # service environment settings are refused before publishing this row.
-    wrapped, container_image = _container_wrap(
+    wrapped = _container_wrap(
         SPEC_PATH, payload, progress=progress,
         spool_max_bytes=stage_a_spool_window_bytes(campaign, batch_range))
     sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
     refuse_retired_service_environment(sealed_spec)
     if produced_declaration is None:
         raise DispatchRefused("Stage A requires an explicit launch-bound produced declaration")
-    spool = {}
     return quantum_row.QuantumRow(
-        str(adjoint_manifest), progress,
-        quantum_row.QuantumRowDemand(str(stage_a_memory_gib(campaign)), "80", 10),
-        [tag], 0, wrapped, (*spool.items(), ("PRISMAQUANT_DEV_MODE", "1")),
-        produced_declaration=(None if produced_declaration is None else str(produced_declaration)),
-        container_image=container_image).row(
+        quantum_row.QuantumRowDemand(str(stage_a_memory_gib(campaign)), 10),
+        [tag], 0, wrapped, timeout_s,
+        produced_declaration=str(produced_declaration)).row(
             checkout=sealed_spec.get("cwd", str(Path(__file__).resolve().parents[1])))
 
 
@@ -3265,6 +3241,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                              "stamps a digest that differs from the sealed "
                              "one; certified mode refuses it")
     parser.add_argument("--priority", type=int, default=SUBMISSION_PRIORITY)
+    parser.add_argument("--timeout-s", type=int, required=True)
     parser.add_argument("--head-grace-s", type=int, default=HEAD_PROGRESS_GRACE_S)
     parser.add_argument("--stage-a-prefetch-override", type=Path, default=None,
                         help="explicit source_prefetch override document for "
@@ -3496,6 +3473,7 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                 manifest, records[0][1]["campaign"])
             rows.append({"kind": "stage-a",
                          "row": stage_a_argv(manifest, records[0][1]["campaign"],
+                                              timeout_s=args.timeout_s,
                                               tag=adjoint_tag,
                                               prefetch_override=args.stage_a_prefetch_override,
                                               artifact_budget_bytes=args.stage_a_artifact_budget_bytes,
@@ -3556,7 +3534,7 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                         record, output_root=output_root, band=band))
                 argv = quantum_argv(
                     record, record_path=record_path,
-                    output_root=output_root, priority=priority,
+                    output_root=output_root, timeout_s=args.timeout_s, priority=priority,
                     head_grace_s=args.head_grace_s,
                     consumer_tags=tags, band=band, link=link,
                     ceilings=ceilings)

@@ -121,7 +121,7 @@ def sealed(tmp_path, monkeypatch, request):
     earlier = _json(tmp_path / "band-005.json", {"band": {"boundary": 5}})
     monkeypatch.setattr(split_dispatch, "checkout_commit", lambda checkout: "c" * 40)
     monkeypatch.setattr(split_dispatch, "implementation_sha256", lambda checkout: TWO)
-    document = seal_round(
+    document = seal_round(timeout_s=3600,
         round_dir=tmp_path / "round", checkout=tmp_path / "checkout",
         split_package=tmp_path / "package" / "split-package.json", campaign=campaign,
         spec=spec, prefetch_override=prefetch, base_template=base, tier=TIER,
@@ -173,14 +173,13 @@ def test_a_sealed_round_names_every_row_and_its_order(sealed):
         assert _flag(payload, "--chain-split-digest-layer") == "3"
         assert "--resume-implementation-compatibility" not in payload
         assert "--chain-split-prep" not in payload
-    # Every Stage A row: the gb10 tag alone, priority 0, the full residency
-    # path, its own manifest and its own template.
+    # Each Stage A row keeps its placement, explicit walltime and produced template.
     templates = set()
     for name in ["prep", *labels]:
         envelope = _envelope(rows[name])
         assert envelope["tags"] == ["gb10"]
         assert str(envelope["priority"]) == "0"
-        assert envelope["data_manifest"] == rows[name]["data_manifest"]["path"]
+        assert envelope["timeout_s"] == 3600
         template = json.loads(Path(_flag(envelope["argv"], DECLARATION_FLAG)).read_text())
         templates.add(template["template_id"])
         assert template["output_prefix"] == str(sealed["space"])
@@ -210,17 +209,18 @@ def test_a_sealed_priority_reaches_every_row(sealed):
         assert str(envelope["priority"]) == "0", row["name"]
 
 
-def test_the_default_priority_is_recorded(sealed):
+def test_the_default_priority_and_explicit_walltime_are_recorded(sealed):
     assert sealed["document"]["priority"] == "0"
     for row in sealed["document"]["rows"]:
         assert str(_envelope(row)["priority"]) == "0", row["name"]
+        assert _envelope(row)["timeout_s"] == 3600, row["name"]
 
 
 @pytest.mark.parametrize("priority", ["high", "", "1.5", "0 "])
 def test_a_priority_that_is_not_an_integer_refuses(tmp_path, priority):
     # The band is checked before any input is read or anything is written.
     with pytest.raises(SplitDispatchRefused, match="not an integer"):
-        seal_round(round_dir=tmp_path / "round", checkout=None, split_package=None,
+        seal_round(timeout_s=3600, round_dir=tmp_path / "round", checkout=None, split_package=None,
                    campaign=None, spec=None, prefetch_override=None, base_template=None,
                    artifact_budget_bytes=None, chain_regime=None, seconds_per_layer=None,
                    digest_layer=None, band_request=None, band_references=None,

@@ -2461,7 +2461,7 @@ def run_original_diagnostic_capture(authority_input, plan_input, session_prepara
     from .layer_streaming import _source_profile
     from .matmul_arithmetic import pin_matmul_arithmetic
     from .memory_management import enforce_device_envelope
-    from .residency_map import bind_residency_manifest, residency_report
+    from .residency_map import residency_report
     from .source_generation import (
         _control, observe_original_source_execution, original_source_runtime,
         validate_original_source_runtime,
@@ -2486,7 +2486,6 @@ def run_original_diagnostic_capture(authority_input, plan_input, session_prepara
     if prepared_context["implementation_sha256"] != _aura_source_sha256():
         raise AdjointIdentityRefused("original diagnostic current implementation differs")
     require_cuda_hot_path("original selected-row diagnostic", "cuda")
-    bind_residency_manifest(bindings["read_manifest"]["sha256"])
     ids, calibration = load_calibration_input(base["calibration_input"]["path"],
         expected_sha256=base["calibration_input"]["sha256"], n_samples=512, seqlen=512)
     if calibration != prepared_context["calibration"]:
@@ -2635,7 +2634,7 @@ def run_adjoint_capture(
     from .gpu_guard import require_cuda_hot_path
     from .joint_projection_backend import executing_image, prewarm_projection_backend
     from .joint_run_progress import JointRunProgress
-    from .residency_map import bind_residency_manifest, residency_report
+    from .residency_map import residency_report
     from .stage_a_head import prepared_head, stage_a_roster, walked_head
     from .stage_inputs import bound as _bound, same as _same
     from .tessera_joint_aura import (
@@ -2727,7 +2726,6 @@ def run_adjoint_capture(
 
     space = adjoint_space(output_root)
     space.mkdir(parents=True, exist_ok=True)
-    bind_residency_manifest(data_manifest_sha256)
     result = {
         "schema": "prismaquant.joint_adjoint_capture.execution.v1",
         "command": "adjoint-capture",
@@ -3210,12 +3208,10 @@ def preflight_adjoint_inputs(config, *, prepared, data_manifest_sha256=None,
                              output_root=None, capture_options=None):
     """Read the capture's CPU startup inputs without CUDA/model or output."""
     from .layer_streaming import _build_weight_map, construction_multimodal
-    from .residency_map import bind_residency_manifest
     from .stage_inputs import bound
     from .streaming_model import build_streaming_skeleton, load_streaming_auto_config
     from .tessera_joint_eval_panel import select_evaluation
 
-    bind_residency_manifest(data_manifest_sha256)
     bound(prepared, "prepared anchors")
     ids, calibration = load_stage_a_calibration(config)
     encoding_shape = list(ids.shape)
@@ -3276,12 +3272,6 @@ def main(argv=None) -> int:
     parser.add_argument("--read-manifest-sha256", default=None,
                         help="digest of the parent run's sealed data manifest")
     parser.add_argument("--data-manifest-sha256", default=None)
-    from .staged_tier_policy import DEFAULT_ALLOWED_TIERS
-    parser.add_argument("--allowed-tiers", default=DEFAULT_ALLOWED_TIERS,
-                        help="sealed staged-tier declaration for GPU-consumed "
-                             "bulk inputs: comma subset of {ram,ssd}, RAM "
-                             "first (default %(default)s). Pool/HDD bulk "
-                             "opens refuse under this declaration.")
     parser.add_argument("--prefetch-override", type=Path, default=None,
                         help="explicit source_prefetch override document "
                              "(schema %s): replaces the plan's sealed "
@@ -3399,13 +3389,6 @@ def main(argv=None) -> int:
         config = _load_plan(args.plan, args.plan_sha256,
                             **({"projection_runtime": False}
                                if args.cpu_input_preflight else {}))
-        from .staged_tier_policy import activate_staged_tier_policy
-        try:
-            allowed = activate_staged_tier_policy(args.allowed_tiers)
-        except ValueError as exc:
-            parser.error(str(exc))
-        print(f"[STAGED-TIER] bulk inputs serve from {','.join(sorted(allowed))}; "
-              f"pool/HDD bulk opens refuse", flush=True)
         if args.cpu_input_preflight:
             report = preflight_adjoint_inputs(
                 config, prepared={"path": str(args.prepared),

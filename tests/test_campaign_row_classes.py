@@ -328,7 +328,7 @@ def test_the_campaign_s_own_rows_are_unaffected_by_the_weights_only_gate():
 
 
 # --------------------------------------------------------------------------
-# The launcher attaches no GPU device: native admission is CPU-only until unit 4E
+# Native admission controls GPU device attachment.
 # --------------------------------------------------------------------------
 
 def podman_argv(container: dict, *, admission=ADMISSION) -> list[str]:
@@ -345,9 +345,9 @@ def test_a_cpu_admission_attaches_nothing_under_either_declared_runtime():
         assert "--device" not in argv and "nvidia.com/gpu=all" not in argv
 
 
-def test_a_gpu_admission_is_refused_not_attached():
-    with pytest.raises(RuntimeError, match="held for unit 4E"):
-        podman_argv({"image": "example:pinned"}, admission=with_admission(gpus=1))
+def test_a_gpu_admission_attaches_the_cdi_device():
+    argv = podman_argv({"image": "example:pinned"}, admission=with_admission(gpus=1))
+    assert argv[argv.index("--device") + 1] == "nvidia.com/gpu=all"
 
 
 def test_an_unknown_gpu_runtime_is_refused():

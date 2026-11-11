@@ -193,12 +193,12 @@ def row_template(base_template: dict, *, template_id: str, tier: str,
 
 def _stage_row(*, name, kind, checkout, manifest, template_path, campaign, spec,
                prefetch_override, artifact_budget_bytes, tag, payload_extra, reader,
-               batch_range=None, priority=PRIORITY) -> dict:
+               timeout_s, batch_range=None, priority=PRIORITY) -> dict:
     import dispatch_joint_quanta as dispatch
 
     dispatch.SPEC_PATH = Path(spec)
     row = dispatch.stage_a_argv(
-        Path(manifest), campaign, tag=tag, prefetch_override=Path(prefetch_override),
+        Path(manifest), campaign, timeout_s=timeout_s, tag=tag, prefetch_override=Path(prefetch_override),
         artifact_budget_bytes=artifact_budget_bytes,
         produced_declaration=Path(template_path), batch_range=batch_range)
     payload = row["argv"]
@@ -206,25 +206,23 @@ def _stage_row(*, name, kind, checkout, manifest, template_path, campaign, spec,
         raise SplitDispatchRefused("a split row takes no forward recovery and no seed")
     if row["tags"] != [tag]:
         raise SplitDispatchRefused("a split row carries exactly its declared placement tag")
-    row.update(cwd=str(checkout), priority=int(priority),
-               residency={**row["residency"], "prefetch_depth_gib": reader["depth"]["declared_gib"],
-                          "read_mb_s": reader["rate"]["read_mb_s"]})
+    row.update(cwd=str(checkout), priority=int(priority))
     row["argv"] = [*payload, *payload_extra]
     return {"name": name, "kind": kind, "row": row,
             "data_manifest": _pin(manifest), "template": _pin(template_path), "reader": reader}
 
 
-def _cpu_row(*, name, kind, checkout, tag, python, module_argv, mem_gb=8, cpus=2,
+def _cpu_row(*, name, kind, checkout, tag, python, module_argv, timeout_s, mem_gb=8, cpus=2,
              priority=PRIORITY) -> dict:
     return {"name": name, "kind": kind,
             "row": {"argv": [str(python), *module_argv], "cwd": str(checkout),
                     "tags": [tag], "priority": int(priority), "demand": {"cpu": cpus, "mem_gb": mem_gb, "gpu": 0},
-                    "timeout_s": 1800, "env": {}}}
+                    "timeout_s": timeout_s, "env": {}}}
 
 
 def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_override,
                base_template, artifact_budget_bytes, chain_regime, seconds_per_layer,
-               digest_layer, band_request, band_references, python, tag="gb10",
+               digest_layer, band_request, band_references, python, timeout_s, tag="gb10",
                template_prefix, tier, priority=PRIORITY) -> dict:
     """Write ``round_dir`` (templates and ``round.json``); submit nothing.
 
@@ -267,7 +265,7 @@ def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_o
               "--chain-probe-fusion", str(chain_regime["chain_probe_fusion"]),
               "--resume-chain-state-sha256", package["chain_state"]["sha256"],
               "--resume-from-checkpoint", str(boundary)]
-    common = dict(checkout=checkout, campaign=campaign, spec=spec,
+    common = dict(checkout=checkout, campaign=campaign, spec=spec, timeout_s=timeout_s,
                   prefetch_override=prefetch_override,
                   artifact_budget_bytes=artifact_budget_bytes, tag=tag, priority=priority)
     templates = round_dir / "templates"
@@ -323,14 +321,14 @@ def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_o
         receipt = round_dir / "joins" / f"join-{int(mark):03d}.json"
         rows.append({**_cpu_row(
             name=f"join-{int(mark):03d}", kind="join", checkout=checkout, tag=tag, priority=priority,
-            python=python, module_argv=[
+            python=python, timeout_s=timeout_s, module_argv=[
                 "-m", "prismaquant.stage_a_chain_split", "--output-root", str(output_root),
                 "--boundary", str(int(mark)), "--receipt", str(receipt)]),
             "boundary": int(mark), "receipt": str(receipt)})
         band = round_dir / "bands" / f"band-{int(mark):03d}.json"
         rows.append({**_cpu_row(
             name=f"band-{int(mark):03d}", kind="band", checkout=checkout, tag=tag, priority=priority,
-            python=python, module_argv=[
+            python=python, timeout_s=timeout_s, module_argv=[
                 "-m", "prismaquant.joint_adjoint_band", "--request", band_request["path"],
                 "--request-sha256", band_request["sha256"], "--boundary", str(int(mark)),
                 "--output", str(band)]),
@@ -339,7 +337,7 @@ def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_o
              *(row["band"] for row in rows if row["kind"] == "band")]
     rows.append({**_cpu_row(
         name="band-set", kind="band-set", checkout=checkout, tag=tag, priority=priority,
-        python=python,
+        python=python, timeout_s=timeout_s,
         module_argv=["-c", _BAND_SET, *bands]), "bands": bands})
     document = {
         "schema": ROUND_SCHEMA, "checkout": str(checkout), "commit": commit,
@@ -359,7 +357,7 @@ def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_o
 
 def seal_forward_round(*, round_dir, checkout, forward_package, campaign, spec,
                        prefetch_override, base_template, artifact_budget_bytes,
-                       chain_regime, seconds_per_layer, n_probes, python, tag="gb10",
+                       chain_regime, seconds_per_layer, n_probes, python, timeout_s, tag="gb10",
                        template_prefix, tier, priority=PRIORITY) -> dict:
     """Write a forward split's ``round_dir`` (templates and ``round.json``); submit nothing.
 
@@ -389,7 +387,7 @@ def seal_forward_round(*, round_dir, checkout, forward_package, campaign, spec,
                     ["source_prefetch"]["prefetch_lookahead"])
     regime = ["--chain-batch-size", str(chain_regime["chain_batch_size"]),
               "--chain-probe-fusion", str(chain_regime["chain_probe_fusion"])]
-    common = dict(checkout=checkout, campaign=campaign, spec=spec,
+    common = dict(checkout=checkout, campaign=campaign, spec=spec, timeout_s=timeout_s,
                   prefetch_override=prefetch_override,
                   artifact_budget_bytes=artifact_budget_bytes, tag=tag, priority=priority)
     templates = round_dir / "templates"
@@ -440,7 +438,7 @@ def seal_forward_round(*, round_dir, checkout, forward_package, campaign, spec,
     receipt = round_dir / "joins" / "forward-join.json"
     rows.append({**_cpu_row(
         name="forward-join", kind="forward-join", checkout=checkout, tag=tag,
-        priority=priority, python=python, module_argv=[
+        priority=priority, python=python, timeout_s=timeout_s, module_argv=[
             "-m", "prismaquant.stage_a_forward_split", "--output-root", str(output_root),
             "--receipt", str(receipt)]), "receipt": str(receipt)})
     document = {
@@ -781,6 +779,7 @@ def main(argv=None) -> int:
     seal.add_argument("--tier", required=True)
     seal.add_argument("--template-prefix", required=True)
     seal.add_argument("--artifact-budget-bytes", type=int, required=True)
+    seal.add_argument("--timeout-s", type=int, required=True)
     seal.add_argument("--chain-batch-size", type=int, required=True)
     seal.add_argument("--chain-probe-fusion", choices=("on", "off"), required=True)
     seal.add_argument("--seconds-per-layer", type=float, required=True,
@@ -801,6 +800,7 @@ def main(argv=None) -> int:
                  "--template-prefix"):
         forward.add_argument(flag, required=True)
     forward.add_argument("--artifact-budget-bytes", type=int, required=True)
+    forward.add_argument("--timeout-s", type=int, required=True)
     forward.add_argument("--chain-batch-size", type=int, required=True)
     forward.add_argument("--chain-probe-fusion", choices=("on", "off"), required=True)
     forward.add_argument("--n-probes", type=int, required=True)
@@ -833,7 +833,7 @@ def main(argv=None) -> int:
                 seconds_per_layer=args.seconds_per_layer, digest_layer=args.digest_layer,
                 band_request={"path": args.band_request, "sha256": args.band_request_sha256},
                 band_references=[{"path": path} for path in args.band_reference],
-                python=args.python, tag=args.tag, priority=args.priority)
+                python=args.python, timeout_s=args.timeout_s, tag=args.tag, priority=args.priority)
             print(json.dumps({"round": str(Path(args.round_dir) / ROUND_NAME),
                               "rows": [row["name"] for row in document["rows"]]}))
         elif args.command == "seal-forward":
@@ -848,7 +848,7 @@ def main(argv=None) -> int:
                 chain_regime={"chain_batch_size": args.chain_batch_size,
                               "chain_probe_fusion": args.chain_probe_fusion},
                 seconds_per_layer=args.seconds_per_layer, n_probes=args.n_probes,
-                python=args.python, tag=args.tag, priority=args.priority)
+                python=args.python, timeout_s=args.timeout_s, tag=args.tag, priority=args.priority)
             print(json.dumps({"round": str(Path(args.round_dir) / ROUND_NAME),
                               "rows": [row["name"] for row in document["rows"]]}))
         elif args.command == "plan":

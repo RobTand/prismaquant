@@ -43,8 +43,6 @@ def test_container_row_keeps_row_arguments_and_declared_runtime():
     assert row["retry_safe"] is True
     assert row["container_images"] == ["qualified:fixed"]
     assert "progress_phases" not in row
-    with pytest.raises(ValueError, match="GPU lane not qualified"):
-        campaign_rows.validate_row(row)
 
 
 def test_container_uses_worker_snapshot_and_native_cpuset_without_shell():
@@ -363,9 +361,10 @@ def test_a_cpu_admission_withholds_the_device_whatever_the_spec_says():
         assert attached is False and 'no GPU' in reason
 
 
-def test_a_gpu_admission_is_refused_until_unit_4e():
-    with pytest.raises(RuntimeError, match='held for unit 4E'):
-        _runner().gpu_attachment(with_admission(gpus=1))
+def test_a_gpu_admission_attaches_the_cdi_device():
+    argv = _runner().podman_command(spec(), ['python3'], cwd='/checkout',
+        image_id='sha256:' + 'a' * 64, admission=with_admission(gpus=1), cidfile='/cid')
+    assert argv[argv.index('--device') + 1] == 'nvidia.com/gpu=all'
 
 
 def test_a_malformed_admission_is_refused():

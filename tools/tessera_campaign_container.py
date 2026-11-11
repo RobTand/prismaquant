@@ -640,22 +640,20 @@ def _require_admission(admission: dict) -> None:
 def gpu_attachment(admission: dict) -> tuple:
     """Whether to attach a GPU, decided only by the native admission.
 
-    A CPU admission withholds every device. A GPU admission refuses: the GPU
-    arm is held for unit 4E, so this adapter never attaches a device. An empty
+    A CPU admission withholds every device. A GPU admission uses CDI.
     ``CUDA_VISIBLE_DEVICES`` is not admission and is not consulted.
     """
     _require_admission(admission)
     if admission["gpus"] == 0:
         return False, "native admission reserved no GPU"
-    raise RuntimeError("the container GPU arm is held for unit 4E; "
-                       "native admission reserved a GPU and this adapter attaches none")
+    return True, "native admission reserved a GPU"
 
 
 def podman_command(spec: dict, command: list[str], *, cwd: str, image_id: str,
                    admission: dict, cidfile, content_sha256=None, environ=None,
                    bounded=False, checkout_commit=None) -> list[str]:
     validate_container(spec, bounded=bounded)
-    gpu_attachment(admission)
+    attached, _reason = gpu_attachment(admission)
     environ = environ if environ is not None else {}
     budget_gb = container_memory_budget_gb(spec)
     if budget_gb is not None and budget_gb > admission["memory_gib"]:
@@ -666,6 +664,8 @@ def podman_command(spec: dict, command: list[str], *, cwd: str, image_id: str,
             "--cgroups=disabled", "--network=none", "--env-host=false",
             "--cpuset-cpus", ",".join(map(str, admission["affinity"])),
             "--entrypoint", "", "--workdir", "/workspace"]
+    if attached:
+        argv += ["--device", "nvidia.com/gpu=all"]
     if os.uname().machine == "aarch64":
         argv += ["--userns=keep-id", "--user=1000:1000"]
     else:

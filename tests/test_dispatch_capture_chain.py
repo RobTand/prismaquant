@@ -99,11 +99,6 @@ def test_native_chain_builder_omits_retired_progress_even_when_requested(tmp_pat
     phases = {entry["name"]: entry["row"].get("progress_phases") for entry in document["rows"]}
     assert phases == {"prep": None, "capture-000-001": None,
                       "capture-001-002": None, "join": None}
-    from prismaquant.tessera_campaign_rows import validate_row
-    for entry in document["rows"]:
-        if entry["kind"] == "quantum":
-            with pytest.raises(ValueError, match="GPU lane not qualified"):
-                validate_row(entry["row"])
 
 
 @pytest.mark.parametrize("change, message", [

@@ -197,7 +197,7 @@ def sealed(tmp_path, monkeypatch):
         template_id="fixture-base"))
     monkeypatch.setattr(split_dispatch, "checkout_commit", lambda checkout: "c" * 40)
     monkeypatch.setattr(split_dispatch, "implementation_sha256", lambda checkout: "1" * 64)
-    document = seal_forward_round(
+    document = seal_forward_round(timeout_s=3600,
         round_dir=tmp_path / "round", checkout=tmp_path / "checkout",
         forward_package=tmp_path / "package" / "forward-package.json", campaign=campaign,
         spec=spec, prefetch_override=prefetch, base_template=base, tier=TIER,
@@ -239,7 +239,7 @@ def test_a_sealed_forward_round_names_every_row(sealed):
         envelope = _envelope(rows[name])
         assert envelope["tags"] == ["gb10"]
         assert str(envelope["priority"]) == "0"
-        assert envelope["data_manifest"] == rows[name]["data_manifest"]["path"]
+        assert envelope["timeout_s"] == 3600
         assert "--host-class" not in envelope and "--measurement" not in envelope
         templates.add(json.loads(Path(_flag(envelope["argv"], DECLARATION_FLAG)).read_text())["template_id"])
         # A forward walk reads up: two layers ahead of the one it reads.
