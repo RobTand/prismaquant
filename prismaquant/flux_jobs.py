@@ -570,7 +570,7 @@ def validate_launch(submission: FluxSubmission, *, argv, source, resources,
     return launch
 
 
-def verify_native_launch(submission: FluxSubmission, *, max_evidence_bytes, uri=None, **intent):
+def verify_native_launch(submission: FluxSubmission, *, max_evidence_bytes, **intent):
     """Bind independent launch intent to the original actual native jobspec.
 
     Native environments are compared in memory and never included in errors.
@@ -578,10 +578,10 @@ def verify_native_launch(submission: FluxSubmission, *, max_evidence_bytes, uri=
     """
     from .staged_manifest import read_document, decode_document, publish_staged_json
     launch = validate_launch(submission, **intent)
-    if uri is None and _validate_submission(submission) != launch:
+    if _validate_submission(submission) != launch:
         raise ValueError('saved launch changed during native verification')
     args = launch['native_argv']
-    uri = uri or launch['profile']['uri']
+    uri = launch['profile']['uri']
     expected = decode_document(_checked([args[0], '--dry-run', *args[1:]], uri=uri))
     actual_raw = _checked(['job', 'info', '--original', submission.job_id, 'jobspec'], uri=uri)
     if len(actual_raw.encode()) > max_evidence_bytes:
@@ -653,10 +653,9 @@ def verify_current_job(*, job_id, record_dir, source):
         raise ValueError('current native job/source differs from saved submission')
     settings = {'XDG_RUNTIME_DIR': '/run/user/1000'} if '--env=XDG_RUNTIME_DIR=/run/user/1000' in launch['native_argv'] else None
     resources = FluxResources(**launch['resources'])
+    validate_launch(saved, argv=launch['argv'], source=source, resources=resources,
+                    afterok=launch['afterok'], environment=settings, staged_input=launch.get('staged_input'))
     uri = _instance_uri()
-    verify_native_launch(saved, max_evidence_bytes=16 << 20, uri=uri, argv=launch['argv'], source=source,
-        resources=resources, afterok=launch['afterok'], environment=settings,
-        staged_input=launch.get('staged_input'))
     events = [_native_document(line) for line in
               _checked(['job', 'eventlog', '--format=json', saved.job_id], uri=uri).splitlines()]
     if not events or any(not isinstance(event, dict) or not isinstance(event.get('name'), str)
