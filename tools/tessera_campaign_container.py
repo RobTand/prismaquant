@@ -640,8 +640,9 @@ def _require_admission(admission: dict) -> None:
 def gpu_attachment(admission: dict) -> tuple:
     """Whether to attach a GPU, decided only by the native admission.
 
-    A CPU admission withholds every device. A GPU admission uses CDI.
-    ``CUDA_VISIBLE_DEVICES`` is not admission and is not consulted.
+    A CPU admission withholds every device. A GPU admission attaches the
+    CDI device. An empty ``CUDA_VISIBLE_DEVICES`` is not admission and is
+    not consulted.
     """
     _require_admission(admission)
     if admission["gpus"] == 0:
