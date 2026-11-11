@@ -180,7 +180,7 @@ def _campaign(tmp_path, *, projection_backend):
     receipt_path.write_text(json.dumps(receipt))
     out = tmp_path / "out"
     out.mkdir()
-    return ["--records", str(records_dir), "--output-root", str(out),
+    return ["--timeout-s", "3600", "--records", str(records_dir), "--output-root", str(out),
             "--adjoint-receipt", str(receipt_path), "--dry-run"]
 
 

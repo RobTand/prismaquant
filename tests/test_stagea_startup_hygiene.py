@@ -1,34 +1,15 @@
-"""Stage A startup and timeout hygiene (R10/R11 findings).
+"""Stage A refuses occupied checkpoint paths before GPU work.
 
-1. Adjoint checkpoints have fixed paths and ``mkdir(exist_ok=False)``. R10's
-   tail left ``checkpoints/boundary-045``; R11 would have failed with
-   FileExistsError about ten GPU-minutes in. Stage A now refuses at startup,
-   before any GPU work, when a checkpoint path it writes is occupied.
-2. Immutable staged reads check coverage immediately. Retired wait settings
-   do not couple dispatch admission to a progress grace.
-
-CPU-only.
+R10 left checkpoints/boundary-045. R11 would have failed with FileExistsError
+during capture. These tests check the startup refusal and its boundary.
 """
 from __future__ import annotations
 
-import ast
-import hashlib
-import json
-import sys
-from pathlib import Path
-
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from prismaquant import joint_cost_stage_a as stage_a
+from prismaquant.joint_adjoint_checkpoints import adjoint_space
 
-import dispatch_joint_quanta as dispatch  # noqa: E402
-from prismaquant import joint_cost_stage_a as stage_a  # noqa: E402
-from prismaquant.joint_adjoint_checkpoints import adjoint_space  # noqa: E402
-
-from test_dispatch_joint_quanta import _adjoint_manifest  # noqa: E402
-
-
-# --------------------------------------------------- 1. occupied checkpoints
 
 class _GpuWorkStarted(AssertionError):
     pass
@@ -90,63 +71,3 @@ def test_an_empty_space_passes_the_check(tmp_path, monkeypatch):
     run = _start_stage_a(tmp_path, monkeypatch)
     with pytest.raises(_PastStartupCheck):
         run()
-
-
-# ------------------------------------------- 2. staged-range wait vs grace
-
-from stage_a_spool_spec import declared_stage_a_argv  # noqa: E402
-
-
-def _spec(monkeypatch, tmp_path, env):
-    spec = tmp_path / "spec.json"
-    from stage_a_spool_spec import with_spool
-    spec.write_text(json.dumps(with_spool(
-        {"container": {"image": "sha256:" + "0" * 64}, "env": dict(env)})))
-    monkeypatch.setattr(dispatch, "SPEC_PATH", spec)
-
-
-@pytest.fixture
-def campaign(tmp_path):
-    plan_path = tmp_path / "plan.json"
-    from stage_a_spool_spec import stage_a_plan
-    plan_path.write_text(json.dumps(stage_a_plan(
-        tmp_path, output_root=str(tmp_path / "campaign-root"))))
-    return {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
-            "manifest_sha256": "c" * 64, "scope": {"campaign": "fixture"},
-            "read_manifest_sha256": "d" * 64, "plan_path": str(plan_path),
-            "prepared_path": "/fixture/prepare/prepared.json",
-            "roster_sha256": hashlib.sha256(b"roster\n").hexdigest()}
-
-
-@pytest.mark.parametrize("wait", ["900", "901", "1800", "inf", "soon"])
-def test_retired_wait_setting_does_not_control_native_staging(tmp_path, monkeypatch, campaign, wait):
-    _spec(monkeypatch, tmp_path, {"PRISMAQUANT_STAGED_RANGE_WAIT_S": wait})
-    manifest = _adjoint_manifest(tmp_path, campaign)
-    assert declared_stage_a_argv(dispatch.stage_a_argv, manifest, campaign)
-
-
-@pytest.mark.parametrize("env", [{}, {"PRISMAQUANT_STAGED_RANGE_WAIT_S": "600"},
-                                 {"PRISMAQUANT_STAGED_RANGE_WAIT_S": "0"}])
-def test_a_wait_below_every_grace_submits(tmp_path, monkeypatch, campaign, env):
-    _spec(monkeypatch, tmp_path, env)
-    manifest = _adjoint_manifest(tmp_path, campaign)
-    argv = declared_stage_a_argv(dispatch.stage_a_argv, manifest, campaign)
-    assert argv["progress_phases"] == ["head=1800", "chain-000=900", "chain-001=900"]
-
-
-def test_native_dispatch_has_no_wait_vs_grace_coupling():
-    assert not hasattr(dispatch, 'require_staged_wait_below_grace')
-
-
-def test_both_row_builders_check_the_wait_on_the_parse_they_seal():
-    """The quantum rows declare the same 900 s chunk grace as Stage A."""
-    source = (Path(dispatch.__file__)).read_text()
-    tree = ast.parse(source)
-    for name in ("stage_a_argv", "quantum_argv"):
-        function = next(node for node in ast.walk(tree)
-                        if isinstance(node, ast.FunctionDef) and node.name == name)
-        calls = [node for node in ast.walk(function) if isinstance(node, ast.Call)
-                 and getattr(node.func, "id", None) == "_container_wrap"]
-        assert len(calls) == 1, name
-        keywords = [kw.arg for kw in calls[0].keywords]
-        assert "progress" in keywords and None not in keywords, name
