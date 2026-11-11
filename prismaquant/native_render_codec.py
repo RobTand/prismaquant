@@ -1591,7 +1591,7 @@ def render_nvfp4_dequant(
     """Render a 2-D weight through the exact production NVFP4 codec.
 
     Unlike the historical private RTN helper, every scale-plane choice is an
-    explicit argument.  Offline selectors such as PrismaSnap must be
+    explicit argument.  Offline selectors must be
     reproducible from their receipt and therefore cannot inherit either
     ``PRISMAQUANT_NVFP4_SCALE_RULE`` or the research-only snapped-scale
     scoring switch from the process environment.  Callers holding a complete

@@ -83,27 +83,6 @@ class Qwen4ExpProfile(ModelProfile):
         return None
 
     # ------------------------------------------------------------
-    # Numerics
-    # ------------------------------------------------------------
-    def rms_norm_parameter_offset(self) -> float | None:
-        """1.0 — this family executes ``gamma = 1 + weight``.
-
-        `Qwen4ExpTextRMSNorm.__init__` initialises ``self.weight`` to *zeros*
-        (modeling_qwen4_exp.py:162) and its forward computes
-        ``output * (1.0 + self.weight.float())`` (modeling_qwen4_exp.py:177),
-        exactly like Qwen3.5/3.6.
-
-        Caveat for any future function-preserving transform: the *gated*
-        variant used inside the DeltaNet block, `Qwen4ExpTextRMSNormGated`,
-        is a different encoding — ones-init (modeling_qwen4_exp.py:187) and a
-        plain ``self.weight * hidden_states`` (modeling_qwen4_exp.py:196), i.e.
-        offset 0.0. This method returns the family-wide value for the plain
-        norm; a transform that touches ``linear_attn.norm`` must special-case
-        it rather than inherit this answer.
-        """
-        return 1.0
-
-    # ------------------------------------------------------------
     # MTP
     # ------------------------------------------------------------
     def has_mtp(self) -> bool:

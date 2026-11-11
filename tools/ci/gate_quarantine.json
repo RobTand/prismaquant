@@ -47,16 +47,6 @@
       }
     },
     {
-      "target": "tests/test_cluster_campaign_runner.py::test_an_exiting_helper_is_never_called_ambiguous",
-      "issue": 3197,
-      "reason": "An owned exiting helper was classified as mismatch on hosted ARM; process-ownership fix belongs to its owner.",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "hosted_pass": 41275735452,
-        "hosted_failure": 41277228478
-      }
-    },
-    {
       "target": "tests/test_dispatch_joint_quanta.py::test_two_stage_a_rows_whose_windows_exceed_a_box_are_not_both_placed",
       "issue": 3184,
       "reason": "AssertionError",

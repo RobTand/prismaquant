@@ -12,7 +12,7 @@ import sys
 
 from .cost_stage_checkpoint import atomic_write_bytes
 from .digests import indent2_json_file_bytes
-from .export_structure import _read_metadata, verify_export_structure
+from .export_structure import _read_index, _read_metadata, _regular_stat, verify_export_structure
 from .model_profiles.default import DefaultProfile
 from .model_profiles.registry import detect_profile
 from .model_profiles.structure import ModelStructureSpec, SCHEMA
@@ -47,14 +47,16 @@ def _source(root: Path, *, metadata_only: bool) -> tuple[dict, dict, dict]:
     """Use the existing partial-index and physical-header owners."""
     index = root / "model.safetensors.index.json"
     if index.exists():
-        from .prismasnap_checkpoint import _Checkpoint
-
-        # Strict JSON refusal precedes the checkpoint owner's index grammar.
-        _strict_json_object(index.read_bytes(), where="intake source index")
-        source = _Checkpoint(root, require_all_shards=not metadata_only)
-        weight_map = source.weight_map
-        document = source.index
-        available = sorted(source.available_shards)
+        document, _ = _read_index(index)
+        weight_map = dict(sorted(document["weight_map"].items()))
+        available = []
+        for name in sorted(set(weight_map.values())):
+            path = root / name
+            if os.path.lexists(path):
+                _regular_stat(path)
+                available.append(name)
+            elif not metadata_only:
+                raise ValueError(f"source index references missing shard {name}")
     elif (root / "model.safetensors").exists():
         verify_export_structure(root)
         header, _, _ = read_safetensors_header(str(root / "model.safetensors"))
