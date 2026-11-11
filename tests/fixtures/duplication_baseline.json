@@ -267,9 +267,6 @@
    "prismaquant/stage_b_workspace_profile.py",
    "prismaquant/tessera_runtime_contract.py"
   ],
-  "_argv_flag": [
-   "prismaquant/joint_layer_quanta.py"
-  ],
   "_bound": [
    "prismaquant/joint_aura_transition_base.py",
    "tools/build_tessera_census_cache.py",
@@ -346,9 +343,6 @@
    "prismaquant/shipcard_slots.py",
    "prismaquant/tessera_allocator.py"
   ],
-  "_finite_number": [
-   "prismaquant/quality_prefill_contract.py"
-  ],
   "_fp16_bytes": [
    "prismaquant/gguf_formats.py",
    "prismaquant/gguf_iq_formats.py"
@@ -389,9 +383,6 @@
    "prismaquant/joint_cost_quantum.py",
    "prismaquant/joint_cost_stage_a.py",
    "prismaquant/tessera_joint_aura.py"
-  ],
-  "_is_number": [
-   "prismaquant/schemas.py"
   ],
   "_json": [
    "prismaquant/joint_catalog_extension.py",
@@ -436,9 +427,6 @@
   "_load_llm": [
    "tools/measure_vllm_full_kl.py",
    "tools/measure_vllm_wikitext_ppl.py"
-  ],
-  "_load_probe": [
-   "prismaquant/production_cache_stripes.py"
   ],
   "_load_unit": [
    "prismaquant/cost_stage_checkpoint.py",
@@ -509,9 +497,6 @@
   "_positive": [
    "prismaquant/boundary_control.py",
    "prismaquant/tessera_anchored_surface.py"
-  ],
-  "_producer_identity": [
-   "tools/measure_served_gold.py"
   ],
   "_provenance": [
    "tools/measure_vllm_full_kl.py",
@@ -635,12 +620,6 @@
   "_tensor_bytes": [
    "prismaquant/artifact_collection_legacy.py",
    "tools/exl3_grouped_down_replay.py"
-  ],
-  "_text": [
-   "prismaquant/artifact_collection.py"
-  ],
-  "_verify_source": [
-   "prismaquant/tessera_materialization.py"
   ],
   "_write": [
    "prismaquant/tessera_tp_audit.py",
