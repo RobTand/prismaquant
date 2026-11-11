@@ -66,7 +66,7 @@ def test_real_streamed_body_rows_match_end_to_end_fisher(
         collector.remove_hooks()
 
     context = _build_streaming_context(str(checkpoint), device=torch.device("cpu"),
-        dtype=torch.float32, offload_folder=str(tmp_path / "offload"),
+        dtype=torch.float32, offload_folder=str(tmp_path / "offload"), layers_per_shard=1,
         max_cache_slots=2, prefetch_workers=1, prefetch_min_available_gb=0,
         cache_headroom_gb=0, attn_implementation="eager")
     try:
