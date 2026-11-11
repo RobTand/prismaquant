@@ -25,8 +25,8 @@ test --test_env=MAX_JOBS=1
 test --test_env=PQ_BAZEL_BUDGETS=record
 
 # Pass the BuildBuddy API key header from the environment or a private rc
-# file. Never commit the key. BuildBuddy's free plan is shared with TL3's and
-# PrismaBuild's gates, so PrismaQuant takes at most 40 executor slots at a time.
+# file. Never commit the key. BuildBuddy's free plan is shared with other
+# repositories' gates, so PrismaQuant takes at most 40 executor slots at a time.
 build:remote --remote_cache=grpcs://remote.buildbuddy.io
 build:remote --remote_download_minimal
 build:remote --jobs=40

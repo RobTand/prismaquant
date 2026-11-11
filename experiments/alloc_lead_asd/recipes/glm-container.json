@@ -10,11 +10,6 @@
         "readonly": true
       },
       {
-        "source": "/ram/prewarm",
-        "target": "/ram/prewarm",
-        "readonly": true
-      },
-      {
         "source": "/mnt/shared/tessera-measurements/pq1962-sol-20261002",
         "target": "/mnt/shared/tessera-measurements/pq1962-sol-20261002",
         "readonly": false
