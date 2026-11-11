@@ -238,67 +238,6 @@ class Qwen3_5Profile(ModelProfile):
             self._declared_moe_layout()
         return super().structure_spec()
 
-    def rms_norm_parameter_offset(self) -> float:
-        """Qwen3.5/Qwen3.8 execute RMSNorm with ``1 + weight``."""
-        return 1.0
-
-    def prismasnap_moe_layer_contract(
-        self,
-        layer_index: int,
-    ) -> dict[str, object]:
-        """Closed MoE seam declaration for the Qwen3.5 producer family.
-
-        Names are recipe names here and cross into the source checkpoint only
-        through :meth:`source_tensor_name`.  That distinction is load-bearing:
-        a native-causal serving config may point at a staged wrapper-namespaced
-        source index.  The planner accepts either the packed 3-D expert pair or
-        the declared per-expert alternative, never a mixed census.
-        """
-        if type(layer_index) is not int or layer_index < 0:
-            raise ValueError("PrismaSnap MoE layer index must be non-negative")
-        prefix = f"model.layers.{layer_index}"
-        mlp = f"{prefix}.mlp"
-        return {
-            "schema": "prismaquant.prismasnap.moe_layer_profile.v1",
-            "layer": layer_index,
-            "input_norm": f"{prefix}.input_layernorm.weight",
-            "post_attention_norm": f"{prefix}.post_attention_layernorm.weight",
-            "mlp_prefix": mlp,
-            # These roles are deliberately typed. `gate` produces E-way
-            # routing logits while `shared_expert_gate` produces one sigmoid
-            # scalar; tuple order must never decide which algebra applies.
-            # Both are exact compensation terms and excluded from the codec
-            # objective.
-            "router": f"{mlp}.gate.weight",
-            "packed_routed": {
-                # Packed expert banks are direct Parameters on the experts
-                # module, not nn.Linear children; released safetensors keys
-                # therefore have no trailing `.weight`.
-                "gate_up": f"{mlp}.experts.gate_up_proj",
-                "down": f"{mlp}.experts.down_proj",
-                "expert_axis": 0,
-                "row_axis": 1,
-                "input_axis": 2,
-                "gate_rows": "first_half",
-                "up_rows": "second_half",
-            },
-            "per_expert_routed": {
-                "root": f"{mlp}.experts",
-                "gate_projection": "gate_proj",
-                "up_projection": "up_proj",
-                "down_projection": "down_proj",
-            },
-            "shared_experts": (
-                {
-                    "output_gate": f"{mlp}.shared_expert_gate.weight",
-                    "gate": f"{mlp}.shared_expert.gate_proj.weight",
-                    "up": f"{mlp}.shared_expert.up_proj.weight",
-                    "down": f"{mlp}.shared_expert.down_proj.weight",
-                },
-            ),
-            "bias_policy": "reject_projection_biases",
-        }
-
     # ------------------------------------------------------------
     # MTP
     # ------------------------------------------------------------

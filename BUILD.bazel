@@ -8804,12 +8804,6 @@ pq_py_library(
         "prismaquant/per_row_pricing.py",
         "prismaquant/perturbed_x_cache.py",
         "prismaquant/priced_cell.py",
-        "prismaquant/prismasnap.py",
-        "prismaquant/prismasnap_checkpoint.py",
-        "prismaquant/prismasnap_contract.py",
-        "prismaquant/prismasnap_moe.py",
-        "prismaquant/prismasnap_moe_checkpoint.py",
-        "prismaquant/prismasnap_validation.py",
         "prismaquant/probe_inventory.py",
         "prismaquant/production_recache.py",
         "prismaquant/production_weight_cache.py",
@@ -8908,12 +8902,6 @@ pq_py_library(
         "prismaquant/lane_spec.py",
         "prismaquant/model_walk.py",
         "prismaquant/native_moe_panel.py",
-        "prismaquant/prismasnap.py",
-        "prismaquant/prismasnap_checkpoint.py",
-        "prismaquant/prismasnap_contract.py",
-        "prismaquant/prismasnap_moe.py",
-        "prismaquant/prismasnap_moe_checkpoint.py",
-        "prismaquant/prismasnap_validation.py",
         "prismaquant/production_weight_cache.py",
         "prismaquant/serving_profiles.py",
         "prismaquant/shape_runtime_prices.py",
@@ -8936,7 +8924,6 @@ pq_py_library(
         "tools/measure_vllm_wikitext_ppl.py",
         "tools/prepare_dsv4_wikitext_inputs.py",
         "tools/prismaquant_source_bootstrap.py",
-        "tools/prismasnap.py",
         "tools/reseal_campaign_identity.py",
         "tools/serve_fingerprint.py",
         "tools/spec_decode_guard.py",
@@ -9297,12 +9284,8 @@ pq_py_library(
     srcs = [
         "prismaquant/cluster_campaign.py",
     ],
-    data = [
-        "prismaquant/cluster_campaign.py",
-    ],
     deps = [
         ":prismaquant/__init__",
-        ":prismaquant/digests",
     ],
 )
 
@@ -11630,22 +11613,6 @@ pq_py_library(
     ],
 )
 
-pq_py_library(
-    name = "tools/build_prismasnap_27b_campaign",
-    srcs = [
-        "tools/build_prismasnap_27b_campaign.py",
-    ],
-    data = [
-        "prismaquant/cluster_campaign.py",
-        "tools/build_prismasnap_27b_campaign.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cluster_campaign",
-        "@pq_pip//torch",
-    ],
-)
 
 pq_py_library(
     name = "tools/build_sensitivity_ablation_assignments",
@@ -13493,19 +13460,6 @@ pq_py_library(
     ],
 )
 
-pq_py_library(
-    name = "tools/prismasnap",
-    srcs = [
-        "tools/prismasnap.py",
-    ],
-    data = [
-        "tools/prismasnap.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-    ],
-)
 
 pq_py_library(
     name = "tools/profile_produced_group_lookup",
@@ -13787,19 +13741,6 @@ pq_py_library(
     ],
 )
 
-pq_py_library(
-    name = "tools/run_cluster_campaign",
-    srcs = [
-        "tools/run_cluster_campaign.py",
-    ],
-    data = [
-        "tools/run_cluster_campaign.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/cluster_campaign",
-    ],
-)
 
 pq_py_library(
     name = "tools/run_with_scratch_dirs",
