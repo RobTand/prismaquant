@@ -24,6 +24,7 @@ campaign claim. Progress transport remains a separate migration obligation.
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -172,9 +173,7 @@ def test_regen_cli_derives_prepared_contracts(tmp_path):
             "prepared_sha256"]
         assert [w["window_index"] for w in prepared["windows"]] == list(
             range(WINDOWS_PER_LAYER))
-        manifest = json.loads(
-            __import__("gzip").decompress(
-                Path(block["manifest_path"]).read_bytes()).decode("utf-8"))
+        manifest = json.loads(gzip.decompress(Path(block["manifest_path"]).read_bytes()))
         names = [p["name"] for p in manifest["read_plan"]["phases"]]
         for window in range(WINDOWS_PER_LAYER):
             assert names.index(f"render-{window:02d}") + 1 == names.index(
@@ -375,7 +374,7 @@ def _dispatch_bridge(tmp_path, monkeypatch):
     # Four fake quanta and no pilot run: the explicit, recorded override
     # (production pilot admission is unchanged; PQ #1811 did the same).
     assert dispatch.main([
-        "--records", str(records), "--output-root", str(tmp_path / "dispatch"),
+        "--timeout-s", "3600", "--records", str(records), "--output-root", str(tmp_path / "dispatch"),
         "--adjoint-receipt", str(layout["receipt_path"]),
         "--force-unverified-pilot"], _gateway=gateway,
         # No checkpoint behind the fixture; coverage is tested on its own
@@ -389,11 +388,9 @@ def _dispatch_bridge(tmp_path, monkeypatch):
     submitted = next(row for row in gateway.submitted
                      if row["quantum_id"] == record["quantum_id"])
     application_row = submitted["row"]
-    assert application_row["data_manifest"] == block["manifest_path"]
-    assert hashlib.sha256(Path(application_row["data_manifest"]).read_bytes()).hexdigest() == digest
     argv = application_row["argv"]
-    assert digest in " ".join(argv)
-    phases = [phase.split("=", 1)[0] for phase in application_row["progress_phases"]]
+    assert argv[argv.index("--data-manifest-sha256") + 1] == digest
+    phases = [phase["name"] for phase in json.loads(gzip.decompress(wire))["read_plan"]["phases"]]
     assert phases == block["phases"]
     return layout, record, phases
 

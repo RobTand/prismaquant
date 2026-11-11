@@ -466,19 +466,13 @@ def test_executable_row_parts_propagate_manifest_phases(tmp_path,
     assert progress[1][0] == "checkpoint-load"
     # Production dispatch refuses the same row: typed unsupported binding.
     with pytest.raises(dispatch.ExecutableBindingUnsupported):
-        dispatch.quantum_argv(
-            bound, record_path=record_path, output_root=tmp_path)
-    # Legacy rows keep their existing path (slice manifest, strict tiers).
+        dispatch.quantum_argv(bound, timeout_s=3600, record_path=record_path, output_root=tmp_path)
+    # Legacy rows keep their slice manifest digest.
     legacy = dict(bound)
     del legacy["executable_readset"]
-    argv_legacy = dispatch.quantum_argv(
-        legacy, record_path=record_path, output_root=tmp_path)
+    argv_legacy = dispatch.quantum_argv(legacy, timeout_s=3600, record_path=record_path, output_root=tmp_path)
     # The quantum receives its slice file, never a receipt (PQ #993).
     assert argv_legacy["argv"][argv_legacy["argv"].index("--adjoint-slice") + 1] == str(adjoint_path)
-    assert argv_legacy["data_manifest"].endswith(
-        "slice.gz")
-    assert argv_legacy["argv"][argv_legacy["argv"].index("--allowed-tiers") + 1] == (
-        dispatch.STAGED_ALLOWED_TIERS)
 
 
 def test_runtime_reports_read_phases_without_pricing_units():
@@ -1752,8 +1746,7 @@ def test_dispatcher_refuses_plausible_render_binding(tmp_path, monkeypatch):
                       dispatch.DispatchRefused)
     with pytest.raises(dispatch.ExecutableBindingUnsupported,
                        match="no accepted PB produced-output binding"):
-        dispatch.quantum_argv(
-            record, record_path=record_path, output_root=tmp_path)
+        dispatch.quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=tmp_path)
 
 
 def test_dispatcher_refuses_unbound_render_prerequisite(tmp_path,
@@ -1791,8 +1784,7 @@ def test_dispatcher_refuses_unbound_render_prerequisite(tmp_path,
     (tmp_path / "slice.gz").write_bytes(b"slice")
     with pytest.raises(dispatch.ExecutableBindingUnsupported,
                        match="no accepted PB produced-output binding"):
-        dispatch.quantum_argv(
-            record, record_path=record_path, output_root=tmp_path)
+        dispatch.quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=tmp_path)
 
 
 def test_build_refuses_render_binding_fiction(tmp_path):

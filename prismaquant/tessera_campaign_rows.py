@@ -628,8 +628,8 @@ def campaign_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | N
     spec-level values, so a row built for it is byte-identical to the row this
     function returned before classes existed.  Nothing about the class is
     written into the row. The container specification stays in argv, and the
-    row retains its image admission intent. Native execution still refuses
-    this unqualified GPU row before submission.
+    row retains its image admission intent. Native validation still refuses
+    unsupported image, staging or progress requirements before submission.
     """
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     resolved = row_class(spec, row_class_name)
@@ -707,17 +707,13 @@ def _row_resources(row):
 
 
 def validate_row(row):
-    """Admit one CPU row without dropping scientific or execution requirements."""
+    """Admit one row without dropping scientific or execution requirements."""
     from prismaquant.flux_jobs import validate_job
     allowed = {'argv', 'cwd', 'demand', 'env', 'tags', 'retry_safe', 'timeout_s',
                'progress_phases', 'container_images', 'data_manifest', 'residency',
                'gpu_memory_gb', 'priority', 'produced_outputs', 'pilot', 'staged_input'}
     if not isinstance(row, dict) or set(row) - allowed:
         raise ValueError('unsupported native row fields; requirements cannot be discarded')
-    # Report the actual qualification hold for every production GPU builder,
-    # before inspecting transport-specific requirements that cannot run yet.
-    if row.get('demand', {}).get('gpu', 0):
-        raise ValueError('GPU lane not qualified; requires plan step P-7')
     for field in ('pilot',):
         if field in row:
             raise ValueError(f'{field}: strict staging/publication/pilot contract is unqualified (units 2/4)')

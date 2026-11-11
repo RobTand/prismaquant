@@ -4,24 +4,26 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 from tools import dispatch_stage_a_split as stage
-from tools import dispatch_capture_chain as capture
 from tools import dispatch_joint_quanta as joint
 from prismaquant import flux_jobs as jobs, tessera_campaign_rows as rows
 
 
 def row(**extra):
-    return {'argv':['/bin/true'],'cwd':'/mnt/shared/source','demand':{'cpu':1,'mem_gb':1,'gpu':0},
+    return {'argv':['/bin/true'],'cwd':str(Path(__file__).resolve().parents[1]),'demand':{'cpu':1,'mem_gb':1,'gpu':0},
             'timeout_s':60,'env':{},'tags':[],**extra}
 
 
-def test_gateway_preflights_real_neutral_rows_without_shelling_pb():
+def test_gateway_preflights_real_neutral_rows_without_shelling_pb(tmp_path):
     with patch.object(jobs,'validate_job',return_value={}), patch.object(jobs,'submit_job') as submit:
-        for intent in (row(data_manifest='/strict'), row(produced_outputs={'template':'/out'}),
-                       row(progress_phases=['phase=900']), row(priority=-10), row(pilot={}),
-                       row(demand={'cpu':1,'mem_gb':1,'gpu':1})):
-            with pytest.raises(ValueError):
-                joint.Gateway().submit(intent,state_dir=Path('/mnt/shared/never-created'))
+        for intent, reason in ((row(data_manifest='/strict'), 'data_manifest: strict staging'),
+                               (row(produced_outputs={'template':'/out'}), 'legacy produced_outputs'),
+                               (row(progress_phases=['phase=900']), 'progress-stall enforcement'),
+                               (row(priority=-10), 'queue priority mapping'),
+                               (row(pilot={}), 'pilot: strict staging')):
+            with pytest.raises(ValueError, match=reason):
+                joint.Gateway().submit(intent,state_dir=tmp_path/'never-created')
         submit.assert_not_called()
+    assert not (tmp_path/'never-created').exists()
 
 
 def test_old_pb_history_cannot_resume_as_native(tmp_path):
@@ -81,21 +83,12 @@ def test_changed_sealed_row_cannot_reuse_earlier_success(tmp_path):
         collect.assert_not_called()
 
 
-def test_capture_refuses_unsupported_future_quantum_before_prep_launch(tmp_path):
-    document={'rows':[{'name':'prep','row':row()},{'name':'quantum','row':row(data_manifest='/strict')}]}
-    with patch.object(capture,'load_round',return_value=document), patch.object(jobs,'validate_job',return_value={}), patch.object(jobs,'submit_job') as submit:
-        with pytest.raises(capture.ChainDispatchRefused,match='strict staging'):
-            capture.submit(tmp_path)
-        submit.assert_not_called()
-        assert not stage.submission_path(tmp_path,'prep').exists()
-
-
 def test_recovery_refuses_row_cwd_that_differs_from_saved_source(tmp_path):
     state = tmp_path / 'native'
     state.mkdir()
-    application_row = row(cwd='/mnt/shared/foreign-source')
+    application_row = row(cwd=str(tmp_path/'foreign-source'))
     (state/'manifest.json').write_text(json.dumps({'rows':[application_row],
-        'sources':[{'checkout':'/mnt/shared/pinned-source'}]}))
+        'sources':[{'checkout':str(tmp_path/'pinned-source')}]}))
     intent = {'event':'native-intent','state_dir':str(state),'row':application_row}
     submission = jobs.FluxSubmission('saved-id',state/'rows/00000','a'*64)
     with patch.object(jobs,'load_submission',return_value=submission), patch.object(jobs,'validate_launch') as validate:

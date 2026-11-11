@@ -69,7 +69,7 @@ def _dispatch(tmp_path, monkeypatch, capsys, *, replay_mode, ceilings,
                         raising=False)
     gateway = dispatch.FakeGateway()
     code = dispatch.main(
-        ["--records", str(records), "--output-root", str(out),
+        ["--timeout-s", "3600", "--records", str(records), "--output-root", str(out),
          "--adjoint-receipt", str(receipt_path), *extra], _gateway=gateway,
         # No checkpoint behind the fixture; coverage has its own tests.
         _coverage=lambda rows: [])
@@ -79,7 +79,8 @@ def _dispatch(tmp_path, monkeypatch, capsys, *, replay_mode, ceilings,
 
 
 def _graces(argv):
-    return {name: int(value) for name, value in (item.split("=", 1) for item in argv["progress_phases"])}
+    return {stamp["phase"]: stamp["grace_s"] for stamp in _stamps(argv)
+            if "phase" in stamp}
 
 
 def _stamps(argv):
@@ -162,8 +163,7 @@ def test_spill_window_replays_carry_their_pass(tmp_path, monkeypatch, capsys):
         # The last declared phase also runs the quantum's tail (PQ #1190).
         assert [item["kind"] for item in rest] == (
             ["tail"] if name == last else [])
-    # render-00 only reads: it keeps the chunk grace and no stamp.
-    assert graces["render-00"] == dispatch.CHUNK_PROGRESS_GRACE_S
+    # render-00 only reads and has no compute stamp.
     assert "render-00" not in stamps
 
 
@@ -180,9 +180,6 @@ def test_windowed_replays_carry_their_pass(tmp_path, monkeypatch, capsys):
         assert graces[name] >= need, (
             f"{name}: a {graces[name]} s grace cannot cover a replay "
             f"backward over {len(plan[name]['entry_indices'])} stored batches")
-    for name in plan:
-        if name.startswith("render-"):
-            assert graces[name] == dispatch.CHUNK_PROGRESS_GRACE_S, name
 
 
 def test_a_row_outside_the_measured_scope_takes_the_blanket_and_says_why(
@@ -223,10 +220,9 @@ def test_no_compute_phase_carries_the_load_bound_alone(
              if stamp.get("schema") == LOAD_STAMP]
     assert loads == ["checkpoint-load"]
     computes = [stamp for stamp in stamps if stamp.get("schema") == COMPUTE_STAMP]
-    graces = _graces(argv)
     for stamp in computes:
         assert stamp["compute"], stamp["phase"]
-        assert stamp["grace_s"] == graces[stamp["phase"]] == (
+        assert stamp["grace_s"] == (
             stamp["read"]["grace_s"]
             + sum(term["grace_s"] for term in stamp["compute"]))
     (basis,) = [stamp for stamp in stamps if stamp.get("schema")

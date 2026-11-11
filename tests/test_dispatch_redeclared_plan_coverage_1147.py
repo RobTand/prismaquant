@@ -113,7 +113,7 @@ def _campaign(tmp_path, *, resource_bound):
     out = tmp_path / "out"
     out.mkdir()
     return plan_path, prepared_path, [
-        "--records", str(records_dir), "--output-root", str(out),
+        "--timeout-s", "3600", "--records", str(records_dir), "--output-root", str(out),
         "--adjoint-receipt", str(receipt_path), "--dry-run"]
 
 

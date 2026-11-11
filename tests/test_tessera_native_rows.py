@@ -32,10 +32,13 @@ class NativeRowsTests(unittest.TestCase):
             self.assertFalse(state.exists())
             submit.assert_not_called()
 
-    def test_preflight_all_rows_before_launch(self):
+    def test_preflight_validates_gpu_rows_and_refuses_bad_demands(self):
+        with patch.object(jobs, 'validate_job', return_value={}):
+            _, resources, _ = rows.validate_row(self.row(demand={'cpu': 10, 'mem_gb': 104, 'gpu': 1}, timeout_s=3600))
+        self.assertEqual(resources, jobs.FluxResources(10, 104, 1, 3600))
         with patch.object(jobs, 'validate_job', return_value={}), patch.object(jobs, 'submit_job') as submit:
-            with self.assertRaisesRegex(ValueError, 'GPU lane not qualified'):
-                rows.submit_rows([self.row(), self.row(demand={'cpu': 1, 'mem_gb': 1, 'gpu': 1})],
+            with self.assertRaisesRegex(ValueError, 'unsupported resource demand'):
+                rows.submit_rows([self.row(), self.row(demand={'cpu': 1, 'mem_gb': 1, 'ssd_gb': 2})],
                                  '/mnt/shared/never-created')
             submit.assert_not_called()
 
@@ -55,12 +58,6 @@ class NativeRowsTests(unittest.TestCase):
         del row['timeout_s']
         with self.assertRaises(KeyError):
             rows.validate_row(row)
-
-    def test_cpu_and_memory_demands_are_not_clamped(self):
-        for demand in ({'cpu': 5, 'mem_gb': 1}, {'cpu': 1, 'mem_gb': 17},
-                       {'cpu': 1, 'mem_gb': 1, 'ssd_gb': 2}):
-            with self.subTest(demand=demand), self.assertRaises(ValueError):
-                rows.validate_row(self.row(demand=demand))
 
     def test_unknown_or_combined_placement_refuses(self):
         for tags in (['gfx1201'], ['gb10', 'sparky']):

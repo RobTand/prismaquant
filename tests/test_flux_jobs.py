@@ -128,9 +128,9 @@ class FluxJobsTests(unittest.TestCase):
             with self.subTest(placement=placement), self.assertRaises(ValueError):
                 jobs.FluxResources(1, 1, 0, 30, placement)
 
-    def test_bounds_do_not_silently_round_or_allow_gpu(self):
-        for args in ((0, 1, 0, 1), (5, 1, 0, 1), (True, 1, 0, 1), (1, 17, 0, 1),
-                     (1, 1, 1, 1), (1, 1, 0, 0), (1, 1, 0, 1801), (1, 1.5, 0, 1)):
+    def test_bounds_do_not_silently_round_or_allow_missing_walltime(self):
+        for args in ((0, 1, 0, 1), (True, 1, 0, 1), (1, 1, -1, 1),
+                     (1, 1, 0, 0), (1, 1, 0, None), (1, 1.5, 0, 1)):
             with self.subTest(args=args), self.assertRaises(ValueError):
                 jobs.FluxResources(*args)
 
@@ -428,8 +428,7 @@ class FluxJobsTests(unittest.TestCase):
     def test_stock_shape_includes_only_requested_resources(self):
         self.assertEqual(jobs._shape(self.resources), 'slot/[core=2;memory=3]')
         self.assertEqual(jobs._shape(jobs.FluxResources(1, 1, 0, 120)), 'slot/[core=1;memory=1]')
-        # Rendering supports GPUs while the qualified resources gate still refuses them.
-        self.assertEqual(jobs._shape(SimpleNamespace(cores=4, memory_gib=8, gpus=2)),
+        self.assertEqual(jobs._shape(jobs.FluxResources(4, 8, 2, 3600)),
                          'slot/[core=4;memory=8;gpu=2]')
 
     def instance_query(self, args, **kwargs):

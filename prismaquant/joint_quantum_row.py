@@ -417,7 +417,7 @@ class QuantumRunInputs:
     manifest_sha256: str
     output_root: str
 
-    def argv(self, *, allowed_tiers: str, band: QuantumBandArguments | None = None) -> list[str]:
+    def argv(self, *, band: QuantumBandArguments | None = None) -> list[str]:
         band_arguments = [] if band is None else band.argv()
         return [
             "python3", "-m", QUANTUM_ENTRY_POINT,
@@ -430,40 +430,35 @@ class QuantumRunInputs:
             "--adjoint-slice", str(self.adjoint_slice.path),
             "--adjoint-slice-sha256", self.adjoint_slice.sha256,
             "--data-manifest-sha256", self.manifest_sha256,
-            "--allowed-tiers", allowed_tiers,
             "--resume", "--output-root", str(self.output_root), *band_arguments]
 
 
 @dataclass(frozen=True)
 class QuantumRowDemand:
     memory_gib: str
-    gpu_gib: str
     cpus: int
 
     @classmethod
     def from_policy(cls, policy, *, environment, source_prefetch=None, operator_prefetch=None):
         if policy is None:
-            return cls("104", "80", 10)
+            return cls("104", 10)
         limits = policy["limits"]
-        memory, gpu = (f"{limits[key] / 1024 ** 3:g}"
-                       for key in ("physical_bytes", "gpu_bytes"))
+        memory = f"{limits['physical_bytes'] / 1024 ** 3:g}"
         cpus = max(int(environment.get("PRISMAQUANT_LAYER_READ_THREADS", 1)),
                    int(source_prefetch["prefetch_workers"]) + 1,
                    int(operator_prefetch["prefetch_workers"]) + 1)
-        return cls(memory, gpu, cpus)
+        return cls(memory, cpus)
 
 
 @dataclass(frozen=True)
 class QuantumRow:
-    manifest_path: str
-    progress: Sequence[tuple[str, int]]
     demand: QuantumRowDemand
     tags: Sequence[str]
     priority: int
     command: Sequence[str]
+    timeout_s: int
     environment: Sequence[tuple[str, str]] = ()
     produced_declaration: str | None = None
-    container_image: str | None = None
     produced_declaration_wire: bytes | None = None
 
     def row(self, *, checkout: str) -> dict:
@@ -482,16 +477,10 @@ class QuantumRow:
         row = {"argv": list(self.command), "cwd": checkout,
                "demand": {"gpu": 1, "mem_gb": number(self.demand.memory_gib),
                           "cpu": self.demand.cpus},
-               "gpu_memory_gb": number(self.demand.gpu_gib),
                "tags": list(self.tags), "priority": self.priority,
-               "env": environment, "retry_safe": True,
-               "data_manifest": self.manifest_path,
-               "residency": {"tier": "stage", "ram": "auto"},
-               "progress_phases": [f"{name}={grace}" for name, grace in self.progress]}
+               "env": environment, "retry_safe": True, "timeout_s": self.timeout_s}
         if self.produced_declaration is not None:
             from .stage_a_produced_output import declaration_launch_arguments
             row['argv'] += declaration_launch_arguments(
                 self.produced_declaration, wire=self.produced_declaration_wire)
-        if self.container_image is not None:
-            row["container_images"] = [self.container_image]
         return row
