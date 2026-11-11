@@ -182,7 +182,7 @@ def _build(tmp_path, monkeypatch, path, *, force_multimodal_skeleton, **kwargs):
         path,
         device=torch.device("cpu"),
         dtype=torch.bfloat16,
-        offload_folder=str(tmp_path / "offload"),
+        offload_folder=str(tmp_path / "offload"), layers_per_shard=1,
         log_prefix="[test]",
         **kwargs,
     )

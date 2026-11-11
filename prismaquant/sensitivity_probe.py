@@ -3348,7 +3348,7 @@ def run_streaming_multimodal_visual_probe_pass(
         ctx = _build_streaming_context(
             model_path,
             device=device, dtype=dtype,
-            offload_folder=offload_folder,
+            offload_folder=offload_folder, layers_per_shard=1,
             log_prefix="[probe/mm-stream]",
             multimodal=True,
             visual_requires_grad=True,

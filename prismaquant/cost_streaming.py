@@ -773,7 +773,7 @@ def build_streamed_causal_lm(
         model_path,
         device=device,
         dtype=dtype,
-        offload_folder=offload_folder,
+        offload_folder=offload_folder, layers_per_shard=1,
         cache_headroom_gb=cache_headroom_gb,
         max_cache_slots=max_cache_slots,
         prefetch_workers=prefetch_workers,
