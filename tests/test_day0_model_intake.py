@@ -102,7 +102,7 @@ def test_unclassified_module_kind_is_explicit(tmp_path):
     ("layer_count", "num_hidden_layers"), ("hidden", "hidden_size"),
     ("vocab", "vocab_size"), ("architectures", "architectures"),
     ("duplicate_config", "duplicate"), ("index_roster", "roster"),
-    ("unsafe_index", "weight_map"), ("missing_shard", "missing"),
+    ("unsafe_index", "shard name"), ("missing_shard", "missing"),
 ])
 def test_inconsistent_source_refuses_before_runtime(tmp_path, change, error):
     root = tmp_path / "source"

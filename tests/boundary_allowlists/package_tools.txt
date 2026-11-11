@@ -6,7 +6,6 @@
 # CI refuses a pull request that adds a line here.
 prismaquant/boundary_control.py	import	tools.serve_fingerprint
 prismaquant/g3_v2.py	import	tools.gold_measurement_fidelity
-prismaquant/prismasnap_validation.py	import	tools.serve_fingerprint
 prismaquant/ship_gates.py	import	tools.gold_engine_options
 prismaquant/shipcard.py	import	tools.serve_fingerprint
 prismaquant/task_suite.py	import	tools.full_kl_teacher_payload

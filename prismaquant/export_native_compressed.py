@@ -4969,13 +4969,6 @@ def main(argv: Sequence[str] | None = None):
         known.model = str(resolve_source_checkpoint_path(known.model))
         parse_argv = _replace_cli_option(parse_argv, "--model", known.model)
 
-    # Refuse a stale/tampered or merely MATERIALIZED PrismaSnap source before
-    # opening the export transaction or doing any GPU render work.  Ordinary
-    # unsnapped sources remain a no-op in this preflight.
-    from .prismasnap_contract import require_verified_prismasnap_if_present
-
-    require_verified_prismasnap_if_present(known.model)
-
     requested_output = Path(known.output)
     with transactional_export_directory(
         known.model,
@@ -6135,53 +6128,6 @@ def _copy_tokenizer(src_model: str, out_dir: Path) -> None:
     for py in src.glob("*.py"):
         shutil.copy2(py, out_dir / py.name)
 
-    # PrismaSnap is an additive source-preparation pass.  Its compact,
-    # self-digested provenance must survive the otherwise unchanged native
-    # exporter so the final shipcard's model hash binds the treatment.  The
-    # absent-source path performs no write and remains byte-for-byte identical
-    # to every pre-PrismaSnap export.
-    snap_path = src / "prismasnap_provenance.json"
-    if os.path.lexists(snap_path):
-        if snap_path.is_symlink() or not snap_path.is_file():
-            raise RuntimeError(
-                f"PrismaSnap provenance is not a regular file: {snap_path}"
-            )
-        try:
-            snap = json.loads(snap_path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            raise RuntimeError(
-                f"PrismaSnap provenance is unreadable: {snap_path}"
-            ) from exc
-        if (
-            not isinstance(snap, dict)
-            or snap.get("schema")
-            not in {
-                "prismaquant.prismasnap.provenance.v1",
-                "prismaquant.prismasnap.provenance.v2",
-            }
-        ):
-            raise RuntimeError(
-                f"PrismaSnap provenance has an unsupported contract: {snap_path}"
-            )
-        from .prismasnap_validation import (
-            validate_prismasnap_checkpoint,
-            validate_prismasnap_provenance_payload,
-        )
-
-        # Export can run for hours.  Replay the index/shard content identity
-        # immediately before the provenance is copied into the staged output;
-        # a source mutation after preflight must abort the transaction.
-        validate_prismasnap_checkpoint(src, require_verified=True)
-
-        validate_prismasnap_provenance_payload(
-            snap,
-            require_verified=True,
-            where=f"native export PrismaSnap provenance {snap_path}",
-        )
-        # This receipt describes the BF16 *source* tree, not the compressed
-        # output shards.  Preserve it under an unambiguous name so the final
-        # artifact never claims its own bytes are the materialized checkpoint.
-        shutil.copy2(snap_path, out_dir / "source_prismasnap_provenance.json")
 
 
 def _source_has_prefixed_weights(src_model: str, prefix: str) -> bool:

@@ -169,37 +169,6 @@ def scratch() -> Path:
 
 
 # --------------------------------------------------------------------------
-# PrismaSnap lane admission
-# --------------------------------------------------------------------------
-
-
-def test_prismasnap_source_lane_admission_fires(scratch):
-    """PrismaSnap-prepared sources are admitted only to compressed-tensors."""
-    block = extract_block(
-        'if [[ ( -e "${MODEL_PATH}/prismasnap_provenance.json" \\',
-        "PrismaSnap-prepared sources are admitted only",
-    )
-    prepared = scratch / "prismasnap_model"
-    prepared.mkdir(exist_ok=True)
-    (prepared / "prismasnap_provenance.json").write_text("{}")
-    plain = scratch / "plain_model"
-    plain.mkdir(exist_ok=True)
-
-    def status(model_path: Path, container: str) -> int:
-        return run_block(
-            block,
-            {"MODEL_PATH": str(model_path), "EXPORT_CONTAINER": container},
-        )
-
-    assert status(prepared, "nvfp4_cb") == FIRED
-    assert status(prepared, "gguf") == FIRED
-    # A PrismaSnap source on the measured native lane is admitted...
-    assert status(prepared, "compressed-tensors") == PASSED
-    # ...and a plain source is admitted on any lane.
-    assert status(plain, "nvfp4_cb") == PASSED
-
-
-# --------------------------------------------------------------------------
 # CB learned-codebook trainer / receipt / scope
 # --------------------------------------------------------------------------
 

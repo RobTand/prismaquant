@@ -6,10 +6,6 @@ import stat
 import pytest
 
 from experiments import profile_expert_routing_1931 as control
-# _write imports the directory sync lazily. Load it here, so its first import
-# (and any rename or fsync that import does) happens before the tests observe
-# os.replace and os.fsync, whichever test runs first or alone.
-import prismaquant.prismasnap_checkpoint  # noqa: E402,F401
 
 
 def test_measurement_record_fsyncs_file_then_rename_then_directory(tmp_path, monkeypatch):
