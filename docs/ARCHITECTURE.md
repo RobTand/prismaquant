@@ -920,10 +920,12 @@ and 58-minute await deadline are unchanged. See `docs/bazel.md` for the timing
 source and scope. Known excluded manual rules are removed from impacts before
 manifest validation; hosted routing and unknown-target refusal remain enforced.
 
-As of: 2026-11-02, hosted CI description corrected, PQ #3216.
-Source: `.github/workflows/gate.yml` and `.github/workflows/ci.yml` at
-`f1335b03`. PRs use hosted `pr-gate`; the post-merge CPU suite remains on
-Python 3.12. This corrects the retired `pb-tests` description below.
+As of: 2026-11-11, batch CI, PQ #3383.
+Source: `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.mergify.yml`.
+Both queues require `linked issue` on original PRs and `gate` on batch drafts.
+The default batch waits up to 10 minutes. Bazel and hosted gate jobs run only
+on authenticated Mergify batches or `gate-canary` PRs. Graph impact still runs
+on every PR. The post-merge CPU suite remains on Python 3.12.
 
 As of: 2026-11-02, read-ahead growth reserve, PQ #2602 (child of #1347).
 `GuardReadBudget` subtracts a per-window growth reserve derived from the
@@ -32841,8 +32843,8 @@ allocation.
 And there is CI to run it — `.github/workflows/ci.yml` executes the full suite
 on main pushes and manual dispatches, on Python 3.12 with CPU torch. PRs keep
 the hosted import/CLI smoke and allowlist checks. `.github/workflows/gate.yml`
-runs selected PR coverage through `pr-gate` and full merge-queue coverage through
-`gate`, on hosted ARM and x64 runners using Python 3.12. See
+runs full coverage through `gate` on authenticated Mergify batch drafts or
+`gate-canary` PRs, with Remote Bazel and a hosted amd64 exception lane. See
 [the CI gate contract](ci_gate.md). Before PrismaQuant is
 installed, these jobs use the stdlib-only `tools/resolve_tessera_dev_pin.py` to
 derive the exact Tessera checkout from `TESSERA_DEV_PIN_COMMIT`, stop

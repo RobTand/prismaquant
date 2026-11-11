@@ -35,9 +35,7 @@ def hosted(directories, default, *, file_budgets=()):
     for directory in directories:
         metadata = json.loads((directory / 'run.json').read_text())
         jobs = json.loads((directory / 'jobs.json').read_text())['jobs']
-        final = next((job for job in jobs if job['name'] == 'gate' and job.get('conclusion') != 'skipped'), None)
-        if final is None:
-            final = next((job for job in jobs if job['name'] == 'pr-gate' and job.get('conclusion') != 'skipped'), {})
+        final = next((job for job in jobs if job['name'] == 'gate' and job.get('conclusion') != 'skipped'), {})
         job_times = []
         for job in jobs:
             steps = {step['name']: step for step in job.get('steps', [])}

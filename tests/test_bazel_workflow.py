@@ -11,9 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def required_gate_steps():
     jobs = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())['jobs']
-    return [next(step for step in jobs[name]['steps']
-                 if step.get('name') == 'Require complete cutover evidence')
-            for name in ('pr-gate', 'gate')]
+    return [next(step for step in jobs['gate']['steps']
+                 if step.get('name') == 'Require complete cutover evidence')]
 
 
 @pytest.mark.parametrize('trusted,remote_result,remote_verdict,passes', [

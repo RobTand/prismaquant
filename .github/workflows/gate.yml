@@ -32,7 +32,7 @@ env:
 jobs:
   remote:
     name: Remote Bazel selection and shards
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 140
     outputs:
@@ -118,7 +118,7 @@ jobs:
     name: Hosted exception lane
     needs:
     - remote
-    if: ${{ !cancelled() && (needs.remote.result == 'success' || github.event.pull_request.head.repo.full_name != github.repository) }}
+    if: ${{ !cancelled() && needs.remote.result == 'success' }}
     uses: ./.github/workflows/bazel-hosted.yml
     with:
       architecture: amd64
@@ -199,36 +199,6 @@ jobs:
         path: graph-upload/
         if-no-files-found: error
         retention-days: 7
-  pr-gate:
-    name: pr-gate
-    if: ${{ !cancelled() && !(github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary'))) }}
-    needs:
-    - remote
-    - hosted
-    - graph-impact
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-    - name: Require complete cutover evidence
-      env:
-        TRUSTED: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-        REMOTE_RESULT: ${{ needs.remote.result }}
-        REMOTE_VERDICT: ${{ needs.remote.outputs.verdict }}
-        HOSTED_RESULT: ${{ needs.hosted.result }}
-        HOSTED_VERDICT: ${{ needs.hosted.outputs.verdict }}
-        GRAPH_RESULT: ${{ needs.graph-impact.result }}
-        GRAPH_VERDICT: ${{ needs.graph-impact.outputs.verdict }}
-      run: |
-        set -Eeuo pipefail
-        test "$HOSTED_RESULT" = success
-        test "$HOSTED_VERDICT" = pass
-        test "$GRAPH_RESULT" = success
-        test "$GRAPH_VERDICT" = pass
-        case "$TRUSTED" in
-          true) test "$REMOTE_RESULT" = success; case "$REMOTE_VERDICT" in pass|skipped) ;; *) exit 1;; esac;;
-          false) test "$REMOTE_RESULT" = skipped; test -z "$REMOTE_VERDICT";;
-          *) exit 1;;
-        esac
   gate:
     name: gate
     if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) }}
