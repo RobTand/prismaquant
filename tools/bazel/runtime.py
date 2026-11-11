@@ -14,9 +14,9 @@ GATE_ENVIRONMENT = {
     'TORCHINDUCTOR_COMPILE_THREADS': '1',
     'MAX_JOBS': '1',
     'CUDA_VISIBLE_DEVICES': '',
-    'GIT_AUTHOR_NAME': 'PrismaBuild CI',
+    'GIT_AUTHOR_NAME': 'PrismaQuant CI',
     'GIT_AUTHOR_EMAIL': 'ci@example.invalid',
-    'GIT_COMMITTER_NAME': 'PrismaBuild CI',
+    'GIT_COMMITTER_NAME': 'PrismaQuant CI',
     'GIT_COMMITTER_EMAIL': 'ci@example.invalid',
 }
 # What Bazel's test runner adds. A hosted shard has none of it.
