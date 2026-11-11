@@ -48,7 +48,7 @@ def _layout(tmp_path, monkeypatch):
 
 def _run(dispatch, gateway, records, receipt_path, out, *extra, coverage=None):
     return dispatch.main(
-        ["--records", str(records), "--output-root", str(out),
+        ["--timeout-s", "3600", "--records", str(records), "--output-root", str(out),
          "--adjoint-receipt", str(receipt_path),
          # FakeGateway does not execute a producer or measure pilot counters.
          # Record the existing override, including for simulated real runs;

@@ -128,15 +128,6 @@ def test_plan_uses_census_quanta_and_pb_row_sizing(selection):
     assert not s.output.exists()
 
 
-def test_real_materialization_builder_reaches_the_named_native_gpu_hold(selection):
-    s = selection
-    tm.plan(s.request, s.census, s.workspace, s.spec)
-    for row in json.loads((s.workspace / 'manifest.json').read_text()):
-        assert 'progress_phases' not in row
-        with pytest.raises(ValueError, match='GPU lane not qualified'):
-            campaign_rows.validate_row(row)
-
-
 @pytest.mark.parametrize('campaign_argv', [[], ['--max-act-rows', '1024'],
                                         ['--streaming', '--max-act-rows', '1024']])
 def test_plan_sizes_resident_materialization_from_the_priced_cap(

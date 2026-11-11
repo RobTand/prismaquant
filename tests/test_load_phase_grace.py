@@ -187,10 +187,6 @@ def test_a_declared_reader_count_below_one_refuses():
 # The dispatch edge, on the band-serial test's four bound executable rows.
 
 
-def _graces(argv):
-    return {name: int(value) for name, value in (item.split("=", 1) for item in argv["progress_phases"])}
-
-
 def _stamps(argv):
     inner = _inner(argv)
     return json.loads(inner[inner.index(PROGRESS_GRACE_FLAG) + 1])
@@ -223,7 +219,6 @@ def test_a_filtered_dispatch_counts_only_its_own_rows(tmp_path, monkeypatch):
     phase_bytes = _checkpoint_bytes(bound[3])
     assert phase_bytes > 0
     expected = -(-phase_bytes // FLOOR)
-    assert _graces(argv)["checkpoint-load"] == expected
     (stamp,) = _load_stamps(argv)
     assert (stamp["mode"], stamp["readers"], stamp["grace_s"]) == (
         "derived", 1, expected)
@@ -242,13 +237,13 @@ def test_an_unfiltered_dispatch_counts_every_row_it_publishes(tmp_path, monkeypa
     assert len(rows) == len(bound) > 1
     loads = 0
     for row in rows.values():
-        graces = _graces(row["row"])
-        if "checkpoint-load" not in graces:
+        stamps = _load_stamps(row["row"])
+        if not stamps:
             continue
         loads += 1
-        assert graces["checkpoint-load"] == HEAD_PROGRESS_GRACE_S
-        (stamp,) = _load_stamps(row["row"])
-        assert (stamp["mode"], stamp["readers"]) == ("blanket", len(bound))
+        (stamp,) = stamps
+        assert (stamp["phase"], stamp["mode"], stamp["readers"], stamp["grace_s"]) == (
+            "checkpoint-load", "blanket", len(bound), HEAD_PROGRESS_GRACE_S)
     assert loads > 0
 
 

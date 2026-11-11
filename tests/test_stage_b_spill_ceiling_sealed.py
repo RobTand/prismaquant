@@ -128,7 +128,7 @@ def _dispatch_row(tmp_path, monkeypatch, *, bound, spec):
         record["executable_readset"]["spill_bound"] = bound
     path = records / "layer-002.json"
     path.write_text(json.dumps(_reseal(record)))
-    return dispatch, dispatch.quantum_argv(record, record_path=path, output_root=out)
+    return dispatch, dispatch.quantum_argv(record, timeout_s=3600, record_path=path, output_root=out)
 
 
 def _row_ceiling(tmp_path, monkeypatch) -> int:

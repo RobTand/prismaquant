@@ -41,11 +41,11 @@ class FluxResources:
     placement: str = 'portable'
 
     def __post_init__(self):
-        for name, low, high in (('cores', 1, 4), ('memory_gib', 1, 16),
-                                ('gpus', 0, 0), ('walltime_s', 1, 1800)):
+        for name, low in (('cores', 1), ('memory_gib', 1),
+                          ('gpus', 0), ('walltime_s', 1)):
             value = getattr(self, name)
-            if type(value) is not int or not low <= value <= high:
-                raise ValueError(f'{name} must be an integer in [{low}, {high}] for {_PROFILE}')
+            if type(value) is not int or value < low:
+                raise ValueError(f'{name} must be an integer >= {low}')
         if self.placement not in {'portable', *_PROPERTIES, *(f'host:{h}' for h in _HOSTS)}:
             raise ValueError('unsupported placement; host placement requires caller data/runtime justification')
 
@@ -637,12 +637,12 @@ def _require_allocation(allocation, resources, ranks):
     core_ids = {node['id'] for node in leaves['core']}
     pus = set().union(*(_allocation_ids(node['properties']['os-pus']) for node in leaves['core']))
     if (len(core_ids) != resources.cores or core_ids != _allocation_ids(row['children']['core'])
-            or row['children'].get('gpu') is not None or pus != set(os.sched_getaffinity(0))):
+            or pus != set(os.sched_getaffinity(0))):
         raise ValueError('current native allocation/affinity differs')
 
 
 def verify_current_job(*, job_id, record_dir, source):
-    """Authenticate current CPU admission before using saved resource claims.
+    """Authenticate current admission before using saved resource claims.
 
     A missing submit acknowledgement refuses. No receipt race permits trusting
     unverified launch fields, adopting another job or submitting a replacement.

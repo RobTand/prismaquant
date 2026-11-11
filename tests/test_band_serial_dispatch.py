@@ -415,7 +415,7 @@ def _dispatch_layout(tmp_path, monkeypatch, *, run_identity_extra=None):
 
 def _main(dispatch, gateway, records, receipt_path, out, *extra):
     return dispatch.main(
-        ["--records", str(records), "--output-root", str(out),
+        ["--timeout-s", "3600", "--records", str(records), "--output-root", str(out),
          "--adjoint-receipt", str(receipt_path),
          # Fake-gateway fixtures never run a producer to measure a pilot.
          # Use the existing recorded override, not invented pilot counters.
@@ -429,10 +429,6 @@ def _main(dispatch, gateway, records, receipt_path, out, *extra):
 def _inner(argv):
     tail = argv["argv"]
     return tail[tail.index("--", tail.index("--spec")) + 1:]
-
-
-def _phases(argv):
-    return [item.split("=", 1)[0] for item in argv["progress_phases"]]
 
 
 def _by_id(gateway):
@@ -493,7 +489,6 @@ def test_band_serial_publishes_producers_then_their_consumers(
         # so it reserves no stage window and commits each group at origin.
         assert template["write_only"] is True
         assert template["window_groups"] == 0
-        assert _phases(argv)[:2] == ["head", "checkpoint-load"]
 
     # Layer 3 executes, publishes its handoff and reports complete; layer 1
     # is still running.
@@ -514,16 +509,18 @@ def test_band_serial_publishes_producers_then_their_consumers(
     assert inner[inner.index("--adjoint-handoff") + 1] == published["path"]
     assert inner[inner.index("--adjoint-handoff-sha256") + 1] == published["sha256"]
     assert "--emit-adjoint-handoff" not in inner  # layer 1 is another band
-    staged = Path(consumer["data_manifest"])
+    staged, = (out / "layer-quanta" / "band-serial").glob("layer-002.*.executable.json.gz")
     digest = hashlib.sha256(staged.read_bytes()).hexdigest()
     assert inner[inner.index("--data-manifest-sha256") + 1] == digest
     assert staged.parent == out / "layer-quanta" / "band-serial"
-    phases = _phases(consumer)
+    phases = [phase["name"] for phase in
+              json.loads(gzip.decompress(staged.read_bytes()))["read_plan"]["phases"]]
     assert phases[:3] == ["head", HANDOFF_LOAD_PHASE, "own-002-source"]
     assert "checkpoint-load" not in phases
     assert not any(name.startswith("chain-") for name in phases)
-    grace = dict(item.split("=", 1) for item in consumer["progress_phases"])
-    assert int(grace[HANDOFF_LOAD_PHASE]) == dispatch.HEAD_PROGRESS_GRACE_S
+    stamps = json.loads(inner[inner.index("--progress-grace-derivation") + 1])
+    load = next(stamp for stamp in stamps if stamp.get("phase") == HANDOFF_LOAD_PHASE)
+    assert load["grace_s"] == dispatch.HEAD_PROGRESS_GRACE_S
     # The quantum re-derives the staged bytes from what it is given.
     handoff = load_quantum_handoff(published["path"], published["sha256"],
                                    record=bound[2], adjoint_slice=_slice(bound[2]),
@@ -617,7 +614,6 @@ def test_a_producer_that_published_no_handoff_leaves_its_consumer_on_the_chain(
                  "--band-serial", "--handoff-tier", TIER) == 0
     argv = _by_id(gateway)["layer-002"]["row"]
     assert "--adjoint-handoff" not in _inner(argv)
-    assert _phases(argv)[:2] == ["head", "checkpoint-load"]
 
 
 def test_a_fresh_consumer_of_a_handoff_less_producer_runs_the_chain(
@@ -638,7 +634,6 @@ def test_a_fresh_consumer_of_a_handoff_less_producer_runs_the_chain(
     rows = _by_id(gateway)
     assert "layer-003" not in rows
     assert "--adjoint-handoff" not in _inner(rows["layer-002"]["row"])
-    assert _phases(rows["layer-002"]["row"])[:2] == ["head", "checkpoint-load"]
 
 
 @pytest.mark.parametrize("case", ["no-tier", "legacy-rows", "batched-regime",

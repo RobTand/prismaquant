@@ -259,12 +259,5 @@ def test_native_post_campaign_builder_retains_requirements_and_refuses_execution
     assert gpu_row["container_images"] == row["container_images"]
     with pytest.raises(ValueError) as gpu_refused:
         campaign_rows.submit_rows([gpu_row], state)
-    assert str(gpu_refused.value) == 'GPU lane not qualified; requires plan step P-7'
-    assert not state.exists()
-    # Exercise the GPU refusal alone as well as its precedence above staging.
-    gpu_only = {key: value for key, value in gpu_row.items()
-                if key not in {'data_manifest', 'container_images', 'progress_phases', 'gpu_memory_gb'}}
-    with pytest.raises(ValueError) as gpu_refused:
-        campaign_rows.submit_rows([gpu_only], state)
-    assert str(gpu_refused.value) == 'GPU lane not qualified; requires plan step P-7'
+    assert str(gpu_refused.value) == 'data_manifest: strict staging is unqualified without a bound staged_input'
     assert not state.exists()

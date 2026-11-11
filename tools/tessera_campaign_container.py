@@ -637,26 +637,27 @@ def _require_admission(admission: dict) -> None:
         raise RuntimeError("container admission is missing or malformed")
 
 
-def gpu_attachment(admission: dict) -> tuple:
-    """Whether to attach a GPU, decided only by the native admission.
+def gpu_attachment(admission: dict, environ) -> tuple:
+    """Whether to attach a GPU, decided by the native admission.
 
-    A CPU admission withholds every device. A GPU admission refuses: the GPU
-    arm is held for unit 4E, so this adapter never attaches a device. An empty
-    ``CUDA_VISIBLE_DEVICES`` is not admission and is not consulted.
+    A CPU admission withholds every device. A GPU admission attaches only the
+    one device Flux assigned in ``CUDA_VISIBLE_DEVICES``; any other value refuses.
     """
     _require_admission(admission)
     if admission["gpus"] == 0:
         return False, "native admission reserved no GPU"
-    raise RuntimeError("the container GPU arm is held for unit 4E; "
-                       "native admission reserved a GPU and this adapter attaches none")
+    index = environ.get("CUDA_VISIBLE_DEVICES", "")
+    if not re.fullmatch("[0-9]+", index):
+        raise RuntimeError("a GPU admission needs exactly one CUDA_VISIBLE_DEVICES index")
+    return True, f"nvidia.com/gpu={index}"
 
 
 def podman_command(spec: dict, command: list[str], *, cwd: str, image_id: str,
                    admission: dict, cidfile, content_sha256=None, environ=None,
                    bounded=False, checkout_commit=None) -> list[str]:
     validate_container(spec, bounded=bounded)
-    gpu_attachment(admission)
     environ = environ if environ is not None else {}
+    attached, device = gpu_attachment(admission, environ)
     budget_gb = container_memory_budget_gb(spec)
     if budget_gb is not None and budget_gb > admission["memory_gib"]:
         raise RuntimeError(
@@ -666,6 +667,8 @@ def podman_command(spec: dict, command: list[str], *, cwd: str, image_id: str,
             "--cgroups=disabled", "--network=none", "--env-host=false",
             "--cpuset-cpus", ",".join(map(str, admission["affinity"])),
             "--entrypoint", "", "--workdir", "/workspace"]
+    if attached:
+        argv += ["--device", device]
     if os.uname().machine == "aarch64":
         argv += ["--userns=keep-id", "--user=1000:1000"]
     else:
@@ -946,7 +949,7 @@ def main(argv=None) -> int:
     if declared is not None and declared != content_digest:
         raise RuntimeError(f"container image content differs for {requested!r}: "
                            f"expected {declared}, observed {content_digest}")
-    with_gpu, gpu_reason = gpu_attachment(admission)
+    with_gpu, gpu_reason = gpu_attachment(admission, os.environ)
     imports = verify_pinned_import(spec, cwd=str(Path.cwd()))
     commit = namespace_commit if namespace_commit is not None else checkout_commit(str(Path.cwd()))
     print(json.dumps({"schema": "prismaquant.tessera_campaign_container.v1",

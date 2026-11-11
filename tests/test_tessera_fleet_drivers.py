@@ -284,8 +284,8 @@ def test_two_ladder_dispatches_with_different_probes_are_separate_trees(tmp_path
     assert (checkout / dispatch_ladder.WRAPPER).read_text() == 'print("ladder")\n'
 
 
-def test_ladder_gpu_refuses_before_staging(tmp_path):
-    with pytest.raises(ValueError, match='GPU lane not qualified'):
+def test_ladder_refuses_unshared_source_before_staging(tmp_path):
+    with pytest.raises(ValueError, match='payload source must be shared'):
         dispatch_ladder.main(['--shards', '1', '--checkout', str(tmp_path), '--workspace', str(tmp_path / 'w')])
     assert not (tmp_path / 'w').exists()
 

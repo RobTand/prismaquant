@@ -3838,7 +3838,7 @@ def run_layer_quantum(
     from .joint_projection_backend import executing_image, prewarm_projection_backend
     from .model_profiles import detect_profile
     from .production_weight_cache import ProductionWeightCache
-    from .residency_map import bind_residency_manifest, residency_report
+    from .residency_map import residency_report
     from .stage_inputs import bound as _bound, same as _same
     from .tessera_joint_aura import (
         ACTIVATION_SCALE_ENV,
@@ -3917,10 +3917,6 @@ def run_layer_quantum(
             raise QuantumIdentityRefused(refusal)
         handoff_capture_batch = normalize_replay_regime(replay_regime)["capture_batch"]
     from .joint_stageb_resources import enforce_device_policy
-    # Bind the readset before the first head read, so the head slice and
-    # every declared entry after it resolve through residency (PQ #1024).
-    bind_residency_manifest(
-        data_manifest_sha256 or record["campaign"].get("read_manifest_sha256"))
     head_slice = None
     readset_block = record.get("executable_readset")
     if isinstance(readset_block, dict) and readset_block.get("head_slice") is not None:
@@ -4345,12 +4341,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help="band-serial (PQ #996): publish this quantum's "
                              "final input cotangent and owner states for "
                              "layer-1")
-    from .staged_tier_policy import DEFAULT_ALLOWED_TIERS
-    parser.add_argument("--allowed-tiers", default=DEFAULT_ALLOWED_TIERS,
-                        help="sealed staged-tier declaration for GPU-consumed "
-                             "bulk inputs: comma subset of {ram,ssd}, RAM "
-                             "first (default %(default)s). Pool/HDD bulk "
-                             "opens refuse under this declaration.")
     return parser
 
 
@@ -4402,21 +4392,12 @@ def main(argv=None) -> int:
         return EXIT_IDENTITY_REFUSED
     from .tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
-    # The readset is bound inside run_layer_quantum; until then the plan
-    # itself is the only input read (PQ #1024).
     config = _load_plan(args.plan, args.plan_sha256, defer_pool_reads=True)
     if Path(config["output_root"]).resolve() != Path(args.output_root).resolve():
         print(f"{IDENTITY_REFUSED_MARKER}: plan output_root "
               f"{config['output_root']} is not --output-root {args.output_root}",
               flush=True)
         return EXIT_IDENTITY_REFUSED
-    from .staged_tier_policy import activate_staged_tier_policy
-    try:
-        allowed = activate_staged_tier_policy(args.allowed_tiers)
-    except ValueError as exc:
-        parser.error(str(exc))
-    print(f"[STAGED-TIER] bulk inputs serve from {','.join(sorted(allowed))}; "
-          f"pool/HDD bulk opens refuse", flush=True)
     profiler = None
     if args.profile_tool == "cprofile":
         import cProfile

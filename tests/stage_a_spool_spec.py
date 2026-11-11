@@ -56,7 +56,7 @@ def write_declaration(directory) -> Path:
 def declared_stage_a_argv(builder, manifest, campaign, **kwargs):
     """Call a shipped ``stage_a_argv`` with the launch-bound declaration the Stage A row requires."""
     kwargs.setdefault("produced_declaration", write_declaration(Path(campaign["plan_path"]).parent))
-    return builder(manifest, campaign, **kwargs)
+    return builder(manifest, campaign, timeout_s=3600, **kwargs)
 
 
 def with_spool(spec: dict) -> dict:

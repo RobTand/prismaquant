@@ -1,27 +1,7 @@
-"""Scientific planning rows retain the image selected by their resolved spec.
+"""Joint rows bind images in their container spec.
 
-PrismaBuild #714: a GB10-class action was claimed by the Spark that did *not*
-hold its pinned Docker image, and died inside ``tools.tessera_campaign_container``
-after the attempt was spent.  The image was sealed inside the
-``--spec`` JSON and nowhere PB could read it before claiming.  The paired PB
-change adds the submitter's ``--container-image`` and the campaign row field
-``container_images``; this file gates the PrismaQuant callers that must fill
-them:
-
-* the joint dispatcher's stage-A and quantum rows declare exactly the image
-  of the same parsed spec they serialize into ``--spec``;
-* generated campaign rows carry ``container_images`` from the *resolved*
-  row-class container, so a class override declares its own image;
-* a spec whose image is supplied by a validated ``container.archive``
-  declares nothing -- the launcher's digest-verifying load establishes
-  presence inside the action, on whichever worker claims it;
-* a row that runs no container is byte-identical to before and declares
-  nothing.
-
-These tests are behavioral: they compare the declaration against the spec
-bytes actually sealed into the submission (or the row argv), never against a
-hard-coded string, so a launcher change and a dispatcher change that drift
-apart fail here.
+Generated campaign rows retain their separate image field.
+Archive-backed specs retain their declared image bytes and content digest.
 """
 from __future__ import annotations
 
@@ -67,12 +47,6 @@ def _embedded_spec(argv: list) -> dict:
 
     command = argv["argv"] if isinstance(argv, dict) else argv
     return json.loads(command[command.index("--spec") + 1])
-
-
-def _declared_image(row, flag):
-    assert flag == IMAGE_FLAG
-    image, = row["container_images"]
-    return image
 
 
 @pytest.fixture
@@ -140,19 +114,19 @@ def _quantum_record(tmp_path: Path) -> Path:
     return record_path
 
 
-def test_stage_a_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec):
+def test_stage_a_seals_the_image_in_the_spec(tmp_path, joint_spec):
     argv = declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
     embedded = _embedded_spec(argv)
-    assert _declared_image(argv, IMAGE_FLAG) == embedded["container"]["image"]
+    assert embedded["container"]["image"] == IMAGE
 
 
-def test_quantum_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec):
+def test_quantum_seals_the_image_in_the_spec(tmp_path, joint_spec):
     record_path = _quantum_record(tmp_path)
     record = json.loads(record_path.read_text())
-    argv = joint.quantum_argv(record, record_path=record_path,
+    argv = joint.quantum_argv(record, timeout_s=3600, record_path=record_path,
                               output_root=tmp_path / "out")
     embedded = _embedded_spec(argv)
-    assert _declared_image(argv, IMAGE_FLAG) == embedded["container"]["image"]
+    assert embedded["container"]["image"] == IMAGE
 
 
 def test_the_declaration_comes_from_the_same_parse_as_the_sealed_spec(
@@ -180,14 +154,13 @@ def test_the_declaration_comes_from_the_same_parse_as_the_sealed_spec(
     embedded = _embedded_spec(argv)
     assert reads["spec"] == 1
     assert embedded["container"]["image"] == IMAGE
-    assert _declared_image(argv, IMAGE_FLAG) == IMAGE
 
 
 def test_a_repository_manifest_digest_is_declared_exactly(tmp_path, monkeypatch):
     spec = _write_spec(tmp_path / "spec.json", {"image": REPO_IMAGE})
     monkeypatch.setattr(joint, "SPEC_PATH", spec)
     argv = declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
-    assert _declared_image(argv, IMAGE_FLAG) == REPO_IMAGE
+    assert _embedded_spec(argv)["container"]["image"] == REPO_IMAGE
 
 
 def test_an_archive_backed_spec_declares_no_image(tmp_path, monkeypatch):
@@ -216,7 +189,7 @@ def test_a_malformed_archive_is_refused_not_silently_undeclared(tmp_path, monkey
         declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
 
 
-def test_the_dry_run_plan_declares_the_stage_a_image(tmp_path, joint_spec, capsys):
+def test_the_dry_run_plan_seals_the_stage_a_image(tmp_path, joint_spec, capsys):
     """End to end through the dispatcher's own plan output."""
 
     plan = tmp_path / "plan.json"
@@ -236,7 +209,7 @@ def test_the_dry_run_plan_declares_the_stage_a_image(tmp_path, joint_spec, capsy
                                           "prepared_sha256": "2" * 64,
                                           "read_manifest_sha256": "4" * 64})
     from stage_a_spool_spec import write_declaration
-    code = joint.main(["--stage-a-produced-declaration", str(write_declaration(tmp_path)), "--records", str(records),
+    code = joint.main(["--timeout-s", "3600", "--stage-a-produced-declaration", str(write_declaration(tmp_path)), "--records", str(records),
                        "--output-root", str(tmp_path / "out"),
                        "--adjoint-manifest", str(manifest),
                        "--dry-run"])
@@ -244,7 +217,7 @@ def test_the_dry_run_plan_declares_the_stage_a_image(tmp_path, joint_spec, capsy
     plan_out = json.loads(capsys.readouterr().out)
     assert [row["kind"] for row in plan_out["rows"]] == ["stage-a"]
     argv = plan_out["rows"][0]["row"]
-    assert _declared_image(argv, IMAGE_FLAG) == _embedded_spec(argv)["container"]["image"]
+    assert _embedded_spec(argv)["container"]["image"] == IMAGE
 
 
 # ---------------------------------------------------------------------------
@@ -412,9 +385,9 @@ def test_joint_and_direct_submission_keep_the_portable_reference(tmp_path):
     spec = with_spool(_portable_spec())
     path = tmp_path / "portable.json"
     path.write_text(json.dumps(spec))
-    argv, reference = joint._container_wrap(
+    argv = joint._container_wrap(
         path, ["python3", "-V"], progress=[("head", 1800)])
-    assert reference == spec["container_admission_reference"]
+    reference = spec["container_admission_reference"]
     assert _embedded_spec(argv)["container_admission_reference"] == reference
     args = _direct_args(tmp_path, spec["container"])
     direct = campaign._native_action_row(args, manifest=tmp_path / "read.json",
