@@ -14,7 +14,7 @@
 #
 # Add "queue" to queue and remove it to dequeue. After a failure, comment
 # "@mergifyio queue"; toggling the label does not reset a dequeued PR.
-# TL3 tests each change through PrismaBuild and reviews it, posts its "TL3
+# TL3 tests and reviews each change, posts its "TL3
 # approval" check on the reviewed head, then adds "tl3-queue". TL3 follows
 # Mergify's queue check on the PR head and never reads pr-gate, so a pr-gate
 # condition would leave a failing TL3 PR unqueued without TL3 noticing. The
