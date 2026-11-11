@@ -1714,7 +1714,7 @@ def _compute_precompute_key(model_path: str, dataset_name: str,
 
 # In-process StreamingContext + tokenizer cache. Populated when
 # `PRISMAQUANT_PROBE_CTX_CACHE=1` is set. Keyed by model path, device,
-# dtype, source checkpoint content and tokenizer content. A driver can reuse
+# dtype, source and tokenizer content, and resolved shard count. A driver can reuse
 # one loaded model across calibration chunks.
 _PROBE_CTX_CACHE: dict = {}
 
@@ -4680,7 +4680,7 @@ def main():
               "identity is unavailable; use a local calibration file", flush=True)
     context_key = (
         args.model, str(device), args.dtype, source_identity["content_sha256"],
-        args.probe_reuse_inputs["tokenizer_sha256"],
+        args.probe_reuse_inputs["tokenizer_sha256"], args.layers_per_shard,
     )
 
     # Skip setup + calibration if every shard is reusable. Loading the
@@ -4758,7 +4758,7 @@ def main():
                 args.model,
                 device=device,
                 dtype=dtype,
-                offload_folder=offload_folder,
+                offload_folder=offload_folder, layers_per_shard=args.layers_per_shard,
                 prefetch_workers=args.prefetch_workers,
                 prefetch_min_available_gb=args.prefetch_min_available_gb,
                 log_prefix="[incremental]",
