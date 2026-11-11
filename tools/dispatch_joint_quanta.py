@@ -2125,7 +2125,7 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     if produced_declaration is None:
         raise DispatchRefused("Stage A requires an explicit launch-bound produced declaration")
     return quantum_row.QuantumRow(
-        quantum_row.QuantumRowDemand(str(stage_a_memory_gib(campaign)), 10),
+        quantum_row.QuantumRowDemand(str(stage_a_memory_gib(campaign)), 9),
         [tag], 0, wrapped, timeout_s,
         produced_declaration=str(produced_declaration)).row(
             checkout=sealed_spec.get("cwd", str(Path(__file__).resolve().parents[1])))
