@@ -713,7 +713,7 @@ def main(argv=None) -> int:
         p = sub.add_parser(name)
         inputs(p)
         p.add_argument("--batch-size", type=int, default=4)
-        p.add_argument("--allowed-tiers", default="ram,ssd")
+        p.add_argument("--allowed-tiers", default="ssd")
         p.add_argument("--prefetch-override", default=None)
         p.add_argument("--scratch", required=True)
         if name == "drive":

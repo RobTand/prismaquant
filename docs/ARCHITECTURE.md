@@ -9229,7 +9229,7 @@ The Stage B preparation reads its declared inputs off the stage (2026-09-23,
 preparation submits with `--residency stage`, so PrismaBuild stages its
 manifest, but the tools still opened every input at its pool path.
 
-With `--data-manifest-sha256` (and `--allowed-tiers`, default `ram,ssd`),
+With `--data-manifest-sha256` (and `--allowed-tiers`, default `ssd`),
 `regenerate_joint_quanta` and `prepare_extended_joint_quanta` call
 `stage_b_prep_io.bind_staged_reads`. That call activates the strict tier
 policy and binds the process residency resolver to the manifest. Every
@@ -34869,7 +34869,7 @@ existing output.
 holds a seed marker or seed receipt, and `stage_a_argv` refuses a sealed
 request that carries `--chain-seed`. A seed's checkpoints never feed Stage B.
 
-**Staging.** Under the `ram,ssd` tier policy every bulk byte a seed reads
+**Staging.** Under the `ssd` tier policy every bulk byte a seed reads
 must be in its action's data manifest. `tools/build_stagea_seed_package.py`
 derives that manifest from the source run's own submitted manifest (PQ
 #1043), as `build_stagea_forward_recovery_package` derives a recovery
@@ -34994,7 +34994,7 @@ as `priority`. `pbrun --after` does not order them. It defers a consumer on a pr
 write-only template and builds the consumer's manifest from the batches the
 producer committed, and a prep commits nothing.
 
-**Manifests** (`tools/build_stagea_split_package.py`). Under the `ram,ssd`
+**Manifests** (`tools/build_stagea_split_package.py`). Under the `ssd`
 tier policy a row reads the run's boundary rows and the checkpoint's
 cotangents through the process input map, so each must be a staged entry.
 The builder takes the source run's submitted manifest, the run's output

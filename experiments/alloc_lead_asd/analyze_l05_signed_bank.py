@@ -32,7 +32,7 @@ def main():
     if args.output.exists():
         p.error('output must be unused')
     torch.set_num_threads(1)
-    activate_staged_tier_policy('ram,ssd')
+    activate_staged_tier_policy('ssd')
     bind_residency_manifest(args.data_manifest_sha256)
     inputs, raw = {}, {}
     for name in ('rows', 'binding', 'local_control'):

@@ -62,7 +62,7 @@ def test_own_boundary_group_publishes_and_reads_exact_tensors(tmp_path, monkeypa
         spool_bytes=(1 << 24) if spool else None)
     with storage:
         refs = write_group(storage)
-        with staged_tier_policy_test_context('ram,ssd'):
+        with staged_tier_policy_test_context('ssd'):
             read_group(storage, refs)
         storage.settle_local_output()
         assert len(pub._groups) == 1
@@ -83,7 +83,7 @@ def test_strict_unpublished_input_has_no_own_session_exemption(tmp_path, monkeyp
     monkeypatch.delenv(ENV_VAR, raising=False)
     reset_residency_resolver_for_tests()
     try:
-        with storage, staged_tier_policy_test_context('ram,ssd'):
+        with storage, staged_tier_policy_test_context('ssd'):
             with pytest.raises(LeaseRefused, match='^readset-not-staged$'):
                 with storage.prefetch([ref]):
                     pass

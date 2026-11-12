@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import prepare_stageb_after_capture as wrapper  # noqa: E402
 
 DECLARATION = ["--produced-declaration", "/mnt/shared/m.submission/template.json", "--produced-declaration-sha256", "d" * 64]
-STRICT = ["--data-manifest-sha256", "a" * 64, "--allowed-tiers", "ram,ssd"]
+STRICT = ["--data-manifest-sha256", "a" * 64, "--allowed-tiers", "ssd"]
 
 
 def _args(tmp_path, binding_path):

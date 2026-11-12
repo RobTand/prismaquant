@@ -217,7 +217,7 @@ def write_submission(args, entries, annotations, quanta, indexes) -> dict:
         # and refuses rather than reading the pool.
         "strict_read_flags": ["--data-manifest-sha256",
                               hashlib.sha256(manifest_bytes).hexdigest(),
-                              "--allowed-tiers", "ram,ssd"],
+                              "--allowed-tiers", "ssd"],
         "native_argv": ["--produced-declaration", str(template_path),
                         "--produced-declaration-sha256", hashlib.sha256(template_bytes).hexdigest()],
         "staged_input_required": True,

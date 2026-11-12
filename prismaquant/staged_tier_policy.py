@@ -42,9 +42,9 @@ from __future__ import annotations
 from contextlib import contextmanager
 import threading
 
-#: The campaign default: RAM first, SSD stage when declared. Pool/HDD are
+#: The campaign default: the SSD stage. Pool/HDD are
 #: never bulk tiers under this policy.
-DEFAULT_ALLOWED_TIERS = "ram,ssd"
+DEFAULT_ALLOWED_TIERS = "ssd"
 
 PATH_ENV = 'PRISMAQUANT_STAGED_MANIFEST'
 SHA_ENV = 'PRISMAQUANT_STAGED_MANIFEST_SHA256'

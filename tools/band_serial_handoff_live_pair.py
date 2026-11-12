@@ -197,7 +197,7 @@ def _bind_staged(data_manifest_sha256: str) -> None:
     from prismaquant.residency_map import bind_residency_manifest
     from prismaquant.staged_tier_policy import activate_staged_tier_policy
 
-    activate_staged_tier_policy("ram,ssd")
+    activate_staged_tier_policy("ssd")
     bind_residency_manifest(data_manifest_sha256)
 
 

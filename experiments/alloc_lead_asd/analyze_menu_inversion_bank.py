@@ -84,7 +84,7 @@ def main():
     args = parser.parse_args()
     if args.output.exists():
         parser.error('output must be unused')
-    activate_staged_tier_policy('ram,ssd')
+    activate_staged_tier_policy('ssd')
     bind_residency_manifest(args.data_manifest_sha256)
     raw = read_staged_whole_file(args.payload, PAYLOAD_SHA256, label='historical PB rung identity dump')
     prefix, suffix = b'=====L1ID-BEGIN=====\n', b'\n=====L1ID-END=====\n'

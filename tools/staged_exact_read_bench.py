@@ -1027,7 +1027,7 @@ def main(argv=None) -> int:
                         help="the adjoint space the checkpoint lives under")
     parser.add_argument("--manifest-sha256", required=True,
                         help="the data manifest this action was submitted with")
-    parser.add_argument("--allowed-tiers", default="ram,ssd")
+    parser.add_argument("--allowed-tiers", default="ssd")
     parser.add_argument("--land-wait-s", type=float, default=3600.0)
     parser.add_argument("--ram-wait-s", type=float, default=1800.0)
     parser.add_argument("--sink", choices=("scratch", "discard"), default="scratch")

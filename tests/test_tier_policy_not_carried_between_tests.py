@@ -11,7 +11,7 @@ from prismaquant.staged_tier_policy import (
 
 
 def test_step_1_a_test_leaves_the_policy_active():
-    activate_staged_tier_policy("ram,ssd")
+    activate_staged_tier_policy("ssd")
     assert policy_is_active()
 
 

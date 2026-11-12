@@ -187,7 +187,7 @@ def test_the_submission_declares_every_digest_and_the_strict_flags(tmp_path):
     assert gzip.decompress(raw)
     assert submission["strict_read_flags"] == [
         "--data-manifest-sha256", hashlib.sha256(raw).hexdigest(),
-        "--allowed-tiers", "ram,ssd"]
+        "--allowed-tiers", "ssd"]
 
 
 def test_bind_refuses_a_second_digest_and_a_malformed_one(tmp_path, monkeypatch):
@@ -197,14 +197,14 @@ def test_bind_refuses_a_second_digest_and_a_malformed_one(tmp_path, monkeypatch)
     bind(monkeypatch, binding)
     digest = binding['read_contract_sha256']
     with pytest.raises(io.PreparationReadRefused, match="64-character"):
-        io.bind_staged_reads(manifest_sha256="abc", allowed_tiers="ram,ssd")
+        io.bind_staged_reads(manifest_sha256="abc", allowed_tiers="ssd")
     io.bind_staged_reads(manifest_sha256=digest, allowed_tiers="ssd",
                          own_outputs=[tmp_path / "a"])
     again = io.bind_staged_reads(manifest_sha256=digest, allowed_tiers="ssd",
                                  own_outputs=[tmp_path / "b"])
     assert again.owns(tmp_path / "a" / "x") and again.owns(tmp_path / "b" / "y")
     with pytest.raises(io.PreparationReadRefused, match="already bound"):
-        io.bind_staged_reads(manifest_sha256="d" * 64, allowed_tiers="ram,ssd")
+        io.bind_staged_reads(manifest_sha256="d" * 64, allowed_tiers="ssd")
 
 
 def test_the_bound_reader_serves_read_bound_while_bound(tmp_path, monkeypatch):
