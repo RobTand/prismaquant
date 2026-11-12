@@ -69,6 +69,12 @@ from .layer_streaming import (
 )
 from .io_spans import mem_available_bytes
 from .source_prefetch import read_ahead_layer_files
+
+
+def read_ahead_source_files(weight_shard, layers_prefix, layers, seen):
+    """Page-cache read-ahead of the next layers' source files on the IO engine's pool (#3424)."""
+    from .io_engine import ENGINE
+    read_ahead_layer_files(weight_shard, layers_prefix, layers, seen, ENGINE.submit)
 from .source_read_plan import select_source_tensors, check_sealed_selection
 from .tied_embeddings import resolve_tied_output_embedding
 from .streaming_initialization import (
@@ -1232,7 +1238,7 @@ class StreamingContext:
         if (L >= last) != (step > 0):
             step, seen = -step, set()
         self._read_ahead = (L, step, seen)
-        read_ahead_layer_files(self.weight_shard, self.layers_prefix,
+        read_ahead_source_files(self.weight_shard, self.layers_prefix,
                                range(L + step, self.num_layers if step > 0 else -1, step), seen)
         # v20 step 3+4: value-aware retention. The historical
         # one-way-stream assumption (discard immediately after install)

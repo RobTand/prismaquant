@@ -71,14 +71,14 @@ def test_exhausted_or_unknown_auto_budget_never_starts_file_reads(tmp_path, monk
     assert reads == []
 
 
-def test_read_ahead_keeps_about_eight_files_ahead_and_starts_each_once(monkeypatch):
-    from prismaquant import io_engine, source_prefetch
+def test_read_ahead_keeps_about_eight_files_ahead_and_starts_each_once():
+    from prismaquant import source_prefetch
 
     started = []
-    monkeypatch.setattr(io_engine.ENGINE, "submit", lambda fn, paths: started.extend(paths))
+    submit = lambda fn, paths: started.extend(paths)  # noqa: E731
     shard = {f"model.layers.{L}.w{i}": f"s{2 * L + i}" for L in range(10) for i in range(2)}
     seen: set = set()
-    source_prefetch.read_ahead_layer_files(shard, "model.layers.", range(1, 10), seen)
+    source_prefetch.read_ahead_layer_files(shard, "model.layers.", range(1, 10), seen, submit)
     assert started == [f"s{n}" for n in range(2, 10)]
-    source_prefetch.read_ahead_layer_files(shard, "model.layers.", range(2, 10), seen)
+    source_prefetch.read_ahead_layer_files(shard, "model.layers.", range(2, 10), seen, submit)
     assert started[8:] == ["s10", "s11"]

@@ -187,9 +187,9 @@ def prefetch_files_to_page_cache(
     return stats
 
 
-def read_ahead_layer_files(weight_shard, layers_prefix, layers, seen, *, files=8):
+def read_ahead_layer_files(weight_shard, layers_prefix, layers, seen, submit, *, files=8):
     """Read the source files of ``layers``, in order, about ``files`` files
-    ahead, into the page cache on the IO engine's pool, one read per file.
+    ahead, into the page cache through ``submit`` (the caller's pool), one read per file.
     ``seen`` holds the files already started. ``mode="auto"`` skips a file
     when memory is short. One buffered stream reads 2.6-2.9 GB/s; 8 files in
     parallel 11.1-11.7 GB/s."""
@@ -202,11 +202,10 @@ def read_ahead_layer_files(weight_shard, layers_prefix, layers, seen, *, files=8
         window += sorted(by_layer.get(str(layer), set()).difference(window))
         if len(window) >= files:
             break
-    from .io_engine import ENGINE
     for path in window:
         if path not in seen:
             seen.add(path)
-            ENGINE.submit(partial(prefetch_files_to_page_cache, mode="auto", progress=False), [path])
+            submit(partial(prefetch_files_to_page_cache, mode="auto", progress=False), [path])
 
 
 def prefetch_safetensors_checkpoint(
