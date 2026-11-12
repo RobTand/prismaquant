@@ -254,6 +254,8 @@ _RENDER_SETTINGS: tuple[str, ...] = (
     "PRISMAQUANT_ACT_CLIP_QUANTILE",
     "PRODUCTION_CACHE_LEVERS",
     "PRODUCTION_CACHE_DISABLE_LEVERS",
+    # Every render reads act/ through --activation-cache-dir: random act/ must not key-match keyed act/.
+    "ACT_ROW_SELECTION",
 )
 
 # These CB_* / PRISMAQUANT_CB_* names are the retired codebook lane's producer
@@ -395,7 +397,7 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
     # produced that cache. Minutes to rebuild, so keying is generous.
     "cb-col-weights": _key_pairs(
         "MODEL_PATH", "DATASET", "NSAMPLES", "SEQLEN", "ACTIVATION_ROWS_LIMIT",
-        "CB_IMATRIX_SOURCE",
+        "CB_IMATRIX_SOURCE", "ACT_ROW_SELECTION",
     ),
     # --- production caches -------------------------------------------------
     "frontier-cache": _key_pairs(
