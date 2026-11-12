@@ -335,7 +335,7 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
             (json.loads(line) for line in head_query['query'].read_text().splitlines()), 'arm64')
     durations = {}
     timing_file = root / DURATIONS_PATH
-    if mode == 'pr' and decision['selection'] == 'fallback' and timing_file.is_file():
+    if mode == 'pr' and timing_file.is_file():
         files = json.loads(timing_file.read_text())['files']
         durations = {label: files[path] for label in population['tests']
                      if (path := label[2:].replace(':', '/') + '.py') in files}
@@ -354,8 +354,7 @@ def selection_manifest(decision, populations, *, hosted, base, head, mode,
     if (mode not in ('pr', 'main')
             or any(not re.fullmatch('[0-9a-f]{40}', revision) for revision in (base, head))):
         raise SelectionError('invalid manifest mode or source revisions')
-    fallback = mode == 'pr' and decision['selection'] == 'fallback'
-    shard_counts = {'amd64': 6 if fallback else 2, 'arm64': 4} if shard_counts is None else shard_counts
+    shard_counts = {'amd64': 6 if mode == 'pr' else 2, 'arm64': 4} if shard_counts is None else shard_counts
     hosted, hosted_arm64 = set(hosted), set(hosted_arm64)
     full = mode == 'main' or decision['selection'] == 'fallback'
     selected = set(decision.get('selected', ()))
@@ -383,7 +382,7 @@ def selection_manifest(decision, populations, *, hosted, base, head, mode,
         labels = population if full else action_requested
         try:
             shards = partition_population(labels, tests=tests & labels,
-                shard_count=shard_counts[architecture], durations=durations if fallback else None) if labels else []
+                shard_count=shard_counts[architecture], durations=durations) if labels else []
         except (GateError, KeyError) as error:
             raise SelectionError('cannot partition queried population') from error
         document['architectures'][architecture] = {
