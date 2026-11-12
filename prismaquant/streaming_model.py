@@ -2083,7 +2083,7 @@ def _prefetch_widening_note(*, max_cache_slots, cache_slots, memory_slots,
 
 def _build_streaming_context(model_path: str, *,
                              device: torch.device, dtype: torch.dtype,
-                             offload_folder: str,
+                             offload_folder: str, layers_per_shard: int,
                              cache_headroom_gb: float | None = None,
                              max_cache_slots: int | None = None,
                              prefetch_workers: int | str | None = None,
@@ -2103,35 +2103,12 @@ def _build_streaming_context(model_path: str, *,
     materialize only the always-resident head pieces. Decoder layers
     stay on meta until PrismaQuant streams them from safetensors.
 
-    `multimodal` is the CALLER's declaration that this run drives visual
-    inputs. When it is True:
-      - Stages via `stage_multimodal` (preserves vision_config).
-      - Instantiates via `config.architectures[0]` (declared arch) so the
-        visual tower actually materializes — bypasses
-        AutoModelForCausalLM's silent text-only downgrade.
-      - After the skeleton is built, materializes the head and visual
-        tower onto `device` (small — 2-3 GB even at 122B scale). Body
-        still streams.
-      - If `visual_requires_grad=True`, flips `.requires_grad_(True)` on
-        every visual Linear's weight so Fisher backward hooks fire when
-        `run_multimodal_visual_probe_pass` drives the combined forward
-        (pixel_values → visual_tower → merged inputs_embeds → streamed
-        body → lm_head → CE).
-
-    When `multimodal=False` (the default) the skeleton comes from
-    `AutoModelForCausalLM.from_config` exactly as before, except that a
-    top-level config the auto class cannot resolve at all — a
-    vision-language *wrapper* config — falls back to
-    `_resolve_text_only_skeleton` instead of raising.
-
-    A third case sits between them and is why the two axes are separate
-    locals. A family the pinned transformers gives no `<Arch>ForCausalLM`
-    route (`ModelProfile.requires_multimodal_skeleton()`, e.g. glm5_next)
-    cannot be CONSTRUCTED text-only, so the staging, skeleton class and
-    weight map flip to the multimodal ones below even for a text-only
-    caller. That flip says nothing about the run's inputs: the visual tower
-    stays on meta unless the caller asked for it. **No visual tensor is read
-    from the checkpoint unless `multimodal=True` was passed in.**
+    ``multimodal`` declares visual inputs. It stages the full configuration,
+    builds the declared architecture, and loads the visual tower onto device.
+    ``visual_requires_grad`` enables gradients on the visual Linears.
+    Text-only callers load no visual tensors, including profiles that require
+    a multimodal skeleton. Unresolved wrapper classes use the text-only resolver.
+    ``layers_per_shard`` is the caller's resolved count for cache headroom.
 
     ``source_snapshot_only`` requires authenticated source ownership. It keeps
     all nonbody state on meta and allows only a one-shot selected snapshot;
@@ -2445,7 +2422,7 @@ def _build_streaming_context(model_path: str, *,
               f"{num_layers} layers in {time.time()-t_res:.1f}s", flush=True)
 
         free_bytes = mem_available_bytes()
-        # Resolve headroom: env override > explicit arg > autoscale > legacy 75 GB default.
+        # Explicit headroom wins; otherwise use the environment or autoscaler.
         resolved_headroom_gb = cache_headroom_gb
         autoscale_diag = None
         if resolved_headroom_gb is None:
@@ -2457,8 +2434,7 @@ def _build_streaming_context(model_path: str, *,
                     from .autoscale import pick_cache_headroom_gb
                     resolved_headroom_gb, autoscale_diag = pick_cache_headroom_gb(
                         model_path,
-                        layers_per_shard=int(os.environ.get("LAYERS_PER_SHARD", "1") or 1)
-                            if str(os.environ.get("LAYERS_PER_SHARD", "")).isdigit() else 1,
+                        layers_per_shard=layers_per_shard,
                         nsamples=int(os.environ.get("NSAMPLES", "32")),
                         seqlen=int(os.environ.get("SEQLEN", "1024")),
                     )
@@ -2588,7 +2564,7 @@ def load_resident_source_model(model_path: str, *, device: torch.device,
     try:
         context = _build_streaming_context(
             model_path, device=device, dtype=dtype, offload_folder=offload_folder,
-            cache_headroom_gb=0, max_cache_slots=2, prefetch_workers=1,
+            cache_headroom_gb=0, layers_per_shard=1, max_cache_slots=2, prefetch_workers=1,
             prefetch_min_available_gb=0, attn_implementation=attn_implementation,
             resident_resource_check=resource_check)
         demand = context._resident_source_demand

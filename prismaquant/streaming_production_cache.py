@@ -1313,7 +1313,7 @@ def fill_production_weight_cache_streaming(
         model_path,
         device=device,
         dtype=dtype,
-        offload_folder=str(offload_folder),
+        offload_folder=str(offload_folder), layers_per_shard=1,
         log_prefix="[stream-prod-cache]",
     )
     try:
