@@ -36,13 +36,6 @@ def _curve_fixture(tmp_path, **overrides):
     return name, argv[1:cut]          # drop the "allocator" prog name and the SLO
 
 
-def _without_wall_clock(doc):
-    doc = json.loads(json.dumps(doc))
-    for point in doc["points"]:
-        point["solver"].pop("solver_seconds", None)
-    return doc
-
-
 def _run(tmp_path, own, allocator_argv):
     output = tmp_path / "frontier.json"
     code = prefill_frontier.main([*own, "--output", str(output), "--", *allocator_argv])
@@ -219,7 +212,7 @@ def test_ties_are_deterministic_and_lexical(tmp_path, monkeypatch):
     cut = argv.index("--slo-prefill-p95-ttft-ms")
     first = _run(tmp_path, ["--slo-grid", "4"], argv[1:cut])[1]
     second = _run(tmp_path, ["--slo-grid", "4"], argv[1:cut])[1]
-    assert _without_wall_clock(first) == _without_wall_clock(second)
+    assert first == second
     for point in first["points"]:
         if point["feasible"]:
             assert set(load_assignment(point["assignment_path"]).values()) == {"FP8_E4M3"}

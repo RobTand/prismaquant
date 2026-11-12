@@ -443,7 +443,7 @@ def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
         "assignment_sha256": None,
         "assignment_path": None,
         "solver": {key: diag.get(key) for key in (
-            "frontier_size", "transitions", "solver_seconds", "refusal",
+            "frontier_size", "transitions", "refusal",
             "refusal_detail", "prefill_slo_breakpoints_ms")},
     }
     if not record["feasible"]:

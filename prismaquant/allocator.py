@@ -3818,7 +3818,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     or (max_decode is not None and max_decode < 0)):
                 diag["reason"] = "fixed_runtime_resources_exceed_budget"
                 return None, float("nan"), float("inf"), float("inf")
-            start = _time.perf_counter()
             try:
                 frontier = solve_runtime_frontier(
                     candidates, measured_runtime_resources,
@@ -3836,13 +3835,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 # single solve keeps exiting, as before.
                 if measured_runtime_sweep is None:
                     raise SystemExit(f"[alloc] ERROR: measured runtime search: {exc}") from None
-                diag["solver_seconds"] = _time.perf_counter() - start
+                diag["solver_calls"] = 1
                 diag["reason"] = f"exact_search_refused:{diag.get('refusal')}"
                 diag["refusal_detail"] = str(exc)
                 return None, float("nan"), float("inf"), float("inf")
             except (ValueError, RuntimeError) as exc:
                 raise SystemExit(f"[alloc] ERROR: measured runtime search: {exc}") from None
-            diag["solver_seconds"] = _time.perf_counter() - start
+            diag["solver_calls"] = 1
             # The prefill values at which the lowest-loss proposal changes as
             # the prefill budget tightens: walk the loss-ordered frontier and
             # keep each new running minimum of operator-sum prefill. These are
@@ -3899,11 +3898,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             "exact_filter_trace": [],
         }
         _solve_diagnostics[round(requested_target, 9)] = outer_diag
-        solver_seconds_total = 0.0
         solver_calls = 0
         for attempt in range(16):
             proposal_diag: dict = {}
-            _solve_t0 = _time.perf_counter()
             assign, solver_achieved = solve_with_promotion(
                 stats,
                 candidates,
@@ -3916,12 +3913,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 profile=model_profile,
                 diagnostics=proposal_diag,
             )
-            # DP wall time, summed over the tightening retries this target
-            # needed. Stamped into the seed JSON so a continuous-menu run can
-            # be compared against a stock one without re-timing by hand.
-            solver_seconds_total += _time.perf_counter() - _solve_t0
             solver_calls += 1
-            outer_diag["solver_seconds"] = solver_seconds_total
             outer_diag["solver_calls"] = solver_calls
             outer_diag.update({
                 key: value
@@ -4309,15 +4301,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 assignment=assignment_expanded,
                 cost_data=cost_data),
             **({"solve_diagnostics": {
-                    str(k): {
-                        "solver_seconds": v.get("solver_seconds"),
-                        "solver_calls": v.get("solver_calls"),
-                    }
-                    for k, v in _solve_diagnostics.items()
-                    if isinstance(v, dict) and "solver_seconds" in v
-                }} if any(
-                    isinstance(v, dict) and "solver_seconds" in v
-                    for v in _solve_diagnostics.values()) else {}),
+                    str(k): {"solver_calls": v["solver_calls"]}
+                    for k, v in _solve_diagnostics.items() if "solver_calls" in v
+                }} if any("solver_calls" in v for v in _solve_diagnostics.values()) else {}),
             **propagated_cost_provenance(research_cost_provenance),
             **({"paired_rate_trade": paired_trade,
                 "cost_baseline_assignment_sha256": DIRECT_UTF8_STRICT.sha256(cost_baseline_assignment),
@@ -5963,19 +5949,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 menu_widths=tessera_menu_widths,
                 group_menu_report=tessera_group_menu_report,
                 dev_pin=tessera_dev_pin),
-            # DP wall time per solved target, summed over the tightening
-            # retries that target needed. `_solve_diagnostics` was previously
-            # read only by the infeasibility message, so the cost of a solve
-            # was invisible to anything that consumed the output; a continuous
-            # menu is exactly the case where that number stops being obvious.
+            # Solver work per solved target. No wall time: the file must be a
+            # function of its inputs, because run-pipeline digests it (#3404).
             "solve_diagnostics": {
-                str(k): {
-                    "solver_seconds": v.get("solver_seconds"),
-                    "solver_calls": v.get("solver_calls"),
-                    "evals": v.get("evals"),
-                }
-                for k, v in _solve_diagnostics.items()
-                if isinstance(v, dict) and "solver_seconds" in v
+                str(k): {"solver_calls": v["solver_calls"], "evals": v.get("evals")}
+                for k, v in _solve_diagnostics.items() if "solver_calls" in v
             },
             # Ultraplan P5c: which hard serving constraints were active, which
             # probed assignments the axis REJECTED and for which SLO, and
