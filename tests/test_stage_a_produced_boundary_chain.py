@@ -5,6 +5,7 @@ Native execution/dependency authority is proved by the recorded CPU controller.
 These fixtures exercise the actual tensor and IO owners without a scheduler.
 """
 import dataclasses
+import os
 from pathlib import Path
 import pytest
 import torch
@@ -133,7 +134,11 @@ def test_a_mutated_origin_is_refused_before_direct_publication(tmp_path, monkeyp
     refs = write_group(storage, count=1)
     path = Path(refs[0].path)
     content = path.read_bytes()
+    before = path.stat()
     path.write_bytes(content[:-1] + bytes([content[-1] ^ 255]))
+    # File timestamps use a coarse clock: a rewrite inside the same tick keeps
+    # the writer's stat identity. Move the timestamp so the mutation is visible.
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
     assert path.stat().st_size == refs[0].file_bytes
     with pytest.raises(RuntimeError, match='writer destination identity changed'):
         write_group(storage, count=GROUP_SIZE - 1, first=1)
