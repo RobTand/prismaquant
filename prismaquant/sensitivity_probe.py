@@ -2143,7 +2143,6 @@ class FisherAccumulator:
         self._input_snaps: dict[str, list[torch.Tensor]] = defaultdict(list)
         self._input_row_indices: dict[str, list[torch.Tensor]] = defaultdict(list)
         self._input_token_offsets: dict[str, int] = defaultdict(int)
-        self._rows_got: dict[str, int] = defaultdict(int)
         # Packed expert Fisher-trace accumulator: written by
         # _PackedLinearPerTokenFisher during backward (per-token-summed;
         # values may be device-resident 0-dim fp32 tensors), read in
@@ -2159,7 +2158,7 @@ class FisherAccumulator:
         # Per-experts-module activation snapshots, captured live so
         # measure_quant_cost can read packed expert inputs.
         self._packed_act_snaps: dict[str, list[torch.Tensor]] = defaultdict(list)
-        self._packed_act_rows: dict[str, int] = defaultdict(int)
+        self._packed_act_row_indices: dict[str, list[torch.Tensor]] = defaultdict(list)
         if model_profile is None:
             from .model_profiles import (
                 DeadVendoredOverrideError,
@@ -2444,22 +2443,16 @@ class FisherAccumulator:
                 experts_mod = model.get_submodule(experts_qname)
 
                 def _exp_fwd(_mod, inp, _out, _qn=experts_qname,
-                             _fulls=tuple(full_names), _x_acc=self._packed_act_snaps,
-                             _r=self._packed_act_rows):
+                             _fulls=tuple(full_names)):
                     x = inp[0] if isinstance(inp, tuple) else inp
                     if isinstance(x, torch.Tensor):
-                        flat = x.detach().reshape(-1, x.size(-1))
                         for full_name in _fulls:
-                            self._packed_sample_count[full_name] += int(flat.size(0))
+                            self._packed_sample_count[full_name] += (
+                                int(x.numel()) // int(x.size(-1)))
                         if act_cache_dir is not None:
-                            need = self.input_rows - _r[_qn]
-                            if need > 0:
-                                if flat.size(0) > need:
-                                    idx = torch.randperm(flat.size(0),
-                                                         device=flat.device)[:need]
-                                    flat = flat.index_select(0, idx)
-                                _x_acc[_qn].append(flat.to("cpu"))
-                                _r[_qn] += flat.size(0)
+                            self._keep_act_snapshot(
+                                self._packed_act_snaps,
+                                self._packed_act_row_indices, _qn, x)
 
                 self._fwd_handles.append(
                     experts_mod.register_forward_hook(_exp_fwd))
@@ -2545,22 +2538,18 @@ class FisherAccumulator:
                     stats["w_max_abs"] = float(wd.abs().max().item())
                     stats["w_norm_sq"] = float(wd.pow(2).sum().item())
             if self.cache_dir is not None:
-                need = self.input_rows - self._rows_got[name]
-                flat = x.detach().reshape(-1, x.size(-1))
-                base = int(self._input_token_offsets[name])
-                self._input_token_offsets[name] += int(flat.size(0))
-                if need > 0:
-                    if flat.size(0) > need:
-                        idx = torch.randperm(flat.size(0), device=flat.device)[:need]
-                        flat = flat.index_select(0, idx)
-                    else:
-                        idx = torch.arange(flat.size(0), device=flat.device)
-                    self._input_snaps[name].append(flat.to("cpu"))
-                    self._input_row_indices[name].append(
-                        (idx.detach().to("cpu", dtype=torch.long) + base)
-                    )
-                    self._rows_got[name] += flat.size(0)
+                self._keep_act_snapshot(
+                    self._input_snaps, self._input_row_indices, name, x)
         return hook
+
+    def _keep_act_snapshot(self, snaps, indices, name, x):
+        """Number each row of the call globally, then keep the keyed top-K."""
+        flat = x.detach().reshape(-1, x.size(-1))
+        base = self._input_token_offsets[name]
+        self._input_token_offsets[name] += int(flat.size(0))
+        rows = torch.arange(base, base + flat.size(0), device=flat.device)
+        probe_statistics.keep_act_rows(
+            snaps, indices, name, flat, rows, self.input_rows, to_cpu=True)
 
     def _make_grouped_bwd(self, name: str, num_groups: int):
         """Backward hook for a grouped-BMM operand (wo_a shape).
@@ -2875,31 +2864,19 @@ class FisherAccumulator:
 
         if self.cache_dir is not None:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            for name, snaps in self._input_snaps.items():
-                if not snaps:
-                    continue
-                X = torch.cat(snaps, dim=0).to(torch.bfloat16).contiguous()
-                row_parts = self._input_row_indices.get(name, [])
-                row_indices = (
-                    torch.cat(row_parts, dim=0).to(torch.long).contiguous()
-                    if row_parts else None
-                )
-                payload = {"inputs": X, "name": name}
-                if row_indices is not None and row_indices.numel() == X.shape[0]:
-                    payload["row_indices"] = row_indices
-                fname = re.sub(r"[^A-Za-z0-9_-]", "__", name) + ".pt"
-                torch.save(payload, self.cache_dir / fname)
-            # Also write packed-experts module input snapshots. We key
-            # these by the experts module qname (not the parameter name);
-            # measure_quant_cost looks for the same input regardless of
-            # which packed parameter is being measured.
-            for experts_qname, snaps in self._packed_act_snaps.items():
-                if not snaps:
-                    continue
-                X = torch.cat(snaps, dim=0).to(torch.bfloat16).contiguous()
-                fname = re.sub(r"[^A-Za-z0-9_-]", "__", experts_qname) + ".pt"
-                torch.save({"inputs": X, "name": experts_qname},
-                           self.cache_dir / fname)
+            # Packed-experts snapshots are keyed by the experts module
+            # qname: measure_quant_cost reads one input for every packed
+            # parameter of that module.
+            for snaps, indices in (
+                    (self._input_snaps, self._input_row_indices),
+                    (self._packed_act_snaps, self._packed_act_row_indices)):
+                for name, (X,) in snaps.items():
+                    fname = re.sub(r"[^A-Za-z0-9_-]", "__", name) + ".pt"
+                    torch.save({
+                        "inputs": X.to(torch.bfloat16).contiguous(),
+                        "name": name, "row_indices": indices[name][0],
+                        "row_selection": probe_statistics.ACT_ROW_SELECTION,
+                    }, self.cache_dir / fname)
 
         # Write per-layer Fisher H detail files (the full per-weight
         # diagonal for Linears, per-expert per-output-channel for packed
