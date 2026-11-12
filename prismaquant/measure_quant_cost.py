@@ -762,49 +762,33 @@ class ActivationIndex:
 # ---------------------------------------------------------------------------
 # Memory-pressure watchdog
 # ---------------------------------------------------------------------------
-def start_mem_watchdog(swap_grow_limit_mb: int = 256,
-                       min_mem_available_mb: int = 1024,
+def start_mem_watchdog(min_mem_available_mb: int = 1024,
                        interval_s: float = 2.0):
     """Background thread that aborts the process if memory pressure rises.
 
-    Triggers a hard abort when either:
-      - swap used grows by more than `swap_grow_limit_mb` vs. the baseline
-        captured at watchdog start
-      - MemAvailable drops below `min_mem_available_mb`
+    Triggers a hard abort when host MemAvailable drops below
+    `min_mem_available_mb`. On GB10 the job's GPU memory is not charged to its
+    cgroup, so this host-wide floor is what stops a GPU-side runaway.
 
     The abort uses `os._exit(3)` after printing a diagnostic to stderr,
     bypassing any Python-level cleanup that could itself allocate memory.
     Returns the running :class:`io_spans.PeriodicSampler`.
     """
     baseline = io_spans.read_meminfo()
-    swap_baseline = baseline.get("SwapTotal", 0) - baseline.get("SwapFree", 0)
 
     def check():
         try:
-            info = io_spans.read_meminfo()
-            swap_used = info.get("SwapTotal", 0) - info.get("SwapFree", 0)
-            mem_avail = info.get("MemAvailable", 0)
-            swap_grow_mb = (swap_used - swap_baseline) / (1024 * 1024)
-            mem_avail_mb = mem_avail / (1024 * 1024)
-            if swap_grow_mb > swap_grow_limit_mb:
-                print(f"\n[watchdog] ABORT: swap grew {swap_grow_mb:.0f} MB "
-                      f"(limit {swap_grow_limit_mb} MB). "
-                      f"MemAvailable={mem_avail_mb:.0f} MB",
-                      flush=True)
-                os._exit(3)
+            mem_avail_mb = io_spans.read_meminfo().get("MemAvailable", 0) / (1024 * 1024)
             if mem_avail_mb < min_mem_available_mb:
                 print(f"\n[watchdog] ABORT: MemAvailable={mem_avail_mb:.0f} MB "
-                      f"< floor {min_mem_available_mb} MB. "
-                      f"swap_grow={swap_grow_mb:.0f} MB",
+                      f"< floor {min_mem_available_mb} MB.",
                       flush=True)
                 os._exit(3)
         except Exception:
             pass
 
     t = io_spans.PeriodicSampler(check, interval_s=interval_s, name="mem-watchdog").start()
-    print(f"[watchdog] armed: swap_grow_limit={swap_grow_limit_mb}MB "
-          f"min_mem_avail={min_mem_available_mb}MB interval={interval_s}s  "
-          f"baseline swap_used={swap_baseline//(1024*1024)}MB "
+    print(f"[watchdog] armed: min_mem_avail={min_mem_available_mb}MB interval={interval_s}s  "
           f"mem_avail={(baseline.get('MemAvailable', 0))//(1024*1024)}MB",
           flush=True)
     return t
