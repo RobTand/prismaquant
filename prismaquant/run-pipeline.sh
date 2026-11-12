@@ -126,6 +126,7 @@ if [[ "$EXPORT_CONTAINER" == "nvfp4_cb" ]]; then
   echo "[pipeline] ERROR: EXPORT_CONTAINER=nvfp4_cb is RETIRED. The Gridbook codebook serving lane was removed on 2026-09-02; see archive/gridbook_lane_2026-09-02/README.md. Use compressed-tensors, gguf, or the Tessera lane." >&2
   exit 2
 fi
+[[ -z "${WALK_GATE_EXECUTION:-}" ]] || { echo "[pipeline] ERROR: WALK_GATE_EXECUTION was removed (#3415): [3d] meta-loads the model, so it runs only the fake trace. For a real forward, run python3 -m prismaquant.model_walk --execution real --materialize as a separate gate job." >&2; exit 2; }
 # Tessera lane knobs. TESSERA_REPO is where the pinned release's checkout
 # lives: PrismaQuant NAMES Tessera's own plan translator and exporter rather
 # than vendoring either (the same "named, not copied" boundary
@@ -1084,7 +1085,7 @@ if [[ "$COST_MODE" == "aura" ]]; then
 fi
 echo "  EXPORT_GPTQ=$EXPORT_GPTQ EXPORT_SCALE_SWEEP=$EXPORT_SCALE_SWEEP"
 echo "  PIPELINE_SPEC_PATH=$PIPELINE_SPEC_PATH"
-echo "  WALK_GATE_EXECUTION=${WALK_GATE_EXECUTION:-auto->fake} WALK_GATE_SEQLEN=${WALK_GATE_SEQLEN:-8} PRISMAQUANT_WALK_GATE_OVERRIDE=${PRISMAQUANT_WALK_GATE_OVERRIDE:+<set>}"
+echo "  WALK_GATE_SEQLEN=${WALK_GATE_SEQLEN:-8} PRISMAQUANT_WALK_GATE_OVERRIDE=${PRISMAQUANT_WALK_GATE_OVERRIDE:+<set>}"
 echo "  PRISMAQUANT_NVFP4_SCALE_RULE=${PRISMAQUANT_NVFP4_SCALE_RULE:-static_6}"
 echo "  PRODUCTION_CACHE_LRU_GB=$PRODUCTION_CACHE_LRU_GB PRODUCTION_CACHE_PREFETCH=$PRODUCTION_CACHE_PREFETCH"
 echo "  VALIDATED_FRONTIER_SKIP_CALIB=$VALIDATED_FRONTIER_SKIP_CALIB VALIDATED_FRONTIER_DATASET=$VALIDATED_FRONTIER_DATASET"
@@ -2286,7 +2287,7 @@ if [[ "$COST_MODE" == "aura" && "$AURA_ADDITIVITY_GATE" != "0" \
       2>&1 | tee "${WORK_DIR}/logs/aura_additivity.log" || \
       echo "[pipeline] [3c] WARNING: additivity report failed (non-blocking)"
   else
-    echo "[pipeline] [3c] AURA additivity report: no measured end-KL in this run (SELECTION_MODE=${SELECTION_MODE}); recording the predicted sum only. Set AURA_ADDITIVITY_GATE=measure for the residual."
+    echo "[pipeline] [3c] AURA additivity report: no measured end-KL in this run (AURA_ADDITIVITY_GATE=${AURA_ADDITIVITY_GATE}, SELECTION_MODE=${SELECTION_MODE}); recording the predicted sum only. Under measure, logs/aura_additivity_kl.log says why the measurement did not complete."
     python3 - "$COST_PATH" "${WORK_DIR}/artifacts/layer_config.json" "$AURA_ADDITIVITY_JSON" <<'PY' || \
       echo "[pipeline] [3c] WARNING: additivity report failed (non-blocking)"
 import json
@@ -2368,17 +2369,15 @@ fi
 # reasons in ModelProfile.walk_claim_rules(), not waived at export time.
 # -----------------------------------------------------------------------
 : "${WALK_GATE_SEQLEN:=8}"
-# auto->fake: the fake trace is the intended cheap path; an abort becomes a
-# structured incomplete-trace refusal (override env or --execution real via a
-# manual gate run), never a silent pass.
-: "${WALK_GATE_EXECUTION:=fake}"
+# The fake trace is the only in-pipeline path; an abort becomes a structured
+# incomplete-trace refusal (override env, or a manual real-execution gate job).
 : "${PRISMAQUANT_WALK_GATE_OVERRIDE:=}"
 MODEL_WALK_REPORT="${WORK_DIR}/artifacts/model_walk.json"
 echo "[pipeline] [3d] discovery-walker export gate ..."
 WALK_GATE_ARGS=(
   python3 -m prismaquant.model_walk
   --model "$MODEL_PATH"
-  --execution "$WALK_GATE_EXECUTION"
+  --execution fake
   --seq-len "$WALK_GATE_SEQLEN"
   --output "$MODEL_WALK_REPORT"
 )
