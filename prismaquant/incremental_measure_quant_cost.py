@@ -1008,7 +1008,6 @@ def main():
                          "experts keep the current export-faithful packed "
                          "measurement path.")
     ap.add_argument("--chunk-size", type=int, default=256)
-    ap.add_argument("--swap-grow-limit-mb", type=int, default=256)
     ap.add_argument("--min-mem-available-mb", type=int, default=2048)
     ap.add_argument("--no-watchdog", action="store_true")
     ap.add_argument("--layers-per-shard", default="1",
@@ -1214,13 +1213,8 @@ def main():
             offload_folder=offload_folder, layers_per_shard=args.layers_per_shard,
             log_prefix="[incremental-cost]",
         )
-        # Watchdog is armed AFTER model skeleton is up — baseline is the
-        # post-context state, so the trigger reflects measurement-phase
-        # growth only (e.g. a leak in the activation cache path), not
-        # transient churn from skeleton build / layer install.
         if not args.no_watchdog:
             start_mem_watchdog(
-                swap_grow_limit_mb=args.swap_grow_limit_mb,
                 min_mem_available_mb=args.min_mem_available_mb,
             )
         ctx = ctx_local
