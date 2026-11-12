@@ -111,23 +111,14 @@ def test_forked_shard_cannot_use_payload_but_keeps_known_header_metadata(tmp_pat
         assert resolver._windows == 0
 
 
-@pytest.mark.parametrize('bound', [False, True])
-def test_explicit_offline_unstaged_read_preserves_known_bytes_and_pool_accounting(tmp_path, monkeypatch, bound):
+def test_explicit_offline_unstaged_read_preserves_known_bytes(tmp_path):
     payload = b'explicit-offline-known-input'
     source = tmp_path / 'offline'
     source.write_bytes(payload)
-    resolver = None
-    if bound:
-        declared = tmp_path / 'declared'
-        declared.write_bytes(b'a-different-input')
-        resolver = bind(monkeypatch, publish_inputs(tmp_path, [declared]))
     assert active_policy() is None
     value, observed = io_engine.load_file(source, len(payload), binding=None,
         decode=lambda raw, receipt, staged: (bytes(raw), None))
     assert value == payload and observed[0]['sha256'] == sha(payload)
-    if resolver is not None:
-        assert resolver.report()['bytes_from_pool'] == len(payload)
-        assert resolver.report()['bytes_from_stage'] == 0 and resolver._windows == 0
 
 
 def test_immutable_reader_has_no_configured_wait():

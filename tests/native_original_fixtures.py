@@ -5,7 +5,6 @@ import pytest
 
 from prismaquant import residency_map, stage_b_prep_io
 from prismaquant.staged_manifest import materialize
-from staged_native_fixtures import bind
 
 
 @pytest.fixture(autouse=True)
@@ -15,6 +14,25 @@ def _forget_state(monkeypatch):
     yield
     residency_map.reset_residency_resolver_for_tests()
     stage_b_prep_io.reset_staged_reads_for_tests()
+
+
+def _bind_without_policy(monkeypatch, binding):
+    """Install a resolver with no staged-tier policy (test-only partial state).
+
+    These fixtures serve original material from the stage, but read their
+    calibration and campaign inputs from the pool. Native launch never builds
+    this state, and residency_resolver() refuses it. Build it directly.
+    """
+    for name, value in (('PRISMAQUANT_STAGED_MANIFEST', binding['path']),
+                        ('PRISMAQUANT_STAGED_MANIFEST_SHA256', binding['sha256']),
+                        ('PRISMAQUANT_READ_CONTRACT_SHA256', binding['read_contract_sha256']),
+                        ('PRISMAQUANT_READ_CONTRACT_PATH', binding['read_contract_path'])):
+        monkeypatch.setenv(name, value)
+    residency_map.reset_residency_resolver_for_tests()
+    residency_map._RESOLVER = residency_map.ResidencyResolver(
+        binding['path'], manifest_sha256=binding['sha256'],
+        read_contract_sha256=binding['read_contract_sha256'])
+    return residency_map._RESOLVER
 
 
 def _stage_manifest(tmp_path, monkeypatch, manifest):
@@ -45,6 +63,6 @@ def _stage_manifest(tmp_path, monkeypatch, manifest):
         artifact.chmod(0o644)
     binding = {'schema': 'prismaquant.staged_launch.v1', 'path': str(filename), 'sha256': digest,
                'read_contract_path': str(contract), 'read_contract_sha256': identity, 'allowed_tiers': 'ssd'}
-    resolver = bind(monkeypatch, binding)
+    resolver = _bind_without_policy(monkeypatch, binding)
     return {entry['path']: resolver.staged_read(Path(entry['path']))['stage_path']
             for entry in manifest['entries']}

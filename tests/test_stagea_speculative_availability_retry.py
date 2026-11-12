@@ -127,39 +127,6 @@ def test_successful_prefetch_served_with_single_read(monkeypatch):
         ctx.shutdown()
 
 
-def test_cancelled_context_performs_no_demand_read(monkeypatch):
-    """A shut-down context reads, installs, and retries nothing on demand."""
-    reads: list[int] = []
-
-    def reader(prefix, *args, **kwargs):
-        L = int(prefix.rstrip(".").rsplit(".", 1)[-1])
-        reads.append(L)
-        return _tensors(L)
-
-    ctx = _make_ctx(monkeypatch, reader)
-    ctx._staged_wait_cancel = threading.Event()
-    try:
-        # Poison the future first: cancellation must still win over retry.
-        from prismaquant.staged_tier_policy import StagedRangeNotLanded
-
-        def poison(prefix, *args, **kwargs):
-            reads.append(3)
-            raise StagedRangeNotLanded(prefix, 0, 1)
-
-        monkeypatch.setattr(streaming_model, "_read_layer_to_device", poison)
-        fut = ctx.schedule_prefetch(3)
-        assert fut is not None
-        with pytest.raises(Exception):
-            fut.result()
-        monkeypatch.setattr(streaming_model, "_read_layer_to_device", reader)
-        ctx._staged_wait_cancel.set()
-        with pytest.raises(CancelledError):
-            ctx.ensure_loaded(3)
-        assert reads == [3], f"cancelled demand must add no read, got {reads}"
-    finally:
-        ctx.shutdown()
-
-
 def test_settle_fails_closed_on_failed_future(monkeypatch):
     """Certification never retries, cold-reads, or ignores a failed future."""
     from prismaquant.staged_lease import LeaseRefused

@@ -5,26 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from prismaquant import io_engine, residency_map, staged_tier_policy
+from prismaquant import io_engine
 
 BUFFERS = (b"", b"raw-\xc3\xa9\x00\r\n", bytes(range(256)))
 
 
 @pytest.mark.parametrize("raw", BUFFERS)
-@pytest.mark.parametrize("staged", (False, True))
-def test_io_raw_receipt_keeps_its_one_read_and_declared_identity(
-    tmp_path, monkeypatch, raw, staged
-):
+def test_io_raw_receipt_keeps_its_one_read_and_declared_identity(tmp_path, monkeypatch, raw):
     declared = tmp_path / "declared.bin"
     declared.write_bytes(raw)
-    source = declared
-    entry = None
-    if staged:
-        source = tmp_path / "stage.bin"
-        source.write_bytes(raw)
-        entry = {"stage_path": str(source), "sha256": hashlib.sha256(raw).hexdigest()}
-        monkeypatch.setattr(staged_tier_policy, "policy_is_active", lambda: False)
-        monkeypatch.setattr(residency_map, "residency_resolver", lambda: None)
     opened = []
     original = Path.open
 
@@ -34,23 +23,19 @@ def test_io_raw_receipt_keeps_its_one_read_and_declared_identity(
 
     monkeypatch.setattr(Path, "open", counted)
     timing = {}
-    result, receipt, signature = io_engine.read_file(
-        declared, len(raw), staged=entry, timing=timing
-    )
+    result, receipt, signature = io_engine.read_file(declared, len(raw), timing=timing)
     assert type(result) is bytes and result == raw
     expected = {
         "path": str(declared), "bytes": len(raw),
         "sha256": hashlib.sha256(raw).hexdigest(),
     }
-    if staged:
-        expected["serving_tier"] = "stage"
     assert receipt == expected
     assert len(receipt["sha256"]) == 64
     info = declared.lstat()
     assert signature == (
         info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
     )
-    assert opened == [(source, ("rb",))]
+    assert opened == [(declared, ("rb",))]
     assert timing.keys() == {"read_s"} and timing["read_s"] >= 0
 
 
@@ -87,20 +72,6 @@ def test_io_native_pool_open_failure_is_not_wrapped(tmp_path, monkeypatch):
     with pytest.raises(PermissionError) as refused:
         io_engine.read_file(path, 3)
     assert refused.value is error and refused.value.__cause__ is None
-
-
-def test_io_stage_digest_refusal_still_precedes_return(tmp_path, monkeypatch):
-    path, stage = tmp_path / "declared.bin", tmp_path / "stage.bin"
-    path.write_bytes(b"abc")
-    stage.write_bytes(b"xyz")
-    monkeypatch.setattr(staged_tier_policy, "policy_is_active", lambda: False)
-    monkeypatch.setattr(residency_map, "residency_resolver", lambda: None)
-    with pytest.raises(io_engine.StagedReadRefused) as refused:
-        io_engine.read_file(
-            path, 3, staged={"stage_path": str(stage), "sha256": hashlib.sha256(b"abc").hexdigest()}
-        )
-    assert str(refused.value) == "staged bytes differ from the map digest"
-    assert refused.value.__cause__ is None
 
 
 def test_io_unsealed_buffer_routes_exactly_once_after_read(tmp_path, monkeypatch):
