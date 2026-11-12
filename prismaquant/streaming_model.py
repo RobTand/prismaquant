@@ -68,6 +68,7 @@ from .layer_streaming import (
     set_module_tensor_to_device,
 )
 from .io_spans import mem_available_bytes
+from .source_prefetch import read_ahead_layer_files
 from .source_read_plan import select_source_tensors, check_sealed_selection
 from .tied_embeddings import resolve_tied_output_embedding
 from .streaming_initialization import (
@@ -1226,6 +1227,13 @@ class StreamingContext:
         # Re-derive the lookahead window now that this layer's slot is free.
         if prefetch_following:
             self._top_up_prefetch(L)
+        # Page-cache read-ahead in the sweep direction needs no cache slot (#3424).
+        last, step, seen = getattr(self, "_read_ahead", (-1, 1, set()))
+        if (L >= last) != (step > 0):
+            step, seen = -step, set()
+        self._read_ahead = (L, step, seen)
+        read_ahead_layer_files(self.weight_shard, self.layers_prefix,
+                               range(L + step, self.num_layers if step > 0 else -1, step), seen)
         # v20 step 3+4: value-aware retention. The historical
         # one-way-stream assumption (discard immediately after install)
         # is wrong for multi-shard workloads where every phase-3 shard
