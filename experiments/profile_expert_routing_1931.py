@@ -38,8 +38,11 @@ def _write(path, value):
         handle.write(json.dumps(value, indent=2, allow_nan=False) + '\n')
         handle.flush(); os.fsync(handle.fileno())
     os.replace(temporary,path)
-    from prismaquant.prismasnap_checkpoint import _fsync_dir
-    _fsync_dir(path.parent)
+    descriptor = os.open(path.parent, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _test_module(filename, name):
