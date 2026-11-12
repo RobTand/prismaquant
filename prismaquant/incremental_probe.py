@@ -2604,7 +2604,7 @@ def _validate_precompute_cache_payload(
         or not activations
         or any(
             not isinstance(value, torch.Tensor)
-            or value.ndim != 3
+            or value.ndim not in (3, 4)
             or not torch.is_floating_point(value)
             or tuple(value.shape[:2]) != tuple(ids.shape)
             or not bool(torch.isfinite(value).all().item())
