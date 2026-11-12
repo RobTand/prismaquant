@@ -63,7 +63,7 @@ queue_rules:
     merge_method: merge
     batch_size: 1
     max_checks_retries: 0
-    checks_timeout: 30 minutes
+    checks_timeout: 90 minutes
   - name: default
     queue_conditions:
       - base = main
@@ -84,7 +84,7 @@ queue_rules:
       max: 7
     batch_max_wait_time: 10 minutes
     max_checks_retries: 0
-    checks_timeout: 30 minutes
+    checks_timeout: 90 minutes
 
 priority_rules:
   - name: release changes first
