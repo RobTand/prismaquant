@@ -115,6 +115,13 @@ not qualify native enforcement: native submission refuses unsupported requiremen
 Capture chains emit no queue priority field and refuse an explicit nonzero priority.
 GPU rows use the same native resource and allocation checks as CPU rows.
 
+As of: 2026-11-12, Refs #3421. Source: `prismaquant/staged_tier_policy.py`,
+`prismaquant/staged_lease.py`. The only staged tier is `ssd`. `--allowed-tiers`
+accepts only `ssd`, and every emitter writes `ssd`. The `ram` tier, the
+`ssd-not-allowed` refusal and the `tier` argument of
+`staged_lease.acquire_entries_window` are removed. Test scopes do not narrow.
+Dated entries below that describe a RAM tier or a `ram,ssd` policy are historical.
+
 The dated entries below preserve earlier designs and measurements. Their
 execution-service descriptions are historical; this section and §7.0.2 describe
 the current native route. CLI descriptions and placement errors name admitted

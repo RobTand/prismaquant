@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import threading
 
-from .staged_tier_policy import TierPolicyRefused, tier_is_allowed
+from .staged_tier_policy import TierPolicyRefused
 from .residency_map import residency_map_key
 
 class LeaseRefused(TierPolicyRefused):
@@ -144,9 +144,7 @@ class LeaseWindow:
         return False
 
 
-def acquire_entries_window(resolver, items, *, tier):
-    if tier != 'ssd' or not tier_is_allowed('ssd'):
-        raise LeaseRefused(f'{tier}-not-allowed', kind='availability')
+def acquire_entries_window(resolver, items):
     items = list(items)
     if not items:
         raise ValueError('nonempty staged window required')
@@ -155,7 +153,7 @@ def acquire_entries_window(resolver, items, *, tier):
 
 
 def acquire_entry_window(resolver, declared, entry):
-    window, keys = acquire_entries_window(resolver, [(declared, entry)], tier='ssd')
+    window, keys = acquire_entries_window(resolver, [(declared, entry)])
     return window, keys[0]
 
 
@@ -177,7 +175,7 @@ def exact_lease_counters():
 def enter_group_lease(entry_resolver, members, live_windows, counters=None):
     counters = EXACT_LEASE_COUNTERS if counters is None else counters
     window, keys = acquire_entries_window(entry_resolver,
-        [(ref.path, staged) for ref, staged in members], tier='ssd')
+        [(ref.path, staged) for ref, staged in members])
     window.__enter__()
     live_windows.append(window)
     counters['windows_batched'] += 1

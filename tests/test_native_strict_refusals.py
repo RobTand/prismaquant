@@ -17,31 +17,16 @@ from test_native_strict_app_consumers import _checkpoint
 pytestmark = pytest.mark.usefixtures('native_staged_state')
 
 
-@pytest.mark.parametrize('tiers', ['ram', 'ssd'])
-def test_native_undeclared_input_never_uses_existing_canonical_payload(tmp_path, monkeypatch, tiers):
+def test_native_undeclared_input_never_uses_existing_canonical_payload(tmp_path, monkeypatch):
     source = tmp_path / 'canonical'
     source.write_bytes(b'existing-but-undeclared')
     other = tmp_path / 'declared'
     other.write_bytes(b'only-admitted-input')
     resolver = bind(monkeypatch, publish_inputs(tmp_path, [other]))
     opened = _forbid_source(monkeypatch, source)
-    with staged_tier_policy_test_context(tiers):
+    with staged_tier_policy_test_context('ssd'):
         with pytest.raises(TierPolicyRefused):
             read_staged_whole_file(source, sha(b'existing-but-undeclared'), label='undeclared')
-    assert opened == [] and resolver._windows == 0
-    assert resolver.report()['bytes_from_pool'] == resolver.report()['bytes_from_stage'] == 0
-
-
-def test_ram_only_scope_cannot_adopt_native_ssd_material(tmp_path, monkeypatch):
-    source = tmp_path / 'wire'
-    raw = b'known-declared-ssd-wire'
-    source.write_bytes(raw)
-    resolver = bind(monkeypatch, publish_inputs(tmp_path, [source]))
-    opened = _forbid_source(monkeypatch, source)
-    with staged_tier_policy_test_context('ram'):
-        with pytest.raises(TierPolicyRefused, match='ssd-not-allowed'):
-            _read_verified_wire_blob({'wire': str(source),
-                'record': {'blob_bytes': len(raw), 'blob_sha256': sha(raw)}})
     assert opened == [] and resolver._windows == 0
     assert resolver.report()['bytes_from_pool'] == resolver.report()['bytes_from_stage'] == 0
 

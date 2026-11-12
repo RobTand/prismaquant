@@ -151,7 +151,7 @@ def test_a_leaks_state_into_modules_it_loads_itself():
     PRISTINE.update(registered=list(registry._REGISTERED),
                     generation=registry._REGISTRY_GENERATION,
                     order=registry._DETECTION_ORDER_CACHE)
-    policy.activate_staged_tier_policy("ram")
+    policy.activate_staged_tier_policy("ssd")
     served._ACTIVE_SERVED_QUANTIZER = object()
     served._RESOLVED_SERVED_QUANTIZER = object()
     registry._REGISTERED.append(object)
