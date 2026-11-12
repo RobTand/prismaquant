@@ -122,6 +122,19 @@ accepts only `ssd`, and every emitter writes `ssd`. The `ram` tier, the
 `staged_lease.acquire_entries_window` are removed. Test scopes do not narrow.
 Dated entries below that describe a RAM tier or a `ram,ssd` policy are historical.
 
+As of: 2026-11-12, Refs #3421. Source: `prismaquant/residency_map.py`,
+`prismaquant/residency_shard_reader.py`, `prismaquant/io_engine.py`,
+`prismaquant/perturbed_x_cache.py`, `prismaquant/tessera_joint_aura.py`,
+`prismaquant/streaming_model.py`. `residency_resolver()` refuses a staged manifest
+when no staged-tier policy is active. Thus every staged reader is strict: it reads
+only declared immutable extents and refuses instead of a pool read. Without a
+manifest, plain runs read the pool as before. The resolver answers only `hit` or
+`undeclared`. These items are removed: the dynamic residency-map stubs, the `ram`
+serving branches, `StagedRangeNotLanded` and its one prefetch retry, the landing
+re-lookup after a miss, and the `published=` argument of `await_staged_spans`.
+Dated entries below that describe a dynamic residency map, a landing wait or a
+prefetch availability retry are historical.
+
 The dated entries below preserve earlier designs and measurements. Their
 execution-service descriptions are historical; this section and §7.0.2 describe
 the current native route. CLI descriptions and placement errors name admitted

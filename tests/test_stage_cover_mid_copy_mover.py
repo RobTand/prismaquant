@@ -11,7 +11,7 @@ import pytest
 
 from prismaquant.residency_map import StagedReadRefused
 from prismaquant.residency_shard_reader import await_staged_spans
-from prismaquant.staged_lease import acquire_entry_window, stage_covers_are_published
+from prismaquant.staged_lease import acquire_entry_window
 from prismaquant.staged_manifest import load_staged_manifest
 from prismaquant.staged_tier_policy import staged_tier_policy_test_context
 from staged_native_fixtures import bind, native_staged_state, publish_inputs
@@ -56,9 +56,6 @@ def test_published_inputs_serve_both_known_extents(tmp_path, monkeypatch):
     resolver, paths, _manifest = _inputs(tmp_path, monkeypatch)
     assert _read(resolver, paths[0], len(HEADER)) == HEADER
     assert _read(resolver, paths[1], len(BODY)) == BODY
-    items = [(p, resolver.staged_range(p, 0, size))
-             for p, size in zip(paths, [len(HEADER), len(BODY)])]
-    assert stage_covers_are_published(resolver, items)
     assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0
 
 

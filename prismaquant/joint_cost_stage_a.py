@@ -1935,7 +1935,7 @@ def run_adjoint_capture_core(
                     if callable(settle):
                         # Still in the chain's admitted source-loading
                         # window, before any backward workspace is opened.
-                        settle(successors, retry_availability=True)
+                        settle(successors)
                     elif torch.device(runner.device).type == "cuda":
                         raise RuntimeError(
                             "render-free chain requires source prefetch settlement")

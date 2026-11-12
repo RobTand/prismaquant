@@ -18,25 +18,8 @@ class LeaseRefused(TierPolicyRefused):
         self.reason, self.kind = reason, kind
 
 
-def classify_refusal(reason):
-    return 'availability' if str(reason).split(':', 1)[0] in {
-        'unpublished', 'stale-epoch', 'retiring', 'file-missing',
-        'ram-not-offered', 'ram-not-allowed', 'ssd-not-allowed'} else 'integrity'
-
-
-_classify = classify_refusal
-
-
 class ReadsetUnbound(RuntimeError):
     pass
-
-
-def lease_helper_root():
-    return None
-
-
-def resolve_sealed_readset(*, env=None):
-    raise ReadsetUnbound('unit4 legacy claim/CAS launch authority is unqualified; use explicit staged manifest')
 
 
 def load_sealed_manifest(bound_manifest_sha256):
@@ -64,11 +47,6 @@ def load_sealed_readset(bound_manifest_sha256):
     return resolver.declared_readset()
 
 
-def load_sealed_read_order(bound_manifest_sha256):
-    return [(path, start, end) for path, spans in load_sealed_readset(bound_manifest_sha256).items()
-            for start, end in spans]
-
-
 class LeaseWindow:
     def __init__(self, resolver, entries):
         self.resolver, self.entries = resolver, dict(entries)
@@ -76,7 +54,6 @@ class LeaseWindow:
         self._entered = self._exited = False
         self._fds = {}
         self._lock = threading.RLock()
-        self.serving_tier = 'stage'
 
     def _require_owner(self):
         if os.getpid() != self._owner_pid:
@@ -155,14 +132,6 @@ def acquire_entries_window(resolver, items):
 def acquire_entry_window(resolver, declared, entry):
     window, keys = acquire_entries_window(resolver, [(declared, entry)])
     return window, keys[0]
-
-
-def stage_cover_is_published(resolver, declared, entry):
-    return entry.get('_resolver') is resolver
-
-
-def stage_covers_are_published(resolver, items):
-    return all(stage_cover_is_published(resolver, path, e) for path, e in items)
 
 
 EXACT_LEASE_COUNTERS = dict(windows_batched=0, entries_batched=0, entries_single=0, batch_fallbacks=0)

@@ -274,10 +274,6 @@ ALLOWLIST = {
     ("prismaquant/stage_a_chain_split.py", "read_partial"): (
         2, INTEGRITY, "a partial's manifest reproduces its own bytes and seal; its pack "
         "against the size and digest its row names"),
-    ("prismaquant/tessera_joint_aura.py", "_read_verified_wire_blob"): (
-        1, INTEGRITY, "staged wire bytes against the receipt digest"),
-    ("prismaquant/tessera_joint_aura.py", "_read_wire_bytes"): (
-        1, INTEGRITY, "staged wire bytes against the receipt digest"),
     ("tools/dispatch_joint_quanta.py", "_admit_dispatch_pilots"): (
         2, INTEGRITY, "pilot counters and independently reviewed source-contract bytes against "
         "their operator-bound digests (#1293); source/regime/shape admission is explicitly overridable"),

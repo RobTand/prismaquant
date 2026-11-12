@@ -317,19 +317,17 @@ def _drop_client_cache(resolver, paths) -> int:
     done = 0
     for path in paths:
         staged = resolver.staged_read(Path(path))
-        for copy in (() if staged is None else
-                     (staged.get("ram_path"), staged.get("stage_path"))):
-            if not copy:
-                continue
-            try:
-                fd = os.open(copy, os.O_RDONLY | os.O_CLOEXEC)
-            except OSError:
-                continue
-            try:
-                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
-                done += 1
-            finally:
-                os.close(fd)
+        if staged is None:
+            continue
+        try:
+            fd = os.open(staged["stage_path"], os.O_RDONLY | os.O_CLOEXEC)
+        except OSError:
+            continue
+        try:
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+            done += 1
+        finally:
+            os.close(fd)
     return done
 
 

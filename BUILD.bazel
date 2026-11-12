@@ -8878,7 +8878,7 @@ pq_py_library(
     data = [
         ":files/prismaquant/data",
         ":files/prismaquant/lane_specs",
-        ":files/prismaquant/model_profiles",
+        ":files/prismaquant/model_profiles/specs",
         ":files/prismaquant/serving_profile_specs",
         ":files/prismaquant/tessera_runtime",
         "README.md",
@@ -8888,10 +8888,6 @@ pq_py_library(
         "prismaquant/aura_cost.py",
         "prismaquant/aura_provenance.py",
         "prismaquant/container_runtime_identity.py",
-        "prismaquant/cost_stage_checkpoint.py",
-        "prismaquant/cost_streaming.py",
-        "prismaquant/digests.py",
-        "prismaquant/export_native_compressed.py",
         "prismaquant/joint_adjoint_checkpoints.py",
         "prismaquant/joint_aura_retained_budget_transition.py",
         "prismaquant/joint_aura_run_transition.py",
@@ -8900,6 +8896,7 @@ pq_py_library(
         "prismaquant/joint_layer_quanta.py",
         "prismaquant/joint_price_step.py",
         "prismaquant/lane_spec.py",
+        "prismaquant/model_profiles/structure.py",
         "prismaquant/model_walk.py",
         "prismaquant/native_moe_panel.py",
         "prismaquant/production_weight_cache.py",
@@ -9283,9 +9280,6 @@ pq_py_library(
     name = "prismaquant/cluster_campaign",
     srcs = [
         "prismaquant/cluster_campaign.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
     ],
 )
 
@@ -10000,7 +9994,6 @@ pq_py_library(
         ":prismaquant/stage_a_head",
         ":prismaquant/stage_a_produced_output",
         ":prismaquant/staged_lease",
-        ":prismaquant/staged_tier_policy",
         ":prismaquant/tessera_reader",
         "@pq_pip//torch",
     ],
@@ -10621,6 +10614,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/staged_manifest",
+        ":prismaquant/staged_tier_policy",
     ],
 )
 
@@ -11612,7 +11606,6 @@ pq_py_library(
         ":prismaquant/glm_source_derivative",
     ],
 )
-
 
 pq_py_library(
     name = "tools/build_sensitivity_ablation_assignments",
@@ -13460,7 +13453,6 @@ pq_py_library(
     ],
 )
 
-
 pq_py_library(
     name = "tools/profile_produced_group_lookup",
     srcs = [
@@ -13740,7 +13732,6 @@ pq_py_library(
         ":prismaquant/digests",
     ],
 )
-
 
 pq_py_library(
     name = "tools/run_with_scratch_dirs",
@@ -14039,7 +14030,6 @@ pq_py_library(
         ":prismaquant/io_engine",
         ":prismaquant/residency_map",
         ":prismaquant/residency_shard_reader",
-        ":prismaquant/staged_lease",
         ":prismaquant/staged_tier_policy",
         ":tools/qualify_t4_overlay",
         "@pq_pip//pytest",

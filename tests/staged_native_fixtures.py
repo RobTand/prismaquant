@@ -44,8 +44,11 @@ def fixture(tmp_path, payload=b'known-fixture\x00\xff', *, ranges=None):
 
 
 def bind(monkeypatch, binding):
-    from prismaquant import residency_map
-    # Native launch installs these explicit immutable bindings before imports.
+    from prismaquant import residency_map, staged_tier_policy
+    # Native launch installs these explicit immutable bindings before imports,
+    # and activates the ssd policy before any resolver exists.
+    if staged_tier_policy.active_policy() is None:
+        staged_tier_policy.activate_staged_tier_policy('ssd')
     monkeypatch.setenv(residency_map.ENV_VAR, binding['path'])
     monkeypatch.setenv('PRISMAQUANT_STAGED_MANIFEST_SHA256', binding['sha256'])
     monkeypatch.setenv('PRISMAQUANT_READ_CONTRACT_SHA256', binding['read_contract_sha256'])

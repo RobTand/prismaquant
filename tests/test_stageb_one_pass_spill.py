@@ -138,7 +138,7 @@ def _runner(state, device):
     install = context.install
     context.install = (lambda layer, *, require_prefetched=False, prefetch_following=True:
                        install(layer, require_prefetched=require_prefetched))
-    context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
+    context.settle_prefetched_layers = lambda layers: None
     context.settle_prefetch_layers = lambda layers: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
         "owners": [], "unique_storage_bytes": sum(

@@ -260,7 +260,7 @@ def _run_complete_row(*, output_root: Path, device: str, reserves) -> dict:
     model = TinyLM(state).eval().to(torch.bfloat16).to(device)
     context = FakeContext(model, device)
     context.settle_prefetch_layers = lambda layers: None
-    context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
+    context.settle_prefetched_layers = lambda layers: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
         "owners": [], "unique_storage_bytes": sum(
             p.numel() * p.element_size() for p in model.parameters())}

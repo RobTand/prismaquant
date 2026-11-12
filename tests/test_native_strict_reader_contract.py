@@ -60,7 +60,6 @@ def test_strict_shard_preserves_dtype_slice_empty_and_owned_bytes(tmp_path, monk
     opened = _forbid_source(monkeypatch, source)
     with staged_tier_policy_test_context('ssd'):
         with layer_streaming._source_safe_open(str(source), framework='pt') as reader:
-            assert reader._handle is None
             assert set(reader.keys()) == set(tensors)
             assert reader.metadata() == {'fixture': 'strict-known-values'}
             got = {name: reader.get_tensor(name) for name in tensors}
