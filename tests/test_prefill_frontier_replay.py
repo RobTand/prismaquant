@@ -75,12 +75,6 @@ def test_replay_metadata_matches_normal_writer_for_an_admitted_fixed_charge(tmp_
     # The sweep replay attaches its PACT selection record (PQ #1659); the
     # ordinary single-solve writer has no selection to attach.
     replayed[LAYER_CONFIG_META_KEY].pop("pact_selection", None)
-    # The measured solver wall clock is not part of the metadata comparison.
-    for config in (replayed, expected):
-        meta = config[LAYER_CONFIG_META_KEY]
-        meta["measured_runtime_search"]["target_diagnostics"].pop("solver_seconds", None)
-        for diagnostic in meta["solve_diagnostics"].values():
-            diagnostic.pop("solver_seconds", None)
     assert replayed == expected
 
 
