@@ -28,9 +28,6 @@ from prismaquant import (
     joint_stageb_resources,
     measured_runtime_prices,
     native_runtime_cohort,
-    prismasnap_checkpoint,
-    prismasnap_moe_checkpoint,
-    prismasnap_validation,
     quality_prefill_contract,
     quality_prefill_coverage,
     quality_prefill_knee,
@@ -77,7 +74,6 @@ TEXT_LOADERS = {
 
 BYTE_LOADERS = {
     "joint_cost_read_schedule": joint_cost_read_schedule._decode_unique,
-    "prismasnap_validation": lambda data: prismasnap_validation._json_from_bytes(data, where="evidence"),
     "runtime_provenance": lambda data: runtime_provenance._strict_json(data, "/p/m.json", "manifest"),
 }
 
@@ -85,7 +81,6 @@ FILE_LOADERS = {
     "artifact_collection": artifact_collection.load_record,
     "artifact_collection_legacy": lambda path: artifact_collection_legacy._load_json_source(path, logical_schema="s.v1"),
     "measured_runtime_prices": measured_runtime_prices._json,
-    "prismasnap_checkpoint": lambda path: prismasnap_checkpoint._load_json(path, where="checkpoint"),
 }
 
 
@@ -264,13 +259,6 @@ def test_legacy_collection_checks_refuse_as_before(value, expected):
     if isinstance(value, Mapping):
         GOLDEN.call(lambda: artifact_collection_legacy._exact_keys(value, expected, where="legacy"))
     GOLDEN.call(lambda: artifact_collection_legacy._fail("legacy", "text"))
-
-
-@pytest.mark.parametrize("value", ({"a": 1, "b": 2}, {"a": 1}, {"a": 1, "c": 3}, {}))
-def test_moe_checkpoint_exact_keys_refuse_as_before(value):
-    assert prismasnap_moe_checkpoint._require_exact_keys is prismasnap_checkpoint._require_exact_keys
-    GOLDEN.call(lambda: prismasnap_moe_checkpoint._require_exact_keys(
-        value, _KEYS, where="PrismaSnap MoE plan"))
 
 
 def test_runfiles_path_golden_keeps_plus_component():

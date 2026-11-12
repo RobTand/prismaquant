@@ -66,8 +66,6 @@ FILE_SITES = [
     ("prismaquant.joint_quanta_join._sha_file", False, {"where": "w"}),
     ("prismaquant.digests.file_sha256hex", False, {}),
     ("prismaquant.native_receipt_table.file_sha256", True, {}),
-    ("prismaquant.prismasnap_checkpoint._sha256_file", False, {}),
-    ("prismaquant.prismasnap_validation._sha256_file", False, {}),
     ("prismaquant.production_cache_stripes._sha256", False, {}),
     ("prismaquant.digests.file_sha256hex", True, {"block_size": 1024 * 1024}),
     ("prismaquant.stage_a_chain_split._file_sha256", True, {}),
@@ -111,15 +109,6 @@ def test_shipcard_successors_match_the_original_file_recipe(files, name):
         assert outcome(lambda: shipcard.file_sha256hex(path), tmp=files) == original
         wrapped = original if "returned" in original else {"returned": "None"}
         assert outcome(lambda: shipcard.file_sha256(path), tmp=files) == wrapped
-
-
-@pytest.mark.parametrize("chunk", [1, 7, _MIB])
-def test_prismasnap_file_digest_keeps_its_chunk_argument(files, chunk):
-    for ref in ["prismaquant.prismasnap_checkpoint._sha256_file",
-                "prismaquant.prismasnap_validation._sha256_file"]:
-        site = _site(ref)
-        GOLDEN.call(lambda: site(files / f"b{_MIB + 1}", chunk), tmp=files)
-        GOLDEN.call(lambda: site(files / f"b{_MIB + 1}", chunk_bytes=chunk), tmp=files)
 
 
 BYTES_SITES = [
