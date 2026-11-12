@@ -124,7 +124,6 @@ PY
         --mode batched --chunk-size 256 \
         --layers-per-shard "${LAYERS_PER_SHARD}" \
         --skip-missing-activations \
-        --swap-grow-limit-mb 2048 \
         --include-mtp \
         --no-include-visual \
         --include-lm-head \

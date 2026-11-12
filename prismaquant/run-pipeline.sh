@@ -1505,7 +1505,6 @@ if [[ "$BASE_COST_REUSABLE" == "0" ]]; then
     --layers-per-shard "$LAYERS_PER_SHARD" \
     --skip-missing-activations \
     "${LM_HEAD_BASE_COST_ARGS[@]}" \
-    --swap-grow-limit-mb "${SWAP_GROW_LIMIT_MB:-2048}" \
     2>&1 | tee "${WORK_DIR}/logs/cost.log"
 else
   echo "[pipeline] [2/4] baseline cost exists, skipping"
