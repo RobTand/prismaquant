@@ -1645,7 +1645,8 @@ PY
   fi
   require_stage_settings "$PRODUCTION_RENDER_COST_CACHE_PATH" aura-dw-cache \
     "AURA_CACHE_FORMATS=$AURA_CACHE_FORMATS"
-  if [[ ! -f "$PRODUCTION_RENDER_COST_CACHE_PATH" ]]; then
+  # Only [2c] reads this cache; a final cost_aura.pkl (settings checked below) skips [2c] (#3418).
+  if [[ ! -f "$PRODUCTION_RENDER_COST_CACHE_PATH" && ! -f "$AURA_COST_RAW" ]]; then
     echo "[pipeline] [2b/4] building format-menu production cache for AURA dW ..."
     python3 -m prismaquant.build_production_cache \
       --model "$MODEL_PATH" \
@@ -1666,7 +1667,7 @@ PY
       $(if [[ "$SELECTION_MODE" == "validated-surrogate" ]]; then echo "--render-packed-experts"; fi) \
       2>&1 | tee "${WORK_DIR}/logs/aura_dw_cache.log"
   else
-    echo "[pipeline] [2b/4] AURA dW production cache exists, skipping"
+    echo "[pipeline] [2b/4] AURA dW production cache or final AURA cost exists, skipping"
   fi
 
   # [2c] The AURA cost itself: KL-Fisher probes x production-rendered dW.
@@ -1772,6 +1773,7 @@ fi  # no prepriced input: normal cost measurement/finalization
 # -----------------------------------------------------------------------
 # 3. Allocator (multi-choice knapsack over per-layer formats)
 # -----------------------------------------------------------------------
+[[ "${STOP_AFTER:-}" != cost ]] || { echo "[pipeline] STOP_AFTER=cost: probe and cost are final; exiting before the allocator (#3418)"; exit 0; }
 if [[ -n "$TARGET_DISK_GB" ]]; then
   echo "[pipeline] [3/4] running allocator under a ${TARGET_DISK_GB}GB byte budget (overrides TARGET_BITS=${TARGET_BITS}) ..."
 else
