@@ -23818,7 +23818,7 @@ PRISMAQUANT_CB_LDLQ / _SCOPE / _GATE, PRISMAQUANT_CB_MINCHAIN* — no shell
                      settings-hash entries (`${VAR:-}`). Nothing reads them:
                      their code was archived on 2026-09-25 (#1304, debt D34
                      closed). They stay so existing WORK_DIR hashes hold.
-AURA_ADDITIVITY_GATE=measure
+AURA_ADDITIVITY_GATE=measure  STOP_AFTER=<unset> (cost: exit 0 before [3/4], #3418)
 PRISMAQUANT_GGUF_IMATRIX=1  DEVICE=cuda  EXPORT_DEVICE=cuda
 ```
 
