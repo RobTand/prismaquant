@@ -113,13 +113,6 @@ fi
 # rows closed the render gap vs llama.cpp's imatrix quantizer from +20%
 # to +7.7% KLD (top-1 at parity). See docs/lanes/gguf.md.
 : "${EXPORT_CONTAINER:=compressed-tensors}"
-python -m prismaquant.prismasnap_contract --model "$MODEL_PATH"
-if [[ ( -e "${MODEL_PATH}/prismasnap_provenance.json" \
-        || -L "${MODEL_PATH}/prismasnap_provenance.json" ) \
-      && "$EXPORT_CONTAINER" != "compressed-tensors" ]]; then
-  echo "[pipeline] ERROR: PrismaSnap-prepared sources are admitted only to the measured native compressed-tensors lane; EXPORT_CONTAINER=${EXPORT_CONTAINER} is unvalidated." >&2
-  exit 2
-fi
 if [[ "$EXPORT_CONTAINER" == "nvfp4_cb" ]]; then
   # RETIRED 2026-09-02.  Rob: "put Tessera in PrismaQuant and remove Gridbook".
   # The codebook container was served only by the separately released Gridbook

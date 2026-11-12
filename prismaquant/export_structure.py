@@ -57,6 +57,21 @@ def _read_metadata(path: Path, *, shard: bool) -> tuple[bytes, int, dict]:
     return raw, prefix + length, before
 
 
+def _read_index(path: Path) -> tuple[dict, dict]:
+    """Read the shared source and export index grammar."""
+    raw, _, snapshot = _read_metadata(path, shard=False)
+    payload = _strict_json_object(raw, where=str(path))
+    weight_map = payload.get("weight_map")
+    if not isinstance(weight_map, dict) or not weight_map:
+        raise ValueError(f"{path}: expected a nonempty weight_map")
+    for tensor, name in weight_map.items():
+        if not tensor or not isinstance(name, str) or not name.endswith(".safetensors") or (
+            Path(name).name != name or "/" in name or "\\" in name
+        ):
+            raise ValueError(f"{path}: invalid tensor or shard name {tensor!r}: {name!r}")
+    return payload, snapshot
+
+
 def verify_export_structure(
     artifact_dir: str | Path,
     *,
@@ -79,16 +94,8 @@ def verify_export_structure(
     snapshots = {}
     # lexists also detects a dangling index symlink, which must not fall back.
     if os.path.lexists(index):
-        raw, _, snapshots[index] = _read_metadata(index, shard=False)
-        payload = _strict_json_object(raw, where=str(index))
-        weight_map = payload.get("weight_map")
-        if not isinstance(weight_map, dict) or not weight_map:
-            raise ValueError(f"{index}: expected a nonempty weight_map")
-        for tensor, name in weight_map.items():
-            if not tensor or not isinstance(name, str) or not name.endswith(".safetensors") or (
-                Path(name).name != name or "/" in name or "\\" in name
-            ):
-                raise ValueError(f"{index}: invalid tensor or shard name {tensor!r}: {name!r}")
+        payload, snapshots[index] = _read_index(index)
+        weight_map = payload["weight_map"]
         expected = set(weight_map.values())
     else:
         if index_size_basis is not None:
