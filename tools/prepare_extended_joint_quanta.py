@@ -408,7 +408,7 @@ def main(argv=None):
                              'was submitted with. Forwarded to the generator')
     parser.add_argument('--allowed-tiers', default=None,
                         help='with --data-manifest-sha256: the staged tiers a read '
-                             'may come from (default ram,ssd)')
+                             'may come from (default ssd)')
     parser.add_argument('--produced-output', action='store_true',
                         help='commit every file under the native produced-output declaration of this '
                              'admitted action (PQ #1070); the action must declare '

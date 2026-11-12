@@ -12,6 +12,10 @@ from safetensors.torch import save_file
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "g3job"))
 import g3_lib as L
 import g3_offline_decoded_kl as G
+from staged_native_fixtures import native_staged_state  # noqa: F401
+
+# bind() also creates the prismaquant resolver; the fixture releases it.
+pytestmark = pytest.mark.usefixtures("native_staged_state")
 
 
 def fixture(tmp_path):

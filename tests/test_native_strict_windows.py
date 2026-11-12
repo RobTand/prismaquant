@@ -24,11 +24,10 @@ from test_native_strict_reader_contract import _forbid_source
 pytestmark = pytest.mark.usefixtures('native_staged_state')
 
 def test_parse_allowed_tiers_grammar():
-    assert parse_allowed_tiers("ram,ssd") == frozenset({"ram", "ssd"})
-    assert parse_allowed_tiers("ram") == frozenset({"ram"})
-    assert parse_allowed_tiers(" RAM , SSD ") == frozenset({"ram", "ssd"})
-    assert parse_allowed_tiers(DEFAULT_ALLOWED_TIERS) == frozenset({"ram", "ssd"})
-    for bad in ("", "pool", "hdd", "ram,pool", "ssd,hdd", "nvme", 42, None):
+    assert parse_allowed_tiers("ssd") == frozenset({"ssd"})
+    assert parse_allowed_tiers(" SSD ") == frozenset({"ssd"})
+    assert parse_allowed_tiers(DEFAULT_ALLOWED_TIERS) == frozenset({"ssd"})
+    for bad in ("", "ram", "ram,ssd", "pool", "hdd", "ssd,hdd", "nvme", 42, None):
         with pytest.raises(ValueError):
             parse_allowed_tiers(bad)
 
@@ -36,56 +35,46 @@ def test_parse_allowed_tiers_grammar():
 def test_policy_context_lifetime_is_explicit_and_thread_global():
     assert active_policy() is None
     seen = {}
-    with staged_tier_policy_test_context("ram,ssd") as allowed:
-        assert allowed == frozenset({"ram", "ssd"})
+    with staged_tier_policy_test_context("ssd") as allowed:
+        assert allowed == frozenset({"ssd"})
         worker = threading.Thread(
             target=lambda: seen.setdefault("active", active_policy()))
         worker.start()
         worker.join()
-        assert seen["active"] == frozenset({"ram", "ssd"})
+        assert seen["active"] == frozenset({"ssd"})
         with pytest.raises(TierPolicyRefused):
             raise TierPolicyRefused("sentinel")
     assert active_policy() is None
-    assert seen["active"] == frozenset({"ram", "ssd"})
+    assert seen["active"] == frozenset({"ssd"})
     with pytest.raises(RuntimeError, match="boom"):
-        with staged_tier_policy_test_context("ram"):
+        with staged_tier_policy_test_context("ssd"):
             raise RuntimeError("boom")
     assert active_policy() is None
 
 
-def test_nested_scope_narrows_never_widens_and_restores():
-    with staged_tier_policy_test_context("ram,ssd"):
-        assert active_policy() == frozenset({"ram", "ssd"})
-        with staged_tier_policy_test_context("ram"):
-            assert active_policy() == frozenset({"ram"})
-        assert active_policy() == frozenset({"ram", "ssd"})
-        with staged_tier_policy_test_context("ram"):
-            with staged_tier_policy_test_context("ram,ssd"):
-                assert active_policy() == frozenset({"ram"})
-            assert active_policy() == frozenset({"ram"})
-            with pytest.raises(RuntimeError, match="incompatible"):
-                with staged_tier_policy_test_context("ssd"):
-                    pass
-            assert active_policy() == frozenset({"ram"})
-        assert active_policy() == frozenset({"ram", "ssd"})
+def test_nested_scope_restores_the_prior_verdict():
+    with staged_tier_policy_test_context("ssd"):
+        with staged_tier_policy_test_context("ssd"):
+            assert active_policy() == frozenset({"ssd"})
+        assert active_policy() == frozenset({"ssd"})
     assert active_policy() is None
-    activate_staged_tier_policy("ram")
+    activate_staged_tier_policy("ssd")
     try:
-        with staged_tier_policy_test_context("ram,ssd"):
-            assert active_policy() == frozenset({"ram"})
-        assert active_policy() == frozenset({"ram"})
+        with staged_tier_policy_test_context("ssd"):
+            assert active_policy() == frozenset({"ssd"})
+        assert active_policy() == frozenset({"ssd"})
     finally:
         deactivate_staged_tier_policy_for_tests()
     assert active_policy() is None
 
 
 def test_overlapping_scopes_on_threads_refuse():
-    with staged_tier_policy_test_context("ram,ssd"):
+    with staged_tier_policy_test_context("ssd"):
         outcome = {}
 
         def enter_elsewhere():
             try:
-                with staged_tier_policy_test_context("ram"):
+                with staged_tier_policy_test_context("ssd"):
                     outcome["entered"] = True
             except RuntimeError as exc:
                 outcome["refused"] = str(exc)
@@ -95,7 +84,7 @@ def test_overlapping_scopes_on_threads_refuse():
         worker.join()
         assert "entered" not in outcome
         assert "unsupported" in outcome["refused"]
-        assert active_policy() == frozenset({"ram", "ssd"})
+        assert active_policy() == frozenset({"ssd"})
     assert active_policy() is None
 
 

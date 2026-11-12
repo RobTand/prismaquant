@@ -125,7 +125,7 @@ def main():
         'schema': 'prismabuild.logical_request.v1',
         'common': {
             'argv': [args.python, 'tools/qualify_t4_overlay.py', '--pb-task-batch', '{pb.task_batch}',
-                     '--allowed-tiers', 'ram,ssd'],
+                     '--allowed-tiers', 'ssd'],
             'cwd': args.qualifier_checkout, 'demand': {'cpu': 3, 'mem_gb': 4, 'gpu': 1},
             'gpu_memory_gb': 2, 'data_manifest': None,
             'env': {'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1', 'OPENBLAS_NUM_THREADS': '1',

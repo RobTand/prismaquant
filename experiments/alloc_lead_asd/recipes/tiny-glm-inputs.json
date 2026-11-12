@@ -3,7 +3,7 @@
   "mount_prefix": "/mnt/shared",
   "annotations": {
     "scope": "issue1962-tiny-glm-causal-control",
-    "allowed_tiers": "ram,ssd",
+    "allowed_tiers": "ssd",
     "phases": [
       {
         "name": "startup",

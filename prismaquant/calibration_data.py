@@ -104,8 +104,7 @@ def load_calibration_input(path, *, expected_sha256, n_samples, seqlen):
     This is explicit artifact preparation, outside the measurement hot path.
 
     Under the active staged-tier policy the artifact comes off the stage
-    through a lifetime-pinned window (RAM first, sealed-allowed SSD
-    fallback, never the pool) and decodes from the same owned bytes the
+    through a lifetime-pinned SSD window (never the pool) and decodes from the same owned bytes the
     digest verifies; inactive policy keeps the legacy pool read exactly.
     """
     from safetensors import safe_open

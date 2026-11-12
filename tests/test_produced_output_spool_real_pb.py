@@ -22,7 +22,7 @@ def test_actual_durable_copy_precedes_progress_and_strict_read(tmp_path, monkeyp
     assert copying.wait(30)
     try:
         assert not pub._groups and not storage._local_output_spool.durable_entries()
-        with staged_tier_policy_test_context('ram,ssd'), storage.prefetch(refs) as window:
+        with staged_tier_policy_test_context('ssd'), storage.prefetch(refs) as window:
             for i, ref in enumerate(refs):
                 assert torch.equal(storage.get(window, ref), torch.arange(8, dtype=torch.float32) + i)
     finally:

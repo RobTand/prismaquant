@@ -43,7 +43,7 @@ def main():
     from prismaquant.residency_map import bind_residency_manifest, residency_resolver
     from prismaquant.staged_tier_policy import activate_staged_tier_policy
     from prismaquant.staged_whole_file import read_staged_sealed_file
-    activate_staged_tier_policy('ram,ssd')
+    activate_staged_tier_policy('ssd')
     bind_residency_manifest(args.data_manifest_sha256)
     torch.set_num_threads(1); torch.cuda.init()
     before = memfds()

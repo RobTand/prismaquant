@@ -115,6 +115,26 @@ not qualify native enforcement: native submission refuses unsupported requiremen
 Capture chains emit no queue priority field and refuse an explicit nonzero priority.
 GPU rows use the same native resource and allocation checks as CPU rows.
 
+As of: 2026-11-12, Refs #3421. Source: `prismaquant/staged_tier_policy.py`,
+`prismaquant/staged_lease.py`. The only staged tier is `ssd`. `--allowed-tiers`
+accepts only `ssd`, and every emitter writes `ssd`. The `ram` tier, the
+`ssd-not-allowed` refusal and the `tier` argument of
+`staged_lease.acquire_entries_window` are removed. Test scopes do not narrow.
+Dated entries below that describe a RAM tier or a `ram,ssd` policy are historical.
+
+As of: 2026-11-12, Refs #3421. Source: `prismaquant/residency_map.py`,
+`prismaquant/residency_shard_reader.py`, `prismaquant/io_engine.py`,
+`prismaquant/perturbed_x_cache.py`, `prismaquant/tessera_joint_aura.py`,
+`prismaquant/streaming_model.py`. `residency_resolver()` refuses a staged manifest
+when no staged-tier policy is active. Thus every staged reader is strict: it reads
+only declared immutable extents and refuses instead of a pool read. Without a
+manifest, plain runs read the pool as before. The resolver answers only `hit` or
+`undeclared`. These items are removed: the dynamic residency-map stubs, the `ram`
+serving branches, `StagedRangeNotLanded` and its one prefetch retry, the landing
+re-lookup after a miss, and the `published=` argument of `await_staged_spans`.
+Dated entries below that describe a dynamic residency map, a landing wait or a
+prefetch availability retry are historical.
+
 The dated entries below preserve earlier designs and measurements. Their
 execution-service descriptions are historical; this section and §7.0.2 describe
 the current native route. CLI descriptions and placement errors name admitted
@@ -9229,7 +9249,7 @@ The Stage B preparation reads its declared inputs off the stage (2026-09-23,
 preparation submits with `--residency stage`, so PrismaBuild stages its
 manifest, but the tools still opened every input at its pool path.
 
-With `--data-manifest-sha256` (and `--allowed-tiers`, default `ram,ssd`),
+With `--data-manifest-sha256` (and `--allowed-tiers`, default `ssd`),
 `regenerate_joint_quanta` and `prepare_extended_joint_quanta` call
 `stage_b_prep_io.bind_staged_reads`. That call activates the strict tier
 policy and binds the process residency resolver to the manifest. Every
@@ -34869,7 +34889,7 @@ existing output.
 holds a seed marker or seed receipt, and `stage_a_argv` refuses a sealed
 request that carries `--chain-seed`. A seed's checkpoints never feed Stage B.
 
-**Staging.** Under the `ram,ssd` tier policy every bulk byte a seed reads
+**Staging.** Under the `ssd` tier policy every bulk byte a seed reads
 must be in its action's data manifest. `tools/build_stagea_seed_package.py`
 derives that manifest from the source run's own submitted manifest (PQ
 #1043), as `build_stagea_forward_recovery_package` derives a recovery
@@ -34994,7 +35014,7 @@ as `priority`. `pbrun --after` does not order them. It defers a consumer on a pr
 write-only template and builds the consumer's manifest from the batches the
 producer committed, and a prep commits nothing.
 
-**Manifests** (`tools/build_stagea_split_package.py`). Under the `ram,ssd`
+**Manifests** (`tools/build_stagea_split_package.py`). Under the `ssd`
 tier policy a row reads the run's boundary rows and the checkpoint's
 cotangents through the process input map, so each must be a staged entry.
 The builder takes the source run's submitted manifest, the run's output

@@ -409,7 +409,7 @@ def main():
     from prismaquant.staged_tier_policy import activate_staged_tier_policy
     from prismaquant.memory_management import CaptureMemoryGuard
     from experiments.glm_full_capture_profile import CaptureObserver
-    activate_staged_tier_policy('ram,ssd')
+    activate_staged_tier_policy('ssd')
     bind_residency_manifest(args.data_manifest_sha256)
     torch.set_num_threads(1)
     guard = CaptureMemoryGuard('cuda')

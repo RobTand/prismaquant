@@ -804,7 +804,7 @@ def main(argv=None, *, finalize_publication=True) -> int:
                          "stage. Without it reads are plain, as before")
     ap.add_argument("--allowed-tiers", default=None,
                     help="with --data-manifest-sha256: the staged tiers a "
-                         "read may come from (default ram,ssd)")
+                         "read may come from (default ssd)")
     ap.add_argument("--produced-output", action="store_true",
                     help="request authenticated produced outputs; native "
                          "publication authority is held for unit4, so this "

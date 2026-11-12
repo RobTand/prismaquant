@@ -5,7 +5,10 @@ import threading
 import pytest
 
 import g3_residency as R
-from staged_native_fixtures import bind, publish_inputs
+from staged_native_fixtures import bind, native_staged_state, publish_inputs  # noqa: F401
+
+# bind() also creates the prismaquant resolver; the fixture releases it.
+pytestmark = pytest.mark.usefixtures("native_staged_state")
 
 NAMES = {"source": b"source", "wire": b"wire", "teacher": b"teacher"}
 OPEN = []

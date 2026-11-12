@@ -1819,10 +1819,7 @@ def _await_layer_readset(by_shard, *, source_authentication=None,
             return
     if not wanted:
         return
-    from .staged_lease import stage_cover_is_published
-    verdict = await_staged_spans(resolver, wanted,
-                                 published=stage_cover_is_published,
-                                 cancel=cancel)
+    verdict = await_staged_spans(resolver, wanted, cancel=cancel)
     if verdict != RANGE_HIT:
         print(f"[residency] layer readset not staged ({verdict}); "
               "the read below decides", flush=True)

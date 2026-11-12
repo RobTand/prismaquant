@@ -73,7 +73,7 @@ def test_ordinary_stage_commands_remain_allowed(argv):
 def test_immutable_coverage_has_no_wait_contract():
     from prismaquant import residency_shard_reader as reader
     assert set(inspect.signature(reader.await_staged_spans).parameters) == {
-        "resolver", "wanted", "published", "cancel"}
+        "resolver", "wanted", "cancel"}
     assert not hasattr(reader, "STAGED_RANGE_WAIT_S")
 
 

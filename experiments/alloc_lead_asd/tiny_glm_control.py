@@ -347,7 +347,7 @@ def main(argv=None):
     torch.set_float32_matmul_precision('highest')
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
-    activate_staged_tier_policy('ram,ssd')
+    activate_staged_tier_policy('ssd')
     bind_residency_manifest(args.manifest_sha256)
     manifest_raw = args.manifest.read_bytes()
     assert sha(manifest_raw) == args.manifest_sha256

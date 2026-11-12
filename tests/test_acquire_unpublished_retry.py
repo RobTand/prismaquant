@@ -1,21 +1,18 @@
-"""PQ #1248: a strict bulk read rides out one retired cover.
+"""A strict bulk read refuses on the first window refusal.
 
-PrismaBuild can retire a cover's fragment after the map answered and before
-``acquire_for`` ran, so the window's enter refuses ``unpublished``
-(availability). The reader waits for the republish, builds a NEW window and
-enters again. Integrity refusals still fail clear on the first attempt, and
-the pool is never read. Fakes only: no SDK is needed.
+The immutable manifest cannot republish an entry, so an availability or an
+integrity refusal fails clear on the first attempt, and the pool is never
+read. Fakes only: no SDK is needed.
 """
 import time
 
 import pytest
 
 from prismaquant import perturbed_x_cache as pxc
-from prismaquant import residency_map, staged_lease
+from prismaquant import staged_lease
 from prismaquant.staged_lease import LeaseRefused
 
 PATH = "/mnt/shared/fake/stage.bin"
-SIZE = 4096
 
 
 class FakeResolver:
@@ -38,8 +35,6 @@ class FakeResolver:
 
 
 class FakeWindow:
-    serving_tier = "stage"
-
     def __init__(self, refusal):
         self.refusal = refusal
         self.entered = 0
@@ -58,15 +53,8 @@ class FakeWindow:
         self.exited += 1
 
 
-def _open(resolver, **kw):
-    fn = getattr(pxc, "_acquire_open_bulk_window", None)
-    if fn is not None:
-        return fn(PATH, "0" * 64, resolver=resolver, declared_size=SIZE, **kw)
-    # Before the fix the caller composed these two calls by hand.
-    window, key, staged, res = pxc._acquire_bulk_window(
-        PATH, "0" * 64, resolver=resolver, declared_size=SIZE)
-    fd, serving, tier = pxc._enter_and_open_window(res, window, key, PATH)
-    return window, key, staged, res, fd, serving, tier
+def _open(resolver):
+    return pxc._acquire_open_bulk_window(PATH, "0" * 64, resolver=resolver)
 
 
 @pytest.fixture
@@ -82,10 +70,6 @@ def harness(monkeypatch):
 
     monkeypatch.setattr(staged_lease, "acquire_entry_window", fake_acquire)
     monkeypatch.setattr(time, "sleep", lambda s: None)
-    # The pinned wait, whatever the runner's environment carries.
-    monkeypatch.setenv("PRISMAQUANT_STAGED_RANGE_WAIT_S", "30")
-    monkeypatch.setattr(pxc, "_await_entry_landing",
-                        lambda *a, **k: True)
     return windows, script
 
 
@@ -102,17 +86,6 @@ def test_unpublished_immutable_entry_refuses_without_retry(harness):
 def test_integrity_refusal_fails_first_attempt(harness):
     windows, script = harness
     script.append(LeaseRefused("digest-mismatch", kind="integrity"))
-    res = FakeResolver()
-    with pytest.raises(LeaseRefused):
-        _open(res)
-    assert len(windows) == 1
-    assert len(res.fallbacks) == 1 and res.pool_reads == []
-
-
-def test_landing_timeout_records_fallback_and_raises(harness, monkeypatch):
-    windows, script = harness
-    script.append(LeaseRefused("unpublished", kind="availability"))
-    monkeypatch.setattr(pxc, "_await_entry_landing", lambda *a, **k: False)
     res = FakeResolver()
     with pytest.raises(LeaseRefused):
         _open(res)

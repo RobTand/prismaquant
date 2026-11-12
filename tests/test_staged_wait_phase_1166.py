@@ -65,10 +65,10 @@ def _record_waits(monkeypatch, setup):
             layer, require_prefetched=require_prefetched,
             prefetch_following=prefetch_following)
 
-    def settle(layers, *, retry_availability=False):
+    def settle(layers):
         for layer in layers:
             log.append(("settle", int(layer), sources[int(layer)], phase()))
-        return original_settle(layers, retry_availability=retry_availability)
+        return original_settle(layers)
 
     monkeypatch.setattr(context, "install", install)
     monkeypatch.setattr(context, "settle_prefetched_layers", settle)

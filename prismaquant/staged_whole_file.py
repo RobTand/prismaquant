@@ -166,9 +166,8 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
             except LeaseRefused as refusal:
                 resolver.record_fallback(path, str(refusal))
                 raise
-            tier = window.serving_tier or "stage"
             resolver.record_serving_tier(
-                path, tier, pin_id=str(serving.get("pin_id") or ""),
+                path, "stage", pin_id=str(serving.get("pin_id") or ""),
                 range_ref=str(serving.get("range_ref") or ""))
             if expected_bytes is not None and expected_bytes != size:
                 raise LeaseRefused(f"{label}-size-divergent", kind="integrity")
@@ -236,10 +235,7 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
             # exact-ref release succeeded. No receipt escapes a failed exit.
             witness.update(descriptors_closed=True, lease_released=lease is None)
             delivery_receipt.update(witness)
-        if tier == "ram":
-            resolver.record_ram_read(path, len(raw))
-        else:
-            resolver.record_stage_read(path, len(raw))
+        resolver.record_stage_read(path, len(raw))
         return raw
     except BaseException:
         if sealed and raw is not None:

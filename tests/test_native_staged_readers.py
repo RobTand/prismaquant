@@ -35,7 +35,7 @@ def forbidden(*args, **kwargs):
     raise AssertionError('canonical opener called')
 
 
-def test_immutable_coverage_cancel_and_unpublished_are_conclusive(tmp_path, monkeypatch):
+def test_immutable_coverage_and_cancel_are_conclusive(tmp_path, monkeypatch):
     source, data, binding, _ = fixture(tmp_path)
     resolver = bind(monkeypatch, binding)
     length = data['entries'][0]['source']['bytes']
@@ -44,8 +44,7 @@ def test_immutable_coverage_cancel_and_unpublished_are_conclusive(tmp_path, monk
     cancel.set()
     assert residency_shard_reader.await_staged_spans(
         None, wanted,  cancel=cancel) == 'undeclared'
-    assert residency_shard_reader.await_staged_spans(
-        resolver, wanted,  published=lambda *args: False) == 'undeclared'
+    assert residency_shard_reader.await_staged_spans(resolver, wanted) == 'hit'
 
 
 def test_owned_whole_io_and_metadata_without_canonical_file(tmp_path, monkeypatch):

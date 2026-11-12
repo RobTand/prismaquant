@@ -52,16 +52,14 @@ def _forbid_source(monkeypatch, source):
     return seen
 
 
-@pytest.mark.parametrize('tiers', ['ssd', 'ram,ssd'])
-def test_strict_shard_preserves_dtype_slice_empty_and_owned_bytes(tmp_path, monkeypatch, tiers):
+def test_strict_shard_preserves_dtype_slice_empty_and_owned_bytes(tmp_path, monkeypatch):
     source, tensors = _shard(tmp_path)
     binding = publish_inputs(tmp_path, [source])
     resolver = bind(monkeypatch, binding)
     source.unlink()
     opened = _forbid_source(monkeypatch, source)
-    with staged_tier_policy_test_context(tiers):
+    with staged_tier_policy_test_context('ssd'):
         with layer_streaming._source_safe_open(str(source), framework='pt') as reader:
-            assert reader._handle is None
             assert set(reader.keys()) == set(tensors)
             assert reader.metadata() == {'fixture': 'strict-known-values'}
             got = {name: reader.get_tensor(name) for name in tensors}
@@ -79,7 +77,7 @@ def test_strict_shard_preserves_dtype_slice_empty_and_owned_bytes(tmp_path, monk
     assert opened == [] and resolver.report()['bytes_from_pool'] == 0
 
 
-@pytest.mark.parametrize('fault', ['unbound', 'missing', 'length', 'corrupt', 'nonregular', 'symlink', 'disallowed'])
+@pytest.mark.parametrize('fault', ['unbound', 'missing', 'length', 'corrupt', 'nonregular', 'symlink'])
 def test_strict_whole_input_refuses_without_pool_fallback(tmp_path, monkeypatch, fault):
     source = tmp_path / 'blob.bin'
     raw = b'known-wire-values\x00\xff0123456789'
@@ -108,7 +106,7 @@ def test_strict_whole_input_refuses_without_pool_fallback(tmp_path, monkeypatch,
         obj.symlink_to(renamed)
     source.unlink()
     opened = _forbid_source(monkeypatch, source)
-    with staged_tier_policy_test_context('ram' if fault == 'disallowed' else 'ssd'):
+    with staged_tier_policy_test_context('ssd'):
         with pytest.raises((TierPolicyRefused, OSError, RuntimeError, ValueError)):
             read_staged_whole_file(source, sha(raw), label='strict-wire')
     assert opened == []

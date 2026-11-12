@@ -2,7 +2,7 @@
 
 A split round (``prismaquant.stage_a_chain_split``) is one prep row and one
 quantum row per sample range, all under one run's chain state. Under the
-campaign's ``ram,ssd`` tier policy every bulk byte a row reads must be a
+campaign's ``ssd`` tier policy every bulk byte a row reads must be a
 declared, staged manifest entry: the capture reads the run's own forward
 boundary rows and the sealed checkpoint's cotangents through the process
 input map, never through the row's produced output. This builder derives

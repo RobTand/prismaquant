@@ -3,7 +3,7 @@
   "mount_prefix": "/mnt/shared",
   "annotations": {
     "scope": "issue1962-bounded-dense-screen",
-    "allowed_tiers": "ram,ssd",
+    "allowed_tiers": "ssd",
     "phases": [{"name": "startup", "bytes": 1505923749, "cumulative_bytes": 1505923749}]
   },
   "produced_by": {

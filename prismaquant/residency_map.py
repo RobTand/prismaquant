@@ -10,9 +10,9 @@ import threading
 
 from .staged_manifest import (SCHEMA, PATH_ENV as ENV_VAR, SHA_ENV, READ_ENV,
     ManifestRefused, load_staged_manifest, read_document, open_regular, signature, decode_document)
+from .staged_tier_policy import active_policy
 
-RANGE_HIT, RANGE_UNCOVERED, RANGE_UNDECLARED, RANGE_REFUSED = 'hit', 'uncovered', 'undeclared', 'refused'
-ResidencyMapRefused = ManifestRefused
+RANGE_HIT, RANGE_UNDECLARED = 'hit', 'undeclared'
 
 
 class StagedReadRefused(RuntimeError):
@@ -236,21 +236,6 @@ class ResidencyResolver:
                 'read_contract_sha256': self.manifest.read_contract_sha256,
                 'fallbacks': list(self._fallbacks), 'serving_tiers': list(self._serving)}
 
-    def read_order_bound(self):
-        return True
-
-    def landing_record(self):
-        return None
-
-    def staged_range_alternatives(self, *args, **kwargs):
-        return [], 'immutable staged extents have no overlapping alternatives'
-
-    def record_range_wait(self, *args, **kwargs):
-        raise StagedReadRefused('immutable inputs cannot wait for dynamic landing')
-
-    def record_range_refusal(self, declared, detail):
-        self.record_fallback(declared, detail)
-
 
 _RESOLVER = None
 _RESOLVER_LOCK = threading.RLock()
@@ -265,6 +250,10 @@ def residency_resolver():
         if _RESOLVER is None:
             filename = os.environ.get(ENV_VAR)
             if filename:
+                # Native launch activates the ssd policy before any resolver
+                # exists. A manifest without it is a partial configuration.
+                if active_policy() is None:
+                    raise ManifestRefused('a staged manifest requires the active staged-tier policy')
                 _RESOLVER = ResidencyResolver(filename, manifest_sha256=os.environ.get(SHA_ENV),
                                               read_contract_sha256=os.environ.get(READ_ENV))
         return _RESOLVER
@@ -275,10 +264,6 @@ def bind_residency_manifest(digest):
     if resolver is None:
         raise ManifestRefused('explicit staged manifest path and digest are required')
     resolver.bind_manifest_sha256(digest)
-
-
-def namespaced_residency_resolver(*args, **kwargs):
-    raise ManifestRefused('unit4 native produced-output authority is unqualified')
 
 
 def residency_report():

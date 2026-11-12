@@ -322,14 +322,12 @@ def _await_checkpoint_entries(entries):
         return None
     from .residency_map import residency_resolver
     from .residency_shard_reader import await_staged_spans
-    from .staged_lease import stage_cover_is_published
     resolver = residency_resolver()
     if resolver is None:
         return None  # The strict reader supplies its existing missing-context refusal.
     return await_staged_spans(
         resolver, [(entry["path"], 0, entry["file_bytes"], entry["file_bytes"])
-                   for entry in entries],
-        published=stage_cover_is_published)
+                   for entry in entries])
 
 
 def stream_exact_entry_tensors(records, *, expected_session, max_resident_bytes=None,
@@ -1733,14 +1731,12 @@ def _await_checkpoint_entry(entry):
         return
     from .residency_map import residency_resolver
     from .residency_shard_reader import await_staged_spans
-    from .staged_lease import stage_cover_is_published
     resolver = residency_resolver()
     if resolver is None:
         return  # The strict reader supplies its existing missing-context refusal.
     size = entry["file_bytes"]
     return await_staged_spans(
-        resolver, [(entry["path"], 0, size, size)],
-        published=stage_cover_is_published)
+        resolver, [(entry["path"], 0, size, size)])
 
 
 def _verified_checkpoint_manifest(space, record: dict, *, shared_state_max_bytes=None) -> dict:

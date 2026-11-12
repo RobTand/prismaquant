@@ -33,7 +33,7 @@ def test_source_observer_times_pending_delivery_not_ready_ownership(monkeypatch,
     monkeypatch.setattr(streaming_model.time, "time", lambda: next(clock))
     try:
         with context.observe_source_waits(ledger.sink):
-            loaded = context._await_prefetch(3, delivery, retry_availability=False)
+            loaded = context._prefetch_result(3, delivery)
         assert loaded is delivery.value
         assert delivery.calls == 1
         snapshot = ledger.snapshot()
@@ -60,7 +60,7 @@ def test_failed_source_wait_preserves_exception_and_restores_observer(monkeypatc
     try:
         with pytest.raises(RuntimeError, match="fixture source failed") as caught:
             with context.observe_source_waits(ledger.sink):
-                context._await_prefetch(4, delivery, retry_availability=False)
+                context._prefetch_result(4, delivery)
         assert caught.value is failure
         assert ledger.snapshot()["takes"][0]["wait_s"] == 3.0
         assert getattr(context, "_source_wait_sink", None) is None
@@ -72,7 +72,7 @@ def test_source_wait_without_observer_keeps_delivery_semantics(monkeypatch):
     context = _make_ctx(monkeypatch, workers=1)
     delivery = _Delivery({"weight": object()})
     try:
-        assert context._await_prefetch(3, delivery, retry_availability=False) is delivery.value
+        assert context._prefetch_result(3, delivery) is delivery.value
         assert delivery.calls == 1
     finally:
         context.prefetch_pool.shutdown(wait=True)
@@ -129,7 +129,7 @@ def test_observer_failure_never_masks_loader_failure(monkeypatch, loader_failed)
     try:
         with pytest.raises(RuntimeError) as caught:
             with context.observe_source_waits(refuse_observation):
-                context._await_prefetch(4, delivery, retry_availability=False)
+                context._prefetch_result(4, delivery)
         if loader_failed:
             assert caught.value is failure
             assert "fixture telemetry failed" in caught.value.__notes__[0]

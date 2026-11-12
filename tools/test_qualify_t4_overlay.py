@@ -69,7 +69,6 @@ def test_partial_checkpoint_corruption_is_not_adopted(cell, tmp_path, monkeypatc
 
 def test_strict_new_cell_awaits_declared_wire_and_render_before_payload(cell, monkeypatch):
     from prismaquant import residency_shard_reader as staged
-    from prismaquant.staged_lease import stage_cover_is_published
 
     class ReadyBoundary(Exception):
         pass
@@ -78,12 +77,10 @@ def test_strict_new_cell_awaits_declared_wire_and_render_before_payload(cell, mo
     monkeypatch.setattr(m, 'policy_is_active', lambda: True)
     monkeypatch.setattr(m, 'residency_resolver', lambda: resolver)
 
-    def waiting(actual, wanted, *, deadline, published):
+    def waiting(actual, wanted):
         assert actual is resolver
         assert wanted == [(cell[k], 0, cell[k + '_stat']['bytes'], cell[k + '_stat']['bytes'])
                           for k in ('wire', 'render')]
-        assert published is stage_cover_is_published
-        assert deadline > m.time.monotonic()
         raise ReadyBoundary()
 
     monkeypatch.setattr(staged, 'await_staged_spans', waiting)

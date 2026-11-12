@@ -671,38 +671,16 @@ def _verified_payload_storage(payload, *, max_storage_bytes, device, max_nodes):
     return max(storages.values(), default=0) if device == 'meta' else sum(storages.values())
 
 
-def _await_entry_landing(resolver, entries) -> bool:
-    """Check whole-file coverage once after a strict lookup misses."""
-    if not entries:
-        return True
-    readset = getattr(resolver, "declared_readset", None)
-    if not callable(readset) or not callable(getattr(resolver, "staged_range_outcome", None)):
-        return False
-    from .residency_map import RANGE_HIT
-    from .residency_shard_reader import await_staged_spans
-    from .staged_lease import stage_cover_is_published
-    verdict = await_staged_spans(
-        resolver, [(str(path), 0, size, size) for path, size in entries],
-        published=stage_cover_is_published)
-    return verdict == RANGE_HIT
-
-
-def _acquire_bulk_window(path, expected_sha256, *, resolver=None, declared_size=None):
+def _acquire_bulk_window(path, expected_sha256, *, resolver=None):
     """Strict-policy pinned window for a whole-file bulk input.
 
-    Returns the unentered ``(window, key, staged, resolver)``. The shared
-    lease owner selects RAM when allowed and covered, or acquires the SSD
-    copy with its own covers after a RAM availability refusal. Raises
+    Returns the unentered ``(window, key, staged, resolver)``. Raises
     ``LeaseRefused`` before any pool payload byte when unmapped, unfenced,
     or unpermitted. The caller enters the window and opens keys,
     reads through held descriptors, verifies content against
     ``expected_sha256``, re-checks the declared file's binding, and exits
-    the window (close-then-release) on every path.
-
-    An entry the map does not hold yet is waited on as
-    :func:`_await_entry_landing` describes, then looked up again (PQ
-    #1204). ``declared_size`` is the declared file's size when the caller
-    already holds it; otherwise a miss stats it.
+    the window (close-then-release) on every path. The immutable manifest
+    cannot gain an entry later, so a miss refuses at once.
 
     ``resolver`` defaults to the process's input-map resolver, which is
     what every sealed input, every read-only attached generation and every
@@ -718,15 +696,6 @@ def _acquire_bulk_window(path, expected_sha256, *, resolver=None, declared_size=
         raise LeaseRefused("readset-not-staged", kind="availability")
     staged = resolver.staged_read(path, expected_sha256=expected_sha256)
     if staged is None:
-        if declared_size is None:
-            try:
-                declared_size = os.lstat(path).st_size
-            except OSError:
-                declared_size = None
-        if declared_size is not None and _await_entry_landing(
-                resolver, [(path, declared_size)]):
-            staged = resolver.staged_read(path, expected_sha256=expected_sha256)
-    if staged is None:
         raise LeaseRefused("staged-not-serving", kind="availability")
     # acquire_entry_window records its own acquire refusal; the LeaseRefused
     # propagates with kind intact (never converted into a pool read).
@@ -734,12 +703,11 @@ def _acquire_bulk_window(path, expected_sha256, *, resolver=None, declared_size=
     return window, key, staged, resolver
 
 
-def _acquire_open_bulk_window(path, expected_sha256, *, resolver=None,
-                              declared_size=None):
+def _acquire_open_bulk_window(path, expected_sha256, *, resolver=None):
     """Acquire and open one immutable window; availability refusals are final."""
     from .staged_lease import LeaseRefused
     window, key, staged, lease_resolver = _acquire_bulk_window(
-        path, expected_sha256, resolver=resolver, declared_size=declared_size)
+        path, expected_sha256, resolver=resolver)
     try:
         fd, serving, tier = _enter_and_open_window(
             lease_resolver, window, key, path, record_refusal=False)
@@ -771,7 +739,7 @@ def _enter_and_open_window(resolver, window, key, path, *, record_refusal=True):
         except (LeaseRefused, RuntimeError):
             pass
         raise
-    tier = window.serving_tier or "stage"
+    tier = "stage"
     resolver.record_serving_tier(
         path, tier, pin_id=str(serving.get("pin_id") or ""),
         range_ref=str(serving.get("range_ref") or ""))
@@ -781,17 +749,14 @@ def _enter_and_open_window(resolver, window, key, path, *, record_refusal=True):
 def _record_served_bytes(resolver, path, tier, nbytes):
     """Count one verified read's bytes against the tier that served it.
 
-    ``tier`` is the serving tier the window reported (``ram`` or ``stage``),
-    or ``None`` for a read of the declared file, which is counted as pool
-    bytes. Called only after the bytes are verified, so a refused read
+    ``tier`` is ``stage`` for a staged read, or ``None`` for a read of the
+    declared file, which is counted as pool bytes. Called only after the bytes are verified, so a refused read
     counts nothing. With no resolver there is nothing to count (PQ #1026).
     """
     if resolver is None:
         return
     if tier is None:
         resolver.record_pool_read(path, nbytes)
-    elif tier == "ram":
-        resolver.record_ram_read(path, nbytes)
     else:
         resolver.record_stage_read(path, nbytes)
 
@@ -836,8 +801,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     tier = None
     if strict:
         window, key, _staged, lease_resolver, descriptor, serving, tier = (
-            _acquire_open_bulk_window(
-                path, expected_sha256, declared_size=before.st_size))
+            _acquire_open_bulk_window(path, expected_sha256))
         source_signature = file_stat_signature(os.fstat(descriptor))
         source, source_before = Path(window.stage_path(key) or path), os.fstat(descriptor)
         source_offset = _staged.get('object_offset', 0)
@@ -1919,13 +1883,12 @@ def _strict_lease_groups(references, resolver):
     looked up here exactly as the single-entry path looks it up, and a miss
     refuses the same way, before anything is pinned.
 
-    A miss checks immutable coverage once through `_await_entry_landing`.
-    No mover or landing record can change this bound manifest.
+    No mover or landing record can change this bound manifest, so a miss
+    refuses at once.
     """
     from .residency_map import residency_resolver
     from .staged_lease import LeaseRefused
     looked = []
-    missed: dict[int, tuple[object, list[int]]] = {}
     for ref in references:
         entry_resolver = resolver(ref) if callable(resolver) else resolver
         if entry_resolver is None:
@@ -1934,19 +1897,8 @@ def _strict_lease_groups(references, resolver):
             raise LeaseRefused("readset-not-staged", kind="availability")
         staged = entry_resolver.staged_read(Path(ref.path), expected_sha256=ref.sha256)
         if staged is None:
-            missed.setdefault(id(entry_resolver), (entry_resolver, []))[1].append(len(looked))
-        looked.append((ref, entry_resolver, staged))
-    for entry_resolver, indices in missed.values():
-        if not _await_entry_landing(
-                entry_resolver,
-                [(looked[index][0].path, looked[index][0].file_bytes) for index in indices]):
             raise LeaseRefused("staged-not-serving", kind="availability")
-        for index in indices:
-            ref = looked[index][0]
-            staged = entry_resolver.staged_read(Path(ref.path), expected_sha256=ref.sha256)
-            if staged is None:
-                raise LeaseRefused("staged-not-serving", kind="availability")
-            looked[index] = (ref, entry_resolver, staged)
+        looked.append((ref, entry_resolver, staged))
     groups: dict[int, tuple[object, list]] = {}
     for ref, entry_resolver, staged in looked:
         groups.setdefault(id(entry_resolver), (entry_resolver, []))[1].append((ref, staged))
@@ -2122,8 +2074,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         lease_window = lease_fd = None
         if strict:
             lease_window, lease_key, _staged, lease_resolver = (
-                _acquire_bulk_window(path, ref.sha256, resolver=lease_resolver,
-                                     declared_size=ref.file_bytes))
+                _acquire_bulk_window(path, ref.sha256, resolver=lease_resolver))
             live_windows.append(lease_window)
             try:
                 lease_fd, _serving, tier = _enter_and_open_window(
@@ -2167,7 +2118,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         except LeaseRefused as refusal:
             entry_resolver.record_fallback(path, str(refusal))
             raise
-        tier = lease_window.serving_tier or "stage"
+        tier = "stage"
         entry_resolver.record_serving_tier(
             path, tier,
             pin_id=str(serving.get("pin_id") or ""),
