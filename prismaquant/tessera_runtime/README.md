@@ -76,16 +76,16 @@ Use `tools/provision_tessera_pin.py` to install and compare the package bytes.
 Install the canonical Git URL in the isolated interpreter to retain its exact commit metadata.
 Generate the admission answer with `contract_answer` in that interpreter.
 Generate the identity snapshot with `tests.tessera_serving_identity_snapshot`.
-Route each CPU action through PrismaBuild with `--tag x86 --env TMPDIR=/tmp`.
+Run each CPU action as an admitted Flux job (`prismaquant/flux_jobs.py`) with `TMPDIR=/tmp` in its environment.
 
 
-PB `da8fbb6d706a668c98cbe2f2841a6365eaff90d3e3851a6bab76c849f851cd87`
+Retired-system action `da8fbb6d706a668c98cbe2f2841a6365eaff90d3e3851a6bab76c849f851cd87`
 generates the answer and snapshot from the installed contract.
 The answer remains unchanged; the snapshot changes only its pin commit and contract digest.
 The installed package digest is `68486e33ae4d8ba93d83fd94b0e396e153a69aeece7a75da84524b2ee0ba88c2` over 127 files.
 The Git metadata names the canonical remote and exact commit.
 
-PB `92867be921aec5d64f5c1361bfb5817d281badba94661e01f0231c39e5a246a7`
+Retired-system action `92867be921aec5d64f5c1361bfb5817d281badba94661e01f0231c39e5a246a7`
 passes `require_pinned_tessera_runtime` and both real export preflights.
 The action uses CPU metadata only, with no model weights.
 It records these exact commands:
@@ -136,7 +136,7 @@ Each shard used one CPU, four GiB, one native thread, and scratch under `/tmp`.
 
 The correction action is `ce33bde128ffcfe8d856849b56e08e30cff8637c7d7e37a78412e301fc04fff9`; its three targeted tests pass.
 The failed shard remains failed in the record.
-PB `65e5a0168bab` uses the published snapshot owner to compare the four initial snapshots.
+A retired-system action `65e5a0168bab` uses the published snapshot owner to compare the four initial snapshots.
 Their 3,470 tracked source files agree after only owner-verified generated metadata leaves the comparison.
 The source digest is `15ca467cbaa0bd9eba93929892a2be19545ab0702f6c77d523fe181f45963fa5`.
 
@@ -147,7 +147,7 @@ Without the external test override, its positive admission and version-dispatch 
 That old result follows from source inspection, not a second test run on D13.
 The no-table refusal controls do not depend on the missing API.
 
-PB `f05313eeee06` compares captured origin/main `50ec6c1` on D13 with branch source on the new overlay.
+A retired-system action `f05313eeee06` compares captured origin/main `50ec6c1` on D13 with branch source on the new overlay.
 Both overlays remain unchanged.
 Only `contract_version` and `reviewed_contract_sha256` differ in its fixture outputs.
 The canonical layer oracle excludes only those two fields.
@@ -157,7 +157,7 @@ Both stored outputs hash to `57b8f9b3498d25ca3fd67b541c86ff731bca9fb265d8878bd9a
 The evidence directory is `/mnt/shared/tessera-measurements/pq-pin-fca4c6ce0`.
 It contains the preparation, preflight, shard summaries, complete outcomes, source audit, and retained allocation outputs.
 These results prove CPU reader and metadata behavior, not a served model or performance change.
-The final oracle check is PB `62678617d06b38f536343af36ad2a3fe96beeee9c30da605d01f56831fb1f90d`.
+The final oracle check is retired-system action `62678617d06b38f536343af36ad2a3fe96beeee9c30da605d01f56831fb1f90d`.
 It calls the final normalizer on both retained outputs and passes without another allocator run.
 The six-field proposal remains historical; the final test excludes only the two observed fixture fields.
 
@@ -174,7 +174,7 @@ answer, four native-extension rows, runtime scope, plugin, lane and
 evidence predicates are retained; 22 cells remain eager and none compiled.
 The previous v45 package still refuses by digest and reviewed-answer drift.
 
-PB action `bb2911530f0390c7ede9504761d620e8e35468fe766fcaf3902ce4ea62352f2c`
+Retired-system action `bb2911530f0390c7ede9504761d620e8e35468fe766fcaf3902ce4ea62352f2c`
 installed the exact source in isolated DL380 overlay
 `/home/rob/venvs/pq-d13-candidate-2dbac191/bin/python`, without replacing
 any shared default interpreter. Under `-I`, the installed package and
@@ -187,13 +187,12 @@ Raw log: `/home/rob/fleet/inventory/kernels-d13-preparation-20261005.log`;
 identities and full old-answer drift:
 `/mnt/shared/tessera-measurements/d13-public-master-2dbac191/preparation.json`.
 
-The final non-editable Git install is PB
-`7f50b73fca5cfab880bbffcf8ff7e939803975c1e37883e30cec6c776d6dd16e`;
+The final non-editable Git install is retired-system action `7f50b73fca5cfab880bbffcf8ff7e939803975c1e37883e30cec6c776d6dd16e`;
 `direct_url.json` records the real public remote and exact full commit, not
 a manually restamped local install. The verified source manifest hashes
 all 1,910 archived files to
 `f7f331f6fb77d7dd5a688ff773a6a571e1cb8ade961b6a6c8c3a82736175958f`.
-PB `7da66126cebfe7e1c88b6e07e3fa7b56a8c850d6a95cabb11e8052ec67f21eb8`
+Retired-system action `7da66126cebfe7e1c88b6e07e3fa7b56a8c850d6a95cabb11e8052ec67f21eb8`
 ran valid LSP references for all eight authoritative pin constants using
 python-lsp-server 1.12.2, Jedi 0.19.2 and Parso 0.8.5. The initial
 Parso 0.8.4/Python 3.14 zero-result queries are not qualification.
@@ -222,15 +221,14 @@ kept select run-table grammar, coverage inventory and allowance projection,
 not generic scope. Full inventory and reviewed rationale:
 `/mnt/shared/tessera-measurements/d13-public-master-2dbac191/schema-comparison-sweep.json`
 and `/home/rob/fleet/inventory/kernels-d13-schema-comparison-reviewed-20261005.json`.
-PB `80662975483d47eefb21d733ec666751309053555947d34893052b47b8d363fc`
+Retired-system action `80662975483d47eefb21d733ec666751309053555947d34893052b47b8d363fc`
 compiled all five affected reader/pin modules, rechecked the installed
 contract/package with no drift and sealed the inventory/control file hashes
 in its actual CAS output. These are CPU correctness/install facts only.
 
 
 The composed 39-file pin/provisioning/reader/export/fingerprint/doc population
-then completed under the exact Git-installed overlay: PB
-`357857d174f6a5fac067c865eb7810ef32d410d02f4a54d6f12130a849b8d89d`,
+then completed under the exact Git-installed overlay: retired-system action `357857d174f6a5fac067c865eb7810ef32d410d02f4a54d6f12130a849b8d89d`,
 907 passed, zero failed, one skipped. The sole skip is the separately
 opt-in immutable historical-v5 publisher fixture not being supplied; active
 v56 pin/install/API controls ran. Log and per-shard record:
@@ -266,11 +264,10 @@ renames the `reader-pin-83460680` byte-state `reader-pin-b40c93cb`, and no
 rate count moves. The pin stays schema v2. The route-census tool moves to SHA-256
 `e449db34197d2e415a00de9c91a6abde0e3030f381e7a7be25946fc97fcb1c14`
 (`tools/tessera_route_census.py`); this is a source identity, not a new census run.
-The serving-identity snapshot was re-taken under the installed pin by PB
-`8321ca113e50` and differs only in `pin.commit`. PB `c0d0779923a9` repeated
+The serving-identity snapshot was re-taken under the installed pin by retired-system action `8321ca113e50` and differs only in `pin.commit`. Retired-system action `c0d0779923a9` repeated
 the #1304 check: 1 passed, 0 failed, 0 skipped, with all four normalized
 allocator output digests unchanged. Full keys and commands are in PR #1740.
-The full x86 CPU suite under the new interpreter is GREEN: PB `4cbd37811088`
+The full x86 CPU suite under the new interpreter is GREEN: retired-system action `4cbd37811088`
 and `c552682c2843`, 15,473 passed, 354 skipped, 1 xfailed and 0 failed, plus
 88 passed subtests across 872 files. Skips do not qualify GPU or serving
 behavior. An inherited stale citation was resolved by the #1748 rebase;
@@ -399,30 +396,25 @@ byte-identical to the previous pin; the legal inventory keeps its unique
 and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
 `experiments/` and are not wheel entry points.
 Provision the pin venv from a git URL so the install records the commit
-(`git+https://github.com/RobTand/tessera.git@<pin>`). The PrismaBuild test
-interpreter for the current reader/SDK pin on DL380 is
-`/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb`. PQ #1888 adopts exact
-PrismaBuild `95a59051d48cda82eea7927f31870c6c862d7174` / SDK3 while retaining
-Tessera `b40c93cb`. Provision it through an admitted PB action by copying
-`pq-pb059953bc-tessera-b40c93cb` to the new path, repointing copied scripts
-and any `.pth` references, then force-reinstalling only PrismaBuild from
-`git+https://github.com/RobTand/prismabuild.git@95a59051d48cda82eea7927f31870c6c862d7174`
-with `--no-deps --no-build-isolation`. Assert both noneditable Git commits,
-the installed client path under the new prefix and `SDK_VERSION == 3` before
-using it. PB commands and receipts are recorded in PR #1900; a path alone
-is not a provision pass. This CPU pin movement does not certify Spark
-interpreters or activate a runtime generation. Do not mutate old live venvs.
+(`git+https://github.com/RobTand/tessera.git@<pin>`). The current reader pin
+retains Tessera `b40c93cb`; its test interpreter on DL380 is
+`/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb`. Provision a new interpreter
+as an admitted job by copying the previous pin's interpreter to the new path,
+repointing copied scripts and any `.pth` references, and reinstalling only
+Tessera. Assert the noneditable Git commit and the installed path under the new
+prefix before using it; a path alone is not a provision pass. This CPU pin
+movement does not certify Spark interpreters or activate a runtime generation.
+Do not mutate old live venvs.
 
-The previous SDK1 interpreter
+The previous interpreter
 `/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb` carried Tessera `b40c93cb`
-and PrismaBuild `059953bc` (`staged_lease.PB_READER_LEASE_PIN_COMMIT` at
-PQ #1541/#1740). It was a copy of
+(PQ #1541/#1740). It was a copy of
 `pq-pb059953bc-tessera-83460680` with only Tessera reinstalled, non-editable,
-provisioned by host-pinned PB build actions on 2026-09-29: dl380g10
+provisioned by host-pinned admitted build actions on 2026-09-29: dl380g10
 `04db45b6e214`, sparky `6e595022a3d5` and sparklina `18820b4622bf`.
 Each Spark action also builds the `-tf516` sibling. All five interpreters
 passed the exact dependency-pin preflight, `provision_tessera_pin.py
---check-only`, and the Tessera import check. Pin publication is PB
+--check-only`, and the Tessera import check. Pin publication is recorded as action
 `d4c602dbe103`; the full keys, commands and receipts are recorded in PR #1740
 (closes #1739).
 The `83460680` interpreters (PQ #1719) are copies of the `a21d74d8` ones
@@ -434,28 +426,26 @@ sparklina `8323b283eb2d`.
 The `a5f3b232` interpreters (PQ #1616) are copies of the `38e96012` ones
 built the same way. The `38e96012` interpreter is a copy of
 `pq-pb059953bc-tessera-db5b6e23` with only Tessera reinstalled, non-editable,
-provisioned by host-pinned PB build actions on 2026-09-28: dl380g10
+provisioned by host-pinned admitted build actions on 2026-09-28: dl380g10
 `c94b89b4e2ac`, sparky `d36bf663315b`, sparklina `13d94ab22f4d`. Each Spark
 also has a `-tf516` sibling, copied from `pq-pb059953bc-tessera-db5b6e23-tf516`
 with only Tessera reinstalled (sparky `07013de7488f`, sparklina
-`e8cb68eab74e`). Each of those builds also ran the pbtest dependency-pin
-preflight (`pbtest_pins.preflight`) against this tree's resolver. The
+`e8cb68eab74e`). Each of those builds also ran the dependency-pin preflight
+against this tree's resolver. The
 `db5b6e23` interpreters (dl380g10 `18ee90816fc6`, sparky `7d203c3cdacb`,
 sparklina `27b513d61205`; `-tf516` sparky `cb5f94eae9b2`, sparklina
-`ddd47cb807ed`) came from `20bf5346` and `43da1c39-tf516`. Each build asserts both commits in `direct_url.json`
-(distributions `tessera-quant` and `prismabuild`, neither editable), the
+`ddd47cb807ed`) came from `20bf5346` and `43da1c39-tf516`. Each build asserts the Tessera commit in `direct_url.json`
+(distribution `tessera-quant`, not editable), the
 contract, `export.py` and `grammar.py` digests, that `tessera.cached_unit`
 defines `ReuseAuthority` and no PQ schema roster, that
 `tessera.hessian_capture` names no canonical capture, that
-`tessera.producer_authority` spells the option, and that
-`prismabuild.client.SDK_VERSION` is 1. The `43da1c39` interpreters (#675's
+`tessera.producer_authority` spells the option. The `43da1c39` interpreters (#675's
 head, never a merged pin), the `cadc200c` ones, the
 `pq-pb059953bc-tessera-20bf5346` ones (PQ #1541's test interpreter), and the
 `20bf5346` interpreters (dl380g10 `68bdb80acd8d`, sparky `6940c8f1c592`,
 sparklina `062be8b71f67`) and the `a3e83875` ones stay in place. Old interpreters remain untouched for running
 sessions. Announce the new `--python` paths before merging a pin move; never
-update a live venv in place. On each box, run as a host-pinned PB action
-(`--tag <host>`); the GB10 boxes repeat it for the `-tf516` sibling, and
+update a live venv in place. On each box, run as a host-pinned admitted job; the GB10 boxes repeat it for the `-tf516` sibling, and
 the copy repoints any `base-shadow` `.pth` file from the source venv to the new
 one:
 
@@ -484,17 +474,17 @@ the base interpreter takes transformers 5.6.0 from `pq-cu130`, and
 from it and skip with it: `test_glm_campaign_streaming`,
 `test_tessera_stack_group_cli`, `test_selected_snapshot_scope`,
 `test_collector_source_release` and `test_streamed_capture_admission`. Until
-2026-09-23 none of the six had run in a PrismaBuild test run.
+2026-09-23 none of the six had run in an admitted test run.
 
 The sibling interpreter `/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb-tf516`
 is the interpreter above with transformers 5.16.1, tokenizers 0.23.1 and
 safetensors 0.8.0, the versions in the campaign's `prismaquant-tf516` venv.
-Tessera, PrismaBuild, torch and every other package are the same, so
-`pbtest` checks the same exact pin. Each pin move copies the previous pin's
+Tessera, torch and every other package are the same, so
+the pin check sees the same exact pin. Each pin move copies the previous pin's
 `-tf516` sibling in the Spark build actions above; the `b40c93cb` siblings
 descend from `83460680-tf516`, the `83460680` ones from `a21d74d8-tf516`, the `a21d74d8` ones from `a5f3b232-tf516`,
 the `a5f3b232` ones from `38e96012-tf516`, the
-`38e96012` ones from `db5b6e23-tf516`, the `db5b6e23` ones from `43da1c39-tf516` (with PrismaBuild reinstalled at `059953bc`), the
+`38e96012` ones from `db5b6e23-tf516`, the `db5b6e23` ones from `43da1c39-tf516`, the
 `43da1c39` ones from `cadc200c-tf516`, the `cadc200c` ones from `20bf5346-tf516`, the `20bf5346` ones from `a3e83875-tf516`, the `a3e83875` ones from `f94929de-tf516`, and the `4c4ff1c2` ones from `09d6559d-tf516`. The original
 transformers installations came from actions `fa510fbf5a02` (sparky) and
 `29ec7048687b` (sparklina, 2026-09-25). dl380g10's interpreter of the base name is a
@@ -519,14 +509,12 @@ done
   'transformers==5.16.1' 'tokenizers==0.23.1' 'safetensors==0.8.0'
 ```
 
-A PR that touches those six modules, or what they test, runs them there:
+A PR that touches those six modules, or what they test, runs them there as
+admitted jobs using that interpreter, with one thread per shard, two workers and
+two CPUs per shard, and 8 GB per shard:
 
 ```bash
-python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
-  --checkout <this worktree> --tag gb10 --priority -10 \
-  --python /home/rob/venvs/pq-pb059953bc-tessera-b40c93cb-tf516/bin/python \
-  --threads-per-shard 1 --workers-per-shard 2 --cpus-per-shard 2 --mem-gb 8 \
-  --timeout-s 1800 \
+/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb-tf516/bin/python -m pytest \
   tests/test_glm5_next_streamed_forward_parity.py \
   tests/test_glm_campaign_streaming.py tests/test_tessera_stack_group_cli.py \
   tests/test_selected_snapshot_scope.py tests/test_collector_source_release.py \
@@ -534,13 +522,13 @@ python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
 ```
 
 Every session prints a `pq-test-environment:` line with the interpreter and
-its torch, transformers, tessera-quant and prismabuild versions
-(`tests/conftest.py`), so each shard's receipt names the transformers it ran
+its torch, transformers and tessera-quant versions
+(`tests/conftest.py`), so each shard's result names the transformers it ran
 under.
 
 The whole suite passes on this interpreter too. At `26683550bdbf`, 40 shards
 on sparky collected and ran 12,040 tests: 11,821 passed, 216 skipped and 3
-xfailed, and no skip names transformers (PrismaBuild keys in PQ #1090's pull
+xfailed, and no skip names transformers (keys in PQ #1090's pull
 request). So no test needs transformers 5.6.0. Whether this interpreter
 replaces its base as the PrismaQuant test interpreter is a separate decision;
 until then the base keeps running everything else.
@@ -579,7 +567,7 @@ admission facts move, and `TESSERA_DEV_PIN_ANSWER`'s diff is their review:
 - **v32 (#560):** the routed `TESSERA_E2M1_K2` reader domain widens from the
   single rung `[896, 896]` to the full trellis domain `[128, 896]` step 128,
   and the two routed-MoE cells widen with it. The receipt is the seven-rung
-  green load (PB `a186d7bc6f1f…`). The cells stay `route_only` /
+  green load (retired-system action `a186d7bc6f1f…`). The cells stay `route_only` /
   `not_recorded`, so that widening is Rob's call under principle 9 (#198),
   flagged in the answer diff rather than decided by it.
 - **D2/D2b (#562):** the unreceipted DENSE half of #560's widen is reverted
@@ -863,24 +851,21 @@ Hash `src/tessera/grammar.py` and `src/tessera/export.py` at the new commit
 before touching `tessera_legal_domain.py`'s prose; new bytes there are a
 re-measurement, not a re-transcription.
 
-Every PrismaBuild lane checks the INSTALLED Tessera against
-`TESSERA_DEV_PIN_COMMIT` before pytest runs (`tools/resolve_tessera_dev_pin.py`
-inside `pbtest`), so a pin move also needs one new sibling interpreter per
+Every admitted test lane must check the INSTALLED Tessera against
+`TESSERA_DEV_PIN_COMMIT` before pytest runs (`tools/resolve_tessera_dev_pin.py`), so a pin move also needs one new sibling interpreter per
 lane, named `pq-<lane>-tessera-<short commit>`, installed from a git commit and
 never re-pinned in place: bundle the commit into `/mnt/shared/tessera-pins/`,
 then on each box clone the bundle and `pip install --no-deps
 --no-build-isolation git+file://<clone>@<commit>`. For the `-tessera-4c384e60`
 interpreters that was one bundle plus three builds (dl380g10, sparky,
-sparklina), 72-211 s each through PrismaBuild.
+sparklina), 72-211 s each as admitted jobs.
 
-Use a fleet interpreter provisioned at the reviewed pin, then route CPU
-verification through PrismaBuild:
+Use a fleet interpreter provisioned at the reviewed pin, then run CPU
+verification as an admitted Flux job (4 CPUs, 8 GB, one native thread per
+worker) whose `argv` is:
 
 ```bash
-python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
-  --cwd /home/rob/prismaquant --tag dl380g10 --cpus 4 --demand mem_gb=8 \
-  --priority -10 --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 \
-  --env OPENBLAS_NUM_THREADS=1 -- \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   /home/rob/venvs/pq-cpu312-tessera-4c384e60/bin/python -m pytest -q -n 4 \
   tests/test_tessera_serving_pin.py tests/test_tessera_lane_v6.py \
   tests/test_tessera_lane_admission.py tests/test_tessera_export_lane.py

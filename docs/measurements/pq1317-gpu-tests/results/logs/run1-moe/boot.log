@@ -1,0 +1,24 @@
+TS610_CONTAINER_USER {"uid": 1000, "gid": 1000}
+MISSING ["pytest==8.4.2", "pytest-xdist==3.8.0", "execnet==2.1.1", "pluggy==1.6.0", "iniconfig==2.1.0"]
+Collecting pytest==8.4.2
+  Downloading pytest-8.4.2-py3-none-any.whl.metadata (7.7 kB)
+Collecting pytest-xdist==3.8.0
+  Downloading pytest_xdist-3.8.0-py3-none-any.whl.metadata (3.0 kB)
+Collecting execnet==2.1.1
+  Downloading execnet-2.1.1-py3-none-any.whl.metadata (2.9 kB)
+Collecting pluggy==1.6.0
+  Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+Collecting iniconfig==2.1.0
+  Downloading iniconfig-2.1.0-py3-none-any.whl.metadata (2.7 kB)
+Downloading pytest-8.4.2-py3-none-any.whl (365 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 365.8/365.8 kB 20.7 MB/s eta 0:00:00
+Downloading pytest_xdist-3.8.0-py3-none-any.whl (46 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 46.4/46.4 kB 647.9 MB/s eta 0:00:00
+Downloading execnet-2.1.1-py3-none-any.whl (40 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 40.6/40.6 kB 869.2 MB/s eta 0:00:00
+Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+Downloading iniconfig-2.1.0-py3-none-any.whl (6.0 kB)
+Installing collected packages: pytest-xdist, pytest, pluggy, iniconfig, execnet
+Successfully installed execnet-2.1.1 iniconfig-2.1.0 pluggy-1.6.0 pytest-8.4.2 pytest-xdist-3.8.0
+TS610_TEST_TOOLS {"pytest": "8.4.2", "xdist": "3.8.0"}
+TS610_RUNTIME {"torch": "2.13.0+cu130", "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904", "tessera_source": "/mnt/shared/tessera-pins/fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb/src/tessera/__init__.py", "cuda_available": true, "device": "NVIDIA GB10", "capability": [12, 1]}

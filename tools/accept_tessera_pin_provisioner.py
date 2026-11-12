@@ -16,7 +16,7 @@ it, and then checks three properties on the artifacts rather than on the log:
 3. a second run is a no-op, which is the property the whole tool exists for
    and the one a contract-only gate could not deliver.
 
-Run through PrismaBuild on x86; the venv it makes is deleted at the end.
+Run through native Flux on x86 with a new job-private work directory.
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ import provision_tessera_pin as pin                        # noqa: E402
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--clone", type=Path, default=pin.DEFAULT_CLONE)
-    ap.add_argument("--pins-root", type=Path, default=pin.DEFAULT_PINS_ROOT)
+    ap.add_argument("--pins-root", type=Path)
     ap.add_argument("--work", type=Path, required=True,
                     help="scratch root for the throwaway venv and the build")
     ap.add_argument("--seed-from", type=Path,
@@ -46,24 +46,26 @@ def main() -> int:
     args = ap.parse_args()
 
     commit, _ = pin.reviewed_pin()
-    args.work.mkdir(parents=True, exist_ok=True)
+    args.work.mkdir(parents=True, exist_ok=False)
+    args.work = args.work.resolve(strict=True)
+    args.pins_root = args.pins_root or args.work / "pins"
+    if not args.pins_root.resolve().is_relative_to(args.work):
+        raise SystemExit("pins-root must belong to the new private work directory")
     env = args.work / "venv"
-    if env.exists():
-        shutil.rmtree(env)
     venv.create(env, with_pip=True)
     python = env / "bin" / "python"
     # The provisioner installs with --no-build-isolation, which is right for a
     # fleet venv that already carries setuptools and wrong for a venv made two
     # lines ago: 3.12 stopped seeding it.  Giving the throwaway one the build
     # backend keeps the acceptance about the provisioner.
-    subprocess.run([str(python), "-m", "pip", "install", "-q", "setuptools"],
+    subprocess.run([str(python), "-I", "-m", "pip", "install", "--prefix", str(env), "-q", "setuptools"],
                    check=True)
 
     out: dict = {"commit": commit, "venv": str(env)}
 
     def run(*extra: str) -> tuple[int, dict]:
         done = subprocess.run(
-            [sys.executable, str(TOOL), "--python", str(python),
+            [sys.executable, "-s", str(TOOL), "--python", str(python), "--prefix", str(env),
              "--clone", str(args.clone), "--pins-root", str(args.pins_root),
              "--staging-root", str(args.work / "staging"), *extra],
             capture_output=True, text=True)

@@ -38,7 +38,7 @@ from importlib.resources import as_file
 from tests.tessera_metadata_fixture import install_metadata
 import pytest
 import torch
-from tests.conftest import set_cell_census
+from lane_table_fixtures import set_cell_census
 
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_render as render

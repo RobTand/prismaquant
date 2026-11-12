@@ -13,7 +13,7 @@ import json
 import pytest
 
 from prismaquant import tessera_export_lane as tel
-from conftest import down_convert_lane_table
+from lane_table_fixtures import down_convert_lane_table
 from prismaquant.lane_eligibility import (
     EVIDENCE_SMOKE_REFUSALS,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,

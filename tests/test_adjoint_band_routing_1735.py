@@ -12,22 +12,13 @@ import json
 import pytest
 
 import prismaquant.joint_adjoint_band as band
-
-
-def _spies(monkeypatch):
-    calls = {"hash": []}
-    real_hash = getattr(band, "bytes_sha256hex", None)
-
-    def stand_in_hash(value):
-        calls["hash"].append(value)
-        return real_hash(value) if real_hash is not None else None
-
-    monkeypatch.setattr(band, "bytes_sha256hex", stand_in_hash, raising=False)
-    return calls
+from tests.delegation_recording import record_unary_calls
 
 
 def test_json_file_hash_routes_to_owner(monkeypatch, tmp_path):
-    calls = _spies(monkeypatch)
+    calls = {
+        "hash": record_unary_calls(monkeypatch, band, "bytes_sha256hex"),
+    }
     path = tmp_path / "plan.json"
     path.write_bytes(json.dumps({"a": 1}).encode())
     digest = hashlib.sha256(path.read_bytes()).hexdigest()

@@ -1,0 +1,221 @@
+"""Native caller boundaries; real lifecycle proof is retained beside migration evidence."""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from prismaquant import flux_jobs as jobs
+from prismaquant import tessera_campaign_rows as rows
+from tools import dispatch_tessera_campaign as campaign
+from tools.tessera_fleet import common, status
+
+
+class NativeRowsTests(unittest.TestCase):
+    def row(self, **extra):
+        return {'cwd': '/mnt/shared/source', 'argv': ['/bin/true'],
+                'demand': {'cpu': 1, 'mem_gb': 1}, 'env': {}, 'tags': [],
+                'timeout_s': 60, **extra}
+
+    def test_unresolvable_instance_leaves_no_stage_state(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get('TEST_TMPDIR')) as directory:
+            state = Path(directory) / 'state'
+            with patch.object(jobs, '_source_identity', return_value={}), \
+                    patch.object(jobs, '_client_environment', return_value={}), \
+                    patch.object(jobs, '_instance_uri', side_effect=ValueError('unresolvable instance')), \
+                    patch.object(jobs, 'submit_job') as submit:
+                with self.assertRaisesRegex(ValueError, 'unresolvable instance'):
+                    rows.submit_rows([self.row()], state)
+            self.assertFalse(state.exists())
+            submit.assert_not_called()
+
+    def test_preflight_validates_gpu_rows_and_refuses_bad_demands(self):
+        with patch.object(jobs, 'validate_job', return_value={}):
+            _, resources, _ = rows.validate_row(self.row(demand={'cpu': 10, 'mem_gb': 104, 'gpu': 1}, timeout_s=3600))
+        self.assertEqual(resources, jobs.FluxResources(10, 104, 1, 3600))
+        with patch.object(jobs, 'validate_job', return_value={}), patch.object(jobs, 'submit_job') as submit:
+            with self.assertRaisesRegex(ValueError, 'unsupported resource demand'):
+                rows.submit_rows([self.row(), self.row(demand={'cpu': 1, 'mem_gb': 1, 'ssd_gb': 2})],
+                                 '/mnt/shared/never-created')
+            submit.assert_not_called()
+
+    def test_contracts_refuse_before_native_submission(self):
+        cases = ({'data_manifest': 'inputs.json'}, {'progress_phases': ['pricing=900']},
+                 {'residency': 'stage'}, {'produced_outputs': []}, {'pilot': {}},
+                 {'container_images': ['pinned']}, {'gpu_memory_gb': 1},
+                 {'priority': -10}, {'made_up': 1})
+        with patch.object(jobs, 'submit_job') as submit:
+            for extra in cases:
+                with self.subTest(extra=extra), self.assertRaises(ValueError):
+                    rows.submit_rows([self.row(**extra)], '/mnt/shared/never-created')
+            submit.assert_not_called()
+
+    def test_missing_finite_walltime_refuses(self):
+        row = self.row()
+        del row['timeout_s']
+        with self.assertRaises(KeyError):
+            rows.validate_row(row)
+
+    def test_unknown_or_combined_placement_refuses(self):
+        for tags in (['gfx1201'], ['gb10', 'sparky']):
+            with self.subTest(tags=tags), self.assertRaises(ValueError):
+                rows.validate_row(self.row(tags=tags))
+
+    def test_local_source_refuses_even_for_cpu(self):
+        with self.assertRaisesRegex(ValueError, 'shared'):
+            rows.validate_row(self.row(cwd='/home/rob/prismaquant'))
+
+    def test_application_environment_never_dropped(self):
+        with patch.object(jobs, '_source_identity', return_value={}), patch.object(jobs, '_client_environment', return_value={}):
+            for env in ({'SCIENTIFIC_SETTING': 'a'}, {'PRISMABUILD_ACTION_KEY': 'x'},
+                        {'API_TOKEN': 'x'}, {'OMP_NUM_THREADS': '4'}):
+                with self.subTest(env=env), self.assertRaisesRegex(ValueError, 'environment'):
+                    rows.validate_row(self.row(env=env))
+
+    def test_unsupported_retry_configuration_is_not_ignored(self):
+        with self.assertRaises(ValueError):
+            rows.validate_row(self.row(retry={'max_attempts': 2}))
+
+    def test_saved_producer_required(self):
+        submission = jobs.FluxSubmission('1', Path('/missing'), 'sha')
+        with patch.object(jobs, 'load_submission', side_effect=jobs.SubmissionUnknown('unknown')):
+            with self.assertRaises(jobs.SubmissionUnknown):
+                rows.submit_rows([self.row()], '/mnt/shared/never-created', afterok=[submission])
+
+    def test_query_error_never_passes_merge(self):
+        for outcome in ('failed', 'running', 'unknown', 'canceled', 'dependency-failed', 'cache_hit'):
+            with patch.object(rows, 'collect_rows', return_value=[{'status': outcome,
+                    'payload_exit': 0, 'query_error': None}]):
+                with self.subTest(outcome=outcome), self.assertRaisesRegex(RuntimeError, 'merge'):
+                    rows.require_native_success('/unused', 1)
+        with patch.object(rows, 'collect_rows', return_value=[{'status': 'succeeded',
+                'payload_exit': 0, 'query_error': 'transport unavailable'}]):
+            with self.assertRaises(RuntimeError):
+                rows.require_native_success('/unused', 1)
+
+    def test_positive_native_completion_keeps_scientific_validation_separate(self):
+        fact = {'status': 'succeeded', 'payload_exit': 0, 'query_error': None}
+        with patch.object(rows, 'collect_rows', return_value=[fact]):
+            self.assertEqual(rows.require_native_success('/unused', 1), [fact])
+            with self.assertRaises(RuntimeError):
+                rows.require_native_success('/unused', 2)
+
+    def test_receipt_written_early_cannot_override_payload_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / 'manifest.json'
+            manifest.write_text(json.dumps([self.row()]))
+            receipt = root / 'receipts.json'
+            receipt.write_text('{"rows":[{"status":"succeeded"}],"returncode":0}')
+            failure = {'status': 'failed', 'payload_exit': 7, 'query_error': None}
+            with patch.object(rows, 'submit_rows'), patch.object(rows, 'collect_rows', return_value=[failure]):
+                self.assertEqual(campaign._flux_campaign(manifest, wait_s=0, receipts=receipt), 1)
+            self.assertEqual(json.loads(receipt.read_text())['rows'], [failure])
+
+    def test_merge_intent_cannot_substitute_another_stage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / 'manifest.json').write_text(json.dumps({'rows': [self.row()]}))
+            with self.assertRaisesRegex(RuntimeError, 'scientific manifest'):
+                rows.require_native_success(state, 1, rows=[self.row(argv=['/bin/false'])])
+
+    def test_status_ignores_historical_pb_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary) / '.pb-state'
+            state.mkdir()
+            (state / 'export-submissions.json').write_text('{"rows":[{"action_key":"old"}]}')
+            with patch.object(status, 'collect_rows') as collect:
+                self.assertEqual(status.main(['--workspace', temporary]), status.EXIT_NOTHING)
+                collect.assert_not_called()
+
+    def test_collect_rejects_placement_drift_before_reading_native_success(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            row = self.row(tags=['gb10'])
+            identity = {'checkout': '/mnt/shared/source', 'commit': 'a' * 40}
+            (state / 'manifest.json').write_text(json.dumps({'schema': rows.NATIVE_ROWS_SCHEMA,
+                'rows': [row], 'sources': [identity], 'producers': []}))
+            record = state / 'rows' / '00000'
+            record.mkdir(parents=True)
+            launch = {'schema': 'pq.flux.launch.v1', 'record_dir': str(record),
+                'argv': ['/bin/true'],
+                'source': identity, 'resources': {'cores': 1, 'memory_gib': 1, 'gpus': 0,
+                'walltime_s': 60, 'placement': 'portable'}, 'afterok': [],
+                'profile': {'profile': jobs._PROFILE, 'uri': 'local:///fixture/run/local-0',
+                            'broker_starttime': '123.5'}}
+            with patch.object(jobs, '_client_environment', return_value={}):
+                launch['native_argv'] = jobs._native_arguments(
+                row['argv'], identity, jobs.FluxResources(1, 1, 0, 60), record, [],
+                jobs._environment(record, None), None)
+            raw = jobs._json_bytes(launch)
+            (record / 'launch.json').write_bytes(raw)
+            digest = jobs.bytes_sha256hex(raw)
+            (record / 'submission.json').write_text(json.dumps({
+                'schema': 'pq.flux.submission.v1', 'launch_sha256': digest,
+                'state': 'submitted', 'job_id': '123'}))
+            submission = jobs.FluxSubmission('123', record, digest)
+            with patch.object(jobs, 'load_submission', return_value=submission), \
+                    patch.object(jobs, 'collect_job') as collect:
+                result = rows.collect_rows(state)
+                self.assertEqual(result[0]['status'], 'unknown')
+                self.assertIn('application intent', result[0]['query_error'])
+                collect.assert_not_called()
+
+    def test_malformed_row_does_not_hide_the_next_saved_job(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            identity = {'checkout': '/mnt/shared/source', 'commit': 'a' * 40}
+            (state / 'manifest.json').write_text(json.dumps({'schema': rows.NATIVE_ROWS_SCHEMA,
+                'rows': [self.row(), self.row()], 'sources': [{}, identity], 'producers': []}))
+            first = jobs.FluxSubmission('123', state / 'rows' / '00000', 'first')
+            second = jobs.FluxSubmission('456', state / 'rows' / '00001', 'second')
+            with patch.object(jobs, 'load_submission', side_effect=[first, second]), \
+                    patch.object(jobs, 'validate_launch'), \
+                    patch.object(jobs, 'collect_job', return_value=jobs.ExecutionResult(
+                        'succeeded', second.job_id, second.record_dir, 0)) as collect:
+                result = rows.collect_rows(state)
+                self.assertEqual([(r['job_id'], r['status']) for r in result],
+                                 [('123', 'unknown'), ('456', 'succeeded')])
+                collect.assert_called_once_with(second, wait=False)
+
+    def test_read_manifest_is_immutable_even_when_execution_refuses(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = Path(temporary) / 'read-manifest.json'
+            original = b'{"row":"scientific-inputs"}\n'
+            campaign._publish_intent_bytes(manifest, original)
+            campaign._publish_intent_bytes(manifest, original)
+            with self.assertRaisesRegex(RuntimeError, 'fresh workspace'):
+                campaign._publish_intent_bytes(manifest, b'{"row":"changed-inputs"}\n')
+            self.assertEqual(manifest.read_bytes(), original)
+
+    def test_read_manifest_symlink_never_rebinds_intent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / 'target'
+            target.write_bytes(b'exact-inputs')
+            manifest = root / 'manifest'
+            manifest.symlink_to(target)
+            with self.assertRaisesRegex(RuntimeError, 'fresh workspace'):
+                campaign._publish_intent_bytes(manifest, b'exact-inputs')
+            self.assertTrue(manifest.is_symlink())
+            self.assertEqual(target.read_bytes(), b'exact-inputs')
+
+    def test_campaign_status_never_submits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(jobs, 'submit_job', side_effect=AssertionError('submit')):
+                self.assertEqual(campaign.main(['status', '--workspace', temporary]), status.EXIT_NOTHING)
+
+    def test_stage_barrier_refuses_missing_rows_and_failed_payload(self):
+        failure = {'status': 'failed', 'payload_exit': 7, 'query_error': None}
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(rows, 'submit_rows'), patch.object(rows, 'collect_rows', return_value=[failure]):
+                with self.assertRaisesRegex(ValueError, 'downstream merge'):
+                    common.run_stage([self.row()], Path(temporary), 'encode', wait_s=0)
+            self.assertEqual(json.loads((Path(temporary) / '.flux-state/encode/endings.json').read_text())['rows'], [failure])
+
+
+if __name__ == '__main__':
+    unittest.main()

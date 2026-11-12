@@ -17,6 +17,7 @@ import pickle
 from .cluster_campaign import _atomic_write_new_bytes as atomic_write_bytes
 from .cost_stage_checkpoint import canonical_json_sha256
 from .dev_mode import seal_check
+from .joint_campaign_ledger import JOINED_RESULTS_SCHEMA
 from prismaquant.joint_aura_rows import prepare_joint_aura_identities, release_joint_aura_identities, validated_identity_memo
 from .stage_inputs import read_bound as _read_bound, require as _require, same as _same
 from .tessera_joint_aura import (
@@ -309,7 +310,6 @@ def bind_joined_anchors(joint, plan, *, plan_binding):
     the monolithic producer carries; read that pair by digest and let the
     existing handoff validate every source, render, calibration and wire.
     """
-    from .joint_quanta_join import JOINED_RESULTS_SCHEMA
     provenance = joint['provenance']
     _same(provenance.get('join_schema'), JOINED_RESULTS_SCHEMA, 'joint join schema')
     coverage = provenance.get('coverage', {})

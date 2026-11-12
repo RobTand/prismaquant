@@ -1,4 +1,4 @@
-"""Internal original-material qualification through real PB leases, CPU only.
+"""Internal original-material qualification through real immutable native staged windows, CPU only.
 
 This is not automatic campaign admission or a GLM producer transition.
 """
@@ -17,8 +17,8 @@ from safetensors.torch import save_file
 
 from prismaquant import tessera_calibration_cache as cc
 from prismaquant.residency_map import bind_residency_manifest
-from test_stage_b_prep_staged_reads_1092 import _stage_manifest
-from test_strict_reader_tier_enforcement import MANIFEST, _forget_state  # noqa: F401
+from native_original_fixtures import _stage_manifest
+from native_original_fixtures import _forget_state  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 REVISION = 'a6' * 20
@@ -74,7 +74,6 @@ def material(tmp_path, monkeypatch, request):
     pub = _bound(tmp_path / 'publisher.json', publisher)
     reads = _bound(tmp_path / 'readset.json', readset)
     staged = _stage_manifest(tmp_path, monkeypatch, readset)
-    bind_residency_manifest(MANIFEST)
     checks = []
     def admit(label, **kwargs):
         checks.append((label, kwargs))
@@ -263,7 +262,6 @@ def test_unsupported_routes_remain_closed(material, monkeypatch, route):
         stage_root = m['tmp'] / 'dynamic-stage'
         stage_root.mkdir()
         _stage_manifest(stage_root, monkeypatch, m['readset'])
-        bind_residency_manifest(MANIFEST)
         with pytest.raises(RuntimeError, match='unsupported dynamic'):
             _owner(m)
         return
@@ -366,14 +364,12 @@ def test_peak_admission_callback_cannot_reap_material_the_new_window_reuses(mate
     owner.close()
 
 
-def test_control_validation_requires_generation_bound_client_before_original_material(material, monkeypatch):
-    from prismaquant import staged_lease, staged_whole_file
-
-    def unavailable():
-        raise RuntimeError('generation-bound control client unavailable')
+def test_control_validation_requires_immutable_contract_before_original_material(material, monkeypatch):
+    from prismaquant import staged_whole_file
     def original_read(*args, **kwargs):
-        pytest.fail('original material read before control-client qualification')
-    monkeypatch.setattr(staged_lease, 'client_sdk', unavailable)
+        pytest.fail('original material read before immutable control validation')
+    malformed = dict(material['readset'], schema='foreign.read_contract')
+    material['options']['readset_input'] = _bound(material['tmp'] / 'foreign-readset.json', malformed)
     monkeypatch.setattr(staged_whole_file, 'read_staged_sealed_file', original_read)
-    with pytest.raises(RuntimeError, match='generation-bound control client'):
+    with pytest.raises(ValueError, match='read-contract schema'):
         _owner(material)

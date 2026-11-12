@@ -1,0 +1,26 @@
+{
+  "schema": "graph-impact.v1",
+  "figures": {
+    "u_pct": 51.145946653361364,
+    "loc_u_pct": 64.55189830927246,
+    "scc_max": 162,
+    "median_selected_pct": 13.2,
+    "p90_selected_pct": 87.2,
+    "modules_over_half": 268,
+    "conftest_source_modules": 0
+  },
+  "tolerances": {
+    "u_pct": 1.0,
+    "loc_u_pct": 1.0,
+    "scc_max": 0,
+    "median_selected_pct": 1.0,
+    "p90_selected_pct": 1.0,
+    "modules_over_half": 2,
+    "conftest_source_modules": 0
+  },
+  "reach_budget": 295,
+  "test_to_test": "reach",
+  "test_to_test_count": 845,
+  "test_to_test_strict_by": "2026-11-16",
+  "analyzer_sha256": "9ad443c9fc2cd96d1c35c488c422742d09b746e91745d8011a8c74562e58a3c7"
+}

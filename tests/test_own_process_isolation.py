@@ -1,21 +1,20 @@
 """``own_process`` modules run in a child pytest in a shared session (PQ #1008).
 
-The Stage A produced-output harness and the ten modules that import it need
-a process of their own (one pinned ``prismabuild`` per process). In a
-multi-file session they used to skip silently: 25 tests in one #996 shard.
+Some modules need a process of their own (an import graph no other module in the
+session has touched). In a multi-file session they used to skip silently: 25
+tests in one #996 shard.
 ``tests/conftest.py`` now replaces each marked test with a proxy under the
 same node id; one child pytest per module runs exactly the chosen node ids,
 and each proxy reports its own test's outcome.
 
 These tests drive real pytest sessions over the samples in
 ``tests/own_process_samples``: ``sample_isolated`` (marked),
-``sample_shared``, whose import plants a module that stands in for a second
-``prismabuild``, ``sample_hangs`` (marked), whose one hanging test must
-fail alone under the per-test bound (PQ #1027), and ``sample_bound_loaded``
-(marked), which reports the bound it runs under when only
-``PRISMABUILD_TEST_TIMEOUT_S`` asks for one (PQ #1055). The samples write
-their process ids, so the tests check where each test ran, not only what it
-reported.
+``sample_shared``, whose import plants a foreign module, ``sample_hangs``
+(marked), whose one hanging test must fail alone under the declared
+pytest-timeout bound (PQ #1027), ``sample_collection_error`` (marked), whose
+collection fails, and ``sample_child_dies`` (marked), whose child is killed
+mid-module. The samples write their process ids, so the tests check where each
+test ran, not only what it reported.
 """
 from __future__ import annotations
 
@@ -44,14 +43,13 @@ def _session(tmp_path, *files, extra=(), environ=None):
     env = {name: value for name, value in os.environ.items()
            if not name.startswith("PYTEST_") and name != "PQ_OWN_PROCESS_REPORT"}
     env["OWN_PROCESS_SAMPLE_OUT"] = str(out)
-    # ``None`` removes a variable: a PrismaBuild shard exports the per-test
-    # bound to every test, so "unset" has to be said.
+    # ``None`` removes a variable, so "unset" can be said.
     for name, value in (environ or {}).items():
         if value is None:
             env.pop(name, None)
         else:
             env[name] = value
-    argv = [sys.executable, "-m", "pytest", "-q", "--no-header",
+    argv = [sys.executable, "-s", "-m", "pytest", "-q", "--no-header",
             "-p", "no:cacheprovider", "-c", str(ROOT / "pytest.ini"),
             "--rootdir", str(ROOT), "--basetemp", str(tmp_path / "base"),
             f"--junitxml={junit}", "-k", "not deselected", *extra,
@@ -68,9 +66,12 @@ def _session(tmp_path, *files, extra=(), environ=None):
         output, _ = proc.communicate()
         pytest.fail(f"the sample session ran past 900 s:\n{output[-4000:]}")
     outcomes = {}
-    for case in ET.parse(junit).getroot().iter("testcase"):
+    cases = list(ET.parse(junit).getroot().iter("testcase")) if junit.exists() else []
+    for case in cases:
         name = case.get("name")
         failure = case.find("failure")
+        if failure is None:
+            failure = case.find("error")
         skipped = case.find("skipped")
         if failure is not None:
             outcomes[name] = ("failed", (failure.get("message") or "")
@@ -120,6 +121,15 @@ def test_a_shared_session_runs_the_marked_module_in_one_child(tmp_path):
     assert _child_imports(out) == [str(pid) for pid in child]
     # The child ran what the parent chose: -k deselected this one.
     assert not (out / "deselected.pid").exists()
+
+
+def test_a_marked_module_that_passes_passes_in_its_own_child(tmp_path):
+    proc, output, outcomes, out = _session(tmp_path, "sample_passes.py", "sample_shared.py")
+    assert proc.returncode == 0, output
+    assert outcomes == {"test_first": ("passed", ""), "test_second": ("passed", ""), "test_shared": ("passed", "")}, output
+    child = {_pid(out, "pass-first"), _pid(out, "pass-second")}
+    assert len(child) == 1 and proc.pid not in child
+    assert _pid(out, "shared") == proc.pid
 
 
 def test_a_session_of_the_module_alone_runs_in_process(tmp_path):
@@ -192,149 +202,122 @@ def test_a_test_that_never_reached_its_call_phase_is_not_a_pass(tmp_path):
 #: ran out the bound on a loaded sparklina, so the bound leaves wide room.
 BOUND_S = 30
 
-#: Registration and import isolation are asserted from the sample's report.
-#: Its setup allowance is independent of the intentional hanging sample's bound.
-REGISTRATION_BOUND_S = 120
-
-#: Each per-test bound a session can run under: the module that must be
-#: importable, the parent session's arguments and environment, and the words
-#: its failure must carry.
-BOUNDS = {
-    # PrismaBuild's bound, which pbtest exports to every shard, named with -p.
-    "prismabuild": (
-        "prismabuild.pytest_test_bound",
-        ("-p", "prismabuild.pytest_test_bound"),
-        {"PRISMABUILD_TEST_TIMEOUT_S": str(BOUND_S)},
-        (f"per-test bound of {BOUND_S}s", "PRISMABUILD_TEST_TIMEOUT_S")),
-    # The same bound from the variable alone, as a pbtest shard runs: the
-    # conftest loads the plugin in the parent and in the child (PQ #1055).
-    "prismabuild-env": (
-        "prismabuild.pytest_test_bound",
-        (),
-        {"PRISMABUILD_TEST_TIMEOUT_S": str(BOUND_S)},
-        (f"per-test bound of {BOUND_S}s", "PRISMABUILD_TEST_TIMEOUT_S")),
-    # pytest-timeout, which CI runs under ``--timeout=300``.
-    "pytest-timeout": (
-        "pytest_timeout",
-        (f"--timeout={BOUND_S}",),
-        {"PRISMABUILD_TEST_TIMEOUT_S": ""},
-        (f"Timeout (>{float(BOUND_S)}s)", "pytest-timeout")),
-}
+#: pytest-timeout's registration in each plugin state: autoloaded (the default,
+#: registered as ``timeout``) and autoload disabled with the plugin named (``-p``).
+#: A child shares its parent's environment, so it is in the same state.
+AUTOLOAD_ON = ((f"--timeout={BOUND_S}",), {})
+AUTOLOAD_OFF = (("-p", "pytest_timeout", f"--timeout={BOUND_S}"), {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"})
+STATES = {"autoload-on": AUTOLOAD_ON, "autoload-off": AUTOLOAD_OFF}
 
 
-@pytest.mark.parametrize("bound", sorted(BOUNDS))
-def test_a_hanging_test_fails_alone_under_the_per_test_bound(tmp_path, bound):
+@pytest.mark.parametrize("state", sorted(STATES))
+def test_a_hanging_test_fails_alone_under_the_declared_per_test_bound(tmp_path, state):
     """The bound applies to each test in the child, not to the module (#1027).
 
-    The hang outlasts one bound by itself, so ``test_after`` passes only if
-    the module is not bounded as a whole. Each environment runs the bound it
-    has: the PrismaBuild venv has no pytest-timeout, and CI does not install
-    ``prismabuild``.
+    The hang outlasts one bound by itself, so ``test_after`` passes only if the module is not
+    bounded as a whole. pytest-timeout is the declared bound (``pyproject.toml`` test extra).
     """
-    module, args, environ, words = BOUNDS[bound]
-    pytest.importorskip(module)
+    args, environ = STATES[state]
     proc, output, outcomes, out = _session(
-        tmp_path, "sample_hangs.py", "sample_shared.py", extra=args,
-        environ=environ)
+        tmp_path, "sample_hangs.py", "sample_shared.py", extra=args, environ=environ)
     assert proc.returncode == 1, output
-    assert set(outcomes) == {"test_before", "test_hangs", "test_after",
-                             "test_shared"}, output
-    state, message = outcomes["test_hangs"]
-    assert state == "failed", output
-    for word in words:
+    assert set(outcomes) == {"test_before", "test_hangs", "test_after", "test_shared"}, output
+    kind, message = outcomes["test_hangs"]
+    assert kind == "failed", output
+    for word in (f"Timeout (>{float(BOUND_S)}s)", "pytest-timeout"):
         assert word in message, message
     for name in ("test_before", "test_after", "test_shared"):
         assert outcomes[name] == ("passed", ""), output
-    # One child ran all three, and it lived through the hang.
     child = {_pid(out, "before"), _pid(out, "hangs"), _pid(out, "after")}
     assert len(child) == 1 and proc.pid not in child, output
 
 
-# -- the bound from the environment alone (PQ #1055) ---------------------------
-
-#: The variable pbtest exports to every shard, and the plugin reads.
-BOUND_ENV = "PRISMABUILD_TEST_TIMEOUT_S"
-
-
-def _prismabuild_installed():
-    import importlib.util
-    if importlib.util.find_spec("prismabuild") is None:
-        pytest.skip("prismabuild is not installed: CI never sets the bound")
-
-
-def test_a_hanging_test_in_process_fails_alone_under_the_bound(tmp_path):
-    """A module alone in a session runs in process, bounded per test (#1055).
-
-    Only the variable is set, as on a pbtest shard: no ``-p``.
-    """
-    _prismabuild_installed()
-    proc, output, outcomes, out = _session(
-        tmp_path, "sample_hangs.py", environ={BOUND_ENV: str(BOUND_S)})
+@pytest.mark.parametrize("state", sorted(STATES))
+def test_a_hanging_test_in_process_fails_alone_under_the_declared_bound(tmp_path, state):
+    args, environ = STATES[state]
+    proc, output, outcomes, out = _session(tmp_path, "sample_hangs.py", extra=args, environ=environ)
     assert proc.returncode == 1, output
     assert set(outcomes) == {"test_before", "test_hangs", "test_after"}, output
-    state, message = outcomes["test_hangs"]
-    assert state == "failed", output
-    for word in (f"per-test bound of {BOUND_S}s", BOUND_ENV):
-        assert word in message, message
+    assert outcomes["test_hangs"][0] == "failed" and f"Timeout (>{float(BOUND_S)}s)" in outcomes["test_hangs"][1], output
     assert outcomes["test_before"] == outcomes["test_after"] == ("passed", "")
-    assert {_pid(out, "before"), _pid(out, "hangs"), _pid(out, "after")} == {
-        proc.pid}
+    assert {_pid(out, "before"), _pid(out, "hangs"), _pid(out, "after")} == {proc.pid}
 
 
-def _bound_report(out):
-    return json.loads((out / "bound.json").read_text())
+@pytest.mark.parametrize("variant", ["plugin-disabled", "autoload-off-unnamed"])
+def test_a_requested_bound_without_the_plugin_is_a_failure_never_a_skip(tmp_path, variant):
+    """pytest refuses an unrecognized ``--timeout``: usage error, exit 4, nothing runs, nothing skips."""
+    extra, environ = ((("-p", "no:timeout", "--timeout=30"), {}) if variant == "plugin-disabled"
+                      else ((f"--timeout=30",), {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}))
+    proc, output, outcomes, _out = _session(tmp_path, "sample_isolated.py", "sample_shared.py", extra=extra, environ=environ)
+    assert proc.returncode == 4, output
+    assert "unrecognized arguments: --timeout" in output, output
+    assert outcomes == {}, output
 
 
-@pytest.mark.parametrize("shared", [False, True], ids=["alone", "shared"])
-def test_the_bound_loads_from_the_environment_without_importing_prismabuild(
-        tmp_path, shared):
-    """The variable loads the plugin, and ``prismabuild`` stays unimported.
+def test_a_child_that_cannot_load_the_plugin_fails_its_proxies_by_exit_status(tmp_path):
+    """The parent has the plugin, its own-process child cannot: every proxy fails, none passes or skips.
 
-    The Stage A harness fails a process whose ``prismabuild`` is not its
-    pinned candidate (``_pb_source``), so the plugin is loaded from its file,
-    in the session and in an ``own_process`` child alike.
+    The shadow module raises ImportError only inside a child (the variable the parent sets for it) and is the
+    real plugin everywhere else.
     """
-    _prismabuild_installed()
-    files = ("sample_bound_loaded.py",) + (("sample_shared.py",) if shared else ())
-    proc, output, _outcomes, out = _session(
-        tmp_path, *files, environ={BOUND_ENV: str(REGISTRATION_BOUND_S)})
-    assert proc.returncode == 0, output
-    report = _bound_report(out)
-    assert report["registered"] is True, report
-    assert report["bound_s"] == float(REGISTRATION_BOUND_S), report
-    assert report["prismabuild_imported"] is False, report
-    # Alone, the module runs in process; shared, in its own child.
-    assert (report["pid"] == proc.pid) is (not shared), report
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    (shadow / "pytest_timeout.py").write_text(
+        "import os, sys\nfrom pathlib import Path\n"
+        "if os.environ.get('PQ_OWN_PROCESS_REPORT'):\n"
+        "    raise ImportError('sample: pytest-timeout unavailable in the child')\n"
+        "here = Path(__file__).resolve().parent\n"
+        "real = next(Path(p) / 'pytest_timeout.py' for p in sys.path if p and Path(p).resolve() != here\n"
+        "            and (Path(p) / 'pytest_timeout.py').is_file())\n"
+        "exec(compile(real.read_text(), str(real), 'exec'), globals())\n")
+    args, environ = AUTOLOAD_OFF
+    proc, output, outcomes, _out = _session(
+        tmp_path, "sample_isolated.py", "sample_shared.py", extra=args,
+        environ={**environ, "PYTHONPATH": str(shadow)})
+    assert proc.returncode == 1, output
+    assert outcomes["test_shared"] == ("passed", ""), output
+    for name in ("test_passes", "test_fails", "test_skips", "test_xfails", "test_param[1]", "test_param[2]"):
+        kind, message = outcomes[name]
+        assert kind == "failed", (name, kind, output)
+        assert "own pytest process" in message or "reported nothing" in message, message
 
 
-@pytest.mark.parametrize("shared", [False, True], ids=["alone", "shared"])
-def test_nothing_changes_when_the_bound_is_unset(tmp_path, shared):
-    files = ("sample_bound_loaded.py",) + (("sample_shared.py",) if shared else ())
-    proc, output, _outcomes, out = _session(
-        tmp_path, *files, environ={BOUND_ENV: None})
-    assert proc.returncode == 0, output
-    report = _bound_report(out)
-    assert report["registered"] is False, report
-    assert report["bound_s"] is None, report
-    assert report["prismabuild_imported"] is False, report
+def test_a_collection_error_in_an_own_process_module_fails_the_session(tmp_path):
+    proc, output, outcomes, _out = _session(tmp_path, "sample_collection_error.py", "sample_shared.py")
+    assert proc.returncode == 2, output
+    assert "own_process_sample_module_that_does_not_exist" in output, output
+    assert not any(kind == "skipped" for kind, _ in outcomes.values()), outcomes
+    assert any(kind == "failed" for kind, _ in outcomes.values()), outcomes
 
 
-def test_a_bound_that_cannot_load_is_refused(monkeypatch):
-    """The variable is set but no plugin file is found: refuse, never run
-    unbounded and green."""
-    import importlib.util
+def test_a_killed_child_fails_every_test_it_did_not_report_by_name(tmp_path):
+    proc, output, outcomes, out = _session(tmp_path, "sample_child_dies.py", "sample_shared.py")
+    assert proc.returncode == 1, output
+    assert outcomes["test_reports_before_dying"] == ("passed", ""), output
+    for name in ("test_kills_its_process", "test_never_runs"):
+        kind, message = outcomes[name]
+        assert kind == "failed", (name, kind, output)
+        assert "never reported" in message or "reported nothing" in message or "exited unexpectedly" in message, message
+    assert outcomes["test_shared"] == ("passed", "")
 
+
+@pytest.mark.parametrize("registered, expected", [
+    ({}, ["--timeout=30"]),
+    ({"timeout": object(), "pytest_timeout": object()}, ["--timeout=30"]),
+    ({"timeout": object()}, ["--timeout=30"]),
+    ({"pytest_timeout": object()}, ["-p", "pytest_timeout", "--timeout=30"]),
+])
+def test_the_child_names_the_plugin_only_when_the_parent_did(registered, expected):
     import conftest
 
-    registered = []
-    config = types.SimpleNamespace(pluginmanager=types.SimpleNamespace(
-        has_plugin=lambda name: False,
-        register=lambda plugin, name: registered.append(name)))
-    monkeypatch.setenv(BOUND_ENV, "30")
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
-    with pytest.raises(pytest.UsageError, match=BOUND_ENV):
-        conftest._load_prismabuild_test_bound(config)
-    assert registered == []
-    monkeypatch.setenv(BOUND_ENV, "")
-    conftest._load_prismabuild_test_bound(config)
-    assert registered == []
+    manager = types.SimpleNamespace(has_plugin=lambda name: name in registered)
+    config = types.SimpleNamespace(option=types.SimpleNamespace(timeout=30), pluginmanager=manager)
+    assert conftest._own_process_bound_args(config) == (expected if registered else ["--timeout=30"])
+
+
+def test_no_bound_requested_means_no_bound_argument():
+    import conftest
+
+    config = types.SimpleNamespace(option=types.SimpleNamespace(timeout=None),
+                                   pluginmanager=types.SimpleNamespace(has_plugin=lambda name: True))
+    assert conftest._own_process_bound_args(config) == []

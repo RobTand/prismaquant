@@ -1,6 +1,6 @@
 """A shard whose only file skips at collection exits 0, not 5 (PQ #915).
 
-``pbtest`` gives every shard its own pytest over its own files, so pytest's
+the sharded runner gives every shard its own pytest over its own files, so pytest's
 ``EXIT_NO_TESTS_COLLECTED`` is the verdict the fleet reads. A module that
 skips at collection time -- ``pytest.importorskip`` at module scope, directly
 or through an imported sibling test module -- collects nothing, so the shard
@@ -30,7 +30,7 @@ def _run(directory: Path, *args: str) -> subprocess.CompletedProcess:
     # PYTEST_XDIST_WORKER_COUNT, and a child that inherits them starts as a
     # worker and blocks on a controller channel that is not there.
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(("PYTEST_", "PRISMABUILD_"))}
+           if not key.startswith("PYTEST_")}
     env["PYTHONPATH"] = str(REPO)
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-p", "no:xdist", "-o", "addopts=",

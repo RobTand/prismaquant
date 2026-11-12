@@ -1,0 +1,940 @@
+{
+ "schema": "pq1317.pb-receipts.v2",
+ "note": "Facts read from the PrismaBuild queue and CAS on 2026-10-09: attempt record, sealed request and CAS receipt. 'snapshot.parent' is the PrismaQuant commit the action ran from. The run's .pbrun-closure file (run-manifest.json, closure_files) shows dirty_sha256 = sha256 of empty input, which proves a clean snapshot. 'actions' holds the accepted run (run2-*) and the corroborating first run (run1-*). 'development_actions' holds every other PrismaBuild action of this attempt. They qualify nothing.",
+ "actions": {
+  "run1-moe": {
+   "action_key": "fe1ae1f2402b865d7dc84a6f86e56745f4767db4b8aee0bddeec73d964d03462",
+   "role": "GPU run",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparky",
+   "elapsed_s": 27.2,
+   "demand": {
+    "cpu": 2,
+    "gpu": 1,
+    "mem_gb": 8
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 5400.0,
+   "command": [
+    "bash",
+    "-c",
+    "<inline script, see results/logs/<run>/command.sh>"
+   ],
+   "command_chars": 3484,
+   "snapshot": {
+    "commit": "385922991063f7d55e1dad8a5d67dd82d4ecceb1",
+    "parent": "c1015cbe08ca24c1b80094af6382ac7ac81cb0ad"
+   },
+   "memory_peak_bytes": 4503973888,
+   "gpu_power_w_peak": 12.97,
+   "cas_receipt_sha256": "ea16705a16056fb9273d7f1bfb4607d7a337f5ff3202f3fa17e7cf8acea21e5a",
+   "result_sha256": "bc554dcceaf77f894be8f4d4c7f10c09eb2ee1b271150e0c631226403948999d",
+   "stdout_log_sha256": "febe4c57b938a99d9b54a07d28b2794bb5b5cc7208603795fc59eb8c65c8efa3",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121"
+  },
+  "run1-dense": {
+   "action_key": "370fead21f36ad81db81b7f6b536e85c09ccc97baae95f297105510dd2931fac",
+   "role": "GPU run",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparklina",
+   "elapsed_s": 128.1,
+   "demand": {
+    "cpu": 2,
+    "gpu": 1,
+    "mem_gb": 12
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 5400.0,
+   "command": [
+    "bash",
+    "-c",
+    "<inline script, see results/logs/<run>/command.sh>"
+   ],
+   "command_chars": 3450,
+   "snapshot": {
+    "commit": "de449e4dcbf0c53c6e8566e8724d47cdc39731d3",
+    "parent": "c1015cbe08ca24c1b80094af6382ac7ac81cb0ad"
+   },
+   "memory_peak_bytes": 11158560768,
+   "gpu_power_w_peak": 61.45,
+   "cas_receipt_sha256": "3718a059d31ab8d60abf5c1b6e63a16eec07a129a708e22fc3d2d35fb3dce044",
+   "result_sha256": "b80ca4914488f7c780e94820f5e1d190dc7b95ec8a72ae559cb15e118d398105",
+   "stdout_log_sha256": "fdb3c3601ef251b27b32efdb1b7a2857751c4d6fc10fc882d3fe5d63ff16a64b",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121"
+  },
+  "run1-preflight": {
+   "action_key": "57575b6ee1afe4f3c41496acdfaf46501186e2c25126da36760e901734467a22",
+   "role": "D38 CPU preflight (collect only, no GPU)",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparky",
+   "elapsed_s": 11.8,
+   "demand": {
+    "cpu": 2,
+    "mem_gb": 8
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 1800.0,
+   "command": [
+    "bash",
+    "-c",
+    "<inline script, see results/logs/<run>/command.sh>"
+   ],
+   "command_chars": 1609,
+   "snapshot": {
+    "commit": "d93a49d1eef218cc87d23b5fbea94949dae156de",
+    "parent": "c1015cbe08ca24c1b80094af6382ac7ac81cb0ad"
+   },
+   "memory_peak_bytes": 1007259648,
+   "gpu_power_w_peak": 4.91,
+   "cas_receipt_sha256": "0a528b4010da0afb7ae9fbceab0a0809d7f30d9a7236c4c23e83788164929e28",
+   "result_sha256": "edc5f371a8aeb14fd806f6df4be6f5d3c065883a71bfc5709d87528c02dd6895",
+   "stdout_log_sha256": "2bba8247d3c8c4dced5d5fa156d5696c072436e4a4d9a1ed2a04aa00570e2470",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121"
+  },
+  "run2-moe": {
+   "action_key": "7a3dac4d75437bb570b7c27379112cf65bff1fcc8bc6728d72a6b6c07e19db4d",
+   "role": "GPU run",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparky",
+   "elapsed_s": 47.6,
+   "demand": {
+    "cpu": 2,
+    "gpu": 1,
+    "mem_gb": 12
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 5400.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "moe",
+    "--mode",
+    "run"
+   ],
+   "command_chars": 105,
+   "snapshot": {
+    "commit": "dbd41c2bdd9358c744963771fa2e6787685bd24e",
+    "parent": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7"
+   },
+   "memory_peak_bytes": 4095160320,
+   "gpu_power_w_peak": 13.88,
+   "cas_receipt_sha256": "5f6e5d4d94a0d21ee9a57eda478e0215c71237ea735982d8cd72a5c4261f5ced",
+   "result_sha256": "8dba571b1460db4f524d228b4dacb6c9f15577c363c5be2b5cd3cdd7566504f0",
+   "stdout_log_sha256": "61d31c1910ee4a460e795084efe6f60f5f3ca3e6409ddbf805138109352d20c2",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121"
+  },
+  "run2-dense": {
+   "action_key": "ec7d9d959d863db83a37063203f0d34d32dc4a588230c7f4856ad25921c8cbd6",
+   "role": "GPU run",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparky",
+   "elapsed_s": 130.0,
+   "demand": {
+    "cpu": 2,
+    "gpu": 1,
+    "mem_gb": 24
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 5400.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "dense",
+    "--mode",
+    "run"
+   ],
+   "command_chars": 107,
+   "snapshot": {
+    "commit": "f6aad38f5f55fdd249a200e0a792a602af7f6cae",
+    "parent": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7"
+   },
+   "memory_peak_bytes": 9986125824,
+   "gpu_power_w_peak": 58.36,
+   "cas_receipt_sha256": "9cb781b9498baec082f6c72b4da076d9e58df27574e572b0a35624ec5c077876",
+   "result_sha256": "5f51c3e583b58cb64552c9270c9c8526423ce7543851b1b1d428d51f5398e317",
+   "stdout_log_sha256": "e5e8e47436234e71f178d01d25b993cd31a03c5723b930c618d20794020d95d1",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121"
+  },
+  "run2-preflight-moe": {
+   "action_key": "fc2fb0448f13f5f3b5472c8a54e825410c8c5ca502d5dcb8e4ddc1c414410676",
+   "role": "D38 CPU preflight (collect only, no GPU)",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparklina",
+   "elapsed_s": 14.3,
+   "demand": {
+    "cpu": 2,
+    "mem_gb": 8
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 1800.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "moe",
+    "--mode",
+    "collect"
+   ],
+   "command_chars": 109,
+   "snapshot": {
+    "commit": "5fc11bebcad8d27f6cdf05d8bbe08ca0d5a7b147",
+    "parent": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7"
+   },
+   "memory_peak_bytes": 897359872,
+   "gpu_power_w_peak": 4.93,
+   "cas_receipt_sha256": "2b7eebd60fd0f3f6de3971915a926de88f9b51eefbdb36d2026b49408cfb5f81",
+   "result_sha256": "4fc8591ebe2ce19c4394378be57e2ab709b52d978adbf525cf2ec3971db5d229",
+   "stdout_log_sha256": "6bc06e24c7a0fea4dd1562eaa2559e248a807c0327526541fc9d0d2192bdd2ac",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121"
+  },
+  "run2-preflight-dense": {
+   "action_key": "e51a6b63c2676f5a68566ced603a4b458af5f6b3550245fd1fd7a648bd32a207",
+   "role": "D38 CPU preflight (collect only, no GPU)",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparklina",
+   "elapsed_s": 13.1,
+   "demand": {
+    "cpu": 2,
+    "mem_gb": 8
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 1800.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "dense",
+    "--mode",
+    "collect"
+   ],
+   "command_chars": 111,
+   "snapshot": {
+    "commit": "83843781f5d09b5e51dac63ce74eb9e193386d7e",
+    "parent": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7"
+   },
+   "memory_peak_bytes": 892125184,
+   "gpu_power_w_peak": 4.64,
+   "cas_receipt_sha256": "6b44fcad4376f6debeba4e4cd0848691a8f52f95152422d5f883718b9e3b672f",
+   "result_sha256": "a41af297ca599f8ec05ddf58e706ee5008a41397879ee2253ee4e05ca5823196",
+   "stdout_log_sha256": "0b4e2a424619866b50d7c6aaa8a0b604cc6dc908774042498ff92fffac102f94",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121"
+  }
+ },
+ "development_actions": {
+  "dev-h1-preflight-moe": {
+   "action_key": "c381bc053516e487ef3b8bb829ae4f951c6447e9344b8b343b8fe7726cf32baf",
+   "role": "collect, harness v1",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparky",
+   "elapsed_s": 12.9,
+   "demand": {
+    "cpu": 2,
+    "mem_gb": 8
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 1800.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "moe",
+    "--mode",
+    "collect"
+   ],
+   "command_chars": 109,
+   "snapshot": {
+    "commit": "a57728f8937b7e2a38756129b1182f76815e2c43",
+    "parent": "af39b08452ff7723794642861c27bf7b14d3252d"
+   },
+   "memory_peak_bytes": 942735360,
+   "gpu_power_w_peak": 4.82,
+   "cas_receipt_sha256": "cbedfd250e4dadbf88d1d3bf1da37278863ec263c89ecf2c097e9d6428e6e37b",
+   "result_sha256": "1120fe941dc65d8e134bcfe07abbf362d161891e8a07ef13ba68b308a877998f",
+   "stdout_log_sha256": "8e9e01e51ceadc1e6346302812160ac0c0b19be2a0ece14ccdddcca4552b2906",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121",
+   "harness_or_head": "af39b08452ff"
+  },
+  "dev-h1-preflight-dense": {
+   "action_key": "bb51e74aa08607cc7d2a7a919481da4d8053c0f1b188f2fa1b1c6167c66e2b3a",
+   "role": "collect, harness v1",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparklina",
+   "elapsed_s": 12.8,
+   "demand": {
+    "cpu": 2,
+    "mem_gb": 8
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 1800.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "dense",
+    "--mode",
+    "collect"
+   ],
+   "command_chars": 111,
+   "snapshot": {
+    "commit": "12dedf584d74b3335a2794848e515d6442fb588a",
+    "parent": "af39b08452ff7723794642861c27bf7b14d3252d"
+   },
+   "memory_peak_bytes": 893612032,
+   "gpu_power_w_peak": 4.65,
+   "cas_receipt_sha256": "ff0974562ce221b7a0d73e87db6914e1ea122169a831a7b64150954b2a3d1782",
+   "result_sha256": "a2cea69a33b19fbf11c916e3f08acfaaf24f47db29824278bd84bfc68927a236",
+   "stdout_log_sha256": "8a4bf0c9729411d73e6b4269d1203e866c5386fa4b2a7bdf61f1a264e6a0576c",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121",
+   "harness_or_head": "af39b08452ff"
+  },
+  "dev-h1-gpu-moe": {
+   "action_key": "77996bb0676f23a739dddd83cee155151103e11c3d70bff9fc181e26414106eb",
+   "role": "GPU, harness v1 (float assertions only; shared extension directory)",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparky",
+   "elapsed_s": 39.4,
+   "demand": {
+    "cpu": 2,
+    "gpu": 1,
+    "mem_gb": 12
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 5400.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "moe",
+    "--mode",
+    "run"
+   ],
+   "command_chars": 105,
+   "snapshot": {
+    "commit": "4199857b54a734eba019c8d5396d6da19a0baf74",
+    "parent": "af39b08452ff7723794642861c27bf7b14d3252d"
+   },
+   "memory_peak_bytes": 4123299840,
+   "gpu_power_w_peak": 13.52,
+   "cas_receipt_sha256": "d61ecf5838298ea89cb56264cad95f7e0246b2c9de3f5ef6b43fe872d15e693d",
+   "result_sha256": "a2c7dcc409f04d1c61673f85eeafab59250e3fd5ab4f35e00482542110f2d6aa",
+   "stdout_log_sha256": "e6d682c9a21caf98695de54b99d05ef8b26f6c1bd4e142785502568d12efe7d0",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121",
+   "harness_or_head": "af39b08452ff"
+  },
+  "dev-h1-gpu-dense": {
+   "action_key": "6fed7903565318a2c488fc430bba07266824ec902e8f8b035c3c8e12697ebad2",
+   "role": "GPU, harness v1",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparky",
+   "elapsed_s": 136.8,
+   "demand": {
+    "cpu": 2,
+    "gpu": 1,
+    "mem_gb": 24
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 5400.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "dense",
+    "--mode",
+    "run"
+   ],
+   "command_chars": 107,
+   "snapshot": {
+    "commit": "66c266cf640dc985479449748e5951a2d4a14f46",
+    "parent": "af39b08452ff7723794642861c27bf7b14d3252d"
+   },
+   "memory_peak_bytes": 10329784320,
+   "gpu_power_w_peak": 59.76,
+   "cas_receipt_sha256": "b1a6a19eabbf587a550cc330be16df8fd150c1ba0c0165cebed2c6d0a9947926",
+   "result_sha256": "b11b77fb51d73f8cc0a270b06b29fc59c89e7da8ed80f1e7e7848d2d7763c044",
+   "stdout_log_sha256": "6edec3636b01828fabceb1988d9299be89c4bdd33cf14478648b7b6d9eb8e023",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121",
+   "harness_or_head": "af39b08452ff"
+  },
+  "dev-h2-preflight-moe": {
+   "action_key": "02194acda9e3c11e20f1c50a617f399c3223f7e4721ba30b0e2429dccbae2b8c",
+   "role": "collect, harness v2: probe self-test refused (pytest elides long values); fixed",
+   "state": "failed",
+   "returncode": 1,
+   "attempts": 1,
+   "host": "sparklina",
+   "elapsed_s": 9.1,
+   "demand": {
+    "cpu": 2,
+    "mem_gb": 8
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 1800.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "moe",
+    "--mode",
+    "collect"
+   ],
+   "command_chars": 109,
+   "snapshot": {
+    "commit": "f3c2042096f47446ada458970a96e6f75a6944e9",
+    "parent": "4a8efb287b82ac061aba4c136d7d58b2c22c5f01"
+   },
+   "memory_peak_bytes": 628293632,
+   "gpu_power_w_peak": 13.22,
+   "cas_receipt_sha256": null,
+   "result_sha256": null,
+   "stdout_log_sha256": "9390fe4effc763ba0614563c0a47257fb1385c1e359c6ea60442d19245f02615",
+   "accelerators": null,
+   "platform_key": null,
+   "harness_or_head": "4a8efb287b"
+  },
+  "dev-h2-preflight-dense": {
+   "action_key": "18b54a414a8555aa881b55263651424cf26f500ce5db3328ecc7246778df46ba",
+   "role": "collect, harness v2: probe self-test refused; fixed",
+   "state": "failed",
+   "returncode": 1,
+   "attempts": 1,
+   "host": "sparklina",
+   "elapsed_s": 9.3,
+   "demand": {
+    "cpu": 2,
+    "mem_gb": 8
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 1800.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "dense",
+    "--mode",
+    "collect"
+   ],
+   "command_chars": 111,
+   "snapshot": {
+    "commit": "ffce9a85515307759abde13ee30db11618fd495c",
+    "parent": "4a8efb287b82ac061aba4c136d7d58b2c22c5f01"
+   },
+   "memory_peak_bytes": 628477952,
+   "gpu_power_w_peak": 4.59,
+   "cas_receipt_sha256": null,
+   "result_sha256": null,
+   "stdout_log_sha256": "46f13194f3378bb9627626459c69051a55b0f428ab81fc975e88db43ee609072",
+   "accelerators": null,
+   "platform_key": null,
+   "harness_or_head": "4a8efb287b"
+  },
+  "dev-h3-preflight-moe": {
+   "action_key": "2a738ffa930777348caf9fa86cfdf641fdf98c7dc949afdd28b260cfed770b5f",
+   "role": "collect, harness v3",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparklina",
+   "elapsed_s": 11.8,
+   "demand": {
+    "cpu": 2,
+    "mem_gb": 8
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 1800.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "moe",
+    "--mode",
+    "collect"
+   ],
+   "command_chars": 109,
+   "snapshot": {
+    "commit": "332f45e0f1cc96d675a8abb728c671508e703530",
+    "parent": "b65b706062d63f6b6c0a94293f234dcd47301d80"
+   },
+   "memory_peak_bytes": 897904640,
+   "gpu_power_w_peak": 4.67,
+   "cas_receipt_sha256": "c4ebf862bd64ad8064abacb381ccc478a120ee33998aea8c865a0e4ef0042379",
+   "result_sha256": "1ab59b8c348a5f94af175fd4a1f3df5d8a0e8384b9f5847ef04ec50a62ea32e0",
+   "stdout_log_sha256": "2299e68e4d5b7538dc0e9d4286ed71614573964d5393cfaec4299cf04a22cf80",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121",
+   "harness_or_head": "b65b706062"
+  },
+  "dev-h3-preflight-dense": {
+   "action_key": "cb0fff9e1d029d93ab31ea5879508643033f3004659858fd3938183f70a657ff",
+   "role": "collect, harness v3",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparklina",
+   "elapsed_s": 13.3,
+   "demand": {
+    "cpu": 2,
+    "mem_gb": 8
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 1800.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "dense",
+    "--mode",
+    "collect"
+   ],
+   "command_chars": 111,
+   "snapshot": {
+    "commit": "3c0fd8937ab50eda36d99ac2d7f9f2f05910fae9",
+    "parent": "b65b706062d63f6b6c0a94293f234dcd47301d80"
+   },
+   "memory_peak_bytes": 893165568,
+   "gpu_power_w_peak": 4.66,
+   "cas_receipt_sha256": "62657495240f123c5b83c08631ce24209c59c5df1c7cd0499c0354338ff4c61f",
+   "result_sha256": "11b37782bd4536c9f8c64681c7ef0b257c665e8cc61bfa9c333d06f34896057e",
+   "stdout_log_sha256": "5b09399ccad434c5bda522a8fbfcf929cbfc3674b74c6dd4f1f3d451a01df363",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121",
+   "harness_or_head": "b65b706062"
+  },
+  "dev-h3-gpu-moe": {
+   "action_key": "be95289d8741ea83bfb718382514a3b71e4f402d1c0ac9b476ca25cfb66f0b29",
+   "role": "GPU, harness v3 (on the other Spark than the accepted MoE run)",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparklina",
+   "elapsed_s": 48.2,
+   "demand": {
+    "cpu": 2,
+    "gpu": 1,
+    "mem_gb": 12
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 5400.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "moe",
+    "--mode",
+    "run"
+   ],
+   "command_chars": 105,
+   "snapshot": {
+    "commit": "45fa24134d3a6404a2aa79f37ee9aa6b19693d6b",
+    "parent": "b65b706062d63f6b6c0a94293f234dcd47301d80"
+   },
+   "memory_peak_bytes": 4461019136,
+   "gpu_power_w_peak": 13.44,
+   "cas_receipt_sha256": "eb64d9726675ae0549aaa8d6da98b096d5d844b3458080c2613876ff8648514a",
+   "result_sha256": "555f783daf220e1e4b6c0870c68f97d0e313ee7df6b063439c0c30e4aa396abd",
+   "stdout_log_sha256": "063358377f30bc0aa97788757e9a0d0110546fbac31fa6d9775f9fe8d54b6384",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121",
+   "harness_or_head": "b65b706062"
+  },
+  "dev-h3-gpu-dense": {
+   "action_key": "4c32d75fd0a947f5d68d83dc381efa787ae300a2061f3df6e43bff6701b78aae",
+   "role": "GPU, harness v3",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparky",
+   "elapsed_s": 111.6,
+   "demand": {
+    "cpu": 2,
+    "gpu": 1,
+    "mem_gb": 24
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 5400.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "dense",
+    "--mode",
+    "run"
+   ],
+   "command_chars": 107,
+   "snapshot": {
+    "commit": "13871be374206511afa3bfa2e28cba88165f56fd",
+    "parent": "b65b706062d63f6b6c0a94293f234dcd47301d80"
+   },
+   "memory_peak_bytes": 9987178496,
+   "gpu_power_w_peak": 58.18,
+   "cas_receipt_sha256": "989433e824766fc3b45e01157fec19fda210f751e65e3ab10f9b17ff1a79de50",
+   "result_sha256": "beacaf97c05a26a7af3ce0f4e46a4060d80ba2ea773f39b7608a8f4a9b0ebcf8",
+   "stdout_log_sha256": "1e4c6e6a0f4c699e52912bed35d903e525f7719837c9138e91b5afe3982c36fa",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121",
+   "harness_or_head": "b65b706062"
+  },
+  "diag-worksteal-dense": {
+   "action_key": "2e99a8b611f4472cb14c53f73d7e97cd6535b189a6e5ab3a375d20df59a9ff66",
+   "role": "diagnostic GPU run, dirty snapshot",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparklina",
+   "elapsed_s": 139.1,
+   "demand": {
+    "cpu": 2,
+    "gpu": 1,
+    "mem_gb": 24
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 5400.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "dense",
+    "--mode",
+    "run"
+   ],
+   "command_chars": 107,
+   "snapshot": {
+    "commit": "4a165f635353d04fc18e12eb0724aea8cb3895ff",
+    "parent": "b65b706062d63f6b6c0a94293f234dcd47301d80"
+   },
+   "memory_peak_bytes": 10580414464,
+   "gpu_power_w_peak": 59.38,
+   "cas_receipt_sha256": "527b253d4147e3e22f9534fb0a64a44956aaa40d88cd28659b6ac161e9fb9f9f",
+   "result_sha256": "f152ecf6d1dc15431dd6c1c9d64ab011e1b4127c303f2b89b923bf23e6b6fadf",
+   "stdout_log_sha256": "baf9af5d6aeac368198b972f678c3b4129b8b6e4fb3e27a2d9e50b2ca40d0348",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121",
+   "harness_or_head": "b65b706062 + uncommitted edit (--dist worksteal)"
+  },
+  "diag-rawmaps-dense": {
+   "action_key": "b217becc58b4c04c03b1a6b0af584f25ee29c69e8c30d289cd68b007133a071d",
+   "role": "diagnostic GPU run, dirty snapshot; showed NFS .nfs renames of mapped libraries",
+   "state": "done",
+   "returncode": 0,
+   "attempts": 1,
+   "host": "sparklina",
+   "elapsed_s": 136.1,
+   "demand": {
+    "cpu": 2,
+    "gpu": 1,
+    "mem_gb": 24
+   },
+   "placement": {
+    "required_tags": [
+     "container-image-v1",
+     "gb10"
+    ]
+   },
+   "container_images": [
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ],
+   "timeout_s": 5400.0,
+   "command": [
+    "python3",
+    "docs/measurements/pq1317-gpu-tests/harness/run_suite.py",
+    "--suite",
+    "dense",
+    "--mode",
+    "run"
+   ],
+   "command_chars": 107,
+   "snapshot": {
+    "commit": "19ac481d2e2a9dd8746a627b00dc61df578a1431",
+    "parent": "b65b706062d63f6b6c0a94293f234dcd47301d80"
+   },
+   "memory_peak_bytes": 10639556608,
+   "gpu_power_w_peak": 59.6,
+   "cas_receipt_sha256": "603eae0d0b7836151ee1974979ecc4c43e3b6deeb81ed7b20b557d9153f9f37c",
+   "result_sha256": "ca41d20975c0fe63387f6f094c0ac52464052abdb55bb1b62f285ce38a752ab5",
+   "stdout_log_sha256": "66e9898044d1179a379e3fa0149bb485efafcd4617562d3ee2518d65ddbdee67",
+   "accelerators": [
+    {
+     "compute_capability": "12.1",
+     "driver_version": "595.99.02",
+     "kind": "nvidia"
+    }
+   ],
+   "platform_key": "linux-aarch64-sm121",
+   "harness_or_head": "b65b706062 + uncommitted edit (--dist worksteal, raw maps)"
+  }
+ }
+}

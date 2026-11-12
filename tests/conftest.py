@@ -1,311 +1,103 @@
-"""Shared pytest fixtures.
+"""Shared pytest fixtures and hooks: only what every test needs (#3215).
 
-Formerly minimal: this repo had no conftest before 2026-08-30. It carried one
-NON-autouse fixture, ``synthetic_cb_target``, which let a codebook export test
-declare that its bodies were CPU fixtures rather than served artifacts, through
-the route-status gate's own ``PQ_CB_NON_NATIVE_TARGET`` declaration. That gate,
-that declaration and the export tests that used it all went into
-``archive/gridbook_lane_2026-09-02/`` when the Gridbook codebook serving lane
-was retired on 2026-09-02, so the fixture has no subject left.
+Every test's static inputs include this file and every module it imports, at
+module level or inside a fixture, so Bazel and the gate's selector run every
+test again when any of them changes. This file therefore imports nothing from
+``prismaquant`` or ``tools``. An autouse fixture that resets a ``prismaquant``
+module's process-global state registers the reset with ``_when_loaded``: it
+applies at once to a module already loaded, and to one the test loads later as
+soon as that module's body has run, so it still wins as it did when the fixture
+imported the module itself. A test that never loads the module does not depend
+on it. Fixtures that only some tests use live in helper modules those tests
+import (``lane_table_fixtures``, ``graph_lane_fixtures``,
+``legacy_capture_fixtures``).
+``tests/test_conftest_reach.py`` pins all of this.
 
-What is here now is the autouse fixtures -- profile detection is
-process-global (issue #197; see its docstring), and the suite runs in
-certified mode unless a test asks for dev mode (PQ #1147) -- and the
-legacy-lane-grammar fixtures (``legacy_v4_contract``, ``legacy_v5_contract``,
-``down_convert_lane_table``), which exist so a test about an OLDER Tessera
-lane grammar owns its fixture instead of asserting that the installed
-contract is a version it no longer is.
+What is here: the autouse fixtures -- profile detection is process-global
+(issue #197; see its docstring), and the suite runs in certified mode unless a
+test asks for dev mode (PQ #1147) -- and the session hooks: collection-skip
+exit status, the environment line, the ``fleet_data``/``task_suite`` opt-ins,
+``own_process`` modules, and the golden-row check.
 """
 from __future__ import annotations
 
-import copy
+from collections.abc import Callable
 import fcntl
 import hashlib
+import importlib.machinery
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import time
+from types import ModuleType
 
 import pytest
 
 
-def _installed_contract() -> dict:
-    """The Tessera contract the environment installs, parsed."""
-    from importlib.resources import as_file
-
-    from prismaquant import tessera_runtime_contract as contract
-
-    with as_file(contract.contract_path()) as path:
-        return json.loads(path.read_text(encoding="utf-8"))
-
-
-def set_cell_census(payload: dict, cell: dict, rungs: list[int]) -> None:
-    """Change a valid fixture census and its v11 derived run-table metadata."""
-    from prismaquant.lane_eligibility import _allowable_rung_tables
-
-    cell["rungs_q256"] = list(rungs)
-    if "run_tables" in cell:
-        row = next(r for r in payload["formats"] if r["family"] == cell["family"])
-        tables = _allowable_rung_tables(row, "fixture.formats")
-        cell["run_tables"] = [list(t) for t in sorted(
-            {tables[r] for r in rungs})] if tables else []
+#: Resets the autouse fixtures below apply to a module only once a test has
+#: loaded it, keyed by module name. This file imports none of these modules, so
+#: a test that never loads one does not depend on it (#3215). ``_when_loaded`` applies a reset to a module already
+#: in ``sys.modules`` at once, and ``_resets_follow_module_loads`` applies it to
+#: one the test loads later. Each fixture registers through a ``MonkeyPatch``
+#: of its own, so the registration ends with that fixture's teardown, and no
+#: fixture newly depends on the test's ``monkeypatch``: each keeps the place
+#: in setup and teardown order it had before.
+_LOAD_PATCHES: dict[str, tuple[Callable[[ModuleType], None], ...]] = {}
 
 
+def _when_loaded(registrations: pytest.MonkeyPatch, name: str,
+                 patch: Callable[[ModuleType], None]) -> None:
+    """Apply ``patch`` to module ``name`` now if it is loaded, and whenever it loads,
+    until ``registrations`` is undone."""
 
-def down_convert_lane_table(payload: dict, schema: str) -> dict:
-    """The installed contract, expressed in an OLDER lane grammar.
-
-    Legacy-grammar tests need a legacy table. They used to get one by reading
-    the installed contract, which was v4 at the time -- so on the day Tessera
-    shipped ``tessera.lane-eligibility.v6`` (its PR #176) every such test began
-    asserting that the installed contract was a version it no longer is. That
-    is a fixture problem, not a reader problem: a test about a legacy grammar
-    must OWN its legacy fixture, exactly as ``test_tessera_contract_v5`` already
-    did by rewriting ``runtime`` onto every cell.
-
-    Down-converting rather than hand-writing keeps the fixture honest about
-    everything the grammar did not change -- families, rungs, route statuses,
-    launches -- so the test still exercises real cells. It is a FIXTURE and
-    never an attestation: nothing derived from it is recorded anywhere.
-
-    ``schema`` is ``tessera.lane-eligibility.v9`` (reduce each v10
-    ``platforms`` entry back to a bare key set and drop the platforms that
-    exist only to say what they do NOT execute), ``...v8`` (drop the v9
-    ``smoke.record`` as well), ``...v7`` (drop the v8 ``evidence.artifact`` as well),
-    ``...v6`` (drop v7's ``smoke.attribution`` and ``smoke.control`` too),
-    ``...v5`` (drop the whole ``evidence`` block and the ``runtime`` version
-    fields) or ``...v4`` (drop the per-cell ``runtime`` scope as well).
-
-    Dropping v9's record is not only a key removal: v9 DERIVES
-    ``smoke.attribution`` from the record, and v7/v8 derive it from the
-    control.  A fixture that removed the record and kept the derived
-    attribution would be a table no validator would accept, so the
-    attribution is re-derived under the older rule -- through the reader's own
-    ``derive_smoke_attribution``, which is that rule's home here.
-    """
-    from prismaquant.lane_eligibility import (
-        EVIDENCE_ATTRIBUTION_UNATTRIBUTED, EVIDENCE_OUTCOME_IDENTICAL,
-        EVIDENCE_ATTRIBUTION_SHARED, EVIDENCE_ATTRIBUTION_NOT_SHARED)
-
-    payload = copy.deepcopy(payload)
-    lane = payload["lane_eligibility"]
-    lane["schema"] = schema
-    version = int(schema.rsplit(".v", 1)[1])
-    if version <= 9:
-        # v10 made a platform entry an OBJECT that states what the platform
-        # executes.  Under v9 the value was never read, and a platform with no
-        # cell said nothing at all -- so a v9 fixture keeps only the platforms
-        # that carry cells, with only the identity key v22 published.
-        attested = {cell["platform"] for cell in lane["cells"]}
-        lane["platforms"] = {
-            key: {k: v for k, v in entry.items()
-                  if k in ("compute_capability", "gcn_arch")}
-            for key, entry in lane["platforms"].items()
-            if key in attested
-        }
-    for cell in lane["cells"]:
-        if version <= 5:
-            cell.pop("evidence", None)
-        else:
-            evidence = cell["evidence"]
-            if version <= 8:
-                smoke = evidence["smoke"]
-                if smoke.pop("record", None) is not None:
-                    control = smoke.get("control")
-                    smoke["attribution"] = (
-                        EVIDENCE_ATTRIBUTION_UNATTRIBUTED if control is None
-                        else EVIDENCE_ATTRIBUTION_SHARED
-                        if control["outcome"] == EVIDENCE_OUTCOME_IDENTICAL
-                        else EVIDENCE_ATTRIBUTION_NOT_SHARED)
-            if version <= 7:
-                evidence.pop("artifact", None)
-            if version <= 6:
-                evidence["smoke"].pop("attribution", None)
-                evidence["smoke"].pop("control", None)
-        if version <= 4:
-            cell.pop("runtime", None)
-        elif version <= 5:
-            runtime = cell.get("runtime", {})
-            cell["runtime"] = {"image": runtime["image"],
-                               "execution_modes": runtime["execution_modes"]}
-    return payload
+    module = sys.modules.get(name)
+    if module is not None:
+        patch(module)
+    registrations.setitem(_LOAD_PATCHES, name, (*_LOAD_PATCHES.get(name, ()), patch))
 
 
-def lane_cells_on_one_image(payload: dict, image: str | None = None, *,
-                            family: str | None = None) -> dict:
-    """The installed table's cells measured on ONE runtime image.
+def _first_load(registrations: pytest.MonkeyPatch, name: str,
+                setup: Callable[[ModuleType], None]) -> list[ModuleType]:
+    """``[module]`` once this test has module ``name``, loaded now or later; else ``[]``.
 
-    Several fixtures flatten every cell's ``runtime`` onto one fixture image
-    (or down-convert below v6, where the image axis does not exist). That was
-    safe while no two cells of one (platform, family, structure, regime)
-    scope lived on different images. Tessera contract v38 broke it: the stock
-    image's dense ``TESSERA_E4M3_K1`` pair (resident|streamed) and the GLM
-    image's dense ``_resident`` pair are one scope on two images, and the
-    flattened union is a table in which two cells claim the same scope --
-    which the reader correctly refuses. A fixture therefore keeps one real
-    image's roster and never relabels a union.
-
-    ``image`` defaults to ``versions.default_serve_image`` (dense E4M3 at
-    v39). A fixture needing a specific family can instead name ``family``;
-    its published cells must select exactly one image, never an arbitrary
-    first image. A FIXTURE, never an attestation.
-    """
-    payload = copy.deepcopy(payload)
-    if family is not None:
-        assert image is None, 'fixture must select image or family, not both'
-        images = {c['runtime']['image'] for c in payload['lane_eligibility']['cells']
-                  if c['family'] == family}
-        assert len(images) == 1, f'{family}: fixture needs exactly one image, got {images}'
-        image = images.pop()
-    if image is None:
-        image = payload["versions"]["default_serve_image"]
-    lane = payload["lane_eligibility"]
-    kept = [cell for cell in lane["cells"] if cell["runtime"]["image"] == image]
-    assert kept, f"the installed table publishes no cell on {image!r}"
-    lane["cells"] = kept
-    return payload
-
-
-def project_lane_cells_onto_structures(payload: dict, structures) -> dict:
-    """The installed contract's cell coverage, re-addressed to ``structures``.
-
-    Contract v23 (lane schema v10) made family coverage structure-specific:
-    the packaged dense cells publish TESSERA_E2M1_K2 only, while
-    TESSERA_E4M3_K1 is published only as routed_moe. A fixture that
-    synthesizes one structure by relabelling the OTHER structure's cells --
-    how the allocator fixtures were built when the packaged contract carried
-    no routed_moe cell at all -- therefore loses every family the source
-    structure did not cover, and the admission gate (correctly) refuses the
-    rungs those tests select. This helper instead keeps each (platform,
-    family, regime) scope's own coverage and re-addresses it onto exactly
-    ``structures``:
-
-    * a cell whose structure is requested is kept as published;
-    * every published cell is cloned into each requested structure its
-      scope does not already cover, so a clone carries its family's own
-      admission facts -- rungs, activation contract, route status, plugin
-      requirement, launch set -- and only ``structure``, a pure lookup
-      discriminator (``cell_matches_serving_context``), is synthesized;
-    * cells whose structure is not requested are dropped after cloning, so
-      ``project_lane_cells_onto_structures(payload, ("dense",))`` is a
-      dense-only table whose dense coverage is still every scope's.
-
-    A clone is added only when neither a kept cell nor an earlier clone in
-    the same scope claims an overlapping residency, read off the published
-    ``TESSERA_SERVE_MODE`` flag by the same grammar
-    ``parse_v4_cell_contract`` reads. The overlap
-    key deliberately ignores the runtime image/execution axes because the
-    fixtures that call this then flatten every cell's runtime onto one
-    fixture image, which would otherwise reintroduce the overlap the reader
-    refuses. Like ``down_convert_lane_table`` this is a FIXTURE, never an
-    attestation: nothing derived from it is recorded anywhere.
-    """
-    wanted = list(dict.fromkeys(str(structure) for structure in structures))
-    payload = copy.deepcopy(payload)
-    lane = payload["lane_eligibility"]
-    head = "TESSERA_SERVE_MODE="
-
-    def _residencies(cell: dict) -> frozenset[str]:
-        for flag in cell.get("requires_serve_flags", ()):
-            if str(flag).startswith(head):
-                return frozenset(str(flag)[len(head):].split("|"))
-        return frozenset()
-
-    kept = [cell for cell in lane["cells"] if cell.get("structure") in wanted]
-    claimed: dict[tuple[str, str, str, str], set[str]] = {}
-    for cell in kept:
-        key = (cell["platform"], cell["family"], cell["regime"], cell["structure"])
-        claimed.setdefault(key, set()).update(_residencies(cell))
-    clones = []
-    # Clone from EVERY published cell, not only the kept ones: a scope whose
-    # only cell lives in a dropped structure still owns that scope's family
-    # facts, and the requested structures inherit them from it.
-    for cell in lane["cells"]:
-        for structure in wanted:
-            if structure == cell.get("structure"):
-                continue
-            key = (cell["platform"], cell["family"], cell["regime"], structure)
-            if _residencies(cell) & claimed.get(key, set()):
-                continue
-            clone = copy.deepcopy(cell)
-            clone["id"] = f"{cell['id']}_{structure}_fixture"
-            clone["structure"] = structure
-            clones.append(clone)
-            claimed.setdefault(key, set()).update(_residencies(cell))
-    lane["cells"] = kept + clones
-    published = [s for s in lane.get("structures", []) if s in wanted]
-    lane["structures"] = published + [s for s in wanted if s not in published]
-    return payload
-
-
-@pytest.fixture
-def legacy_v4_contract() -> dict:
-    """The installed contract expressed as a v4 lane table.
-
-    v4 has no runtime-image axis, so the default image's roster is kept
-    first (``lane_cells_on_one_image``): since contract v38 two images
-    publish the same dense E4M3 scopes, and without the axis they overlap.
-    """
-    return down_convert_lane_table(lane_cells_on_one_image(_installed_contract()),
-                                   "tessera.lane-eligibility.v4")
-
-
-@pytest.fixture
-def legacy_v5_contract() -> dict:
-    """The installed contract expressed as a v5 lane table."""
-    return down_convert_lane_table(_installed_contract(),
-                                   "tessera.lane-eligibility.v5")
-
-
-@pytest.fixture
-def installed_client_sdk(monkeypatch):
-    """The reviewed installed ``prismabuild.client``, bound for this test.
-
-    Not autouse: a test about the unbound state must be able to see it.
-    See ``fleet_sdk.installed_client_bound``.
+    ``setup`` runs on that module when it is first seen, which is where the
+    fixture used to run it: right after importing the module itself. A second
+    load under the same name in the same test (a reload, or a fresh copy after
+    a test dropped the entry) is left alone, as it was then.
     """
 
-    from fleet_sdk import installed_client_bound
+    first: list[ModuleType] = []
 
-    with installed_client_bound(monkeypatch) as module:
-        yield module
+    def take(module: ModuleType) -> None:
+        if not first:
+            first.append(module)
+            setup(module)
+
+    _when_loaded(registrations, name, take)
+    return first
 
 
-@pytest.fixture
-def installed_helper_sdk(tmp_path, monkeypatch):
-    """Production resolver over the actual, Git/RECORD-qualified SDK sources.
+@pytest.fixture(autouse=True, scope="session")
+def _resets_follow_module_loads():
+    """Apply each registered reset to a module as a test first loads it.
 
-    The published pbtest guard owns install verification, once per shard and
-    before pytest; this fixture re-reads only the install identity, with the
-    standard library, because the guard's module exists in the shard's main
-    process and not in its xdist workers. This private helper view links those
-    installed bytes, not an SDK4 archive or a copied package; it is a CPU
-    fixture, never a published runtime generation. No test-only SDK injection
-    supplies the production Gateway.
+    Wraps ``SourceFileLoader.exec_module``, which runs every ``.py`` module's
+    body, for the session: once the body has run, the patches registered for
+    that module name apply in registration order. Session-scoped, so it is in
+    place before any test's own fixtures register a patch or load a module.
     """
-    from fleet_sdk import require_prismabuild_sdk
-    from prismaquant import staged_lease
 
-    require_prismabuild_sdk()
-    dist = staged_lease.reviewed_installed_distribution()
-    package = Path(dist.locate_file("prismabuild")).resolve()
-    helper = tmp_path / "installed-sdk-helper"
-    (helper / "src").mkdir(parents=True)
-    (helper / "src" / "prismabuild").symlink_to(package, target_is_directory=True)
-    assert staged_lease._INJECTED is None
-    monkeypatch.setattr(staged_lease, "_HELPER_ROOT", str(helper))
-    sdk = staged_lease.client_sdk()
-    assert Path(sdk.__file__).resolve() == package / "client.py"
-    yield sdk
+    load = importlib.machinery.SourceFileLoader.exec_module
 
+    def exec_module(loader, module):
+        load(loader, module)
+        for patch in _LOAD_PATCHES.get(module.__name__, ()):
+            patch(module)
 
-@pytest.fixture
-def pinned_pb_source():
-    """Explicit, non-autouse ownership of the reviewed PB source graph."""
-    from fullstack_pb_generation import source_bound
-
-    with source_bound():
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(importlib.machinery.SourceFileLoader, "exec_module", exec_module)
         yield
 
 
@@ -356,26 +148,35 @@ def _restore_profile_detection_globals():
     Cost is a dict copy and a short list copy per test, and the writes only
     happen when something actually changed.
     """
-    from prismaquant.model_profiles import registry
-    import prismaquant.vendored as vendored
+    saved = {}
 
-    saved_errors = dict(vendored.OVERRIDE_ERRORS)
-    saved_qwen3_registered = vendored._QWEN3_REGISTERED
-    saved_registered = list(registry._REGISTERED)
-    saved_generation = registry._REGISTRY_GENERATION
-    saved_order_cache = registry._DETECTION_ORDER_CACHE
-    try:
-        yield
-    finally:
-        if vendored.OVERRIDE_ERRORS != saved_errors:
-            vendored.OVERRIDE_ERRORS.clear()
-            vendored.OVERRIDE_ERRORS.update(saved_errors)
-        vendored._QWEN3_REGISTERED = saved_qwen3_registered
-        if registry._REGISTERED != saved_registered:
-            # In place: importers bind this list object, not its name.
-            registry._REGISTERED[:] = saved_registered
-        registry._REGISTRY_GENERATION = saved_generation
-        registry._DETECTION_ORDER_CACHE = saved_order_cache
+    def snapshot_registry(registry):
+        saved["registry"] = (list(registry._REGISTERED), registry._REGISTRY_GENERATION,
+                             registry._DETECTION_ORDER_CACHE)
+
+    def snapshot_vendored(vendored):
+        saved["vendored"] = (dict(vendored.OVERRIDE_ERRORS), vendored._QWEN3_REGISTERED)
+
+    with pytest.MonkeyPatch.context() as registrations:
+        registries = _first_load(registrations, "prismaquant.model_profiles.registry",
+                                 snapshot_registry)
+        vendoreds = _first_load(registrations, "prismaquant.vendored", snapshot_vendored)
+        try:
+            yield
+        finally:
+            for vendored in vendoreds:
+                saved_errors, saved_qwen3_registered = saved["vendored"]
+                if vendored.OVERRIDE_ERRORS != saved_errors:
+                    vendored.OVERRIDE_ERRORS.clear()
+                    vendored.OVERRIDE_ERRORS.update(saved_errors)
+                vendored._QWEN3_REGISTERED = saved_qwen3_registered
+            for registry in registries:
+                saved_registered, saved_generation, saved_order_cache = saved["registry"]
+                if registry._REGISTERED != saved_registered:
+                    # In place: importers bind this list object, not its name.
+                    registry._REGISTERED[:] = saved_registered
+                registry._REGISTRY_GENERATION = saved_generation
+                registry._DETECTION_ORDER_CACHE = saved_order_cache
 
 
 @pytest.fixture(autouse=True)
@@ -412,11 +213,14 @@ def _no_served_quantizer_identity_carried_between_tests():
     production bind); this fixture only clears what a prior test left behind,
     it never binds anything itself.
     """
-    from prismaquant import nvfp4_activation_contract as owner
+    def reset(owner):
+        owner._reset_served_quantizer_identity_for_tests()
 
-    owner._reset_served_quantizer_identity_for_tests()
-    yield
-    owner._reset_served_quantizer_identity_for_tests()
+    with pytest.MonkeyPatch.context() as registrations:
+        owners = _first_load(registrations, "prismaquant.nvfp4_activation_contract", reset)
+        yield
+        for owner in owners:
+            reset(owner)
 
 
 @pytest.fixture(autouse=True)
@@ -430,11 +234,20 @@ def _no_staged_tier_policy_carried_between_tests():
     so which tests run after a leaker is luck. On PR #901 it was nine tessera
     tests on one worker, each refused ``readset-not-staged`` (PQ #906).
     """
-    from prismaquant.staged_tier_policy import (
-        deactivate_staged_tier_policy_for_tests)
-    deactivate_staged_tier_policy_for_tests()
-    yield
-    deactivate_staged_tier_policy_for_tests()
+    def deactivate(policy):
+        policy.deactivate_staged_tier_policy_for_tests()
+
+    with pytest.MonkeyPatch.context() as registrations:
+        policies = _first_load(registrations, "prismaquant.staged_tier_policy", deactivate)
+        yield
+        for policy in policies:
+            deactivate(policy)
+
+
+#: ``prismaquant.tessera_joint_aura.ACTIVATION_SCALE_ENV``, written out so this
+#: file does not import the joint lease; ``tests/test_conftest_reach.py`` pins
+#: that the two agree.
+ACTIVATION_SCALE_ENV = "PRISMAQUANT_PROD_ACT_SCALES"
 
 
 @pytest.fixture(autouse=True)
@@ -449,101 +262,12 @@ def _no_activation_scale_policy_carried_between_tests():
     #2230's dense sidecar oracle failed on a Spark this way). Restore the
     incoming value, or its absence, after every test.
     """
-    from prismaquant.tessera_joint_aura import ACTIVATION_SCALE_ENV
     incoming = os.environ.get(ACTIVATION_SCALE_ENV)
     yield
     if incoming is None:
         os.environ.pop(ACTIVATION_SCALE_ENV, None)
     else:
         os.environ[ACTIVATION_SCALE_ENV] = incoming
-
-
-@pytest.fixture(autouse=True, scope="module")
-def _no_prismabuild_import_carried_between_modules():
-    """No module inherits another module's ``prismabuild`` imports (PQ #1281).
-
-    The per-test restore below cannot see an import made by a module-scoped
-    fixture: that fixture is set up before the test's own snapshot is taken.
-    ``tests/test_fleet_acceptance_level1.py``'s and
-    ``tests/test_fullstack_real_chain.py``'s ``pb`` fixtures import from a
-    sealed generation that way. An autouse fixture is set up before the other
-    fixtures of its scope, so this snapshot comes first and the module's
-    teardown puts the imports back. This module explicitly owns a detached,
-    initially unbound graph: collection or a public pytest plugin may have
-    imported the installed package before setup. Clearing only those cached
-    entries lets each resolver choose and authenticate its own source; it
-    neither pins a default nor weakens an origin assertion. Installed-build
-    tests still import from their original paths, and teardown restores the
-    exact pre-existing module objects and parent edges. Test imports themselves
-    must remain inside a test or fixture (PQ #2265).
-    """
-    from fleet_sdk import prismabuild_imports_restored
-    with prismabuild_imports_restored(detach=True):
-        yield
-
-
-@pytest.fixture(autouse=True)
-def _no_prismabuild_import_carried_between_tests():
-    """No test inherits another test's ``prismabuild`` imports (PQ #1281).
-
-    Where ``import prismabuild`` resolves is process-global: ``sys.path``
-    and ``sys.modules``. A test that imports PrismaBuild from a sealed
-    generation tree left both pointing at it, and every later test on that
-    worker then ran against the generation instead of the installed SDK
-    (``tests/test_stageb_one_pass_spill.py`` then
-    ``tests/test_strict_reader_tier_enforcement.py`` refused
-    ``no-claim-context``). ``fleet_sdk.prismabuild_imports_restored`` says
-    what is put back and why.
-    """
-    from fleet_sdk import prismabuild_imports_restored
-    with prismabuild_imports_restored():
-        yield
-
-
-@pytest.fixture(autouse=True)
-def _no_launching_queue_root_from_the_test_shard(monkeypatch):
-    """No test reads the queue that launched its pbtest shard.
-
-    A pbtest shard is itself a PrismaBuild action, and the pool launcher
-    publishes that action's queue root as ``PRISMABUILD_QUEUE_ROOT``
-    (PB #961). ``reader_lease.injected_context`` prefers it to the queue a
-    test's residency map names, so a test that fakes an action context in a
-    ``tmp_path`` queue would look for its claim in the live fleet queue and
-    refuse ``no-claim-context``. A test that wants the variable sets it.
-    """
-    monkeypatch.delenv("PRISMABUILD_QUEUE_ROOT", raising=False)
-    yield
-
-
-@pytest.fixture(autouse=True)
-def _no_staged_range_wait_unless_asked(monkeypatch):
-    """Tests do not wait on a PrismaBuild fleet that is not running.
-
-    ``StagedShardReader._range_for`` waits a bounded time for a range the
-    residency map does not cover yet, because on the fleet an uncovered span
-    is usually a mover that has not run rather than a range that will never
-    arrive (PQ #874). Under pytest there are no movers: every uncovered span
-    is permanent, so the default 300 s bound would turn each of the several
-    existing tests that assert an immediate ``readset-not-staged`` refusal
-    into a five-minute sleep that still passes.
-
-    Setting the bound to 0 here restores the pre-#874 refuse-on-first-miss
-    behaviour as the suite-wide default, which is what those tests were
-    written against. The tests that are ABOUT the wait set the variable
-    themselves; a test's own ``monkeypatch.setenv`` runs after this fixture
-    and wins.
-
-    This hides no cost. What waits on the fleet is
-    ``layer_streaming._await_layer_readset``, and only it: the strict policy
-    path, the layer read, and only spans PrismaBuild's sealed readset
-    declares and no mover has written yet. A span the readset does not
-    declare, an entry that covers a span and fails a check, and an unbound
-    readset all refuse at once there, exactly as they do here. The one
-    behaviour this default replaces is the 300 s a *declared* range that
-    never arrives would cost before failing -- which needs movers to be
-    meaningful, and there are none under pytest.
-    """
-    monkeypatch.setenv("PRISMAQUANT_STAGED_RANGE_WAIT_S", "0")
 
 
 @pytest.fixture(autouse=True)
@@ -570,8 +294,7 @@ def pytest_sessionfinish(session, exitstatus):
     the run prints ``1 skipped`` and still exits 5.
 
     That is invisible in a full-suite run, because some other file collects.
-    It matters under PrismaBuild, where ``pbtest`` gives each shard its own
-    pytest: a shard whose only file skips at collection exits 5, and the shard
+    It matters where a shard gets its own pytest: a shard whose only file skips at collection exits 5, and the shard
     reads as failed even though pytest reported the skip and nothing went
     wrong (RobTand/prismaquant#915, seen on
     ``tests/test_tessera_stack_group_cli.py``, which imports
@@ -594,9 +317,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 #: Distributions whose versions decide what this suite can run. The GLM
 #: modules need transformers >= 5.16 (``test_glm5_next_streamed_forward_parity``
-#: and the five modules that import from it), and Tessera and PrismaBuild are
-#: pinned (``tools/resolve_*_dev_pin.py``).
-ENVIRONMENT_DISTRIBUTIONS = ("torch", "transformers", "tessera-quant", "prismabuild")
+#: and the five modules that import from it), and Tessera is pinned
+#: (``tools/resolve_*_dev_pin.py``).
+ENVIRONMENT_DISTRIBUTIONS = ("torch", "transformers", "tessera-quant")
 
 
 def environment_line() -> str:
@@ -617,11 +340,11 @@ def environment_line() -> str:
 def pytest_terminal_summary(terminalreporter):
     """Name the environment in every session's output (PQ #1090).
 
-    Six GLM modules skipped at collection in every PrismaBuild run because
+    Six GLM modules skipped at collection in every run because
     the test interpreter had transformers 5.6.0, and nothing in a receipt
-    said which transformers a run had. A shard's output is its receipt, and
-    ``pbtest`` runs pytest with ``--no-header``, so the report header cannot
-    carry this; the terminal summary is printed either way.
+    said which transformers a run had. A run's output is its receipt, and a
+    run with ``--no-header`` has no report header to carry this; the terminal
+    summary is printed either way.
     """
 
     terminalreporter.write_line(environment_line())
@@ -631,12 +354,11 @@ def pytest_terminal_summary(terminalreporter):
 # Modules that need a pytest process of their own (PQ #1008)
 # ---------------------------------------------------------------------------
 #
-# Some harnesses cannot share a process. The Stage A produced-output harness
-# (``test_stage_a_produced_boundary_chain``) resolves a pinned PrismaBuild
-# bundle, and one process can hold only one ``prismabuild``: in a session
-# that has already imported the deployed one, the harness used to skip every
-# test that needed the bundle, so a multi-file shard reported them as
-# skipped and stayed green (25 tests in the #996 run).
+# Some harnesses cannot share a process: a module may need an import graph no
+# other module in the session has touched, and in a session that has already
+# imported something else it used to skip every test that needed it, so a
+# multi-file shard reported them as skipped and stayed green (25 tests in the
+# #996 run).
 #
 # A module marked ``own_process`` keeps its tests and their node ids. When
 # the session collects only that module, nothing changes. When it collects
@@ -652,86 +374,38 @@ def pytest_terminal_summary(terminalreporter):
 # The per-test bound applies to each test in the child, not to the module
 # (PQ #1027). The child starts before any bound is armed for the first proxy,
 # and runs under the bound the parent runs under: pytest-timeout's
-# ``--timeout``, PrismaBuild's ``prismabuild.pytest_test_bound``, or both. A
-# test that hangs in the child fails alone, with the bound named in its
-# failure, and the tests after it still run.
-#
-# PrismaBuild's bound is on whenever ``PRISMABUILD_TEST_TIMEOUT_S`` is set
-# (PQ #1055). ``pbtest`` exports the variable to every shard, but no shard
-# names the plugin with ``-p`` and ``prismabuild`` registers no entry point,
-# so this conftest registers it. It loads the plugin from its file rather
-# than importing the ``prismabuild`` package: an ``own_process`` harness
-# refuses a process whose ``prismabuild`` is not its pinned candidate, and a
-# child session inherits the variable and loads the plugin the same way.
+# ``--timeout``, the only per-test bound this suite declares
+# (``pytest-timeout`` is a test dependency in ``pyproject.toml``). A requested
+# bound without the plugin is a failure, never a skip: pytest refuses an
+# unrecognized ``--timeout``, and a child that cannot load the plugin exits
+# non-zero and fails its proxies by exit status.
 
 OWN_PROCESS_MARK = "own_process"
 #: Set in a child session only: the file the child appends its reports to.
 OWN_PROCESS_REPORT_ENV = "PQ_OWN_PROCESS_REPORT"
-#: PrismaBuild's per-test bound plugin, by the name ``-p`` loads it under.
-PRISMABUILD_TEST_BOUND_PLUGIN = "prismabuild.pytest_test_bound"
-#: The per-test bound in seconds, which ``pbtest`` exports to every shard and
-#: the plugin reads. Unset or empty: no bound.
-PRISMABUILD_TEST_BOUND_ENV = "PRISMABUILD_TEST_TIMEOUT_S"
+OWN_PROCESS_MEASURE_ENV = "PQ_OWN_PROCESS_MEASURE"
 
 
-def _load_prismabuild_test_bound(config) -> None:
-    """Register PrismaBuild's per-test bound when the shard sets one.
-
-    Does nothing when ``PRISMABUILD_TEST_TIMEOUT_S`` is unset or empty, or
-    when the plugin is already registered (``-p``). Otherwise the plugin's
-    file is found without importing ``prismabuild`` (``find_spec`` of a
-    top-level package does not run it), loaded under a private module name,
-    and registered under the plugin's own name. It imports only the standard
-    library and pytest. A bound the session asks for but cannot load is
-    refused: running unbounded and green is what the bound exists to end.
-    """
-    import importlib.util
-
-    if not os.environ.get(PRISMABUILD_TEST_BOUND_ENV, "").strip():
-        return
-    if config.pluginmanager.has_plugin(PRISMABUILD_TEST_BOUND_PLUGIN):
-        return
-    try:
-        package = importlib.util.find_spec("prismabuild")
-    except (ImportError, ValueError):
-        package = None
-    candidates = [Path(location) / "pytest_test_bound.py" for location in
-                  (package.submodule_search_locations or ())] if package else []
-    path = next((candidate for candidate in candidates if candidate.is_file()),
-                None)
-    if path is None:
-        raise pytest.UsageError(
-            f"{PRISMABUILD_TEST_BOUND_ENV} is set, but no "
-            f"{PRISMABUILD_TEST_BOUND_PLUGIN} is installed to apply it: this "
-            "session would run with no per-test bound")
-    spec = importlib.util.spec_from_file_location(
-        "_pq_prismabuild_pytest_test_bound", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    # Registered from pytest_configure, a historic hook: the plugin's own
-    # pytest_configure runs now and reads the bound.
-    config.pluginmanager.register(module, PRISMABUILD_TEST_BOUND_PLUGIN)
-
-
-#: Marks a test that reads fleet-local campaign data or live PrismaBuild
-#: state that no PB action declares (PQ #1014): a gigabyte real-data read, a
-#: walk over a campaign tree, a read of the live queue. Such reads bypass
-#: PB's admission and tiered caching, so these tests skip by default, with a
-#: reason that names the opt-in. They run when ``-m`` names the mark
-#: (``pbtest --pytest-args "-m fleet_data"``) or ``PQ_FLEET_DATA_TESTS=1`` is
-#: set; declaring their reads to PB is PB #915. A skip, not a deselection:
+#: Marks a test that reads fleet-local campaign data that no native record
+#: declares (PQ #1014): a gigabyte real-data read, a walk over a campaign
+#: tree. Such reads bypass declared admission, so these tests skip by default,
+#: with a reason that names the opt-in. They run when ``-m`` names the mark
+#: (``-m fleet_data``) or ``PQ_FLEET_DATA_TESTS=1`` is set. A skip, not a deselection:
 #: under xdist only the workers see a deselection, so a shard of nothing but
 #: these tests would exit 5 ("no tests collected") and read as a failure.
 FLEET_DATA_MARK = "fleet_data"
 FLEET_DATA_ENV = "PQ_FLEET_DATA_TESTS"
 FLEET_DATA_SKIP_REASON = (
-    f"{FLEET_DATA_MARK}: reads fleet data PrismaBuild does not declare "
+    f"{FLEET_DATA_MARK}: reads fleet data no native record declares "
     f"(PQ #1014); run with -m {FLEET_DATA_MARK} or {FLEET_DATA_ENV}=1")
 TASK_SUITE_MARK = "task_suite"
 TASK_SUITE_ENV = "PQ_TASK_SUITE_TESTS"
+#: The mark is interpolated, as in ``FLEET_DATA_SKIP_REASON``: a literal
+#: "-m task_suite" reads to the dependency graph as a launch of
+#: ``prismaquant/task_suite.py``, which this file does not run (#3215).
 TASK_SUITE_SKIP_REASON = (
-    "task_suite: run the required layered gate with -m task_suite or "
-    "PQ_TASK_SUITE_TESTS=1; recorded 76 passed, 0 skipped; "
+    f"{TASK_SUITE_MARK}: run the required layered gate with -m {TASK_SUITE_MARK} or "
+    f"{TASK_SUITE_ENV}=1; recorded 76 passed, 0 skipped; "
     "action 20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6; "
     "receipt 0ed9d0134b60b0df181b15dd605b41e0ca5ce7e5e1fe0ef8d0ee14cb25440913")
 
@@ -767,7 +441,6 @@ def pytest_configure(config):
         f"{OWN_PROCESS_MARK}: the module needs a pytest process of its own. In "
         "a session that collects other modules too, its tests run in one "
         "child pytest and report back under their own node ids (PQ #1008).")
-    _load_prismabuild_test_bound(config)
 
 
 
@@ -817,25 +490,63 @@ def _fold_own_process_reports(records, *, log):
 def _own_process_bound_args(config) -> list[str]:
     """The child's arguments for the per-test bound the parent runs under.
 
-    pytest-timeout's ``--timeout``, and PrismaBuild's plugin when the parent
-    named it with ``-p``. A plugin the parent loaded from
-    ``PRISMABUILD_TEST_TIMEOUT_S`` loads in the child the same way, since the
-    child inherits the variable (PQ #1055); naming it with ``-p`` there
-    would import the ``prismabuild`` package into the child. A bound the
-    parent does not run under is not added.
+    pytest-timeout's ``--timeout``. The child names the plugin with ``-p`` only
+    when the parent registered it under that explicit name (autoload disabled):
+    a parent that autoloaded it registered it as ``timeout``, its child autoloads
+    it too, and pytest refuses the same module under a second name ("Plugin
+    already registered under a different name"). A bound the parent does not
+    run under is not added.
     """
-    argv = []
     timeout = getattr(config.option, "timeout", None)
-    if timeout:
-        argv.append(f"--timeout={timeout}")
-    if PRISMABUILD_TEST_BOUND_PLUGIN in (getattr(config.option, "plugins", None)
-                                        or ()):
-        argv += ["-p", PRISMABUILD_TEST_BOUND_PLUGIN]
-    return argv
+    if not timeout:
+        return []
+    plugins = config.pluginmanager
+    named = plugins.has_plugin("pytest_timeout") and not plugins.has_plugin("timeout")
+    return [*(["-p", "pytest_timeout"] if named else []), f"--timeout={timeout}"]
+
+
+def _own_process_measure_args(config, root, key):
+    launcher = ["-m", "tests._own_process_profile", str(root / f"{key}.pstats")]
+    argv, env = [], {}
+    sources = getattr(config.option, "cov_source", [])
+    if sources != [] and not getattr(config.option, "no_cov", False):
+        argv = ["-p", "pytest_cov", "--cov-reset", "--cov-report=",
+                "--cov-fail-under=0"]
+        argv += [f"--cov={source}" for source in (sources or [""])]
+        argv += ["--cov-config=" + str(config.option.cov_config)]
+        if config.option.cov_branch:
+            argv.append("--cov-branch")
+        if config.option.cov_context:
+            argv.append("--cov-context=" + config.option.cov_context)
+        env["COVERAGE_FILE"] = str(root / f"{key}.coverage")
+    return launcher, argv, env
+
+
+def _write_own_process_measurement(root, key, nodeids, state, records,
+                                   started, lock_wait, executed_child):
+    phases = {phase: sum(row["duration"] for row in records
+                        if row["when"] == phase)
+              for phase in ("setup", "call", "teardown")}
+    child = json.loads((root / f"{key}.child-measurement.json").read_text())
+    record = {
+        "schema": "prismaquant.own_process_measurement.v1",
+        "nodeids": nodeids, "parent_pid": os.getpid(),
+        "executed_child": executed_child, "lock_wait_s": lock_wait,
+        "parent_elapsed_s": time.perf_counter() - started,
+        "child_elapsed_s": child["elapsed_s"], "child_phase_s": phases,
+        "child_unattributed_s": child["elapsed_s"] - sum(phases.values()),
+        "child_profile": child["profile"], "child_coverage": child["coverage"],
+        "child_returncode": state["returncode"], "child_error": state["error"],
+    }
+    (root / f"{key}.{os.getpid()}.measurement.json").write_text(
+        json.dumps(record))
 
 
 def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
     """Run ``nodeids`` in one child pytest, once per session, and read it."""
+    measure = os.environ.get(OWN_PROCESS_MEASURE_ENV) == "1"
+    started = time.perf_counter() if measure else None
+    executed_child = False
     key = hashlib.sha256("\n".join(nodeids).encode()).hexdigest()[:16]
     root = _own_process_root(config)
     root.mkdir(parents=True, exist_ok=True)
@@ -843,23 +554,33 @@ def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
     done = root / f"{key}.done.json"
     log = root / f"{key}.log"
     with open(root / f"{key}.lock", "a+") as lock:
+        waiting = time.perf_counter() if measure else None
         fcntl.flock(lock, fcntl.LOCK_EX)
+        lock_wait = time.perf_counter() - waiting if measure else None
         try:
             if not done.exists():
+                executed_child = True
                 reports.unlink(missing_ok=True)
                 env = {name: value for name, value in os.environ.items()
                        if not name.startswith("PYTEST_XDIST_")
                        and name not in ("PYTEST_ADDOPTS", "PYTEST_CURRENT_TEST")}
                 env[OWN_PROCESS_REPORT_ENV] = str(reports)
-                argv = [sys.executable, "-m", "pytest", "-q", "--no-header",
+                launcher, measure_args = ["-m", "pytest"], []
+                if measure:
+                    launcher, measure_args, measure_env = _own_process_measure_args(
+                        config, root, key)
+                    env.update(measure_env)
+                argv = [sys.executable, "-s", *launcher, "-q", "--no-header",
                         "-p", "no:cacheprovider",
                         "--rootdir", str(config.rootpath),
                         "--basetemp", str(root / f"{key}.tmp")]
                 if config.inipath is not None:
                     argv += ["-c", str(config.inipath)]
                 argv += _own_process_bound_args(config)
+                argv += measure_args
                 argv += list(nodeids)
                 returncode, error = None, None
+                child_started = time.perf_counter() if measure else None
                 try:
                     with open(log, "wb") as out:
                         returncode = subprocess.run(
@@ -869,14 +590,26 @@ def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
                     error = f"{type(exc).__name__}: {exc}"
                     raise
                 finally:
-                    done.write_text(json.dumps(
-                        {"returncode": returncode, "error": error}))
+                    state = {"returncode": returncode, "error": error}
+                    if measure:
+                        child_measurement = {
+                            "elapsed_s": time.perf_counter() - child_started,
+                            "profile": str(root / f"{key}.pstats"),
+                            "coverage": measure_env.get("COVERAGE_FILE"),
+                        }
+                    done.write_text(json.dumps(state))
+                    if measure:
+                        (root / f"{key}.child-measurement.json").write_text(
+                            json.dumps(child_measurement))
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
     state = json.loads(done.read_text())
     lines = reports.read_text().splitlines() if reports.exists() else []
-    outcomes, collection = _fold_own_process_reports(
-        [json.loads(line) for line in lines], log=log)
+    records = [json.loads(line) for line in lines]
+    if measure:
+        _write_own_process_measurement(root, key, nodeids, state, records,
+                                       started, lock_wait, executed_child)
+    outcomes, collection = _fold_own_process_reports(records, log=log)
     reported_failure = any(item["outcome"] == "failed" for item in outcomes.values())
     collection_failure = any(item["outcome"] == "failed" for item in collection)
     collection_skip = (not outcomes and collection
@@ -1015,8 +748,8 @@ def pytest_runtest_protocol(item, nextitem):
     test's bound covered the whole module (PQ #1027): a module could time out
     on its test count, and the proxy that failed was the first one, not the
     one that hung. ``tryfirst`` makes this the outermost wrapper, so the child
-    runs before pytest-timeout's protocol timer or PrismaBuild's per-phase
-    alarms are armed for the proxy, and each test in the child runs under a
+    runs before pytest-timeout's protocol timer
+    is armed for the proxy, and each test in the child runs under a
     bound of its own (``_own_process_bound_args``). The child's collection
     and exit are bounded as the parent session's own are, by the run's
     ceiling. Its wall time is not attributed to any proxy in ``--durations``
@@ -1035,10 +768,14 @@ def _own_process_record(report) -> dict:
                   and len(longrepr) == 3 else str(longrepr or ""))
         if reason.startswith("Skipped: "):
             reason = reason[len("Skipped: "):]
-    return {"nodeid": report.nodeid, "when": getattr(report, "when", "collect"),
+    record = {"nodeid": report.nodeid, "when": getattr(report, "when", "collect"),
             "outcome": report.outcome,
             "longrepr": report.longreprtext if report.failed else "",
             "reason": reason, "wasxfail": getattr(report, "wasxfail", None)}
+    if (os.environ.get(OWN_PROCESS_MEASURE_ENV) == "1"
+            and isinstance(report, pytest.TestReport)):
+        record["duration"] = report.duration
+    return record
 
 
 def _append_own_process_record(report) -> None:
@@ -1088,14 +825,17 @@ def _golden_rows_all_used(request):
     ``golden_table.unfinished_tests_if_whole_module_ran``.
     """
     yield
-    from tests.golden_table import GoldenTable, unfinished_tests_if_whole_module_ran
-
+    # A module holding a GoldenTable has imported tests.golden_table itself;
+    # while that module is not loaded there is no table to check.
+    golden = sys.modules.get("tests.golden_table")
+    if golden is None:
+        return
     tables = [table for table in vars(request.module).values()
-              if isinstance(table, GoldenTable) and table.every_row_used]
+              if isinstance(table, golden.GoldenTable) and table.every_row_used]
     if not tables:
         return
     module = request.node.path
-    unfinished = unfinished_tests_if_whole_module_ran(
+    unfinished = golden.unfinished_tests_if_whole_module_ran(
         module, args=request.config.args,
         deselected=request.config.stash.get(_GOLDEN_DESELECTED, set()),
         outcomes={item.nodeid: item.stash.get(_GOLDEN_OUTCOME, None)
@@ -1109,17 +849,3 @@ def _golden_rows_all_used(request):
                 f"fixtures/{table.name}.json has {len(unused)} frozen row(s) that no "
                 f"passing call used: {unused[:10]}. Restore the call, or archive the "
                 "rows of a retired test with its archive wall.", pytrace=False)
-
-
-@pytest.fixture
-def legacy_capture_mechanism(monkeypatch):
-    """Exercise explicit legacy capture mechanics, without provider qualification.
-
-    Only positive mechanism tests request this fixture. Production automatic
-    admission remains covered without it by the independent refusal matrix.
-    This controlled fixture does not establish immutable original material.
-    """
-    from prismaquant import tessera_calibration_cache as capture
-
-    monkeypatch.setattr(capture, "require_automatic_capture_source_recording",
-                        lambda: None)

@@ -1,0 +1,95 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0
+cachedir: /mnt/shared/tessera-measurements/pq1317-gpu-tests/moe.zoqsR9ua/pytest-cache
+tessera surface: CUDA -- torch 2.13.0+cu130, 1 CUDA device(s), device 0 = NVIDIA GB10
+rootdir: /mnt/shared/tessera-pins/fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb
+configfile: pyproject.toml
+created: 2/2 workers
+2 workers [71 items]
+
+.......................................................................  [100%]
+=============================== warnings summary ===============================
+tests/test_serving_moe_tp2.py: 14 warnings
+tests/test_native_window_moe_method.py: 14 warnings
+  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+tests/test_native_window_moe_method.py::test_router_weight_on_input_matches_actual_stock_placement
+  /usr/local/lib/python3.12/dist-packages/flashinfer/cute_dsl/availability.py:136: DeprecationWarning: Arch from arch.py is deprecated. Use Arch from enums.py instead.
+    from cutlass.base_dsl.arch import Arch
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /mnt/shared/tessera-measurements/pq1317-gpu-tests/moe.zoqsR9ua/junit.xml -
+
+tessera surface: CUDA -- torch 2.13.0+cu130, 1 CUDA device(s), device 0 = NVIDIA GB10
+tessera surface: 0 test(s) skipped, 0 module(s) not collected
+tessera surface: 38 test(s) allocated on the device
+tessera surface: population written to /mnt/shared/tessera-measurements/pq1317-gpu-tests/moe.zoqsR9ua/surface.json sha256:6ecbea81f1f481256bc68fa55f80225d76b53da7afe8b9a235a75a3b48f2219a
+============================= slowest 20 durations =============================
+6.04s call     tests/test_serving_moe_tp2.py::test_native_loader_shape_produces_rank_local_packed_tiles[0]
+5.81s call     tests/test_native_window_moe_method.py::test_fp8_native_method_tp1_loads_compacts_and_matches_the_reference
+4.04s call     tests/test_native_window_moe_method.py::test_router_weight_on_input_matches_actual_stock_placement
+3.39s setup    tests/test_serving_moe_tp2.py::test_native_loader_shape_produces_rank_local_packed_tiles[0]
+1.95s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-epilogue-False]
+1.68s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[e4m3-epilogue-False]
+1.55s call     tests/test_native_window_moe_method.py::test_fp8_native_method_tp2_shard_shapes_are_rank_local[0]
+1.54s call     tests/test_native_window_moe_method.py::test_native_method_refuses_missing_duplicate_and_wrong_rung
+1.52s setup    tests/test_serving_moe_tp2.py::test_window_intake_reuses_one_body_staging_buffer_across_experts[0]
+1.33s call     tests/test_native_window_moe_method.py::test_fp8_native_method_tp2_shard_shapes_are_rank_local[1]
+1.08s call     tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[1-triton-1-2]
+0.90s setup    tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[1-triton-1-2]
+0.90s setup    tests/test_native_window_moe_method.py::test_bf16_folded_native_route_matches_folded_reference
+0.63s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[e4m3-epilogue-True]
+0.58s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-folded-False]
+0.56s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-folded-True]
+0.53s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-epilogue-True]
+0.08s call     tests/test_serving_moe_tp2.py::test_tp2_refuses_runtime_padding_and_original_wire_shape_disagreement
+0.07s call     tests/test_serving_moe_tp2.py::test_window_intake_reuses_one_body_staging_buffer_across_experts[0]
+0.07s call     tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[1-triton-0-1]
+======================= 71 passed, 29 warnings in 21.01s =======================
+TS610_SURFACE {
+  "schema": "tessera.test_surface.v3",
+  "role": "population",
+  "worker_id": null,
+  "xdist_workers": 2,
+  "commit": null,
+  "source_identity": {
+    "schema": "tessera.suite_source.v1",
+    "snapshot_commit": null,
+    "sha256": null,
+    "verification": "unknown",
+    "excluded_metadata": [],
+    "reason": "the processes that executed this population did not agree on its source: gw0 did not establish a verified source identity; gw1 did not establish a verified source identity",
+    "measurement_span": {
+      "entry_sha256": null,
+      "entry_snapshot_commit": null,
+      "entry_verification": "unknown",
+      "agrees": false
+    },
+    "workers": {
+      "gw0": "did not establish a verified source identity",
+      "gw1": "did not establish a verified source identity"
+    }
+  },
+  "cuda": true,
+  "device": "torch 2.13.0+cu130, 1 CUDA device(s), device 0 = NVIDIA GB10",
+  "strict_cuda": true,
+  "counts": {
+    "passed": 71,
+    "failed": 0,
+    "error": 0,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0
+  },
+  "skip_reasons": {},
+  "cuda_surface": {
+    "executed": 38,
+    "measured_by": "tests during whose call torch's CUDA allocator recorded a new allocation",
+    "is_a_floor": true,
+    "box_artifact_skips": {}
+  },
+  "not_collected": []
+}
+
+TS610_RC 0

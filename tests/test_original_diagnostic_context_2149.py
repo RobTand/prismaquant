@@ -19,6 +19,7 @@ from prismaquant.stage_a_selected_row_diagnostic import (
 )
 from test_capture_original_material import _bound
 from test_original_source_admission import authority_case, original_runner, original_model, material, _forget_state  # noqa: F401
+from native_runtime_fixtures import runtime_layout, nonqualifying_runtime  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 

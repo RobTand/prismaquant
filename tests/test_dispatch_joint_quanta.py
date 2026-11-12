@@ -26,9 +26,8 @@ from prismaquant.joint_adjoint_slices import stage_a_slice, write_adjoint_slice
 from prismaquant.joint_layer_quanta import adjoint_binding_fields
 
 from test_stage_b_band_binding import band_from_receipt, synthetic_receipt
-from stage_a_spool_spec import (QUANTUM_SPOOL_ENV, SPOOL_ENV, SPOOL_MOUNT, SPOOL_ROOT,
-                                SPOOL_WINDOW_BYTES,
-                                 STAGE_A_SPOOL_ENV, stage_a_plan, with_spool)
+from stage_a_spool_spec import (SPOOL_MOUNT, SPOOL_ROOT, SPOOL_WINDOW_BYTES, stage_a_plan,
+                                with_spool, write_declaration)
 
 from dispatch_joint_quanta import (  # noqa: E402
     ADJOINT_SCHEMA,
@@ -40,8 +39,14 @@ from dispatch_joint_quanta import (  # noqa: E402
     FakeGateway,
     main,
     quantum_argv,
-    stage_a_argv,
+    stage_a_argv as _dispatch_stage_a_argv,
 )
+
+
+def stage_a_argv(manifest, campaign, **kwargs):
+    """The shipped Stage A row builder, given the launch-bound produced declaration it requires."""
+    kwargs.setdefault("produced_declaration", write_declaration(Path(campaign["plan_path"]).parent))
+    return _dispatch_stage_a_argv(manifest, campaign, timeout_s=3600, **kwargs)
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 N_LAYERS = 3
@@ -185,14 +190,15 @@ def _argv(records_dir, output_root, receipt=None, extra=()):
     # These fixtures exercise unrelated dispatcher contracts without a GPU
     # measurement. Pilot admission itself uses the production defaults in
     # test_joint_dispatch_pilot.py; never invent a passing pilot here.
-    argv = ["--records", str(records_dir), "--output-root", str(output_root),
+    from stage_a_spool_spec import write_declaration
+    argv = ["--timeout-s", "3600", "--stage-a-produced-declaration", str(write_declaration(records_dir.parent)), "--records", str(records_dir), "--output-root", str(output_root),
             "--force-unverified-pilot"]
     if receipt is not None:
         argv += ["--adjoint-receipt", str(receipt)]
     return argv + list(extra)
 
 
-# -- the exact pbrun argv shape (§5.2, pinned: drift breaks placement) ----------
+# -- neutral application row intent (§5.2, preserving placement requirements) --
 
 
 @pytest.mark.parametrize("mode", ["0", "1"])
@@ -229,48 +235,22 @@ def test_load_records_names_the_offending_file_among_valid_records(records_dir, 
 
 
 def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
-    """Every quantum submits exactly the contract's argv: the shared GB10
-    class tag (PB requires *every* tag a row lists, so a host pair would
-    admit neither Spark), the slice manifest, stage residency, per-chunk
-    progress phases, dev-mode env, detached. PB owns placement past that."""
+    """Each quantum keeps its GB10 placement, resource demand and container command."""
     slices = tmp_path / "slices"
     slices.mkdir()
     record = _bind(_record(campaign, 1, slice_dir=slices), _receipt(campaign),
                    tmp_path / "adjoint-slices")
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
-    argv = quantum_argv(record, record_path=record_path,
+    argv = quantum_argv(record, timeout_s=3600, record_path=record_path,
                         output_root=Path("/out/root"))
-    tags = [argv[i + 1] for i, word in enumerate(argv[:-1]) if word == "--tag"]
-    assert tags == ["gb10"]
-    assert CONSUMER_TAGS == ("gb10",)
-    # The regression, at the argv layer: naming both Sparks is a conjunction
-    # PB can satisfy on neither box.
-    assert not {"sparky", "sparklina"} <= set(tags)
-    manifest = argv[argv.index("--data-manifest") + 1]
-    assert manifest == str(Path(slices) / "layer-001.data-manifest.json")
-    assert argv[argv.index("--residency") + 1] == "stage"
-    assert argv[argv.index("--residency-ram") + 1] == "auto"
-    phases = [argv[i + 1] for i, word in enumerate(argv[:-1])
-              if word == "--progress-phase"]
-    assert phases[0].startswith("head=")
-    assert f"layer-001-chunk-000={CHUNK_PROGRESS_GRACE_S}" in phases
+    assert argv["tags"] == ["gb10"] and CONSUMER_TAGS == ("gb10",)
     assert CHUNK_PROGRESS_GRACE_S == 900
-    assert argv[argv.index("--priority") + 1] == str(SUBMISSION_PRIORITY)
-    # The GPU envelope: the capture and the quanta are GPU-or-bust
-    # (require_cuda_hot_path refused the c94602e9d63c run whose rows
-    # demanded no device).
-    assert argv[argv.index("--demand") + 1] == "gpu=1,mem_gb=104"
-    envelope = argv[:argv.index("--")]
-    envs = [envelope[i + 1] for i, word in enumerate(envelope) if word == "--env"]
-    assert envs[-1] == "PRISMAQUANT_DEV_MODE=1"
-    # The fixture spec declares the produced spool, so the quantum row seals
-    # it too; the container refuses a declared spool the action lacks (#1012),
-    # and the host window opt-in has placement charge it (PQ #1364).
-    assert envs[:-1] == [f"{name}={value}" for name, value in QUANTUM_SPOOL_ENV.items()]
-    assert "--detach" in argv
-    assert "--" in argv
-    tail = argv[argv.index("--") + 1:]
+    assert argv["priority"] == SUBMISSION_PRIORITY
+    assert argv["demand"] == {"gpu": 1, "mem_gb": 104, "cpu": 10}
+    assert argv["timeout_s"] == 3600
+    assert argv["env"] == {}
+    tail = argv["argv"]
     # The payload runs inside the qualified campaign container: the
     # projection backend's runtime identity (and the workload's own
     # torch/CUDA) qualify one image, and a bare python3 -m refuses as
@@ -298,6 +278,14 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     assert inner[inner.index("--output-root") + 1] == "/out/root"
 
 
+def _submit_stage_a_fixture(tmp_path, campaign, records_dir, out, gateway, *, terminal=True):
+    manifest = _adjoint_manifest(records_dir, campaign, name="adjoint.data-manifest.json.gz", gzip_bytes=True)
+    assert main(_argv(records_dir, out, None, ("--adjoint-manifest", str(manifest))), _gateway=gateway) == 0
+    if terminal:
+        gateway.mark_terminal(gateway.submitted[-1]["job_id"])
+    gateway.submitted.clear()
+
+
 def test_plan_consumer_tags_override_reaches_every_quantum_row(
         tmp_path, campaign, records_dir):
     """§5.1: the plan block is the declared placement policy, and every row
@@ -310,12 +298,8 @@ def test_plan_consumer_tags_override_reaches_every_quantum_row(
     digest = _write_receipt(receipt_path, _receipt(campaign))
     _stamp_receipt(records_dir, receipt_path)
     gateway = FakeGateway(terminal=True)
-    gateway.mark_terminal("stage-a-action-key")
     out = tmp_path / "out"
-    (out / "layer-quanta").mkdir(parents=True)
-    (out / "layer-quanta" / "campaign-state.json").write_text(
-        json.dumps({"event": "stage-a-submitted",
-                    "action_key": "stage-a-action-key"}) + "\n")
+    _submit_stage_a_fixture(tmp_path, campaign, records_dir, out, gateway)
     plan_path = tmp_path / "plan-with-block.json"
     plan_path.write_text(json.dumps(
         {"output_root": str(tmp_path / "campaign-root"),
@@ -326,9 +310,8 @@ def test_plan_consumer_tags_override_reaches_every_quantum_row(
                     if row["kind"] == "quantum"]
     assert len(quantum_rows) == N_LAYERS
     for row in quantum_rows:
-        argv = row["argv"]
-        tags = [argv[i + 1] for i, word in enumerate(argv[:-1])
-                if word == "--tag"]
+        argv = row["row"]
+        tags = argv["tags"]
         assert tags == ["gb10", "progress-v1"]
 
 
@@ -359,16 +342,16 @@ def test_stage_a_argv_prefetch_override_is_payload_flagged(tmp_path, campaign):
     manifest = _adjoint_manifest(tmp_path, campaign,
                                    name="adjoint.data-manifest.json.gz")
     plain = stage_a_argv(manifest, campaign)
-    assert "--prefetch-override" not in plain
-    assert plain[-1] == "--resume"
+    assert "--prefetch-override" not in plain["argv"]
+    assert "--resume" in plain["argv"]
+    assert "--produced-declaration" in plain["argv"]
 
     override = Path("/mnt/shared/joint-panel/prefetch-override-v10.json")
     widened = stage_a_argv(manifest, campaign, prefetch_override=override)
-    # The pbrun envelope (everything before the payload ``--``) is unchanged;
+    # The application row retains all execution requirements;
     # the override rides inside the container payload only.
-    split = widened.index("--")
-    assert widened[:split] == plain[:plain.index("--")]
-    payload = widened[split + 1:]
+    assert {k: v for k, v in widened.items() if k != "argv"} == {k: v for k, v in plain.items() if k != "argv"}
+    payload = widened["argv"]
     inner = payload[payload.index("--", payload.index("--spec")) + 1:]
     assert inner[:3] == ["python3", "-m", "prismaquant.joint_adjoint_capture"]
     assert inner[inner.index("--prefetch-override"):][:2] == [
@@ -385,7 +368,7 @@ def test_main_threads_stage_a_prefetch_override(tmp_path, campaign, records_dir,
     override.write_text("{}")
     gateway = FakeGateway()
     out = tmp_path / "out"
-    code = main(["--records", str(records_dir), "--output-root", str(out),
+    code = main(_argv(records_dir, out) + [
                  "--state", str(tmp_path / "state.json"),
                  "--adjoint-manifest", str(_adjoint_manifest(tmp_path, campaign)),
                  "--stage-a-prefetch-override", str(override)],
@@ -393,10 +376,11 @@ def test_main_threads_stage_a_prefetch_override(tmp_path, campaign, records_dir,
     assert code == 0
     stage_a_rows = [row for row in gateway.submitted if row["kind"] == "stage-a"]
     assert len(stage_a_rows) == 1
-    argv = stage_a_rows[0]["argv"]
+    argv = stage_a_rows[0]["row"]["argv"]
     assert argv[argv.index("--prefetch-override") + 1] == str(override)
     events = [json.loads(line) for line
               in (tmp_path / "state.json").read_text().splitlines() if line]
+    events = [event for event in events if event["event"] == "stage-a-submitted"]
     assert events[0]["event"] == "stage-a-submitted"
     assert events[0]["prefetch_override"] == str(override)
 
@@ -427,38 +411,43 @@ def test_no_quanta_before_the_stage_a_receipt(tmp_path, campaign, records_dir):
                 _gateway=gateway) == 0
     kinds = [call["kind"] for call in gateway.submitted]
     assert kinds == ["stage-a"]
-    assert gateway.submitted[0]["argv"][gateway.submitted[0]["argv"].index("--tag") + 1] == "sparky"
+    assert gateway.submitted[0]["row"]["tags"][0] == "sparky"
 
 
 def test_stale_stage_a_receipt_refuses(tmp_path, campaign, records_dir):
     """A receipt from another plan revision fails closed, exit 3, and
     publishes nothing."""
     gateway = FakeGateway(terminal=True)
-    gateway.mark_terminal("stage-a-action-key")
     receipt_path = tmp_path / "adjoint-capture.json"
     digest = _write_receipt(receipt_path, _receipt(campaign, plan_sha256="f" * 64))
     _stamp_receipt(records_dir, receipt_path)
     out = tmp_path / "out"
-    (out / "layer-quanta").mkdir(parents=True)
-    state = out / "layer-quanta" / "campaign-state.json"
-    state.write_text(json.dumps({"event": "stage-a-submitted",
-                                 "action_key": "stage-a-action-key"}) + "\n")
+    _submit_stage_a_fixture(tmp_path, campaign, records_dir, out, gateway)
     assert main(_argv(records_dir, out, receipt_path), _gateway=gateway) == 3
     assert gateway.submitted == []
     assert not (out / "layer-quanta" / "layer-002").exists()
 
 
+def test_real_gateway_refuses_receipt_without_native_producer(tmp_path, campaign, records_dir, capsys):
+    from unittest.mock import patch
+    from dispatch_joint_quanta import Gateway
+    from prismaquant import tessera_campaign_rows
+    receipt_path = tmp_path / 'adjoint-capture.json'
+    _write_receipt(receipt_path, _receipt(campaign))
+    _stamp_receipt(records_dir, receipt_path)
+    with patch.object(tessera_campaign_rows, 'submit_rows') as submit:
+        assert main(_argv(records_dir, tmp_path/'out', receipt_path), _gateway=Gateway()) == 3
+        submit.assert_not_called()
+    assert 'no saved native producer' in capsys.readouterr().err
+
+
 def test_quanta_publish_once_the_receipt_lands(tmp_path, campaign, records_dir):
     gateway = FakeGateway(terminal=True)
-    gateway.mark_terminal("stage-a-action-key")
     receipt_path = tmp_path / "adjoint-capture.json"
     digest = _write_receipt(receipt_path, _receipt(campaign))
     _stamp_receipt(records_dir, receipt_path)
     out = tmp_path / "out"
-    (out / "layer-quanta").mkdir(parents=True)
-    (out / "layer-quanta" / "campaign-state.json").write_text(
-        json.dumps({"event": "stage-a-submitted",
-                    "action_key": "stage-a-action-key"}) + "\n")
+    _submit_stage_a_fixture(tmp_path, campaign, records_dir, out, gateway)
     assert main(_argv(records_dir, out, receipt_path), _gateway=gateway) == 0
     kinds = [call["kind"] for call in gateway.submitted]
     assert kinds == ["quantum", "quantum", "quantum"]
@@ -474,11 +463,8 @@ def _write_band(tmp_path, receipt, boundary):
     return path
 
 
-def test_a_band_publishes_its_own_layers_while_stage_a_runs(
+def test_a_band_waits_for_native_success_even_if_its_bytes_arrived_early(
         tmp_path, campaign, records_dir, capsys):
-    """Stage A seals the tail band hours before its receipt. The dispatcher
-    publishes exactly the quanta that band serves; the rest stay pending, and
-    the running stage A is neither refused nor republished."""
     receipt = _receipt(campaign)
     receipt_path = tmp_path / "adjoint-capture.json"
     _write_receipt(receipt_path, receipt)
@@ -487,23 +473,16 @@ def test_a_band_publishes_its_own_layers_while_stage_a_runs(
     band = _write_band(tmp_path, receipt, N_LAYERS)
     gateway = FakeGateway(terminal=False)
     out = tmp_path / "out"
-    (out / "layer-quanta").mkdir(parents=True)
-    (out / "layer-quanta" / "campaign-state.json").write_text(
-        json.dumps({"event": "stage-a-submitted",
-                    "action_key": "stage-a-action-key"}) + "\n")
+    _submit_stage_a_fixture(tmp_path, campaign, records_dir, out, gateway, terminal=False)
     argv = _argv(records_dir, out, None, ("--adjoint-band", str(band)))
-    assert main(argv + ["--dry-run"], _gateway=gateway) == 0
-    printed = json.loads(capsys.readouterr().out)
-    assert [row["quantum_id"] for row in printed["rows"]] == ["layer-002"]
-    assert printed["stage_a_pending"] == ["layer-001", "layer-000"]
+    assert main(argv, _gateway=gateway) == 0
+    resumed, = gateway.submitted
+    assert resumed["kind"] == "stage-a"
+    assert resumed["job_id"] == next(iter(gateway._saved.values()))["job_id"]
+    gateway.submitted.clear()
+    gateway.mark_terminal(next(iter(gateway._saved.values()))["job_id"])
     assert main(argv, _gateway=gateway) == 0
     assert [call.get("quantum_id") for call in gateway.submitted] == ["layer-002"]
-    # A second band adds its layer and republishes nothing.
-    gateway.mark_terminal(gateway.submitted[0]["action_key"])
-    gateway.submitted.clear()
-    lower = _write_band(tmp_path, receipt, N_LAYERS - 1)
-    assert main(argv + ["--adjoint-band", str(lower)], _gateway=gateway) == 0
-    assert [call.get("quantum_id") for call in gateway.submitted] == ["layer-001"]
 
 
 def test_bands_of_another_run_or_slice_refuse(tmp_path, campaign, records_dir):
@@ -566,7 +545,7 @@ def test_dry_run_prints_plan_with_digests_and_submits_nothing(
     printed = capsys.readouterr().out
     for layer in range(N_LAYERS):
         assert f"layer-{layer:03d}" in printed
-    assert "PRISMAQUANT_DEV_MODE=1" in printed
+    assert '"timeout_s": 3600' in printed
     # Each row names the slice it binds and the chain it reads, never the
     # receipt's digest.
     rows = {row["quantum_id"]: row for row in json.loads(printed)["rows"]}
@@ -587,17 +566,13 @@ def test_rerun_publishes_nothing_already_terminal(tmp_path, campaign, records_di
     digest = _write_receipt(receipt_path, _receipt(campaign))
     _stamp_receipt(records_dir, receipt_path)
     gateway = FakeGateway(terminal=True)
-    gateway.mark_terminal("stage-a-action-key")
     out = tmp_path / "out"
-    (out / "layer-quanta").mkdir(parents=True)
-    (out / "layer-quanta" / "campaign-state.json").write_text(
-        json.dumps({"event": "stage-a-submitted",
-                    "action_key": "stage-a-action-key"}) + "\n")
+    _submit_stage_a_fixture(tmp_path, campaign, records_dir, out, gateway)
     assert main(_argv(records_dir, out, receipt_path), _gateway=gateway) == 0
     first = list(gateway.submitted)
     assert len(first) == N_LAYERS
     for call in first:
-        gateway.mark_terminal(call["action_key"])
+        gateway.mark_terminal(call["job_id"])
     gateway.submitted.clear()
     assert main(_argv(records_dir, out, receipt_path), _gateway=gateway) == 0
     assert gateway.submitted == []
@@ -648,15 +623,14 @@ def _adjoint_manifest(tmp_path, campaign, *, phases=("head", "chain-000", "chain
 
 
 def _payload_inner(argv):
-    tail = argv[argv.index("--") + 1:]
+    tail = argv["argv"]
     inner = tail[tail.index("--", tail.index("--spec")) + 1:]
     assert inner[:3] == ["python3", "-m", "prismaquant.joint_adjoint_capture"]
     return inner
 
 
 def _envelope_envs(argv):
-    envelope = argv[:argv.index("--")]
-    return [envelope[i + 1] for i, word in enumerate(envelope) if word == "--env"]
+    return [f"{k}={v}" for k, v in argv["env"].items()]
 
 
 def _write_fixture_spec(spec):
@@ -664,41 +638,29 @@ def _write_fixture_spec(spec):
     dispatch_joint_quanta.SPEC_PATH.write_text(json.dumps(spec))
 
 
-def test_stage_a_seals_the_paced_spool_and_the_ram_tier(tmp_path, campaign):
-    """PQ #1012: the Stage A request carries the spool root, its byte bound
-    and the paced-export opt-in as sealed environment, which PrismaBuild
-    reads from the producer's request, and it seals the storage box's RAM
-    tier as the quantum row does. Both are pbrun envelope options."""
+def test_stage_a_binds_the_produced_declaration(tmp_path, campaign):
+    """The Stage A row binds its produced declaration without a spool environment."""
     manifest = _adjoint_manifest(tmp_path, campaign)
     argv = stage_a_argv(manifest, campaign)
-    envelope = argv[:argv.index("--")]
-    assert envelope[envelope.index("--residency") + 1] == "stage"
-    assert envelope[envelope.index("--residency-ram") + 1] == "auto"
-    assert _envelope_envs(argv) == [
-        *(f"{name}={value}" for name, value in STAGE_A_SPOOL_ENV.items()),
-        "PRISMAQUANT_DEV_MODE=1"]
-    # The spec the container launches from declares the same spool, so the
-    # launcher's own check (the sealed launch equals the spec) holds.
-    tail = argv[argv.index("--") + 1:]
+    assert _envelope_envs(argv) == []
+    flag = argv["argv"].index("--produced-declaration")
+    assert argv["argv"][flag + 1].endswith("stage-a-declaration.json")
+    tail = argv["argv"]
     sealed = json.loads(tail[tail.index("--spec") + 1])
-    assert {name: sealed["env"][name] for name in STAGE_A_SPOOL_ENV} == STAGE_A_SPOOL_ENV
+    assert not [name for name in sealed["env"] if name.startswith("PRISMABUILD_")]
     assert SPOOL_MOUNT in sealed["container"]["mounts"]
 
 
-def test_stage_a_seals_the_plans_two_plane_window_not_the_spec_bound(tmp_path, campaign):
-    """PQ #1110: the chain reads its own cotangent planes back from the
-    spool, so the row seals the plan's two-plane window in place of the
-    spec's bound, in the request environment and in the launched spec alike.
-    The spec on disk is unchanged."""
-    import dispatch_joint_quanta
-    before = dispatch_joint_quanta.SPEC_PATH.read_text()
-    argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
-    assert f"PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES={SPOOL_WINDOW_BYTES}" in _envelope_envs(argv)
-    assert SPOOL_WINDOW_BYTES != int(SPOOL_ENV["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"])
-    tail = argv[argv.index("--") + 1:]
-    sealed = json.loads(tail[tail.index("--spec") + 1])
-    assert sealed["env"]["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"] == str(SPOOL_WINDOW_BYTES)
-    assert dispatch_joint_quanta.SPEC_PATH.read_text() == before
+def test_stage_a_requires_the_launch_bound_declaration(tmp_path, campaign):
+    manifest = _adjoint_manifest(tmp_path, campaign)
+    with pytest.raises(DispatchRefused, match="explicit launch-bound produced declaration"):
+        _dispatch_stage_a_argv(manifest, campaign, timeout_s=3600)
+
+
+def test_the_plans_two_plane_window_is_the_fixture_spool_bound(tmp_path, campaign):
+    """Ported equivalent of the sealed two-plane window: the derivation, not its PB envelope."""
+    from dispatch_joint_quanta import stage_a_spool_window_bytes
+    assert stage_a_spool_window_bytes(campaign) == SPOOL_WINDOW_BYTES
 
 
 def test_the_two_plane_window_at_the_glm_shape(tmp_path):
@@ -720,107 +682,12 @@ def test_the_two_plane_window_at_the_glm_shape(tmp_path):
     assert quantum == 2 * 4 * 64 * (512 * 4096 * 4 * 2 + 65536) == window // 8
 
 
-def test_a_split_quantum_seals_two_planes_of_its_own_batches(tmp_path, campaign):
-    """PQ #738: a split quantum's spool holds its own range's planes, and the
-    capture derives its need from the same range, so the row seals that
-    window rather than the whole run's."""
-    argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign, batch_range=(4, 8))
-    envs = dict(env.split("=", 1) for env in _envelope_envs(argv))
-    assert int(envs["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"]) == SPOOL_WINDOW_BYTES // 2
-    tail = argv[argv.index("--") + 1:]
-    sealed = json.loads(tail[tail.index("--spec") + 1])
-    assert sealed["env"]["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"] == str(
-        SPOOL_WINDOW_BYTES // 2)
+def test_a_split_quantum_owns_two_planes_of_its_own_batches(tmp_path, campaign):
+    """PQ #738: a split quantum's window covers its own range's planes."""
+    from dispatch_joint_quanta import stage_a_spool_window_bytes
+    assert stage_a_spool_window_bytes(campaign, (4, 8)) == SPOOL_WINDOW_BYTES // 2
     with pytest.raises(DispatchRefused, match="not inside the plan's 8 batches"):
         stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign, batch_range=(4, 9))
-
-
-def test_stage_a_seals_the_host_window_beside_its_two_plane_bound(tmp_path, campaign):
-    """PQ #1120: the Stage A row opts into PrismaBuild's host spool window
-    (PB #910), so placement charges its two-plane window to the executing
-    box. The opt-in is sealed in the request environment, where PrismaBuild
-    reads it, and in the launched spec, which the container checks against
-    it. The spec on disk is unchanged."""
-    import dispatch_joint_quanta
-    before = dispatch_joint_quanta.SPEC_PATH.read_text()
-    argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
-    envs = dict(env.split("=", 1) for env in _envelope_envs(argv))
-    assert envs["PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"] == "1"
-    assert envs["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"] == str(SPOOL_WINDOW_BYTES)
-    tail = argv[argv.index("--") + 1:]
-    sealed = json.loads(tail[tail.index("--spec") + 1])
-    assert sealed["env"]["PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"] == "1"
-    assert dispatch_joint_quanta.SPEC_PATH.read_text() == before
-
-
-def test_stage_a_refuses_a_spec_that_opts_out_of_the_host_window(tmp_path, campaign):
-    """A spec that declares the host window off would leave the row's
-    two-plane window uncharged at placement; the row refuses it rather than
-    overriding what the spec says."""
-    import dispatch_joint_quanta
-    spec = json.loads(dispatch_joint_quanta.SPEC_PATH.read_text())
-    spec["env"]["PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"] = "0"
-    dispatch_joint_quanta.SPEC_PATH.write_text(json.dumps(spec))
-    with pytest.raises(DispatchRefused, match="HOST_WINDOW"):
-        stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
-
-
-#: Run in a child process to exercise the installed PrismaBuild package,
-#: isolated from any modules loaded by other tests in this process.
-_PLACEMENT_PROBE = r"""
-import json, sys
-from pathlib import Path
-from prismabuild.client import PoolQueue
-from prismabuild.local_scratch import scratch_terms
-from prismabuild.produced_spool import host_window_terms
-
-variables, queue_root = json.loads(sys.argv[1]), Path(sys.argv[2])
-# These internal demand helpers are test-only integration points. Use the
-# dispatcher's sealed environment unchanged, including the spool opt-in.
-terms = scratch_terms(variables)
-for kind, amount in host_window_terms(variables).items():
-    terms[kind] = terms.get(kind, 0) + amount
-queue = PoolQueue(queue_root)
-checkout = queue_root.parent / "checkout"
-checkout.mkdir()
-cas = queue_root.parent / "cas"
-cas.mkdir()
-resources = {"cpu": 1, "mem_gb": 1, **terms}
-for key in ("a" * 64, "b" * 64):
-    queue.publish(action_key=key, cas_root=cas,
-                  worker_script=checkout / "worker.py",
-                  checkout_root=checkout, resources=resources)
-capacity = {"cpu": 4, "mem_gb": 8, "spool_gb": max(2 * terms.get("spool_gb", 0) - 1, 0)}
-first = queue.claim(owner="first", capacity=capacity)
-second = queue.claim(owner="second", capacity=capacity)
-print(json.dumps({"terms": terms,
-                  "first": None if first is None else first["resources"],
-                  "second": None if second is None else second["resources"],
-                  "available": queue.ledger().available()}))
-"""
-
-
-def test_two_stage_a_rows_whose_windows_exceed_a_box_are_not_both_placed(
-        tmp_path, campaign):
-    """PQ #1120 acceptance, on the installed PrismaBuild package: the sealed
-    environment of a Stage A row derives a ``spool_gb`` demand of its window
-    in whole GiB, and a box whose spool budget
-    holds one such window but not two claims one row and refuses the other.
-    """
-    import subprocess
-    argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
-    variables = dict(env.split("=", 1) for env in _envelope_envs(argv))
-    run = subprocess.run(
-        [sys.executable, "-c", _PLACEMENT_PROBE,
-         json.dumps(variables), str(tmp_path / "pb-queue")],
-        capture_output=True, text=True, timeout=300,
-        env={"PATH": os.defpath, "HOME": str(tmp_path)})
-    assert run.returncode == 0, run.stderr
-    result = json.loads(run.stdout.strip().splitlines()[-1])
-    need = -(-SPOOL_WINDOW_BYTES // (1 << 30))
-    assert result["terms"] == {"spool_gb": need}
-    assert result["first"]["spool_gb"] == need
-    assert result["second"] is None, result
 
 
 @pytest.mark.parametrize("defect, reason", [
@@ -861,8 +728,8 @@ def test_stage_a_reserves_the_plans_memory_bound(tmp_path, campaign, aggregate, 
         plan["aggregate_memory_bytes"] = aggregate
     plan_path.write_text(json.dumps(plan))
     argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
-    envelope = argv[:argv.index("--")]
-    assert envelope[envelope.index("--demand") + 1] == f"gpu=1,mem_gb={expected}"
+    envelope = argv
+    assert envelope["demand"]["mem_gb"] == int(expected)
 
 
 @pytest.mark.parametrize("aggregate", [0, -1, 1.5, True, "108447924224"])
@@ -875,144 +742,61 @@ def test_stage_a_refuses_a_malformed_memory_bound(tmp_path, campaign, aggregate)
         stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
 
 
-def test_stage_a_refuses_a_spec_without_the_spool(tmp_path, campaign):
-    """A spec with no spool root would let the owner write every boundary
-    entry synchronously into the pool: the Stage A dispatch refuses it."""
-    _write_fixture_spec({"container": {"image": "sha256:" + "0" * 64}, "env": {}})
-    manifest = _adjoint_manifest(tmp_path, campaign)
-    with pytest.raises(DispatchRefused,
-                       match="declares no PRISMABUILD_PRODUCED_SPOOL_ROOT"):
-        stage_a_argv(manifest, campaign)
+def test_stage_a_refuses_a_spec_naming_a_retired_spool_environment(tmp_path, campaign):
+    """The retired PB spool names refuse at dispatch; the bound is the declaration's."""
+    _write_fixture_spec(with_spool({"container": {"image": "sha256:" + "0" * 64},
+                                     "env": {"PRISMABUILD_PRODUCED_SPOOL_ROOT": SPOOL_ROOT}}))
+    with pytest.raises(DispatchRefused, match="retired service environment"):
+        stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
 
 
-def _spool_variant(**env):
-    spec = with_spool({"container": {"image": "sha256:" + "0" * 64}, "env": {}})
-    for name, value in env.items():
-        if value is None:
-            spec["env"].pop(name, None)
-        else:
-            spec["env"][name] = value
-    return spec
-
-
-def _shared_root_spec():
-    root = "/mnt/shared/pb-spool/fixture"
-    spec = _spool_variant(PRISMABUILD_PRODUCED_SPOOL_ROOT=root)
-    spec["container"]["mounts"] = [{"source": root, "target": root, "readonly": False}]
-    return spec
-
-
-def _readonly_bind_spec():
-    spec = _spool_variant()
-    spec["container"]["mounts"] = [{**SPOOL_MOUNT, "readonly": True}]
-    return spec
-
-
-def _unbound_spec():
-    spec = _spool_variant()
-    spec["container"]["mounts"] = []
-    return spec
-
-
-SPOOL_REFUSALS = {
-    "root under /mnt/shared": (_shared_root_spec, "under /mnt/shared"),
-    "no byte bound": (lambda: _spool_variant(
-        PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES=None), "positive byte ceiling"),
-    "zero byte bound": (lambda: _spool_variant(
-        PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES="0"), "positive byte ceiling"),
-    "relative root": (lambda: _spool_variant(
-        PRISMABUILD_PRODUCED_SPOOL_ROOT="pb-spool"), "canonical absolute root"),
-    "read-only bind": (_readonly_bind_spec, "writable identity bind"),
-    "no bind": (_unbound_spec, "writable identity bind"),
-    "malformed paced opt-in": (lambda: _spool_variant(
-        PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT="yes"), "must be \"0\" or \"1\""),
-    "opt-in without a root": (lambda: _spool_variant(
-        PRISMABUILD_PRODUCED_SPOOL_ROOT=None,
-        PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES=None),
-        "PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT without"),
-}
-
-
-@pytest.mark.parametrize("case", sorted(SPOOL_REFUSALS))
-def test_stage_a_refuses_a_malformed_spool(tmp_path, campaign, case):
-    """The container's spool check runs at dispatch, and the root must be on
-    the executing box's own disk; each defect refuses before anything is
-    published, for its own reason."""
-    build, reason = SPOOL_REFUSALS[case]
-    _write_fixture_spec(build())
-    manifest = _adjoint_manifest(tmp_path, campaign)
-    with pytest.raises(DispatchRefused, match=reason):
-        stage_a_argv(manifest, campaign)
-
-
-def test_a_quantum_row_seals_the_spool_its_spec_declares(tmp_path, campaign):
-    """The quantum row shares the spec. When the spec declares the spool the
-    row seals it (the container refuses a declared spool the action lacks),
-    with the host window opt-in that has placement charge it (PQ #1364);
-    when it declares none the row carries nothing new, and a quantum never
-    refuses for it."""
+def test_a_quantum_row_seals_no_spool_environment(tmp_path, campaign):
+    """A quantum row has no spool environment. Retired spool settings refuse."""
     slices = tmp_path / "slices"
     slices.mkdir()
     record = _bind(_record(campaign, 1, slice_dir=slices), _receipt(campaign),
                    tmp_path / "adjoint-slices")
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
-    argv = quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
-    assert _envelope_envs(argv) == [
-        *(f"{name}={value}" for name, value in QUANTUM_SPOOL_ENV.items()),
-        "PRISMAQUANT_DEV_MODE=1"]
-    tail = argv[argv.index("--") + 1:]
-    sealed = json.loads(tail[tail.index("--spec") + 1])
-    assert {name: sealed["env"][name] for name in QUANTUM_SPOOL_ENV} == QUANTUM_SPOOL_ENV
+    argv = quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=Path("/out/root"))
+    assert _envelope_envs(argv) == []
     _write_fixture_spec({"container": {"image": "sha256:" + "0" * 64}, "env": {}})
-    argv = quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
-    assert _envelope_envs(argv) == ["PRISMAQUANT_DEV_MODE=1"]
-    _write_fixture_spec(_shared_root_spec())
-    with pytest.raises(DispatchRefused, match="under /mnt/shared"):
-        quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
+    argv = quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=Path("/out/root"))
+    assert _envelope_envs(argv) == []
+    _write_fixture_spec(with_spool({"container": {"image": "sha256:" + "0" * 64},
+                                     "env": {"PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": "1"}}))
+    with pytest.raises(DispatchRefused, match="retired service environment"):
+        quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=Path("/out/root"))
 
 
 def test_stage_a_argv_binds_manifest_digests_into_payload(tmp_path, campaign):
-    """The tier redirect needs the manifest digest *inside* the payload:
-    ``bind_residency_manifest`` refuses a run that bound nothing, and the
-    wrapper forwards no digest flag the dispatcher does not thread. The
-    payload therefore carries ``--data-manifest-sha256`` (the submitted
-    manifest bytes) and ``--read-manifest-sha256`` (the annotated parent
-    read-set digest); the pbrun envelope keeps naming the file."""
+    """The payload binds the submitted manifest and its parent read-set digest."""
     manifest = _adjoint_manifest(tmp_path, campaign)
     argv = stage_a_argv(manifest, campaign)
     inner = _payload_inner(argv)
     assert inner[inner.index("--data-manifest-sha256") + 1] == hashlib.sha256(
         manifest.read_bytes()).hexdigest()
     assert inner[inner.index("--read-manifest-sha256") + 1] == "d" * 64
-    assert argv[argv.index("--data-manifest") + 1] == str(manifest)
 
 
-def test_stage_a_argv_declares_manifest_phases_as_progress(tmp_path, campaign):
-    """Progress declarations come from the validated manifest annotations, in
-    manifest order -- never a hardcoded list. The worker refuses undeclared
-    names, so a stale or invented list would silence the run's window."""
-    manifest = _adjoint_manifest(tmp_path, campaign)
-    argv = stage_a_argv(manifest, campaign)
-    phases = [argv[i + 1] for i, word in enumerate(argv[:-1])
-              if word == "--progress-phase"]
-    assert phases == ["head=1800", "chain-000=900", "chain-001=900"]
-    assert HEAD_PROGRESS_GRACE_S == 1800
-    assert CHUNK_PROGRESS_GRACE_S == 900
+def test_dispatch_requires_an_explicit_walltime(tmp_path, records_dir):
+    argv = _argv(records_dir, tmp_path / "out")
+    start = argv.index("--timeout-s")
+    del argv[start:start + 2]
+    with pytest.raises(SystemExit) as error:
+        main(argv)
+    assert error.value.code == 2
 
 
 def test_stage_a_argv_reads_gzip_manifest_bytes(tmp_path, campaign):
     """The default manifest filename is ``.json.gz``; the bound digest covers
-    the wire bytes pbrun ingests either way."""
+    the stored wire bytes either way."""
     manifest = _adjoint_manifest(tmp_path, campaign, gzip_bytes=True,
                                  name="adjoint.data-manifest.json.gz")
     argv = stage_a_argv(manifest, campaign)
     inner = _payload_inner(argv)
     assert inner[inner.index("--data-manifest-sha256") + 1] == hashlib.sha256(
         manifest.read_bytes()).hexdigest()
-    phases = [argv[i + 1] for i, word in enumerate(argv[:-1])
-              if word == "--progress-phase"]
-    assert phases[0] == "head=1800"
 
 
 def test_stage_a_argv_refuses_manifest_plan_mismatch(tmp_path, campaign):
@@ -1074,7 +858,7 @@ def test_stage_a_argv_refuses_malformed_manifest(tmp_path, campaign, defect):
 
 def test_main_publishes_bound_stage_a_row(tmp_path, campaign, records_dir):
     """The published stage-A row carries the manifest binding end to end:
-    pbrun envelope (file + residency + phases), payload digests, and the
+    payload digests and the
     state event recording both digests for the launch record."""
     manifest = _adjoint_manifest(tmp_path, campaign)
     gateway = FakeGateway()
@@ -1083,34 +867,34 @@ def test_main_publishes_bound_stage_a_row(tmp_path, campaign, records_dir):
                 _gateway=gateway) == 0
     rows = [row for row in gateway.submitted if row["kind"] == "stage-a"]
     assert len(rows) == 1
-    argv = rows[0]["argv"]
+    argv = rows[0]["row"]
     inner = _payload_inner(argv)
     data_id = hashlib.sha256(manifest.read_bytes()).hexdigest()
     assert inner[inner.index("--data-manifest-sha256") + 1] == data_id
     assert inner[inner.index("--read-manifest-sha256") + 1] == "d" * 64
-    phases = [argv[i + 1] for i, word in enumerate(argv[:-1])
-              if word == "--progress-phase"]
-    assert phases == ["head=1800", "chain-000=900", "chain-001=900"]
     events = [json.loads(line) for line
               in (out / "layer-quanta" / "campaign-state.json").read_text().splitlines()
               if line]
-    assert events[0]["event"] == "stage-a-submitted"
-    assert events[0]["data_manifest_sha256"] == data_id
-    assert events[0]["read_manifest_sha256"] == "d" * 64
+    intent, submitted = events
+    assert intent["event"] == "native-intent"
+    assert intent["row"] == argv
+    assert submitted["event"] == "stage-a-submitted"
+    assert submitted["data_manifest_sha256"] == data_id
+    assert submitted["read_manifest_sha256"] == "d" * 64
 
 
 # -- quantum slice binding + v2 read plans (#835, root extension) --------------
 
 
 def _quantum_payload(argv):
-    tail = argv[argv.index("--") + 1:]
+    tail = argv["argv"]
     inner = tail[tail.index("--", tail.index("--spec")) + 1:]
     assert inner[:3] == ["python3", "-m", "prismaquant.joint_cost_quantum"]
     return inner
 
 
 def test_quantum_argv_binds_slice_digest_not_campaign_parent(tmp_path, campaign):
-    """The resolver binding is the slice manifest pbrun stages for this row,
+    """The resolver binding is the slice manifest declared by this row,
     not the campaign parent the record also carries. The fixture seals a
     parent digest that differs from the slice file's, exactly the live shape
     (parent ``71fd…`` vs per-slice digests): the payload must carry the
@@ -1122,8 +906,7 @@ def test_quantum_argv_binds_slice_digest_not_campaign_parent(tmp_path, campaign)
     assert record["campaign"]["read_manifest_sha256"] != record["read_set"]["manifest_sha256"]
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
-    inner = _quantum_payload(quantum_argv(
-        record, record_path=record_path, output_root=Path("/out/root")))
+    inner = _quantum_payload(quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=Path("/out/root")))
     bound = inner[inner.index("--data-manifest-sha256") + 1]
     assert bound == record["read_set"]["manifest_sha256"]
     assert bound == hashlib.sha256(
@@ -1142,7 +925,7 @@ def test_quantum_argv_refuses_drifted_slice(tmp_path, campaign):
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
     with pytest.raises(DispatchRefused, match="do not hash to the sealed"):
-        quantum_argv(record, record_path=record_path,
+        quantum_argv(record, timeout_s=3600, record_path=record_path,
                      output_root=Path("/out/root"))
 
 
@@ -1153,7 +936,7 @@ def test_quantum_argv_refuses_absent_slice(tmp_path, campaign):
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
     with pytest.raises(DispatchRefused, match="unreadable"):
-        quantum_argv(record, record_path=record_path,
+        quantum_argv(record, timeout_s=3600, record_path=record_path,
                      output_root=Path("/out/root"))
 
 
@@ -1167,12 +950,12 @@ def test_quantum_argv_refuses_an_unbound_or_drifted_stage_a_slice(tmp_path, camp
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
     with pytest.raises(DispatchRefused, match="unbound"):
-        quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
+        quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=Path("/out/root"))
     record = _bind(record, _receipt(campaign), tmp_path / "adjoint-slices")
     record_path.write_text(json.dumps(record))
     Path(record["adjoint"]["slice_path"]).write_bytes(b"{}")
     with pytest.raises(DispatchRefused, match="does not hash to the sealed digest"):
-        quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
+        quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=Path("/out/root"))
 
 
 def test_stage_a_argv_accepts_v2_read_plan(tmp_path, campaign):
@@ -1192,9 +975,6 @@ def test_stage_a_argv_accepts_v2_read_plan(tmp_path, campaign):
     assert inner[inner.index("--data-manifest-sha256") + 1] == hashlib.sha256(
         manifest.read_bytes()).hexdigest()
     assert inner[inner.index("--read-manifest-sha256") + 1] == "d" * 64
-    phases = [argv[i + 1] for i, word in enumerate(argv[:-1])
-              if word == "--progress-phase"]
-    assert phases == ["head=1800", "layer-0=900", "chain_000=900"]
 
 
 def test_stage_a_argv_refuses_v2_with_annotations_phases(tmp_path, campaign):
@@ -1219,7 +999,7 @@ def test_stage_a_argv_refuses_foreign_read_parent(tmp_path, campaign):
         stage_a_argv(manifest, campaign)
 
 
-def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, campaign, monkeypatch):
+def test_resource_policy_controls_container_and_native_row_intent(tmp_path, campaign, monkeypatch):
     import dispatch_joint_quanta as dispatch
     from prismaquant import joint_stageb_resources as resources
     policy = {"limits": {"physical_bytes": 100 << 30, "host_bytes": 28 << 30, "gpu_bytes": 72 << 30},
@@ -1238,15 +1018,12 @@ def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, camp
                    tmp_path / 'adjoint-slices')
     path = tmp_path/'record.json'; path.write_text(json.dumps(record))
     args = dict(record_path=path, output_root=tmp_path/'out')
-    argv = quantum_argv(record, **args)
-    assert argv[argv.index('--demand')+1] == 'gpu=1,mem_gb=100'
-    assert argv[argv.index('--gpu-memory-gb')+1] == '72'
-    assert argv[argv.index('--cpus')+1] == '10'
-    assert argv[argv.index('--container-image')+1] == 'content:sha256:' + 'c'*64
+    argv = quantum_argv(record, timeout_s=3600, **args)
+    assert argv["demand"]["mem_gb"] == 100
+    assert argv["demand"]["cpu"] == 10
     spec['cpu_memory_gb'] = 32; dispatch.SPEC_PATH.write_text(json.dumps(spec))
     with pytest.raises(DispatchRefused, match='envelope differs'):
-        quantum_argv(record, **args)
-
+        quantum_argv(record, timeout_s=3600, **args)
 
 
 def test_dev_mode_dispatches_a_re_declared_resource_plan(tmp_path, campaign, monkeypatch, capsys):
@@ -1274,15 +1051,15 @@ def test_dev_mode_dispatches_a_re_declared_resource_plan(tmp_path, campaign, mon
     args = dict(record_path=path, output_root=tmp_path/'out')
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     capsys.readouterr()
-    argv = quantum_argv(record, **args)
-    assert argv[argv.index('--demand')+1] == 'gpu=1,mem_gb=100'
+    argv = quantum_argv(record, timeout_s=3600, **args)
+    assert argv["demand"]["mem_gb"] == 100
     assert "[DEV-MODE] seal resource-bound plan differs" in capsys.readouterr().out
     # The row runs under the plan on disk, by the digest of its bytes.
     on_disk = hashlib.sha256(Path(campaign['plan_path']).read_bytes()).hexdigest()
-    assert on_disk in " ".join(argv) and campaign['plan_sha256'] not in " ".join(argv)
+    assert on_disk in " ".join(argv["argv"]) and campaign['plan_sha256'] not in " ".join(argv["argv"])
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     with pytest.raises(DispatchRefused, match='resource-bound plan differs'):
-        quantum_argv(record, **args)
+        quantum_argv(record, timeout_s=3600, **args)
 
 def test_portable_admission_does_not_skip_container_spec_validation(tmp_path):
     from dispatch_joint_quanta import _container_wrap
@@ -1297,7 +1074,7 @@ def test_extended_catalog_cannot_launch_historical_bare_parent_readset(tmp_path,
     record = _record(campaign, 1, slice_dir=tmp_path)
     record['catalog_extension'] = {'path': '/proof', 'sha256': 'e'*64}
     with pytest.raises(DispatchRefused, match='requires executable prepared-input'):
-        quantum_argv(record, record_path=tmp_path/'record', output_root=tmp_path/'out')
+        quantum_argv(record, timeout_s=3600, record_path=tmp_path/'record', output_root=tmp_path/'out')
 
 
 def _huge_plane_receipt(campaign, row_bytes=8 << 30):
@@ -1342,7 +1119,7 @@ def _plane_dispatch(tmp_path, campaign, monkeypatch, *, env=None, host=28 << 30,
     record = _bind(_record(campaign, 1, slice_dir=tmp_path), _huge_plane_receipt(campaign),
                    tmp_path / 'adjoint-slices')
     path = tmp_path / 'record.json'; path.write_text(json.dumps(record))
-    return lambda: quantum_argv(record, record_path=path, output_root=tmp_path / 'out')
+    return lambda: quantum_argv(record, timeout_s=3600, record_path=path, output_root=tmp_path / 'out')
 
 
 def test_a_host_held_cotangent_plane_over_the_cap_is_refused_at_dispatch(
@@ -1363,12 +1140,12 @@ def test_a_cotangent_scratch_ceiling_below_the_plane_is_refused_at_dispatch(
 def test_a_cotangent_scratch_that_covers_the_plane_dispatches(tmp_path, campaign, monkeypatch):
     env = {'PRISMAQUANT_STAGE_B_COTANGENT_ROOT': '/home/rob/pb-scratch/glm-stageb',
            'PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES': str(36 << 30)}
-    assert '--' in _plane_dispatch(tmp_path, campaign, monkeypatch, env=env)()
+    assert "--" in _plane_dispatch(tmp_path, campaign, monkeypatch, env=env)()["argv"]
 
 
 def test_a_host_held_plane_that_fits_beside_the_render_cap_dispatches(
         tmp_path, campaign, monkeypatch):
-    assert '--' in _plane_dispatch(tmp_path, campaign, monkeypatch, host=64 << 30, retained=8 << 30)()
+    assert '--' in _plane_dispatch(tmp_path, campaign, monkeypatch, host=64 << 30, retained=8 << 30)()["argv"]
     with pytest.raises(DispatchRefused, match='cotangent plane'):
         _plane_dispatch(tmp_path, campaign, monkeypatch, host=36 << 30, retained=8 << 30)()
 
@@ -1390,16 +1167,12 @@ def test_cotangent_scratch_is_validated_and_sealed_in_outer_request(
     args = dict(record_path=path, output_root=tmp_path / 'out')
     if readonly:
         with pytest.raises(dispatch.DispatchRefused, match='writable identity bind'):
-            quantum_argv(record, **args)
+            quantum_argv(record, timeout_s=3600, **args)
         return
-    argv = quantum_argv(record, **args)
-    outer = argv[:argv.index('--')]
-    sealed = dict(outer[i + 1].split('=', 1) for i, value in enumerate(outer[:-1])
-                  if value == '--env' and '=' in outer[i + 1])
+    argv = quantum_argv(record, timeout_s=3600, **args)
+    sealed = argv["env"]
     assert all(sealed.get(name) == value for name, value in env.items())
-    assert sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == (
-        'PRISMAQUANT_STAGE_B_COTANGENT_ROOT:PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES')
-    actual = json.loads(argv[argv.index('--spec') + 1])
+    actual = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])
     assert cotangent_scratch_environment(actual, sealed) == env
 
 
@@ -1421,21 +1194,18 @@ def test_stage_b_spill_is_validated_and_sealed_in_outer_request(
     args = dict(record_path=path, output_root=tmp_path / 'out')
     if readonly:
         with pytest.raises(dispatch.DispatchRefused, match='writable identity bind'):
-            quantum_argv(record, **args)
+            quantum_argv(record, timeout_s=3600, **args)
         return
-    argv = quantum_argv(record, **args)
-    outer = argv[:argv.index('--')]
-    sealed = dict(outer[i + 1].split('=', 1) for i, value in enumerate(outer[:-1])
-                  if value == '--env' and '=' in outer[i + 1])
+    argv = quantum_argv(record, timeout_s=3600, **args)
+    sealed = argv["env"]
     assert all(sealed.get(name) == value for name, value in env.items())
-    assert sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == (
-        'PRISMAQUANT_STAGE_B_SPILL_ROOT:PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES')
-    actual = json.loads(argv[argv.index('--spec') + 1])
+    actual = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])
     assert stage_b_spill_environment(actual, sealed) == env
 
 
 _COTANGENT = ('PRISMAQUANT_STAGE_B_COTANGENT_ROOT', 'PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES')
 _SPILL = ('PRISMAQUANT_STAGE_B_SPILL_ROOT', 'PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES')
+_CACHE_2798 = ('PRISMAQUANT_CONTAINER_CACHE_ROOT', 'PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES')
 
 
 def _scratch_quantum_argv(tmp_path, campaign, env, roots):
@@ -1448,82 +1218,37 @@ def _scratch_quantum_argv(tmp_path, campaign, env, roots):
     record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
                    tmp_path / 'adjoint-slices')
     path = tmp_path / 'record.json'; path.write_text(json.dumps(record))
-    return lambda: quantum_argv(record, record_path=path, output_root=tmp_path / 'out')
+    return lambda: quantum_argv(record, timeout_s=3600, record_path=path, output_root=tmp_path / 'out')
 
 
 def _outer_env(argv):
-    """The ``--env`` entries pbrun seals, in order, before the payload."""
-    outer = argv[:argv.index('--')]
-    return [outer[i + 1] for i, value in enumerate(outer[:-1]) if value == '--env']
+    """The explicit environment assignments retained by the neutral row."""
+    return [f"{k}={v}" for k, v in argv["env"].items()]
 
 
-def test_every_declared_scratch_pair_is_listed_for_pb(tmp_path, campaign):
-    """PQ #1019: the sealed request lists each pair, cotangent first, so PB
-    #911 charges both ceilings to the executing box's ``spool_gb``."""
+def test_every_declared_scratch_kind_is_sealed_with_its_ceiling(tmp_path, campaign):
+    """PQ #1019: the sealed request carries each declared kind's root and a positive decimal ceiling."""
     cotangent, spill = '/home/rob/pb-scratch/cot', '/home/rob/pb-scratch/spill'
     env = {_COTANGENT[0]: cotangent, _COTANGENT[1]: str(36 << 30),
            _SPILL[0]: spill, _SPILL[1]: str(178_000_000_000)}
     argv = _scratch_quantum_argv(tmp_path, campaign, env, (cotangent, spill))()
     sealed = dict(item.split('=', 1) for item in _outer_env(argv))
     assert all(sealed.get(name) == value for name, value in env.items())
-    assert sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == ','.join(
-        ':'.join(pair) for pair in (_COTANGENT, _SPILL))
-    # PB's grammar: ROOT_ENV:MAX_ENV items, each variable sealed beside it,
-    # each ceiling a positive decimal byte count.
-    for item in sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'].split(','):
-        root_env, max_env = item.split(':')
+    for root_env, max_env in (_COTANGENT, _SPILL):
         assert sealed[root_env].startswith('/')
         assert sealed[max_env].isdecimal() and int(sealed[max_env]) > 0
-    # The list is a request option, never forwarded into the container.
-    wrapped = argv[argv.index('--') + 1:]
-    assert not any('PRISMABUILD_LOCAL_SCRATCH_PAIRS' in part for part in wrapped)
+    assert not [name for name in sealed if name.startswith('PRISMABUILD_')]
 
 
-def test_a_quantum_row_refuses_a_spec_that_opts_out_of_the_host_window(
-        tmp_path, campaign):
-    """PQ #1364: a spec that declares the host window off would leave a
-    quantum row's spool uncharged at placement; the row refuses it rather
-    than overriding what the spec says, as the Stage A row does."""
-    import dispatch_joint_quanta as dispatch
-    root = '/home/rob/pb-spool/fixture'
-    env = {'PRISMABUILD_PRODUCED_SPOOL_ROOT': root,
-           'PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES': str(32 << 30),
-           'PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW': '0'}
-    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
-    with pytest.raises(dispatch.DispatchRefused, match='HOST_WINDOW=0'):
-        build()
-
-
-def test_a_stage_b_row_charges_spill_cotangent_and_spool_to_the_box(tmp_path, campaign):
-    """PQ #1364 acceptance, on PrismaBuild's own published pbrun: the sealed
-    environment of a Stage B quantum row that declares a spill, a cotangent
-    scratch and a produced spool derives one ``spool_gb`` demand that covers
-    all three, each rounded up to whole GiB. Before the fix the spool went
-    uncharged: prof-1 (PQ #1348) held ``spool_gb=218`` for a 185.38 GiB
-    spill and a 32 GiB cotangent, beside an uncharged 32 GiB spool."""
-    import subprocess
+def test_a_stage_b_row_retains_spill_and_cotangent_ceilings(tmp_path, campaign):
+    """The planned container keeps the independent cotangent and spill ceilings."""
     cotangent, spill = '/home/rob/pb-scratch/cot', '/home/rob/pb-scratch/spill'
-    spool = '/home/rob/pb-spool/fixture'
-    ceilings = {_COTANGENT[1]: 32 << 30, _SPILL[1]: 199_051_640_832,
-                'PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES': 32 << 30}
+    ceilings = {_COTANGENT[1]: 32 << 30, _SPILL[1]: 199_051_640_832}
     env = {_COTANGENT[0]: cotangent, _SPILL[0]: spill,
-           'PRISMABUILD_PRODUCED_SPOOL_ROOT': spool,
            **{name: str(value) for name, value in ceilings.items()}}
-    argv = _scratch_quantum_argv(tmp_path, campaign, env, (cotangent, spill, spool))()
+    argv = _scratch_quantum_argv(tmp_path, campaign, env, (cotangent, spill))()
     variables = dict(item.split('=', 1) for item in _outer_env(argv))
-    run = subprocess.run(
-        [sys.executable, "-c", _PLACEMENT_PROBE,
-         json.dumps(variables), str(tmp_path / "pb-queue")],
-        capture_output=True, text=True, timeout=300,
-        env={"PATH": os.defpath, "HOME": str(tmp_path)})
-    assert run.returncode == 0, run.stderr
-    result = json.loads(run.stdout.strip().splitlines()[-1])
-    need = sum(-(-value // (1 << 30)) for value in ceilings.values())
-    assert need == 186 + 32 + 32
-    assert result["terms"] == {"spool_gb": need}
-    assert result["first"]["spool_gb"] == need
-    assert result["second"] is None, result
-    assert result["available"]["spool_gb"] == need - 1
+    assert {key: int(variables[key]) for key in ceilings} == ceilings
 
 
 def test_a_row_without_scratch_seals_todays_request(tmp_path, campaign, monkeypatch):
@@ -1531,7 +1256,7 @@ def test_a_row_without_scratch_seals_todays_request(tmp_path, campaign, monkeypa
     import dispatch_joint_quanta as dispatch
     build = _scratch_quantum_argv(tmp_path, campaign, {}, ())
     argv = build()
-    assert _outer_env(argv) == [dispatch.DEV_MODE_ENV]
+    assert _outer_env(argv) == []
     container = sys.modules[dispatch.local_scratch_environment.__module__]
     monkeypatch.setattr(container, 'LOCAL_SCRATCH_KINDS', ())
     assert build() == argv
@@ -1548,16 +1273,6 @@ def test_a_scratch_root_without_a_positive_bound_is_refused(
         env[names[1]] = bound
     build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
     with pytest.raises(dispatch.DispatchRefused, match='positive byte ceiling'):
-        build()
-
-
-def test_a_spec_cannot_declare_the_pair_list(tmp_path, campaign):
-    import dispatch_joint_quanta as dispatch
-    root = '/home/rob/pb-scratch/spill'
-    env = {_SPILL[0]: root, _SPILL[1]: str(1 << 30),
-           'PRISMABUILD_LOCAL_SCRATCH_PAIRS': ''}
-    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
-    with pytest.raises(dispatch.DispatchRefused, match='derived from the declared'):
         build()
 
 
@@ -1597,10 +1312,10 @@ def test_stage_b_replay_regime_is_validated_and_sealed_in_the_spec(
     args = dict(record_path=path, output_root=tmp_path / 'out')
     if message is not None:
         with pytest.raises(dispatch.DispatchRefused, match=message):
-            quantum_argv(record, **args)
+            quantum_argv(record, timeout_s=3600, **args)
         return
-    argv = quantum_argv(record, **args)
-    actual = json.loads(argv[argv.index('--spec') + 1])
+    argv = quantum_argv(record, timeout_s=3600, **args)
+    actual = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])
     assert actual['env'][REPLAY_REGIME_ENV] == regime
 
 
@@ -1621,8 +1336,8 @@ def test_the_bf16_reduction_setting_is_validated_and_sealed_in_the_spec(
         with pytest.raises(dispatch.DispatchRefused, match=message):
             dispatch._container_wrap(path, payload, progress=head_only)
         return
-    argv, _image = dispatch._container_wrap(path, payload, progress=head_only)
-    sealed = json.loads(argv[argv.index('--spec') + 1])
+    argv = dispatch._container_wrap(path, payload, progress=head_only)
+    sealed = json.loads(argv[argv.index("--spec") + 1])
     assert sealed['env'].get(BF16_REDUCTION_ENV) == value
 
 
@@ -1644,8 +1359,8 @@ def test_the_kda_capture_kernel_setting_is_validated_and_sealed_in_the_spec(
         with pytest.raises(dispatch.DispatchRefused, match=message):
             dispatch._container_wrap(path, payload, progress=head_only)
         return
-    argv, _image = dispatch._container_wrap(path, payload, progress=head_only)
-    sealed = json.loads(argv[argv.index('--spec') + 1])
+    argv = dispatch._container_wrap(path, payload, progress=head_only)
+    sealed = json.loads(argv[argv.index("--spec") + 1])
     assert sealed['env'].get(KDA_KERNEL_ENV) == value
 
 
@@ -1678,7 +1393,7 @@ def test_a_band_serial_producer_captures_at_the_chains_batch_size_at_dispatch(
     path.write_text(json.dumps(spec))
     payload = ['python3', '-m', 'prismaquant.joint_cost_quantum', '--quantum', 'q.json']
     head_only = [('head', dispatch.HEAD_PROGRESS_GRACE_S)]
-    argv, _image = dispatch._container_wrap(path, payload, progress=head_only)
+    argv = dispatch._container_wrap(path, payload, progress=head_only)
     assert argv[-len(payload):] == payload
     producer = [*payload, '--emit-adjoint-handoff']
     # A producer row that names no chain batch size refuses outright.
@@ -1691,7 +1406,58 @@ def test_a_band_serial_producer_captures_at_the_chains_batch_size_at_dispatch(
             dispatch._container_wrap(path, producer, progress=head_only,
                                      handoff_chain_batch_size=chain_batch_size)
     else:
-        argv, _image = dispatch._container_wrap(
+        argv = dispatch._container_wrap(
             path, producer, progress=head_only,
             handoff_chain_batch_size=chain_batch_size)
         assert argv[-len(producer):] == producer
+
+
+@pytest.mark.parametrize('name', ['PRISMABUILD_LOCAL_SCRATCH_PAIRS', 'PRISMABUILD_LOCAL_SCRATCH_IO'])
+def test_a_spec_naming_a_retired_scratch_setting_refuses(tmp_path, campaign, name):
+    import dispatch_joint_quanta as dispatch
+    root = '/home/rob/pb-scratch/spill'
+    env = {_SPILL[0]: root, _SPILL[1]: str(1 << 30), name: ''}
+    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
+    with pytest.raises(dispatch.DispatchRefused, match='retired service environment'):
+        build()
+
+
+@pytest.mark.parametrize('bad_pair', [_COTANGENT, _SPILL, _CACHE_2798], ids=['cotangent', 'spill', 'cache'])
+def test_every_scratch_kind_needs_a_positive_ceiling(tmp_path, campaign, bad_pair):
+    pairs = (_COTANGENT, _SPILL, _CACHE_2798)
+    roots = ['/scratch/fixture-2798/' + name for name in ('cot', 'spill', 'cache')]
+    env = {name: value for pair, root in zip(pairs, roots)
+           for name, value in ((pair[0], root), (pair[1], '1073741825'))}
+    env.update({bad_pair[1]: '0', 'PRISMAQUANT_TMPDIR': roots[1] + '/tmp'})
+    build = _scratch_quantum_argv(tmp_path, campaign, env, roots)
+    with pytest.raises(DispatchRefused, match='positive byte ceiling'):
+        build()
+
+
+def test_the_spill_ceiling_follows_the_rows_sealed_bound_from_one_spec_read(tmp_path, campaign, monkeypatch):
+    """Changing the row reservation rewrites only the spill ceiling, and the row reads its spec once."""
+    import dispatch_joint_quanta as dispatch
+    root = str(tmp_path / 'spill')
+    env = {_SPILL[0]: root, _SPILL[1]: '1', 'PRISMAQUANT_STAGE_B_REPLAY_REGIME': 'capture_batch=2'}
+    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
+    bound = {'capture_batch': 2, 'reservation_bytes': 1073741825}
+    monkeypatch.setattr(dispatch, '_sealed_spill_bound', lambda record: bound)
+    read_text = Path.read_text
+    spec_reads = []
+
+    def once_per_row(path, *args, **kwargs):
+        if path == dispatch.SPEC_PATH:
+            spec_reads.append(path)
+            assert len(spec_reads) == 1, 'ceiling and root must use the same spec parse'
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', once_per_row)
+    for reservation in (1073741825, 8_589_934_593):
+        bound['reservation_bytes'] = reservation
+        spec_reads.clear()
+        argv = build()
+        assert len(spec_reads) == 1
+        outer = dict(item.split('=', 1) for item in _outer_env(argv))
+        assert outer[_SPILL[0]] == root and outer[_SPILL[1]] == str(reservation)
+        sealed = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])
+        assert sealed['env'][_SPILL[1]] == str(reservation)

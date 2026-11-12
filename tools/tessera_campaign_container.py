@@ -1,17 +1,21 @@
-"""Run an admitted campaign quantum in its declared Docker environment.
+"""Run an admitted campaign quantum in its declared rootless Podman container.
 
-PB owns placement, CPU affinity and container containment. This adapter only
-maps the worker's sealed checkout and explicit data mounts into the container.
+The native Flux job owns placement and its CPU allocation. This adapter
+authenticates that admission, maps the sealed checkout and explicit data
+mounts into one owned container, and cleans up only the container it created.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import signal
 import subprocess
+import sys
 
 import runpy
 
@@ -23,12 +27,6 @@ _runtime_identity = runpy.run_path(str(
 # by path for the same host-side reason as the identity helper above.
 _spec_contract = runpy.run_path(str(
     Path(__file__).resolve().parents[1] / "prismaquant/campaign_container_spec.py"))
-ACTION_KEY_ENV = _spec_contract["ACTION_KEY_ENV"]
-ACTION_NONCE_ENV = _spec_contract["ACTION_NONCE_ENV"]
-ACTION_SCOPE_ENV = _spec_contract["ACTION_SCOPE_ENV"]
-READER_HELPER_ROOT_ENV = _spec_contract["READER_HELPER_ROOT_ENV"]
-QUEUE_ROOT_ENV = _spec_contract["QUEUE_ROOT_ENV"]
-READER_CONTEXT_ENV = _spec_contract["READER_CONTEXT_ENV"]
 SAFE_PATH_ENV = _spec_contract["SAFE_PATH_ENV"]
 CHECKOUT_COMMIT_ENV = _spec_contract["CHECKOUT_COMMIT_ENV"]
 BOUNDED_CAPTURE_ENV = _spec_contract["BOUNDED_CAPTURE_ENV"]
@@ -44,213 +42,79 @@ from tools.tessera_campaign_namespace import (
 )
 
 
-# These are PrismaBuild's action environment contract, deliberately kept in
-# this host-side adapter rather than imported from ``prismaquant``.  Importing
-# the package runs its production initialisation before this launcher reaches
-# the qualified container, so a worker that only has the small host Python
-# runtime could fail before Docker starts (#601).  The container-side campaign
-# continues to use ``prismaquant.prismabuild_progress`` to write the record;
-# this adapter only carries the two sealed channel values across the boundary.
-PATH_ENV = "PRISMABUILD_ACTION_PROGRESS_PATH"
-TOKEN_ENV = "PRISMABUILD_ACTION_PROGRESS_TOKEN"
-#: The phase names the submission sealed.  Carried across the boundary too,
-#: because a phase the submission did not declare is refused by the worker and
-#: an action reporting only refused names is indistinguishable from one
-#: reporting nothing.  Inside the container this is the only way to know the
-#: list: ``PRISMABUILD_ACTION_PROGRESS_HELPER`` names a file on the fleet mount
-#: that the qualified image does not bind, which is also why the record is
-#: written by ``prismaquant.prismabuild_progress`` rather than by that helper.
-PHASES_ENV = "PRISMABUILD_ACTION_PROGRESS_PHASES"
-
-#: PrismaBuild's residency map (RobTand/prismabuild#583): where this action's
-#: declared inputs were staged.  The consumer half is
-#: ``prismaquant.residency_map`` (``ENV_VAR`` there); the literal is repeated
-#: here for the same reason as the progress names above.  ``docker run``
-#: inherits nothing from the launcher, so a map that stops at this boundary
-#: leaves the resolver inside inert and every read on the pool -- which is
-#: exactly what the GLM-5.3-Flash joint run did for its whole life on
-#: 2026-09-18 (PQ #732): the launcher held the variable, its argv named it
-#: nowhere.
-RESIDENCY_MAP_ENV = "PRISMABUILD_RESIDENCY_MAP"
-#: The key of the map whose value is the directory every staged copy lives
-#: under, bound read-only into the container at the same path.
-STAGE_ROOT_KEY = "stage_root"
-
-
 #: The owner's rapid-iteration switch (Rob, 2026-09-19): when the submitting
 #: environment holds ``PRISMAQUANT_DEV_MODE=1``, the provenance gates inside
 #: the container -- the joint pass's source-proof, prepared-digest and
 #: checkpoint-lineage gates -- stamp and record instead of refusing. The
-#: submitter (``dispatch_tessera_campaign._submit_gpu_action``) seals it into
-#: the spec env it hands this launcher, which is exactly how
-#: ``PRISMAQUANT_LAYER_READ_THREADS`` travels: a hand-sealed spec that
-#: declares it reaches the container the same way, with no dispatch-side
-#: merge. The launcher itself neither requires nor interprets the value; the
-#: gates in ``prismaquant.dev_mode`` do. The name is held together with
-#: ``prismaquant.dev_mode.DEV_MODE_ENV`` by
+#: submitter seals it into the spec env it hands this launcher, which is exactly
+#: how ``PRISMAQUANT_LAYER_READ_THREADS`` travels. The launcher itself neither
+#: requires nor interprets the value; the gates in ``prismaquant.dev_mode`` do.
+#: The name is held together with ``prismaquant.dev_mode.DEV_MODE_ENV`` by
 #: ``tests/test_dev_mode_provenance_gates.py``.
 DEV_MODE_ENV = "PRISMAQUANT_DEV_MODE"
 
 
-def gpu_attachment(spec: dict, *, cpu_only: bool, environ) -> tuple:
-    """Whether to attach the GPU, and the declaration that decided it.
-
-    ``--gpus all`` maps the whole device into the container, and until this
-    function existed the only thing that withheld it was a caller remembering
-    ``--cpu-only``.  A PrismaBuild row that reserved no GPU therefore ran with
-    the device attached and PrismaBuild's GPU tokens unspent, so its admission
-    arithmetic could seat a GPU-reserving row beside it and a power reading
-    taken next door had a second owner it could not see (#430).
-
-    So the grant decides, not the flag's absence.  ``pbrun`` sets
-    ``CUDA_VISIBLE_DEVICES`` to the empty string in the action's environment
-    exactly when it granted no GPU slots, and a spec may say the same thing
-    about its payload; either declaration withholds the device.  Neither is
-    a substitute for this check on its own: an empty ``CUDA_VISIBLE_DEVICES``
-    hides the device from CUDA inside the container, it does not stop the
-    runtime attaching and initialising it, which is the distinction
-    ``require_pool`` already refuses to treat as an exemption.
-
-    Unset is not a declaration.  An interactive run outside ``pbrun`` has no
-    grant to read, and it keeps the behaviour it had; ``--cpu-only`` is still
-    the way to say no there.
-    """
-
-    if cpu_only:
-        return False, "--cpu-only"
-    for source, value in (("container spec env", (spec.get("env") or {}).get("CUDA_VISIBLE_DEVICES")),
-                          ("CUDA_VISIBLE_DEVICES", environ.get("CUDA_VISIBLE_DEVICES"))):
-        if value == "":
-            return False, f"{source} declares no visible device"
-    return True, "no declaration withheld the device"
+#: The native staged-input names (``staged_launch.launch`` exports the same five). The
+#: manifest is immutable and published offline; the adapter forwards only what a
+#: ``retained_shared_phase`` manifest can honestly cross into a container.
+STAGED_ENV = _spec_contract["LAUNCHER_STAGED_ENV"]
+STAGED_MANIFEST_ENV, STAGED_SHA_ENV, STAGED_READ_SHA_ENV, STAGED_READ_PATH_ENV, STAGED_TIERS_ENV = STAGED_ENV
 
 
-def progress_environment(spec: dict, environ) -> dict:
-    """The PrismaBuild progress channel this container needs, if any.
-
-    The container is launched with the declared ``env`` and nothing else, so
-    without this the row inside it cannot report advancement, PB sees a silent
-    action and ends it within the startup allowance -- a stall watchdog killing
-    exactly the working rows it was added to save (PB #480).
-
-    Refused rather than dropped when the file's directory is not inside a
-    writable declared mount.  A report written into the container's own
-    ephemeral filesystem is invisible to the worker and indistinguishable from
-    not reporting at all, and failing at launch is far cheaper than failing an
-    hour into a pricing round.
-    """
-
-    path, token = environ.get(PATH_ENV), environ.get(TOKEN_ENV)
-    if not path or not token:
-        return {}
-    directory = PurePosixPath(path).parent
-    for mount in spec["container"].get("mounts", []):
-        target = PurePosixPath(mount["target"])
-        if (directory == target or target in directory.parents) and not mount.get("readonly", False):
-            channel = {PATH_ENV: str(path), TOKEN_ENV: str(token)}
-            phases = environ.get(PHASES_ENV)
-            # A string, not a file: it needs no mount and it is what lets the
-            # row inside check a phase name where the typo is instead of being
-            # refused quietly until the allowance runs out.
-            if phases:
-                channel[PHASES_ENV] = str(phases)
-            return channel
-    raise RuntimeError(
-        f"the PrismaBuild progress file {path} is not inside any writable "
-        "container mount, so this row could not report the anchors it commits "
-        "and would be ended as a stall; declare a mount covering it")
-
-
-def _read_residency_map(path: str) -> dict:
-    """The map's JSON object, or raise ``RuntimeError`` with the reason."""
-
-    try:
-        with open(path) as stream:
-            payload = json.load(stream)
-    except OSError as exc:
-        raise RuntimeError(
-            f"the PrismaBuild residency map {path} cannot be read on this host "
-            f"({exc.strerror}); the launcher named it, so this row's staged inputs "
-            "cannot be located and it would read the pool for its whole life") from exc
-    except ValueError as exc:
-        raise RuntimeError(
-            f"the PrismaBuild residency map {path} is not JSON: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"the PrismaBuild residency map {path} is not a JSON object")
-    return payload
-
-
-def _stage_root_mounted(stage_root: str) -> bool:
-    """Whether the stage root is a mounted directory here, triggering autofs.
-
-    The Sparks reach ``/stage/prewarm`` through an automount; binding an
-    untriggered placeholder hands the container an empty directory and every
-    staged read falls back to the pool with the map looking perfectly healthy.
-    Listing the directory triggers the mount; ``ismount`` is the fact.
-    """
-
-    try:
-        os.listdir(stage_root)
-    except OSError:
-        return False
-    return os.path.ismount(stage_root)
-
-
-def residency_environment(spec: dict, environ) -> "tuple[dict, list[dict]]":
-    """The residency map this container reads, and the stage mount it needs.
-
-    Returns the environment to forward and the mounts to add.  Both are empty
-    when the launcher named no map: an action outside PrismaBuild's residency
-    contract keeps a byte-identical ``docker run``.
-
-    Refused at launch, never dropped, when the map is not inside a declared
-    mount (the resolver inside opens it by this same path), when it cannot be
-    read or names no absolute ``stage_root``, or when that root is not a
-    mounted directory on this host.  A row whose stage is invisible reads the
-    pool for hours while its receipts say ``resident``; Rob's ruling for the
-    campaign is stage-fed only, so a launch that cannot be is a refusal, like
-    the progress channel's.  Per-file misses stay the resolver's own fallback.
-    """
-
-    named = environ.get(RESIDENCY_MAP_ENV)
-    if not named:
-        return {}, []
-    map_path = PurePosixPath(named)
-    if not map_path.is_absolute():
-        raise RuntimeError(
-            f"the PrismaBuild residency map path {named!r} is not absolute")
-    mounts = spec["container"].get("mounts", [])
-    inside = None
+def _declared_target(mounts, path: PurePosixPath, label: str) -> PurePosixPath:
+    """The container path one host path appears at, through a declared mount."""
     for mount in mounts:
         source = PurePosixPath(mount["source"])
-        if map_path == source or source in map_path.parents:
-            inside = PurePosixPath(mount["target"]) / map_path.relative_to(source)
-            break
-    if inside is None:
+        if path == source or source in path.parents:
+            return PurePosixPath(mount["target"]) / path.relative_to(source)
+    raise RuntimeError(
+        f"the staged {label} {path} is not inside any declared container mount, so the "
+        "reader inside could not open it; declare a mount covering it")
+
+
+def staged_input_environment(spec: dict, environ) -> "tuple[dict, list[dict]]":
+    """The immutable staged manifest this container reads, and the mount it needs.
+
+    Empty when the launcher bound no manifest. Otherwise all five names must be
+    present, the manifest must load against its digest, and its lifetime must be
+    ``retained_shared_phase``: a host-local cache descriptor cannot cross the
+    container boundary, and that descriptor transfer is an unbuilt unit 4D
+    obligation, never an implicit fallback. The manifest and read-contract paths
+    must sit inside declared mounts; the phase namespace is bound read-only at its
+    own path because the manifest names its objects by absolute path.
+    """
+    if not environ.get(STAGED_MANIFEST_ENV):
+        return {}, []
+    missing = [name for name in STAGED_ENV if not environ.get(name)]
+    if missing:
+        raise RuntimeError("the launcher holds a partial staged-input binding "
+                           f"(missing {', '.join(missing)}); refusing rather than guessing")
+    if environ[STAGED_TIERS_ENV] != "ssd":
+        raise RuntimeError("staged inputs are admitted from the ssd tier only")
+    from prismaquant.staged_manifest import load_staged_manifest
+    manifest = load_staged_manifest(environ[STAGED_MANIFEST_ENV], environ[STAGED_SHA_ENV])
+    if manifest.read_contract_sha256 != environ[STAGED_READ_SHA_ENV]:
+        raise RuntimeError("the read contract digest differs from the staged manifest")
+    life = manifest.lifetime
+    if life["mode"] != "retained_shared_phase":
         raise RuntimeError(
-            f"the PrismaBuild residency map {named} is not inside any declared "
-            "container mount, so the resolver inside the container could not open "
-            "it and every staged input would be read from the pool; declare a mount "
-            "covering it")
-    payload = _read_residency_map(named)
-    stage_root = payload.get(STAGE_ROOT_KEY)
-    if not isinstance(stage_root, str) or not PurePosixPath(stage_root).is_absolute():
-        raise RuntimeError(
-            f"the PrismaBuild residency map {named} names no absolute "
-            f"{STAGE_ROOT_KEY!r}, so the staged copies it points at cannot be "
-            "mounted into the container")
-    if not _stage_root_mounted(stage_root):
-        raise RuntimeError(
-            f"the stage root {stage_root} named by the PrismaBuild residency map "
-            "is not a mounted directory on this host; binding it would hand the "
-            "container an empty directory and every staged read would fall back "
-            "to the pool")
-    root = PurePosixPath(stage_root)
-    extra: list[dict] = []
-    if not any(PurePosixPath(m["target"]) == root or PurePosixPath(m["target"]) in root.parents
-               for m in mounts):
-        extra.append({"source": stage_root, "target": stage_root, "readonly": True})
-    return {RESIDENCY_MAP_ENV: str(inside)}, extra
+            "a host_local_cache staged manifest cannot cross the container boundary: its "
+            "pins are descriptors of the owning process, and unit 4D has not built a descriptor "
+            "transfer; use a retained_shared_phase manifest")
+    mounts = spec["container"].get("mounts", [])
+    env = {STAGED_MANIFEST_ENV: str(_declared_target(mounts, PurePosixPath(environ[STAGED_MANIFEST_ENV]), "manifest")),
+           STAGED_SHA_ENV: environ[STAGED_SHA_ENV], STAGED_READ_SHA_ENV: environ[STAGED_READ_SHA_ENV],
+           STAGED_READ_PATH_ENV: str(_declared_target(mounts, PurePosixPath(environ[STAGED_READ_PATH_ENV]), "read contract")),
+           STAGED_TIERS_ENV: "ssd"}
+    namespace = PurePosixPath(life["namespace"])
+    covering = [m for m in mounts if PurePosixPath(m["target"]) == namespace or PurePosixPath(m["target"]) in namespace.parents]
+    if not covering:
+        return env, [{"source": str(namespace), "target": str(namespace), "readonly": True}]
+    nearest = max(covering, key=lambda m: len(PurePosixPath(m["target"]).parts))
+    translated = PurePosixPath(nearest["source"]) / namespace.relative_to(nearest["target"])
+    if translated != namespace or not nearest.get("readonly", False):
+        raise RuntimeError("the staged phase namespace must be covered by a readonly identity mount or none")
+    return env, []
 
 
 def _canonical_absolute(value: object) -> "str | None":
@@ -269,9 +133,6 @@ def _canonical_absolute(value: object) -> "str | None":
 
 COTANGENT_SCRATCH_ENV = ("PRISMAQUANT_STAGE_B_COTANGENT_ROOT",
                          "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
-
-PRODUCED_SPOOL_ENV = ("PRISMABUILD_PRODUCED_SPOOL_ROOT",
-                      "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES")
 
 #: The Stage B one-pass replay spill (PQ #994); the names
 #: ``prismaquant.joint_replay_spill.SPILL_ENV`` reads.
@@ -301,27 +162,10 @@ def stage_b_spill_environment(spec: dict, environ) -> dict:
     return forwarded
 
 
-def produced_spool_environment(spec: dict, environ) -> dict:
-    """Forward the sealed local-spool declaration through an identity bind.
-
-    The source-host exporter runs outside the container. A remapped pathname
-    would name different bytes there, so the most specific covering mount must
-    expose the same host path read-write. No host directory is mounted here.
-    """
-    return _bounded_local_environment(spec, environ, PRODUCED_SPOOL_ENV,
-                                      "local output spool")
-
-
-#: PrismaBuild's sealed list of an action's bounded-local pairs (PB #911):
-#: ``ROOT_ENV:MAX_ENV`` items separated by commas. pbrun charges each pair's
-#: ceiling, rounded up to whole GiB, to the executing box's ``spool_gb``.
-LOCAL_SCRATCH_PAIRS_ENV = "PRISMABUILD_LOCAL_SCRATCH_PAIRS"
-
 #: Every bounded-local scratch kind a campaign container may write on the
-#: executing box's disk, in the order its pair is listed. A kind added here
-#: is forwarded and priced by the same call (``local_scratch_environment``).
-#: The produced spool is not listed: PrismaBuild charges its window through
-#: ``PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW`` and refuses its pair in the list.
+#: executing box's disk. A kind added here is validated and forwarded by the
+#: same call (``local_scratch_environment``).
+#: The produced spool is not listed: its root and bound live in the launch-bound declaration.
 CONTAINER_CACHE_SCRATCH_ENV = (
     "PRISMAQUANT_CONTAINER_CACHE_ROOT", "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES")
 
@@ -358,50 +202,47 @@ LOCAL_SCRATCH_KINDS = (
 
 
 def local_scratch_environment(spec: dict, environ) -> dict:
-    """Every declared bounded-local scratch pair, plus PrismaBuild's pair list.
+    """Every declared bounded-local scratch kind's root and byte ceiling.
 
     Each kind in :data:`LOCAL_SCRATCH_KINDS` is validated by its own
     function, so a root without a sealed positive byte ceiling is refused
-    here, as it is at launch. The pairs that are declared are listed in
-    :data:`LOCAL_SCRATCH_PAIRS_ENV`, so PrismaBuild charges every byte
-    bound it forwards. With no scratch declared this is ``{}`` and the
-    sealed request carries nothing new.
+    here, as it is at launch. With no scratch declared this is ``{}``.
+    Nothing prices scratch bytes at placement: the roots are operator
+    provisioned and each ceiling is enforced where the scratch is opened.
     """
 
-    if LOCAL_SCRATCH_PAIRS_ENV in spec.get("env", {}):
-        raise RuntimeError(
-            f"spec env {LOCAL_SCRATCH_PAIRS_ENV} is derived from the declared "
-            "scratch kinds, not declared by a spec")
     forwarded: dict = {}
-    pairs = []
+    roots = []
     for names, environment in LOCAL_SCRATCH_KINDS:
         declared = environment(spec, environ)
         if declared:
             forwarded.update(declared)
-            pairs.append(names)
-    if not pairs:
-        return {}
-    roots = [forwarded[root] for root, _ in pairs]
+            roots.append(declared[names[0]])
     if len(set(roots)) != len(roots):
         raise RuntimeError(
             "two bounded-local scratch kinds name the same root; each needs "
-            "its own root so PrismaBuild can charge each ceiling")
-    forwarded[LOCAL_SCRATCH_PAIRS_ENV] = ",".join(
-        f"{root}:{maximum}" for root, maximum in pairs)
+            "its own root so each ceiling bounds its own bytes")
     return forwarded
+
+
+def local_scratch_request_environment(spec: dict) -> dict:
+    """Project sealed spec declarations into the row's explicit environment.
+
+    Unlike payload forwarding, the row never consults the coordinator's
+    environment. Keep preflight and row construction on this same path.
+    """
+    return local_scratch_environment(spec, spec.get("env", {}))
 
 
 def _forwarded_local_scratch_environment(spec: dict, environ) -> dict:
-    """Forward every registered pair, never the outer admission control."""
-    forwarded = local_scratch_environment(spec, environ)
-    forwarded.pop(LOCAL_SCRATCH_PAIRS_ENV, None)
-    return forwarded
+    """Forward every registered scratch kind's root and ceiling."""
+    return local_scratch_environment(spec, environ)
 
 
 #: The container's write caches and PrismaQuant's temp parent, each with the
 #: subdirectory it gets under a declared scratch root (PQ #1072, #1014 item f).
 #: Left unset, each one lands in the container's writable overlay, which is
-#: bounded by nothing and invisible to PrismaBuild.
+#: bounded by nothing and invisible to the declared scratch ceilings.
 CONTAINER_CACHE_ENV = (
     ("HF_HOME", "hf"),
     ("TRITON_CACHE_DIR", "triton"),
@@ -526,100 +367,8 @@ def _bounded_local_environment(spec, environ, names, label):
     return dict(zip(names, (root, maximum)))
 
 
-def reader_context_environment(spec: dict, environ) -> "tuple[dict, list[dict]]":
-    """The reader identity this container's SDK binds pins with, if launched.
-
-    Returns the environment to forward and the helper-generation mount to
-    add.  Values come only from the launcher's own environment -- the exact
-    identity the resource_exec proxy injected -- never from the declared
-    spec and never resolved through the mutable ``/repo`` link: a spec that
-    names any of these variables is refused, and so is a partial bundle or
-    a malformed value, because a strict context bound from half an identity
-    is a guessed identity.  The broker token and socket capability travel
-    nowhere here; only the public nonce/scope pair the SDK checks the live
-    claim against crosses the boundary.
-
-    Both are empty on the legacy path: no strict signal in the launcher
-    environment means an action outside the reader contract (or predating
-    it), which keeps a byte-identical ``docker run`` -- documented absence,
-    never a claim of strict support.  The public action key alone is not a
-    strict signal: published PrismaBuild has long set it on every action
-    environment, so key-only is the legacy shape, not a partial bundle.
-    """
-
-    declared = spec.get("env", {}) if isinstance(spec, dict) else {}
-    for name in READER_CONTEXT_ENV:
-        if name in declared:
-            raise RuntimeError(
-                f'spec env {name} is forged or conflicting: reader identity '
-                'is supplied by the launcher, not by a spec')
-    present = {name: environ.get(name) for name in READER_CONTEXT_ENV}
-    if not any(present[name] for name in
-               (ACTION_NONCE_ENV, ACTION_SCOPE_ENV, READER_HELPER_ROOT_ENV)):
-        return {}, []
-    # Older staged launches may carry only the original strict identity tuple.
-    missing = sorted(name for name, value in present.items()
-                     if name != QUEUE_ROOT_ENV and not value)
-    if missing:
-        raise RuntimeError(
-            f"the launcher holds a partial reader-context bundle (missing "
-            f"{', '.join(missing)}); refusing rather than binding a strict "
-            "identity from half of one")
-    key = present[ACTION_KEY_ENV]
-    if re.fullmatch(r"[0-9a-f]{64}", key) is None:
-        raise RuntimeError(
-            "the launcher's PRISMABUILD_ACTION_KEY is not a 64-character "
-            "lowercase action key; refusing rather than forwarding no identity")
-    for name in (ACTION_NONCE_ENV, ACTION_SCOPE_ENV):
-        if not isinstance(present[name], str) or not present[name]:
-            raise RuntimeError(
-                f"the launcher's {name} is empty; the SDK checks the live "
-                "claim against this exact pair, so an empty half is a refusal")
-    root = _canonical_absolute(present[READER_HELPER_ROOT_ENV])
-    if root is None:
-        raise RuntimeError(
-            "the launcher's PRISMABUILD_READER_HELPER_ROOT is not a canonical "
-            "absolute path; refusing rather than binding a helper tree by a "
-            "relative or escaping spelling")
-    if os.path.realpath(root) != root:
-        raise RuntimeError(
-            f"the launcher's PRISMABUILD_READER_HELPER_ROOT {root} resolves "
-            "through a symlink (such as the mutable /repo link): bind the "
-            "exact immutable helper generation at its canonical path instead")
-    if not (Path(root) / "src" / "prismabuild").is_dir():
-        raise RuntimeError(
-            f"the launcher's PRISMABUILD_READER_HELPER_ROOT {root} holds no "
-            "src/prismabuild tree: it must name the immutable generation "
-            "directory itself (the SDK appends /src), not the src tree, "
-            "a file, or an empty directory")
-    helper = PurePosixPath(root)
-    mounts = spec.get("container", {}).get("mounts", []) if isinstance(spec, dict) else []
-    extra: list[dict] = []
-    for mount in mounts:
-        if not isinstance(mount, dict):
-            continue
-        target = PurePosixPath(mount.get("target", "/"))
-        if target == helper:
-            raise RuntimeError(
-                f"container mount target {target} conflicts with the "
-                "launcher's read-only helper-generation bind; the spec must "
-                "not name the helper path")
-        if target != helper and helper in target.parents:
-            raise RuntimeError(
-                f"container mount target {target} nests inside the helper "
-                "generation and would shadow its sealed bytes; the spec must "
-                "not name paths beneath the helper root")
-    # A parent mount can expose a different host directory, or another
-    # nested ancestor can make this subtree writable. Always bind the exact
-    # inspected generation at its own path, after declared parent mounts.
-    # This proves both the source bytes and read-only access independently
-    # of the spec's ancestor mappings.
-    extra.append({"source": root, "target": root, "readonly": True})
-    return ({name: value for name, value in present.items() if value}, extra)
-
-
 def host_path(container_path: str, *, cwd: str, mounts: list) -> "Path | None":
-    """The host path Docker binds behind one absolute container path.
+    """The host path the container engine binds behind one absolute container path.
 
     The sealed checkout is bound at ``/workspace``; every other visible path
     comes from a declared mount. The longest matching target wins, so a
@@ -830,76 +579,255 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
             "safe_path_guard_is_load_bearing": shadow_sha != pinned_sha}
 
 
-def docker_command(spec: dict, command: list[str], *, cwd: str,
-                   uid: int, gid: int, image_id: str, content_sha256=None,
-                   with_gpu=True, environ=None, bounded=False,
-                   checkout_commit=None) -> list[str]:
+PODMAN = "/usr/bin/podman"
+ADMISSION_SCHEMA = "prismaquant.campaign_container_admission.v1"
+EXECUTION_SCHEMA = "prismaquant.campaign_container_execution.v1"
+#: Exit codes owned by this adapter. A payload's own return code passes through;
+#: these name a clean payload whose container cleanup failed, and a container
+#: that could not be created or inspected.
+EXIT_CLEANUP_FAILED = 91
+EXIT_CREATE_FAILED = 92
+#: The only ambient names this adapter reads. Nothing else crosses from the
+#: launching process into the container; a spec's own ``env`` is application data.
+AMBIENT_SETTINGS = ("FLUX_JOB_ID", "OUT", "TMPDIR", *STAGED_ENV,
+                    *COTANGENT_SCRATCH_ENV, *STAGE_B_SPILL_ENV,
+                    *CONTAINER_CACHE_SCRATCH_ENV)
+_CID = re.compile(r"[0-9a-f]{64}")
+
+
+def native_admission(environ) -> dict:
+    """Authenticate the running native job; refuse any launch outside one.
+
+    The saved launch, original jobspec, event log, cgroup scope and R allocation
+    are checked by ``native_results.execution_context`` (through
+    ``flux_jobs.verify_current_job``). Nothing here is read from a PB context.
+    """
+    job_id, out = environ.get("FLUX_JOB_ID"), environ.get("OUT")
+    if not job_id or not out:
+        raise RuntimeError("a container launch requires an admitted native job "
+                           "(FLUX_JOB_ID and OUT); an unadmitted launch is refused")
+    if os.environ.get("FLUX_JOB_ID") != job_id or os.environ.get("OUT") != out:
+        raise RuntimeError("the launch environment differs from the running native job")
+    from prismaquant import native_results
+    context = native_results.execution_context()
+    from prismaquant.digests import bytes_sha256hex
+    raw = (Path(context["record_dir"]) / "launch.json").read_bytes()
+    if bytes_sha256hex(raw) != context["launch_sha256"]:
+        raise RuntimeError("the saved native launch changed during admission")
+    saved_profile = json.loads(raw)["profile"]
+    resources = context["resources"]
+    return {"schema": ADMISSION_SCHEMA, "job_id": context["job_id"],
+            "launch_sha256": context["launch_sha256"], "source": context["source"],
+            "record_dir": context["record_dir"],
+            "affinity": sorted(os.sched_getaffinity(0)),
+            "cores": resources["cores"], "memory_gib": resources["memory_gib"],
+            "gpus": resources["gpus"], "walltime_s": resources["walltime_s"],
+            "profile": {key: saved_profile[key]
+                        for key in ("profile", "config_sha256", "r_sha256")}}
+
+
+def _require_admission(admission: dict) -> None:
+    fields = {"schema", "job_id", "launch_sha256", "source", "record_dir", "affinity",
+              "cores", "memory_gib", "gpus", "walltime_s", "profile"}
+    if (not isinstance(admission, dict) or set(admission) != fields
+            or admission["schema"] != ADMISSION_SCHEMA
+            or not isinstance(admission["affinity"], list) or not admission["affinity"]
+            or any(type(cpu) is not int or cpu < 0 for cpu in admission["affinity"])
+            or admission["affinity"] != sorted(set(admission["affinity"]))):
+        raise RuntimeError("container admission is missing or malformed")
+
+
+def gpu_attachment(admission: dict, environ) -> tuple:
+    """Whether to attach a GPU, decided by the native admission.
+
+    A CPU admission withholds every device. A GPU admission attaches only the
+    one device Flux assigned in ``CUDA_VISIBLE_DEVICES``; any other value refuses.
+    """
+    _require_admission(admission)
+    if admission["gpus"] == 0:
+        return False, "native admission reserved no GPU"
+    index = environ.get("CUDA_VISIBLE_DEVICES", "")
+    if not re.fullmatch("[0-9]+", index):
+        raise RuntimeError("a GPU admission needs exactly one CUDA_VISIBLE_DEVICES index")
+    return True, f"nvidia.com/gpu={index}"
+
+
+def podman_command(spec: dict, command: list[str], *, cwd: str, image_id: str,
+                   admission: dict, cidfile, content_sha256=None, environ=None,
+                   bounded=False, checkout_commit=None) -> list[str]:
     validate_container(spec, bounded=bounded)
-    gpu_flags = GPU_RUNTIME_FLAGS[
-        spec["container"].get("gpu_runtime", DEFAULT_GPU_RUNTIME)]
-    argv = ["docker", "run", "--rm", *(gpu_flags if with_gpu else []), "--ipc=host",
-            "--user", f"{uid}:{gid}", "--workdir", "/workspace",
-            "--entrypoint", "", "--mount",
-            f"type=bind,src={cwd},dst=/workspace,readonly"]
+    environ = environ if environ is not None else {}
+    attached, device = gpu_attachment(admission, environ)
     budget_gb = container_memory_budget_gb(spec)
-    if budget_gb is not None:
-        # THE HARD, KERNEL-ENFORCED LIMIT -- on what the cgroup ACCOUNTS, which
-        # is not the same thing as "everything this row allocates".
-        #
-        # Without it ``CaptureMemoryGuard`` cannot even be constructed ("bounded
-        # capture requires a finite cgroup memory budget"), so a bounded capture
-        # row was refused rather than bounded. With it the guard refuses at
-        # ``cap - MARGIN_BYTES`` and on its host floor, and it also adds the
-        # whole CUDA reservation to the cgroup charge -- the conservative sum
-        # that covers a driver which does NOT charge device memory here.
-        #
-        # That sum is a refusal at the guard's CHECK POINTS, not a physical
-        # bound: between checks a large allocation can overshoot, and a cgroup
-        # cap a driver does not charge bounds the CPU side alone. So this cap is
-        # the CPU-accounted hard limit, and a row that needs an aggregate bound
-        # still needs its risky allocations preceded by ``check(reserve_bytes=..)``
-        # or a bounded CUDA allocator. See docs/ARCHITECTURE.md and
-        # docs/design note in the joint-aura-resume directory; do not read this
-        # line as "GPU + CPU is bounded by box_memory_gb".
-        #
-        # The value is the spec's own ``box_memory_gb``: the same declaration the
-        # demand derivation already refuses to exceed, so the number priced and
-        # the number enforced are one number. ``--memory-swap`` equal to the
-        # limit stops the container growing into swap instead of failing.
-        argv += ["--memory", f"{budget_gb:g}g", "--memory-swap", f"{budget_gb:g}g"]
-    residency_env, residency_mounts = residency_environment(
-        spec, environ if environ is not None else {})
-    reader_env, reader_mounts = reader_context_environment(
-        spec, environ if environ is not None else {})
-    for mount in [*spec["container"].get("mounts", []), *residency_mounts,
-                  *reader_mounts]:
+    if budget_gb is not None and budget_gb > admission["memory_gib"]:
+        raise RuntimeError(
+            f"the container memory cap {budget_gb:g} GiB exceeds the admitted "
+            f"{admission['memory_gib']} GiB; refusing rather than running a larger cap than was reserved")
+    argv = [PODMAN, "create", "--pull=never", "--cidfile", str(cidfile),
+            "--cgroups=disabled", "--network=none", "--env-host=false",
+            "--cpuset-cpus", ",".join(map(str, admission["affinity"])),
+            "--entrypoint", "", "--workdir", "/workspace"]
+    if attached:
+        argv += ["--device", device]
+    if os.uname().machine == "aarch64":
+        argv += ["--userns=keep-id", "--user=1000:1000"]
+    else:
+        argv += ["--user=0:0"]
+    argv += ["--mount", f"type=bind,src={cwd},dst=/workspace,readonly"]
+    staged_env, staged_mounts = staged_input_environment(spec, environ)
+    for mount in [*spec["container"].get("mounts", []), *staged_mounts]:
         value = f"type=bind,src={mount['source']},dst={mount['target']}"
         if mount.get("readonly", False):
             value += ",readonly"
         argv += ["--mount", value]
-    # The bounded capture defaults are the BOUNDED path's environment, so they
-    # are merged only for a row the caller says is bounded. Merging them for
-    # every row overrode a legacy spec's own declaration one layer below the
-    # row-env check that already keeps it: a legacy row sealed with
-    # ``MIMALLOC_PURGE_DELAY=10`` reached the container with ``0``.
     bounded_defaults = BOUNDED_CAPTURE_ENV if bounded else {}
-    scratch = _forwarded_local_scratch_environment(
-        spec, environ if environ is not None else {})
-    # The caches' defaults come first, so any value in the spec overrides
-    # them (PQ #1072).
+    scratch = _forwarded_local_scratch_environment(spec, environ)
     cache_defaults, _pinned = container_cache_environment(spec, scratch)
+    publication = {key: environ[key] for key in ("FLUX_JOB_ID", "OUT") if key in environ}
     forwarded = {SAFE_PATH_ENV: "1", **cache_defaults, **spec.get("env", {}),
-                 **bounded_defaults,
-                 **progress_environment(spec, environ if environ is not None else {}),
-                 **residency_env, **reader_env, **scratch,
-                 **produced_spool_environment(spec, environ if environ is not None else {})}
+                 **bounded_defaults, **staged_env, **scratch, **publication}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
     if content_sha256 is not None:
-        argv += ['--env', 'PRISMAQUANT_CONTAINER_CONTENT_SHA256=' + content_sha256]
+        argv += ["--env", "PRISMAQUANT_CONTAINER_CONTENT_SHA256=" + content_sha256]
     if checkout_commit is not None:
-        argv += ['--env', f'{CHECKOUT_COMMIT_ENV}={checkout_commit}']
+        argv += ["--env", f"{CHECKOUT_COMMIT_ENV}={checkout_commit}"]
     return [*argv, image_id, *command]
+
+
+def _save_record(path: Path, record: dict) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w") as stream:
+        stream.write(json.dumps(record, indent=1) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
+def _cleanup_container(record: dict, stop_seconds: int = 2) -> None:
+    """Reap only the captured CID, keeping every error even when removal fails.
+
+    ``stop_seconds`` is G01's 2 on a normal exit. An interruption passes 1: the native
+    job gives its payload about five seconds after SIGTERM before SIGKILL, and a
+    killed launcher cannot remove its scratch, so cleanup has to finish inside that grace.
+    """
+    path = Path(record["cidfile"])
+    record["removed"] = False
+    try:
+        if path.is_symlink():
+            raise ValueError("owned cidfile replaced by symlink")
+        cid = path.read_text().strip() if path.exists() else record.get("cid")
+        if cid is None:
+            raise ValueError("container creation scope unknown: no captured CID")
+        if _CID.fullmatch(cid) is None:
+            raise ValueError("invalid captured CID")
+        if record.get("cid") not in (None, cid):
+            raise ValueError("owned cidfile replaced")
+        record["cid"] = cid
+        for args in (["stop", "--time", str(stop_seconds), cid], ["rm", "--force", cid]):
+            done = subprocess.run([PODMAN, *args], capture_output=True, text=True, timeout=15)
+            if done.returncode:
+                record["cleanup_errors"].append(args[0] + ": " + done.stderr.strip())
+        gone = subprocess.run([PODMAN, "container", "exists", cid], capture_output=True, timeout=15)
+        record["removed"] = gone.returncode == 1
+        if gone.returncode not in (0, 1):
+            raise ValueError("container absence query failed")
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        record["cleanup_errors"].append(str(exc))
+
+
+def run_owned_container(spec: dict, command: list[str], *, cwd: str, image_id: str,
+                        content_sha256, admission: dict, record_dir, environ,
+                        bounded=False, checkout_commit=None, image=None) -> int:
+    """Create, run and reap one container owned by captured CID (the G01 controls)."""
+    _require_admission(admission)
+    record_dir = Path(record_dir)
+    cidfile, path = record_dir / "container.cid", record_dir / "container.json"
+    if path.exists() or path.is_symlink() or cidfile.exists() or cidfile.is_symlink():
+        raise RuntimeError("container record already exists; refusing to reuse an owned handle")
+    image = image or {}
+    record = {"schema": EXECUTION_SCHEMA, "job_id": admission["job_id"],
+              "launch_sha256": admission["launch_sha256"], "source": admission["source"],
+              "image": {"Id": image_id, "Architecture": image.get("Architecture"),
+                        "Os": image.get("Os"), "content_sha256": content_sha256},
+              "cidfile": str(cidfile), "cid": None, "affinity": admission["affinity"],
+              "memory_gib": admission["memory_gib"], "gpus": admission["gpus"],
+              "creation_returncode": None, "inspection": None, "returncode": None,
+              "interrupted_signal": None, "cleanup_errors": [], "removed": False}
+    _save_record(path, record)  # the cidfile handle is registered before the first create
+
+    class Interrupted(BaseException):
+        pass
+
+    def interrupt(signum, frame):
+        record["interrupted_signal"] = signum
+        raise Interrupted
+
+    handlers = {sig: signal.signal(sig, interrupt) for sig in (signal.SIGTERM, signal.SIGINT)}
+    attached = None
+    code = EXIT_CREATE_FAILED
+    try:
+        argv = podman_command(spec, command, cwd=cwd, image_id=image_id, admission=admission,
+                              cidfile=cidfile, content_sha256=content_sha256, environ=environ,
+                              bounded=bounded, checkout_commit=checkout_commit)
+        made = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+        record["creation_returncode"] = made.returncode
+        (record_dir / "container.create.stdout").write_text(made.stdout)
+        (record_dir / "container.create.stderr").write_text(made.stderr)
+        if made.returncode:
+            raise RuntimeError("rootless container create failed: " + made.stderr.strip())
+        cid = cidfile.read_text().strip()
+        if _CID.fullmatch(cid) is None:
+            raise RuntimeError("create returned no captured CID")
+        record["cid"] = cid
+        inspected = subprocess.run([PODMAN, "inspect", cid], capture_output=True, text=True, timeout=30)
+        if inspected.returncode:
+            raise RuntimeError("created container inspect failed")
+        actual, = json.loads(inspected.stdout)
+        host = actual["HostConfig"]
+        record["inspection"] = {"Id": actual["Id"], "Image": actual["Image"],
+                                "CpusetCpus": host["CpusetCpus"],
+                                "Devices": host.get("Devices") or []}
+        if (actual["Id"] != cid
+                or actual["Image"].removeprefix("sha256:") != image_id.removeprefix("sha256:")
+                or host["CpusetCpus"] != ",".join(map(str, admission["affinity"]))
+                or record["inspection"]["Devices"]):
+            raise RuntimeError("actual container id, image, cpuset or devices differ from admission")
+        _save_record(path, record)
+        attached = subprocess.Popen([PODMAN, "start", "--attach", cid])
+        record["returncode"] = attached.wait()
+        code = record["returncode"]
+    except Interrupted:
+        code = 128 + record["interrupted_signal"]
+    except (RuntimeError, OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
+        record["cleanup_errors"].append("launch: " + str(exc))
+        code = EXIT_CREATE_FAILED
+    finally:
+        for sig in handlers:
+            signal.signal(sig, signal.SIG_IGN)
+        try:
+            if attached is not None and attached.poll() is None:
+                # The container is reaped by CID below; waiting for the attach
+                # client to wind down would spend the native kill grace.
+                attached.kill()
+                attached.wait(timeout=2)
+            if record["cid"] is not None or cidfile.exists():
+                _cleanup_container(record, 1 if record["interrupted_signal"] else 2)
+            else:
+                record["removed"] = True  # nothing was ever created
+        except (OSError, subprocess.SubprocessError) as exc:
+            record["cleanup_errors"].append(str(exc))
+        finally:
+            _save_record(path, record)
+            from prismaquant.digests import bytes_sha256hex
+            digest = bytes_sha256hex(path.read_bytes())
+            print(f"campaign container evidence {path} sha256={digest}", flush=True)
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
+    clean = record["removed"] and not [e for e in record["cleanup_errors"] if not e.startswith("launch: ")]
+    if code == 0 and not clean:
+        return EXIT_CLEANUP_FAILED
+    return code
 
 
 def checkout_commit(cwd: str) -> str | None:
@@ -938,26 +866,29 @@ def checkout_commit(cwd: str) -> str | None:
 
 
 def inspect_or_load(container):
-    requested = container['image']
-    found = subprocess.run(['docker', 'image', 'inspect', requested], capture_output=True, text=True)
+    requested = container["image"]
+    found = subprocess.run([PODMAN, "image", "inspect", requested], capture_output=True, text=True)
     if found.returncode:
-        bound = container.get('archive')
+        bound = container.get("archive")
         if bound is None:
-            raise RuntimeError('declared container image is unavailable: ' + found.stderr)
-        with Path(bound['path']).open('rb') as stream:
-            actual = hashlib.file_digest(stream, 'sha256').hexdigest()
-        if actual != bound['sha256']:
-            raise RuntimeError('declared image archive bytes changed')
-        subprocess.run(['docker', 'load', '--input', bound['path']], check=True)
-        found = subprocess.run(['docker', 'image', 'inspect', requested], capture_output=True, text=True, check=True)
+            raise RuntimeError("declared container image is unavailable: " + found.stderr)
+        with Path(bound["path"]).open("rb") as stream:
+            actual = hashlib.file_digest(stream, "sha256").hexdigest()
+        if actual != bound["sha256"]:
+            raise RuntimeError("declared image archive bytes changed")
+        subprocess.run([PODMAN, "load", "--input", bound["path"]], check=True)
+        found = subprocess.run([PODMAN, "image", "inspect", requested], capture_output=True, text=True, check=True)
     rows = json.loads(found.stdout)
     if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
-        raise RuntimeError('Docker returned no unique image inspection')
+        raise RuntimeError("the container engine returned no unique image inspection")
+    image_id = rows[0].get("Id")
+    if isinstance(image_id, str):
+        rows[0]["Id"] = "sha256:" + image_id.removeprefix("sha256:")
     return rows
 
 
 def validate_namespace_launch(spec: dict, command: list[str], *, cwd: str, environ) -> str | None:
-    """Opt-in ownership refusal before Docker inspection or campaign entry."""
+    """Opt-in ownership refusal before image inspection or campaign entry."""
     if "namespace_binding" not in spec:
         if "namespace_profile" in spec:
             raise RuntimeError("namespace profile requires bound published ownership")
@@ -982,40 +913,43 @@ def validate_namespace_launch(spec: dict, command: list[str], *, cwd: str, envir
     return commit
 
 
+def require_namespace_native_profile(spec: dict, admission: dict) -> None:
+    """A namespace row's sealed native profile must be the one that admitted this job."""
+    binding = spec.get("namespace_binding")
+    if binding is not None and binding["provenance"]["native_profile"] != admission["profile"]:
+        raise RuntimeError("namespace native profile differs from the admitting launch")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", required=True)
-    parser.add_argument('--cpu-only', action='store_true', help='Run admitted CPU checks without requesting a GPU')
+    parser.add_argument("--cpu-only", action="store_true",
+                        help="accepted for old callers; native admission decides the device")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     spec = json.loads(args.spec)
-    # The spec the launcher forwards carries the bounded capture environment
-    # only for a bounded row (``tessera_campaign_rows.row_is_bounded``
-    # merges it), so the row's own env is the marker that says which contract
-    # this is: a legacy spec that names a different purge delay is not held to
-    # a contract it never declared, and is not handed the bounded defaults
-    # either. Both readers of the marker -- the validation below and the
-    # argv built later -- are stated from this one value.
     forwarded_env = spec.get("env") if isinstance(spec.get("env"), dict) else {}
     bounded = all(name in forwarded_env for name in BOUNDED_CAPTURE_ENV)
     validate_container(spec, bounded=bounded)
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a container command is required")
+    admission = native_admission(os.environ)
     namespace_commit = validate_namespace_launch(spec, command, cwd=str(Path.cwd()), environ=os.environ)
+    require_namespace_native_profile(spec, admission)
     requested = spec["container"]["image"]
-    inspected = inspect_or_load(spec['container'])
+    inspected = inspect_or_load(spec["container"])
     if not isinstance(inspected, list) or len(inspected) != 1 or not isinstance(inspected[0], dict):
-        raise RuntimeError("Docker returned no unique image inspection")
+        raise RuntimeError("the container engine returned no unique image inspection")
     image_id = inspected[0].get("Id")
     if not isinstance(image_id, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
-        raise RuntimeError("Docker returned no immutable image ID")
+        raise RuntimeError("the container engine returned no immutable image ID")
     content_digest = _runtime_identity["image_content_sha256"](inspected[0])
     declared = spec["container"].get("content_sha256")
     if declared is not None and declared != content_digest:
-        raise RuntimeError(f"Docker image content differs for {requested!r}: "
+        raise RuntimeError(f"container image content differs for {requested!r}: "
                            f"expected {declared}, observed {content_digest}")
-    with_gpu, gpu_reason = gpu_attachment(spec, cpu_only=args.cpu_only, environ=os.environ)
+    with_gpu, gpu_reason = gpu_attachment(admission, os.environ)
     imports = verify_pinned_import(spec, cwd=str(Path.cwd()))
     commit = namespace_commit if namespace_commit is not None else checkout_commit(str(Path.cwd()))
     print(json.dumps({"schema": "prismaquant.tessera_campaign_container.v1",
@@ -1028,13 +962,10 @@ def main(argv=None) -> int:
                       "overlay_pinned_caches": container_cache_environment(
                           spec, _forwarded_local_scratch_environment(spec, os.environ))[1],
                       **imports}), flush=True)
-    docker = docker_command(spec, command, cwd=str(Path.cwd()),
-                            uid=os.getuid(), gid=os.getgid(), image_id=image_id,
-                            content_sha256=content_digest, with_gpu=with_gpu,
-                            environ=os.environ, bounded=bounded,
-                            checkout_commit=commit)
-    os.execvp(docker[0], docker)
-    return 1  # exec never returns
+    return run_owned_container(spec, command, cwd=str(Path.cwd()), image_id=image_id,
+                               content_sha256=content_digest, admission=admission,
+                               record_dir=admission["record_dir"], environ=os.environ,
+                               bounded=bounded, checkout_commit=commit, image=inspected[0])
 
 
 if __name__ == "__main__":

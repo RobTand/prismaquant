@@ -94,35 +94,14 @@ def test_manifest_omits_unused_source_and_tracks_repeated_teacher_reads(tmp_path
     assert manifest['annotations']['teacher_repeats'] == 2
     assert sum(e['bytes'] for e in manifest['entries']) == manifest['total_bytes']
     assert list(dict.fromkeys(i for p in layers for i in p['entry_indices'])) == list(range(manifest['entry_count']))
-    fleet_src = Path("/mnt/shared/prismabuild-fleet/repo/src")
-    if not fleet_src.is_dir():
-        pytest.skip("PrismaBuild runtime source is not mounted on this box")
-    from fleet_sdk import prismabuild_imports_restored
-
-    # Own the source graph even when a caller has already imported the installed
-    # SDK, and return that caller's modules and import path before leaving.
-    with prismabuild_imports_restored(detach=True):
-        sys.path.insert(0, str(fleet_src))
-        from prismabuild.data_manifest import validate_data_manifest
-        assert validate_data_manifest(manifest)["read_plan"] == manifest["read_plan"]
-
-
-def test_manifest_validator_restores_caller_imports(tmp_path):
-    """A caller's PB graph must neither select nor retain the source validator."""
-    from fleet_sdk import prismabuild_entries, require_prismabuild_sdk
-
-    require_prismabuild_sdk()
-    import prismabuild.core as core
-
-    package = sys.modules["prismabuild"]
-    before = prismabuild_entries()
-    path_before = list(sys.path)
-    test_manifest_omits_unused_source_and_tracks_repeated_teacher_reads(tmp_path)
-    assert sys.path == path_before
-    after = prismabuild_entries()
-    assert after.keys() == before.keys()
-    assert all(after[name] is before[name] for name in before)
-    assert package.core is core
+    # The staged read contract refuses repeated or overlapping ranges of one source; check the same
+    # independent invariant on this plan's own entries.
+    ranges = {}
+    for entry in manifest['entries']:
+        ranges.setdefault(entry['path'], []).append((entry['offset'], entry['offset'] + entry['bytes']))
+    for spans in ranges.values():
+        ordered = sorted(spans)
+        assert all(start >= previous_end for (_, previous_end), (start, _) in zip(ordered, ordered[1:]))
 
 
 def test_one_arm_omission_is_bitwise_equal_in_logits_and_fp64_kl(tmp_path):
@@ -178,9 +157,7 @@ def test_progress_accepts_the_single_arm_window_log_and_completes_its_population
     lines.extend(f"[g3 0.4s] window final-{w}: KL t04 0.000001 t2 0.000002 maxdiff04 0.001"
                  for w in range(25))
     commits = []
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_HELPER", "unit-progress-helper")
-    monkeypatch.setattr(progress.runpy, "run_path", lambda _: {
-        "commit": lambda units, **fields: commits.append((units, fields)) or True})
+    monkeypatch.setattr(progress, "log_progress", lambda units, phase, unit: commits.append((units, phase, unit)))
     monkeypatch.setattr(progress.subprocess, "Popen", lambda *a, **k:
         SimpleNamespace(stdout=[line + "\n" for line in lines], wait=lambda: 0))
     monkeypatch.setattr(progress.sys, "argv", ["g3_progress_launch.py", "--arm", "a8_w",
@@ -194,7 +171,6 @@ def test_progress_accepts_the_single_arm_window_log_and_completes_its_population
 
 def test_progress_refuses_pilot_explicitly(monkeypatch):
     import g3_progress_launch as progress
-    monkeypatch.delenv("PRISMABUILD_ACTION_PROGRESS_HELPER", raising=False)
     monkeypatch.setattr(progress.sys, "argv", ["g3_progress_launch.py", "--pilot"])
     with pytest.raises(SystemExit, match="pilot"):
         progress.main()
@@ -217,71 +193,70 @@ def test_d32_uses_stored_metadata_without_stat_or_proof_owner(tmp_path, monkeypa
         prepared.validate_prepared_source("/absent/model", proof, "0" * 64)
 
 
-def test_docker_contract_translates_every_input_and_mounts_live_helper(monkeypatch):
+def test_container_contract_mounts_only_readonly_manifest_dirs_and_translates_origins(tmp_path, monkeypatch):
     from g3_residency import container_contract, resolve_g3_origin
-    names = {"PRISMABUILD_RESIDENCY_MAP": "/queue/residency/key.json",
-             "PRISMABUILD_READER_HELPER_ROOT": "/helper/exact-generation",
-             "PRISMABUILD_QUEUE_ROOT": "/queue", "PRISMABUILD_ACTION_KEY": "a" * 64,
-             "PRISMABUILD_ACTION_NONCE": "nonce", "PRISMABUILD_ACTION_SCOPE": "scope"}
-    for name, value in names.items():
-        monkeypatch.setenv(name, value)
+    from staged_native_fixtures import bind, publish_inputs
+    source = tmp_path / "source"
+    source.write_bytes(b"source")
+    binding = publish_inputs(tmp_path, [source])
+    bind(monkeypatch, binding)
     mounts, environment = container_contract()
-    assert environment == {**names, "PRISMABUILD_RESIDENCY_MAP": "/g3-pb-residency-map/key.json"}
-    assert next(m for m in mounts if m["source"] == "/queue")["readonly"] is False
-    assert next(m for m in mounts if m["source"] == "/helper/exact-generation")["readonly"] is True
-    assert next(m for m in mounts if m["source"] == "/queue/residency")["target"] == "/g3-pb-residency-map"
-    assert not any(m["readonly"] and Path(m["target"]).is_relative_to("/queue") for m in mounts)
+    assert environment == {}
+    assert mounts == [{"source": str(tmp_path), "target": str(tmp_path), "readonly": True}]
+    assert not any("PRISMABUILD" in json.dumps(m) for m in mounts)
     assert resolve_g3_origin("/teacher1/w.npy", {"/teacher1": "/mnt/shared/teacher"}) == "/mnt/shared/teacher/w.npy"
-    assert resolve_g3_origin("/sourcex/w", {"/source": "/mnt/shared/model"}) == "/sourcex/w"
+    monkeypatch.delenv("PRISMAQUANT_STAGED_MANIFEST")
+    assert container_contract() == ([], {})
+
+
+def test_a_host_local_manifest_cannot_be_launched_into_the_container(tmp_path, monkeypatch):
+    from g3_residency import container_contract
+    from staged_native_fixtures import fixture
+    from prismaquant.staged_manifest import publish_staged_json
+    _source, data, binding, _contract = fixture(tmp_path)
+    local = {**data, "lifetime": {"mode": "host_local_cache", "root": str(tmp_path / "cache"),
+                                  "owner_host": "dl380g10"}}
+    path = tmp_path / "host-local.json"
+    binding = {**binding, "path": str(path), "sha256": publish_staged_json(path, local)}
+    # Only the environment is set: the host-local lifetime cannot even build a resolver here.
+    monkeypatch.setenv("PRISMAQUANT_STAGED_MANIFEST", binding["path"])
+    monkeypatch.setenv("PRISMAQUANT_STAGED_MANIFEST_SHA256", binding["sha256"])
+    monkeypatch.setenv("PRISMAQUANT_READ_CONTRACT_PATH", binding["read_contract_path"])
+    with pytest.raises(RuntimeError, match="host_local_cache.*cannot cross the container boundary"):
+        container_contract()
 
 
 @pytest.mark.parametrize("corrupt", [False, True])
 def test_named_range_pin_outlives_descriptor_and_integrity_never_falls_back(tmp_path, monkeypatch, corrupt):
     import os
-    import threading
-    from types import SimpleNamespace
     import g3_residency as residency
-    stage = tmp_path / "range"
-    stage.write_bytes(b"staged")
-    events = []
-    opened = []
-    def acquire(*args, **kwargs):
-        events.append("acquire")
-        return {"ok": True, "pin": {}, "pin_id": "pin", "ref_id": "ref"}
-    def pinned(*args, **kwargs):
-        events.append("open")
-        fd = os.open(stage, os.O_RDONLY)
-        opened.append(fd)
-        return fd, {"tier_id": "stage"}
-    def release(*args, **kwargs):
-        with pytest.raises(OSError):
-            os.fstat(opened[0])
-        events.append("release-after-close")
-        return True
-    digest = "0" * 64 if corrupt else hashlib.sha256(b"staged").hexdigest()
-    reader = residency.StagedReader.__new__(residency.StagedReader)
-    reader.maps = SimpleNamespace(residency_map_key=lambda p, o: f"{o}:{p}",
-        read_residency_map=lambda _: {"tier_id": "stage", "manifest_sha256": "a" * 64,
-                            "entries": {"7:/host/file": {"bytes": 6, "sha256": digest}}})
-    reader.lease = SimpleNamespace(covers_for_keys=lambda *a, **k: {"ok": True, "covers": []},
-                                  acquire_for=acquire, open_pinned=pinned, release=release)
-    reader.ctx = {"map_path": "map", "action_key": "a" * 64}
-    reader.queue, reader.root, reader.lock = None, tmp_path, threading.Lock()
-    reader.stats = {"staged_bytes": 0, "staged_reads": 0, "read_s": 0.0, "tiers": {}}
-    map_path = tmp_path / "map.json"
-    map_path.write_text("{}")
-    reader.ctx["map_path"] = str(map_path)
-    reader.mapping, reader.map_identity = None, None
-    reader.windows, reader.closed_phases = {}, set()
-    reader.phase_keys, reader.key_phases = {}, {}
-    if corrupt:
-        with pytest.raises(RuntimeError, match="own digest"):
-            reader.read("/host/file", 7, 6)
-    else:
-        assert reader.read("/host/file", 7, 6) == b"staged"
-    assert reader.read("/not-in-map", 0, 3) is None
-    reader.close()
-    assert events == ["acquire", "open", "release-after-close"]
+    from g3_pq_policy import residency_map as maps
+    from staged_native_fixtures import bind, publish_inputs
+    origin = tmp_path / "file"
+    origin.write_bytes(b"0123456staged789")
+    binding = publish_inputs(tmp_path, [origin], ranges={origin: [(7, 13)]})
+    bind(monkeypatch, binding)
+    monkeypatch.delenv("G3_READ_PLAN", raising=False)
+    maps.reset_residency_resolver_for_tests()
+    reader = residency.StagedReader()
+    try:
+        if corrupt:
+            target = next(e.object_path for e in reader.resolver.manifest.extents)
+            os.chmod(target, 0o644)
+            with open(target, "r+b") as stream:
+                stream.write(b"X")
+            with pytest.raises(RuntimeError, match="own digest"):
+                reader.read(str(origin), 7, 6)
+            assert origin.read_bytes() == b"0123456staged789"  # origin untouched and never selected
+        else:
+            assert reader.read(str(origin), 7, 6) == b"staged"
+        window, = reader.windows["smoke"]
+        assert window["lease"]._fds == {} and reader.resolver._windows == 1  # the pin outlives the descriptor
+        assert reader.read("/not-in-manifest", 0, 3) is None
+    finally:
+        reader.close()
+        assert reader.resolver._windows == 0
+        maps.reset_residency_resolver_for_tests()
 
 
 def test_d32_does_not_suspend_two_data_digest_comparability(tmp_path, monkeypatch):

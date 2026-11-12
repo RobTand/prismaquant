@@ -1,0 +1,13 @@
+{
+ "kernels": {
+  "_copy_front": 1,
+  "_init": 1,
+  "_step": 3,
+  "_traceback": 3,
+  "_window_gemm_kernel": 2,
+  "_window_repack_kernel": 2
+ },
+ "targets": [
+  "{\"arch\": 121, \"backend\": \"cuda\", \"warp_size\": 32}"
+ ]
+}

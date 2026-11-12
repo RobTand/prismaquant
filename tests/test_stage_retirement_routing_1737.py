@@ -11,18 +11,7 @@ import json
 
 import prismaquant.stage_a_retirement as retire
 from prismaquant.digests import bytes_sha256hex
-
-
-def _spies(monkeypatch):
-    calls = {"hash": []}
-    real_hash = getattr(retire, "bytes_sha256hex", None)
-
-    def stand_in_hash(value):
-        calls["hash"].append(value)
-        return real_hash(value) if real_hash is not None else None
-
-    monkeypatch.setattr(retire, "bytes_sha256hex", stand_in_hash, raising=False)
-    return calls
+from tests.delegation_recording import record_unary_calls
 
 
 def _successor_record(identity, generation):
@@ -34,7 +23,9 @@ def _successor_record(identity, generation):
 
 
 def test_successor_pinned_check_routes_to_owner(monkeypatch, tmp_path):
-    calls = _spies(monkeypatch)
+    calls = {
+        "hash": record_unary_calls(monkeypatch, retire, "bytes_sha256hex"),
+    }
     record = _successor_record("a" * 64, "7")
     target = tmp_path / "successor.json"
     raw = (json.dumps(record, sort_keys=True) + "\n").encode()

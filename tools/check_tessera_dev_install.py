@@ -1,142 +1,74 @@
 #!/usr/bin/env python3
-"""Fail fast when a test interpreter cannot pass pbtest's Tessera pin gate.
+"""Check installed Tessera bytes and import ownership against the reviewed Git pin.
 
-``pbtest.py`` refuses a PrismaQuant checkout before pytest unless the target
-interpreter carries ``tessera-quant`` as a non-editable Git install at the
-reviewed commit (``tools/resolve_tessera_dev_pin.py``). A local-directory
-install records no Git commit, so the gate can never pass for it -- that is
-RobTand/prismaquant#753 (fleet env ``pq-cpu312``) and RobTand/prismabuild#658.
-
-This check asks the same provenance question locally, before a submission
-burns a fleet slot learning the answer. It checks PROVENANCE only: the
-byte-identity audit stays worker-side in pbtest, and re-provisioning a shared
-interpreter stays the fleet owner's idle-window work
-(``tools/provision_tessera_pin.py``), never this tool's.
-
-Usage::
-
-    python tools/check_tessera_dev_install.py --python /home/rob/venvs/pq-cpu312/bin/python
-
-Exit 0 when the interpreter carries the reviewed commit; exit 1 with the
-remediation (provision command, idle-window requirement, owning issue) when
-it does not. Imports neither PrismaQuant nor Tessera, so it runs anywhere.
+Expected bytes come from a read-only Git clone archived into private scratch
+by the existing provisioner. This check installs nothing and imports neither
+Tessera nor its serving stack.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import subprocess
-import sys
 from pathlib import Path
+import runpy
+import subprocess
+import tempfile
 
-ROOT = Path(__file__).resolve().parents[1]
-PIN_RESOLVER = ROOT / "tools" / "resolve_tessera_dev_pin.py"
-DIST_NAME = "tessera-quant"
-PB_ISSUE = "RobTand/prismabuild#658"
-PQ_ISSUE = "RobTand/prismaquant#753"
-
-#: Inspect the target interpreter's selected distribution provenance.
-#: pbtest independently checks import ownership and installed bytes.
-_PROBE = (
-    "import json, sys\n"
-    "from importlib import metadata\n"
-    "try:\n"
-    f"    dist = metadata.distribution({DIST_NAME!r})\n"
-    "    direct = json.loads(dist.read_text('direct_url.json') or '{}')\n"
-    "    out = {'distribution': dist.metadata['Name'], 'direct_url': direct}\n"
-    "except Exception as exc:\n"
-    "    out = {'reason': type(exc).__name__ + ': ' + str(exc)}\n"
-    "sys.stdout.write(json.dumps(out))\n"
-)
+pin = runpy.run_path(str(Path(__file__).with_name("provision_tessera_pin.py")))
 
 
 def reviewed_commit() -> str:
-    """The commit pbtest will demand, read the way pbtest reads it."""
-    done = subprocess.run([sys.executable, str(PIN_RESOLVER)],
-                          capture_output=True, text=True, check=False)
-    if done.returncode or not done.stdout.strip():
-        raise SystemExit(f"{PIN_RESOLVER} failed: {done.stderr.strip()}")
-    return done.stdout.strip()
+    return pin["reviewed_pin"]()[0]
 
 
-def probe_direct_url(python: str) -> dict:
-    """That interpreter's ``tessera-quant`` provenance, or its reason."""
+def check_install(python: str, *, clone: Path,
+                  pin_source: Path = pin["PIN_SOURCE"]) -> tuple[bool, dict]:
+    commit, contract_sha = pin["reviewed_pin"](pin_source)
+    report = {"python": python, "reviewed_commit": commit,
+              "expected": None, "installed": None, "refusal": None, "passed": False}
     try:
-        done = subprocess.run([python, "-c", _PROBE],
-                              capture_output=True, text=True)
-    except OSError as exc:
-        return {"reason": f"{type(exc).__name__}: {exc}"}
-    try:
-        out = json.loads(done.stdout.strip() or "{}")
-    except ValueError:
-        out = {}
-    if not isinstance(out, dict):
-        out = {}
-    if "direct_url" in out:
-        # Shape is the verdict's job (a non-object direct_url is its own
-        # refusal); absence here means the probe itself failed, named below.
-        return out
-    reason = out.get("reason") or (done.stderr.strip().splitlines() or
-                                   ["the probe printed nothing"])[-1]
-    return {"reason": reason}
-
-
-def verdict(provenance: dict, expected: str, python: str) -> tuple[bool, str]:
-    """Whether the selected distribution has the required Git provenance.
-
-    Require ``vcs_info`` naming Git at the reviewed commit and a non-editable
-    install. pbtest separately verifies unambiguous import ownership and
-    installed bytes; this advisory precheck does not establish either.
-    """
-    reason = provenance.get("reason")
-    if reason is not None:
-        return False, (
-            f"{python}: no {DIST_NAME} provenance ({reason}); expected a "
-            f"non-editable Git install at {expected}. {remediation(python)}")
-    direct = provenance.get("direct_url")
-    if not isinstance(direct, dict):
-        return False, (
-            f"{python}: {DIST_NAME} direct_url.json is not an object "
-            f"({direct!r}); pbtest refuses before pytest "
-            f"({PQ_ISSUE}). {remediation(python)}")
-    vcs = direct.get("vcs_info") or {}
-    observed = vcs.get("commit_id")
-    editable = bool(direct.get("dir_info", {}).get("editable"))
-    if vcs.get("vcs") == "git" and observed == expected and not editable:
-        return True, (
-            f"{python}: {DIST_NAME} is a non-editable Git install at the "
-            f"reviewed commit {expected}")
-    if observed is None:
-        detail = ("a local-directory install, which records no Git commit"
-                  if vcs == {} else
-                  f"a non-git install ({direct!r})")
-    elif editable:
-        detail = f"an editable install at {observed}"
-    else:
-        detail = f"commit {observed}, expected {expected}"
-    return False, (
-        f"{python}: {DIST_NAME} is {detail}; pbtest refuses before pytest "
-        f"({PQ_ISSUE}). {remediation(python)}")
-
-
-def remediation(python: str) -> str:
-    """The one repair and who may run it, pinned in the refusal itself."""
-    return (
-        f"Repair: python tools/provision_tessera_pin.py --python {python} "
-        f"on the box that owns that interpreter, with every user of it idle "
-        f"-- never under a running shard. Re-provisioning the shared fleet "
-        f"interpreter is the fleet owner's call ({PB_ISSUE}); this check "
-        f"only reports.")
+        with tempfile.TemporaryDirectory(prefix="tessera-pin-check-") as temporary:
+            source = Path(temporary) / "source"
+            pin["_archive_into"](commit, clone, source)
+            unshipped = pin["unshipped_packages"](source)
+            expected = pin["expected_identity"](source, unshipped)
+            report["expected"] = expected
+            if expected["contract_sha256"] != contract_sha:
+                raise ValueError("pinned Git source contract differs from reviewed digest")
+            installed, absent = pin["installed_identity"](python, unshipped)
+            report["installed"] = installed
+            if absent is not None:
+                raise ValueError(absent)
+            if installed["distribution"] != "tessera-quant" or installed["import_owners"] != ["tessera-quant"]:
+                raise ValueError("missing or ambiguous tessera-quant import ownership")
+            package = Path(installed["package_path"])
+            owner = Path(installed["distribution_package_path"])
+            if package.is_symlink() or package.resolve(strict=True) != owner.resolve(strict=True):
+                raise ValueError("Tessera import is shadowed or symlinked outside its distribution")
+            direct = installed["direct_url"]
+            if not isinstance(direct, dict) or not isinstance(direct.get("dir_info", {}), dict):
+                raise ValueError("invalid installed provenance")
+            if direct.get("dir_info", {}).get("editable"):
+                raise ValueError("editable install refused")
+            vcs = direct.get("vcs_info")
+            if vcs is not None and (not isinstance(vcs, dict) or vcs.get("vcs") != "git" or vcs.get("commit_id") != commit):
+                raise ValueError("installed Git provenance differs from reviewed commit")
+            fields = pin["drift"](installed, expected)
+            if fields:
+                raise ValueError("installed bytes differ: " + ", ".join(fields))
+            report["passed"] = True
+    except (OSError, ValueError, subprocess.SubprocessError, SystemExit) as exc:
+        report["refusal"] = f"{type(exc).__name__}: {exc}"
+    return report["passed"], report
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--python", required=True,
-                        help="interpreter a pbtest shard would run")
+    parser.add_argument("--python", required=True)
+    parser.add_argument("--clone", type=Path, default=pin["DEFAULT_CLONE"])
     args = parser.parse_args(argv)
-    expected = reviewed_commit()
-    ok, message = verdict(probe_direct_url(args.python), expected, args.python)
-    print(message, flush=True)
+    ok, report = check_install(args.python, clone=args.clone)
+    print(json.dumps(report, indent=2), flush=True)
     return 0 if ok else 1
 
 

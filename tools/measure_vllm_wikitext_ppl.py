@@ -116,8 +116,9 @@ def _provenance(args) -> dict:
     """Serving-stack + code provenance for the result dict (R15).
 
     The tool builds its own in-process `LLM`, so `/proc/self/maps` is the
-    authoritative extension-residency read for the numbers below; a PPL from a
-    different `serve_fingerprint` is not a comparable delta (tools/kl_ab.py).
+    authoritative extension-residency read for the numbers below. Comparable
+    deltas require matching `performance_stack_fingerprint` values;
+    `tools/kl_ab.py` validates `serve_fingerprint` per arm.
     """
     return gold_provenance(
         "measure_vllm_wikitext_ppl", args, engine_kwargs=_ENGINE_KWARGS,

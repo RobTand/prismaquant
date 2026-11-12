@@ -1,0 +1,68 @@
+common --enable_bzlmod
+# Every invocation streams to BuildBuddy from a Remote Bazel runner, including
+# bazel-diff's queries: apply BuildBuddy's suggested flags to all of them.
+common --remote_cache_compression
+common --experimental_remote_cache_chunking
+common --remote_grpc_log=bazel-remote-grpc.log
+common --execution_log_compact_file=execution_log.binpb.zst
+build --enable_platform_specific_config
+build --incompatible_strict_action_env
+build --color=no
+build --show_timestamps
+build --noslim_profile
+build --experimental_profile_include_target_label
+build --experimental_profile_include_primary_output
+test --test_output=errors
+# .github/workflows/gate.yml bounds native threads for every shard.
+test --test_env=OMP_NUM_THREADS=1
+test --test_env=MKL_NUM_THREADS=1
+test --test_env=OPENBLAS_NUM_THREADS=1
+test --test_env=NUMEXPR_NUM_THREADS=1
+test --test_env=TORCHINDUCTOR_COMPILE_THREADS=1
+test --test_env=MAX_JOBS=1
+# Per-test budgets are calibrated on hosted runners, which enforce them; shared
+# remote executors time differently, so Bazel records overruns and passes.
+test --test_env=PQ_BAZEL_BUDGETS=record
+
+# Pass the BuildBuddy API key header from the environment or a private rc
+# file. Never commit the key. BuildBuddy's free plan is shared with other
+# repositories' gates, so PrismaQuant takes at most 40 executor slots at a time.
+build:remote --remote_cache=grpcs://remote.buildbuddy.io
+build:remote --remote_download_minimal
+build:remote --jobs=40
+build:remote --remote_executor=grpcs://remote.buildbuddy.io
+build:remote --bes_backend=grpcs://remote.buildbuddy.io
+build:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+build:remote --extra_execution_platforms=//tools/bazel:linux_amd64
+build:remote --platforms=//tools/bazel:linux_amd64
+build:remote --remote_timeout=600
+build:remote --remote_local_fallback=false
+# Actions run remotely, so the client needs no local runfiles trees; 1,364
+# test trees of symlinks, each with torch, fill a runner's disk.
+build:remote --nobuild_runfile_links
+
+# Every action on linux/arm64 remote executors. Remote Bazel runners are amd64
+# only, so the client stays on amd64. The post-merge run uses it.
+build:remote-arm64 --remote_cache=grpcs://remote.buildbuddy.io
+build:remote-arm64 --remote_download_minimal
+build:remote-arm64 --jobs=40
+build:remote-arm64 --remote_executor=grpcs://remote.buildbuddy.io
+build:remote-arm64 --bes_backend=grpcs://remote.buildbuddy.io
+build:remote-arm64 --bes_results_url=https://app.buildbuddy.io/invocation/
+build:remote-arm64 --extra_execution_platforms=//tools/bazel:linux_arm64
+build:remote-arm64 --platforms=//tools/bazel:linux_arm64
+build:remote-arm64 --host_platform=//tools/bazel:linux_arm64
+build:remote-arm64 --remote_timeout=600
+build:remote-arm64 --remote_local_fallback=false
+build:remote-arm64 --nobuild_runfile_links
+
+# Commit and branch metadata are supplied by the CI entrypoint.
+common:ci --lockfile_mode=error
+build:ci --build_metadata=ROLE=CI
+build:ci --build_metadata=REPO_URL=https://github.com/RobTand/prismaquant
+# Parity reads each test's node receipt.
+build:ci --remote_download_regex=.*/test\.outputs/.*
+
+# Agent and development runs share BuildBuddy with the merge gates: at most 16 jobs.
+# Use with the remote configs: --config=remote --config=dev.
+build:dev --jobs=16

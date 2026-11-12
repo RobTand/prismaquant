@@ -21,6 +21,8 @@ import sys
 
 import pytest
 
+import readset_oracles
+
 pytestmark = pytest.mark.own_process
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -29,7 +31,6 @@ from prismaquant import joint_run_progress as jrp
 from prismaquant.joint_layer_quanta import build_adjoint_manifest
 
 N_LAYERS = 3
-PUBLISHED_PB_SRC = Path("/mnt/shared/prismabuild-fleet/repo/src")
 
 
 class _Clock:
@@ -119,31 +120,6 @@ def _reporter(order):
     return recorder, progress
 
 
-def _published_pb():
-    """The published PrismaBuild contract owners, or a skip naming why not.
-
-    The fleet's own tier loops and pbrun read these bytes; a test that
-    re-implemented the phase rules could stay green while the sealed plan
-    still dropped a phase. A half-visible mount is a skip, not a pass."""
-    if not (PUBLISHED_PB_SRC / "prismabuild" / "core.py").is_file():
-        pytest.skip(f"published PrismaBuild not visible at {PUBLISHED_PB_SRC}")
-    if str(PUBLISHED_PB_SRC) not in sys.path:
-        sys.path.insert(0, str(PUBLISHED_PB_SRC))
-    import prismabuild.data_manifest as data_manifest
-    import prismabuild.manifest_layout as manifest_layout
-    import prismabuild.residency_plan as plans
-    for module in (data_manifest, manifest_layout, plans):
-        if not Path(module.__file__).resolve().is_relative_to(
-                PUBLISHED_PB_SRC.resolve()):
-            # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
-            # site-packages prismabuild turn the test green without running it.
-            pytest.fail(
-                f"a different prismabuild is already imported: {module} -- it shadows the "
-                "published generation under test; the interpreter carries a stale "
-                "prismabuild (PQ #1109)")
-    return data_manifest, manifest_layout, plans
-
-
 # -- the v2 table (fails on base: v1 shape, ascending order) --------------
 
 def test_single_ordered_helper_owns_all_phase_names():
@@ -222,30 +198,15 @@ def test_forward_and_chain_share_extents_without_duplicating_entries():
         assert by_name[f"forward-{layer:03d}"] == by_name[f"chain-{layer:03d}"]
 
 
-def test_generated_plan_is_interoperable_with_published_pb():
-    """The exact gap this change exists to close, against the published
-    bytes: the generated table validates, every read phase survives into
-    the sealed residency ranges (a dropped phase is a phase the window
-    never stages), and driving the phases in order keeps `accepted` true
-    with `remaining` shrinking from the reported phase -- never a reset."""
-    data_manifest, manifest_layout, plans = _published_pb()
-    manifest = _manifest()
-    normalized = data_manifest.validate_data_manifest(manifest)
-    ranges = manifest_layout.manifest_phase_ranges(normalized)
-    plan_names = [entry["name"] for entry in ranges]
-    read_names = [phase["name"] for phase in normalized["read_plan"]["phases"]]
-    assert plan_names == read_names
-    plan = {"phases": [{"name": name} for name in plan_names]}
-    for position, name in enumerate(read_names):
-        assert plans.accepted(plan, name), f"{name} is not a plan phase"
-        remaining = [phase["name"] for phase in
-                     plans.remaining(plan, name)]
-        assert remaining == read_names[position:]
-    # The failure mode a standalone tail phase would buy: a reported name
-    # the plan does not carry resets tracking to the beginning.
-    assert plans.accepted(plan, "tail") is False
-    assert [phase["name"] for phase in plans.remaining(plan, "tail")] == \
-        read_names
+def test_generated_plan_keeps_every_read_phase_in_order():
+    """Every read phase survives into the phase byte ranges (a dropped phase is a phase
+    never staged), in plan order, and there is no standalone tail phase."""
+    manifest = readset_oracles.validate_plan(_manifest())
+    ranges = readset_oracles.phase_ranges(manifest)
+    read_names = [phase["name"] for phase in manifest["read_plan"]["phases"]]
+    assert [entry["name"] for entry in ranges] == read_names
+    assert ranges[-1]["end_bytes"] == manifest["read_plan"]["read_bytes"]
+    assert "tail" not in read_names
 
 
 # -- the capture timeline, through the real reporter ---------------------

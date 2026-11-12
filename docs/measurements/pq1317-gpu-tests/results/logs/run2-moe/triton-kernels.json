@@ -1,0 +1,11 @@
+{
+ "kernels": {
+  "_grouped_window_gemm_kernel": 22,
+  "_unpack_body_kernel": 2,
+  "_window_repack_kernel": 1,
+  "fused_moe_kernel": 2
+ },
+ "targets": [
+  "{\"arch\": 121, \"backend\": \"cuda\", \"warp_size\": 32}"
+ ]
+}

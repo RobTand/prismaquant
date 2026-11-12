@@ -1,0 +1,122 @@
+{
+  "invocation": "4e27bb2a-d6a2-435c-8242-9b1ac0db7f66",
+  "commit": "17b3332d1ca5a91d9b59734baecb66d493f603b7",
+  "terminal": "COMPLETE_INVOCATION_STATUS",
+  "verdict": "OK",
+  "artifacts": [
+    {
+      "name": "assertions-17b3332d1ca5a91d9b59734baecb66d493f603b7.json",
+      "sha256": "0660beace32142dfdeeae64bde5dd5a5939aa256332dedd44597b7d6afc56ebc",
+      "bytes": 787880,
+      "verified": true
+    },
+    {
+      "name": "assertions-17b3332d1ca5a91d9b59734baecb66d493f603b7.json.source.json",
+      "sha256": "e78ccc5d51eb835d77d9ef238619672e0d76b22ee5b111e1282e9af3e0737256",
+      "bytes": 28308,
+      "verified": true
+    },
+    {
+      "name": "assertions-613cf2f97458049a23a035ba0a1f6c882b56f9a3.json",
+      "sha256": "ece034b5d3208c56d054ba847afb56b5264ba74d733a93175994b3f18f015aee",
+      "bytes": 783013,
+      "verified": true
+    },
+    {
+      "name": "assertions-613cf2f97458049a23a035ba0a1f6c882b56f9a3.json.source.json",
+      "sha256": "adbd125159f9c4116ebf2bb1dfa4447b01d4b4736385b5af5321b034d6694ce2",
+      "bytes": 27397,
+      "verified": true
+    },
+    {
+      "name": "equivalence-17b3332d1ca5a91d9b59734baecb66d493f603b7.log.gz",
+      "sha256": "3aba424e7420b1fc5cb42644ad83f6a003d1863792553b892b6f51e5bd289d15",
+      "bytes": 220,
+      "verified": true
+    },
+    {
+      "name": "equivalence-17b3332d1ca5a91d9b59734baecb66d493f603b7.xml.gz",
+      "sha256": "cfebdabf6824f998ffe64d540cbbaefc8addb423fdf852cc0e2bac8bcbb8a79a",
+      "bytes": 1033,
+      "verified": true
+    },
+    {
+      "name": "equivalence-613cf2f97458049a23a035ba0a1f6c882b56f9a3.log.gz",
+      "sha256": "a61b3416df8d53afae876f880785d4f1c41d2fa92755e2a6ef553355a029a4c8",
+      "bytes": 227,
+      "verified": true
+    },
+    {
+      "name": "equivalence-613cf2f97458049a23a035ba0a1f6c882b56f9a3.xml.gz",
+      "sha256": "e08d357c6b5102dea4c9d0fe2e94dd7ff6ef7383692a746414201b483d799d5d",
+      "bytes": 1015,
+      "verified": true
+    },
+    {
+      "name": "equivalence-summary.json",
+      "sha256": "4efeef6a2a351502eeab08a669a064a30616efcb0a5b0376917620aba53522ae",
+      "bytes": 101,
+      "verified": true
+    },
+    {
+      "name": "main-budget-freeze.txt",
+      "sha256": "5e55a152f5e41fd6c5a0843aa2c5cee85c9d4e48aa90cd03b9c9fefaac4c189a",
+      "bytes": 1303,
+      "verified": true
+    },
+    {
+      "name": "main-budget-junit.xml.gz",
+      "sha256": "ac8eb1832032f02de00388015183ac0257e1630491ca591ba3b8d609959ac27a",
+      "bytes": 269,
+      "verified": true
+    },
+    {
+      "name": "main-budget-pytest.log.gz",
+      "sha256": "6491573f9cd4268144d5391f48e38b655b8200d967714a7d36e33b2008cbffcc",
+      "bytes": 297,
+      "verified": true
+    },
+    {
+      "name": "main-budget-timing.json",
+      "sha256": "0d0a57016d6205c1da3ecabfcbc4b61faacd1b58b58564fce21ca76ddb48a535",
+      "bytes": 1492443,
+      "verified": true
+    },
+    {
+      "name": "related.log.gz",
+      "sha256": "7b19e6cbc6aa6104532dba647b1a084cb7282c0d1d3eda37bb35974f81ce073e",
+      "bytes": 195,
+      "verified": true
+    },
+    {
+      "name": "related.xml.gz",
+      "sha256": "af5f54da80aca272e03c072d5f2be8ff4df3a9355fd3fd629c8c53ffbf1bd2e0",
+      "bytes": 2220,
+      "verified": true
+    },
+    {
+      "name": "stack-budget-freeze.txt",
+      "sha256": "5e55a152f5e41fd6c5a0843aa2c5cee85c9d4e48aa90cd03b9c9fefaac4c189a",
+      "bytes": 1303,
+      "verified": true
+    },
+    {
+      "name": "stack-budget-junit.xml.gz",
+      "sha256": "d5766a06efd13843822849b5883e846693da34ca1c2c4fee668b647cd52f385f",
+      "bytes": 270,
+      "verified": true
+    },
+    {
+      "name": "stack-budget-pytest.log.gz",
+      "sha256": "0a6f7fb183c1d272dacef9bde99e14335f6cd7d733ed299d2b7f7b5df3e300a9",
+      "bytes": 298,
+      "verified": true
+    },
+    {
+      "name": "stack-budget-timing.json",
+      "sha256": "c9bf26ed1a2ed4a1cd92ec43e7d9bc86fe9375c6f971dcfd4a2458fa5440a6eb",
+      "bytes": 1465483,
+      "verified": true
+    }
+  ]
+}

@@ -288,6 +288,63 @@ def test_completion_receipt_is_no_clobber(tmp_path):
         )
 
 
+@pytest.mark.parametrize("occupied", ("file", "symlink"))
+def test_completion_stage_refusal_preserves_unowned_entry(tmp_path, occupied):
+    import prismaquant.dsv4_campaign_completion as completion
+
+    destination = tmp_path / "completion.json"
+    stage = tmp_path / f".completion.json.{completion.os.getpid()}.tmp"
+    original = tmp_path / "other-writer"
+    original.write_bytes(b"other writer's incomplete receipt")
+    if occupied == "symlink":
+        stage.symlink_to(original.name)
+    else:
+        stage.write_bytes(original.read_bytes())
+    before = stage.lstat()
+
+    with pytest.raises(FileExistsError):
+        completion._atomic_publish_new(destination, b"new receipt")
+
+    assert stage.lstat() == before
+    assert stage.read_bytes() == original.read_bytes()
+    assert stage.is_symlink() == (occupied == "symlink")
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("outcome", ("success", "link_error", "concurrent_winner"))
+def test_completion_owned_stage_cleanup_preserves_publication(tmp_path, monkeypatch, outcome):
+    import prismaquant.dsv4_campaign_completion as completion
+
+    destination = tmp_path / "completion.json"
+    stage = tmp_path / f".completion.json.{completion.os.getpid()}.tmp"
+    failure = OSError("injected link failure")
+
+    def fail_link(source, target):
+        assert source == stage and target == destination
+        assert source.read_bytes() == b"new receipt"
+        if outcome == "concurrent_winner":
+            target.write_bytes(b"winner receipt")
+            raise FileExistsError("injected concurrent winner")
+        raise failure
+
+    if outcome != "success":
+        monkeypatch.setattr(completion.os, "link", fail_link)
+    if outcome == "success":
+        completion._atomic_publish_new(destination, b"new receipt")
+        assert destination.read_bytes() == b"new receipt"
+        assert destination.stat().st_mode & 0o777 == 0o600
+    elif outcome == "concurrent_winner":
+        with pytest.raises(CampaignCompletionError, match="appeared concurrently"):
+            completion._atomic_publish_new(destination, b"new receipt")
+        assert destination.read_bytes() == b"winner receipt"
+    else:
+        with pytest.raises(OSError) as observed:
+            completion._atomic_publish_new(destination, b"new receipt")
+        assert observed.value is failure
+        assert not destination.exists()
+    assert not stage.exists()
+
+
 def test_outer_waiter_refuses_dirty_release_tree(monkeypatch):
     repo = Path(waiter.__file__).resolve().parent.parent
     calls = []

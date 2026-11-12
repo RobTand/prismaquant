@@ -1,8 +1,8 @@
 """The Stage A loader barrier retries landed speculation before capture (#911).
 
-CPU/meta fixture, real StreamingContext, real layer-major visitor and Stage A
-phase observer, real strict reader and installed PB lease SDK. Only mover
-publication timing is controlled; no injected availability exception.
+CPU/meta fixture, real StreamingContext, layer-major visitor, phase observer
+and immutable native reader. One speculative scheduling failure is injected
+before the real read. Immutable inputs are complete before loading starts.
 """
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -19,13 +19,21 @@ from prismaquant.streaming_model import StreamingContext
 from prismaquant.staged_tier_policy import StagedRangeNotLanded
 from test_layer_major_boundary_capture import draw, owner
 from test_streamed_cost_checkpoints import _DenseTinyLM
-from test_strict_reader_tier_enforcement import (
-    _forget_state, _mid_flight_fixture, _pins_live, _stage_root,
-    _stage_whole, _whole_file, STAGED_RANGE_WAIT_ENV,
-)
+from staged_native_fixtures import bind, native_staged_state, publish_inputs
+from prismaquant.staged_tier_policy import staged_tier_policy_test_context
+from test_streamed_metadata_staged_reads import _deny_pool_opens
 
 
-def test_stage_a_settles_landed_speculation_inside_loading_phase(tmp_path, monkeypatch):
+pytestmark = pytest.mark.usefixtures('native_staged_state')
+
+
+@pytest.fixture
+def _native_policy(native_staged_state):
+    with staged_tier_policy_test_context('ssd'):
+        yield
+
+
+def test_stage_a_settles_landed_speculation_inside_loading_phase(tmp_path, monkeypatch, _native_policy):
     torch.manual_seed(85)
     model = _DenseTinyLM().eval()
     for parameter in model.parameters():
@@ -33,21 +41,15 @@ def test_stage_a_settles_landed_speculation_inside_loading_phase(tmp_path, monke
     expected = {index: layer.proj.weight.detach().clone()
                 for index, layer in enumerate(model.model.layers)}
 
-    paths, staged, weights = {}, {}, {}
+    paths, weights = {}, {}
     for index, layer in enumerate(model.model.layers):
         name = f'model.layers.{index}.proj.weight'
         path = tmp_path / f'layer-{index}.safetensors'
         save_file({name: layer.proj.weight.detach().clone()}, str(path))
         paths[index] = path
-        staged[index] = _stage_whole(_stage_root(tmp_path), path)
         weights[name] = str(path)
-    resolver, consumer, _digest, publish = _mid_flight_fixture(
-        tmp_path, monkeypatch, declared=[row for path in paths.values()
-                                       for row in _whole_file(path)])
-    publish({'0': (paths[0], staged[0])})
-    # A zero wait proves declared-but-unlanded refusal cheaply; campaign
-    # production wait/progress allowances are not changed by this fixture.
-    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, '0')
+    resolver = bind(monkeypatch, publish_inputs(tmp_path, paths.values()))
+    _deny_pool_opens(monkeypatch, tmp_path, names=[p.name for p in paths.values()])
     context = StreamingContext(
         model=model, base_model=model.model, layers=model.model.layers,
         layers_prefix='model.layers.', num_layers=2,
@@ -65,10 +67,14 @@ def test_stage_a_settles_landed_speculation_inside_loading_phase(tmp_path, monke
     phases, reads, failed = [], [], []
     active = {'phase': None}
     worker = context._prefetch_worker
+    injected = []
 
     def observed_worker(index):
         assert active['phase'][0] == 'source_loading'
         reads.append(index)
+        if index == 1 and not injected:
+            injected.append(index)
+            raise StagedRangeNotLanded(str(paths[index]), 0, paths[index].stat().st_size)
         return worker(index)
 
     monkeypatch.setattr(context, '_prefetch_worker', observed_worker)
@@ -80,7 +86,6 @@ def test_stage_a_settles_landed_speculation_inside_loading_phase(tmp_path, monke
             with pytest.raises(StagedRangeNotLanded):
                 future.result(timeout=30)
             failed.append(future)
-            publish({str(i): (paths[i], staged[i]) for i in paths})
         return future
 
     monkeypatch.setattr(context, 'schedule_prefetch', land_after_speculation)
@@ -123,7 +128,7 @@ def test_stage_a_settles_landed_speculation_inside_loading_phase(tmp_path, monke
         assert reads == [0, 1, 1]
         assert resolver.report()['bytes_from_pool'] == 0
         assert resolver.report()['bytes_from_stage'] > 0
-        assert _pins_live(tmp_path, consumer) == []
+        assert resolver._windows == 0
     finally:
         context.shutdown()
 

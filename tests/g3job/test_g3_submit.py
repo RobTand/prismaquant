@@ -1,0 +1,70 @@
+"""g3_submit submits and resumes native jobs over an explicit staged binding."""
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+import g3_submit
+
+BINDING = {"schema": "prismaquant.staged_launch.v1", "sha256": "a" * 64,
+           "read_contract_sha256": "b" * 64, "allowed_tiers": "ssd"}
+LAUNCH = ["--", "--arm", "a8_w", "--output-root"]
+
+
+def arguments(tmp_path, *extra):
+    binding = tmp_path / "binding.json"
+    binding.write_text(json.dumps({**BINDING, "path": str(tmp_path / "m.json"),
+                                  "read_contract_path": str(tmp_path / "c.json")}))
+    return ["--record-dir", str(tmp_path / "record"), "--staged-launch", str(binding),
+            "--read-plan", str(tmp_path / "plan.json"), "--read-plan-sha256", "c" * 64,
+            *extra, *LAUNCH, str(tmp_path / "out")]
+
+
+def test_a_cpu_request_submits_once_over_the_staged_binding(tmp_path, capsys, monkeypatch):
+    from prismaquant import flux_jobs
+    seen = []
+
+    def submit(argv, **kwargs):
+        seen.append((argv, kwargs))
+        return flux_jobs.FluxSubmission("fSAVED1", kwargs["record_dir"], "d" * 64)
+
+    monkeypatch.setattr(flux_jobs, "submit_job", submit)
+    assert g3_submit.main(arguments(tmp_path, "--cpus", "2", "--mem-gb", "8", "--walltime-s", "600")) == 0
+    assert capsys.readouterr().out.strip() == "fSAVED1"
+    (argv, kwargs), = seen
+    assert argv[:3] == ["/usr/bin/python3", "-s", "tools/g3job/g3_progress_launch.py"]
+    assert argv[3:] == ["--arm", "a8_w", "--output-root", str(tmp_path / "out"),
+                        "--read-plan", str(tmp_path / "plan.json"), "--read-plan-sha256", "c" * 64]
+    assert kwargs["staged_input"] == {**BINDING, "path": str(tmp_path / "m.json"),
+                                     "read_contract_path": str(tmp_path / "c.json")}
+    assert kwargs["record_dir"] == tmp_path / "record"
+    assert kwargs["resources"] == flux_jobs.FluxResources(cores=2, memory_gib=8, gpus=0, walltime_s=600)
+    assert kwargs["checkout"] == Path(g3_submit.ROOT)
+    assert "pbrun" not in json.dumps(argv)
+
+
+def test_an_unknown_submission_is_reported_and_never_retried(tmp_path, capsys, monkeypatch):
+    from prismaquant import flux_jobs
+    calls = []
+
+    def submit(*args, **kwargs):
+        calls.append(1)
+        raise flux_jobs.SubmissionUnknown("submission unknown in record; do not resubmit")
+
+    monkeypatch.setattr(flux_jobs, "submit_job", submit)
+    assert g3_submit.main(arguments(tmp_path)) == 3
+    assert calls == [1] and "do not resubmit" in capsys.readouterr().err
+
+
+def test_resume_reconnects_to_the_saved_id_and_never_submits(tmp_path, capsys, monkeypatch):
+    from prismaquant import flux_jobs
+    monkeypatch.setattr(flux_jobs, "submit_job", lambda *a, **k: pytest.fail("resume submitted"))
+    monkeypatch.setattr(flux_jobs, "load_submission", lambda record: SimpleNamespace(job_id="fSAVED1"))
+    assert g3_submit.main(["--record-dir", str(tmp_path / "record"), "--resume"]) == 0
+    assert capsys.readouterr().out.strip() == "fSAVED1"
+
+
+def test_a_submission_without_its_staged_binding_is_a_usage_error(tmp_path):
+    with pytest.raises(SystemExit):
+        g3_submit.main(["--record-dir", str(tmp_path / "record"), *LAUNCH, str(tmp_path / "out")])

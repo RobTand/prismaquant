@@ -189,7 +189,7 @@ def test_snapshot_builder_requires_authentication_before_source_io():
     from prismaquant.streaming_model import _build_streaming_context
     with pytest.raises(RuntimeError, match='authenticated'):
         _build_streaming_context('/does-not-exist', device=torch.device('cpu'),
-            dtype=torch.bfloat16, offload_folder='/unused', source_snapshot_only=True)
+            dtype=torch.bfloat16, offload_folder='/unused', layers_per_shard=1, source_snapshot_only=True)
 
 
 def test_native_packed_checkpoint_dependency_uses_the_complete_parent():

@@ -1,0 +1,18 @@
+{
+ "schema": "prismaquant.g01_container_controls.v1",
+ "source": {"repository": "tessera", "commit": "08a9743c6abcfb93c87e37ff6142c39d6d63f6b3",
+            "path": "tools/_suite_container.py",
+            "git_blob": "135f4ce0cdc17508695960651e7fc084ea339570",
+            "sha256": "7dbc5c33644a33d52ba131d5528083bd809b1ca3568c0db8150f5ef6c4e590b6",
+            "read_by": "builder 1b, source read only, never imported"},
+ "create_flags": ["--pull=never", "--cidfile", "--cgroups=disabled", "--network=none",
+                  "--env-host=false", "--unsetenv-all", "--cpuset-cpus", "--entrypoint", "--workdir"],
+ "user_flags_x86_64": ["--user=0:0"],
+ "user_flags_aarch64": ["--userns=keep-id", "--user=1000:1000"],
+ "cleanup_commands": [["stop", "--time", "2"], ["rm", "--force"], ["container", "exists"]],
+ "start_command": ["start", "--attach"],
+ "documented_deltas": {
+  "--unsetenv-all": "campaign rows rely on image-defined environment; every forwarded name is explicit and the ambient roster is finite",
+  "--read-only": "G01 CPU arm adds it; campaign rows write declared identity mounts and image-local caches, so the root filesystem stays writable"
+ }
+}

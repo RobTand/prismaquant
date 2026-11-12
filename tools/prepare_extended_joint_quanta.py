@@ -211,7 +211,6 @@ def check_stage_b_spec(spec_path, spec, policy):
 
     The dispatcher's own wrapper runs here, with the grace set a Stage B
     quantum row declares: the head grace and the 900 s chunk grace. The spec's
-    ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` must sit below the smaller one, its
     host/device envelope must equal the resource policy's limits, a
     declared cotangent workspace needs its identity mount, and a container
     cache pinned to the overlay needs an ``overlay_cache_reason`` (PQ #1129).
@@ -297,7 +296,7 @@ def prepare(args):
     check_stage_b_spec(args.spec, spec, policy)
     replay_mode = stage_b_replay_mode(spec)
     root = args.metadata_root.resolve()
-    # With --produced-output, inside the admitted PrismaBuild action, every
+    # With --produced-output, inside the admitted native launch, every
     # file below is a produced output committed at its origin (PQ #1070);
     # without it each is published directly, as before.
     publication = bind_preparation_publication(root, required=getattr(args, 'produced_output', False))
@@ -361,7 +360,7 @@ def prepare(args):
         # The generator files its groups under this action's publication.
         generator.append('--produced-output')
     generator += strict
-    if regenerate(generator) != 0:
+    if regenerate(generator, finalize_publication=False) != 0:
         raise ValueError('generator refused; no launch package published')
     launch = ['python3', 'tools/dispatch_joint_quanta.py', '--records', str(root/'records'),
         '--output-root', plan['output_root'], *proof_argv,
@@ -375,8 +374,10 @@ def prepare(args):
         'schema': 'prismaquant.extended_stage_b_launch.v1',
         'catalog_extension': extension, 'resource_policy': plan['stage_b_resource_policy'],
         'generator_argv': generator, 'coordinator_argv': launch,
-        'requires': 'reviewed source checkout; all GPU work through published PB dispatcher'}),
+        'requires': 'reviewed source checkout; all GPU work through native Flux admission'}),
         'launch recipe')])
+    if publication is not None:
+        publication.finalize(Path(publication.publication.producer['record_dir']) / 'produced-result.json')
     print(json.dumps({'status': 'metadata_ready', 'launch': str(root/launch_name),
                       'catalog_extension': extension,
                       'produced_batches': [] if publication is None else publication.batches}))
@@ -401,7 +402,7 @@ def main(argv=None):
                              'original plan')
     parser.add_argument('--campaign-identity-sha256', default=None)
     parser.add_argument('--data-manifest-sha256', default=None,
-                        help='read every declared input off the PrismaBuild stage, '
+                        help='read every declared input from the immutable stage, '
                              'digest-checked, and refuse rather than read the pool '
                              '(PQ #1092); the digest of the data manifest the action '
                              'was submitted with. Forwarded to the generator')
@@ -409,10 +410,12 @@ def main(argv=None):
                         help='with --data-manifest-sha256: the staged tiers a read '
                              'may come from (default ram,ssd)')
     parser.add_argument('--produced-output', action='store_true',
-                        help='commit every file as a PrismaBuild produced output of this '
+                        help='commit every file under the native produced-output declaration of this '
                              'admitted action (PQ #1070); the action must declare '
                              'the write-only template tools/stage_b_preparation_submission.py '
                              'writes, over --metadata-root')
+    from prismaquant.stage_a_produced_output import add_declaration_arguments
+    add_declaration_arguments(parser)
     args = parser.parse_args(argv)
     try:
         prepare(args)

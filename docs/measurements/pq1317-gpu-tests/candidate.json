@@ -1,0 +1,73 @@
+{
+ "schema": "pq1317.candidate.v2",
+ "tessera_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+ "tessera_repository": "https://github.com/RobTand/tessera.git",
+ "tessera_commit_facts": {
+  "subject": "Merge pull request #1033 from RobTand/exec/eng-attn-route",
+  "committed": "2026-10-07T21:26:44Z",
+  "parents": [
+   "df5ddbabf32c7bec2d9788fb405bd44393668e43",
+   "3b3cc7ac3d86e530c901a96468e2d96b41a7f0ff"
+  ],
+  "git_tree_oid": "3b304c6cab442c530cb864e532be2d147571c792",
+  "branch": "master",
+  "source": "gh api repos/RobTand/tessera/git/commits/fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
+ },
+ "tessera_master_at_check": {
+  "checked": "2026-10-09",
+  "head": "69aae020048458a168296ef534ad29938299cf83",
+  "candidate_is_ancestor": true,
+  "commits_after_candidate": 439,
+  "note": "Tessera master moved after the pin. This package qualifies the pinned candidate only."
+ },
+ "pin": {
+  "path": "prismaquant/tessera_runtime/tessera_serving_runtime_pin.json",
+  "schema": "prismaquant.tessera_serving_runtime_pin.v2",
+  "commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+  "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+  "file_sha256": "6acb2fd5bb5a742236e6b251eee8e6a185e0c1cdfe3790bf3f1ab0a16b2040df",
+  "introduced_by": "45019bc619 Pin Tessera fca4c6ce0 with contract v60 (#2426), 2026-10-07",
+  "origin_main_at_check": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+ },
+ "contract": {
+  "path_in_tree": "src/tessera/serving/runtime_contract.json",
+  "sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+  "bytes": 278035,
+  "contract_version": 60,
+  "schema": "tessera.runtime-contract.v1"
+ },
+ "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+ "runtime_contract_schema": "tessera.runtime-contract.v1",
+ "source_tree": {
+  "archive_tree_sha256": "57e1686665cfcc55b2ca6b985977b0a2aa5e9e6cfc0dd73d6a959652370b59c0",
+  "archive_files": 2005,
+  "digest_function": "tools/provision_tessera_pin.py:tree_digest",
+  "method": "A tarball of the commit from the GitHub API (sha256 69870e0df451a34010848e2b3292308fd03b568799d247fb0684b570eb40a521) was extracted into an empty directory and digested with tree_digest. The shared pin directory /mnt/shared/tessera-pins/<commit> digests to the same value and holds no extra or different file.",
+  "shared_pin_dir_equals_archive": true,
+  "checked": "2026-10-09"
+ },
+ "image_digest": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+ "image_note": "Image X as the issues and prismaquant#1317 name it: spark-vllm-nccl230 at sha256:f8dbe1a0... The runs report Torch 2.13.0+cu130 and vLLM 0.28.1rc1.dev397+gfd4a15126.d20260904 inside it.",
+ "target": {
+  "device": "NVIDIA GB10",
+  "capability": "sm_121"
+ },
+ "serving_native_extensions": [
+  {
+   "module_name_prefix": "tessera_window_gemv",
+   "filename_glob": "tessera_window_gemv*.so"
+  },
+  {
+   "module_name_prefix": "tessera_routed_fused_e4m3",
+   "filename_glob": "tessera_routed_fused_e4m3*.so"
+  },
+  {
+   "module_name_prefix": "tessera_routed_fused_mma_e4m3",
+   "filename_glob": "tessera_routed_fused_mma_e4m3*.so"
+  },
+  {
+   "module_name_prefix": "tessera_routed_fused_value",
+   "filename_glob": "tessera_routed_fused_value*.so"
+  }
+ ]
+}

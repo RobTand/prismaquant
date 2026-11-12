@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 import pytest
-from conftest import down_convert_lane_table, lane_cells_on_one_image
+from lane_table_fixtures import down_convert_lane_table, lane_cells_on_one_image
 
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_runtime_contract as contract

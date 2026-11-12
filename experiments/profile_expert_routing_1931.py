@@ -29,7 +29,7 @@ import urllib.request
 
 import torch
 from prismaquant import routed_experts, tessera_campaign as campaign
-from prismaquant.prismabuild_progress import report
+from prismaquant.joint_run_progress import log_progress
 
 
 def _write(path, value):
@@ -38,8 +38,11 @@ def _write(path, value):
         handle.write(json.dumps(value, indent=2, allow_nan=False) + '\n')
         handle.flush(); os.fsync(handle.fileno())
     os.replace(temporary,path)
-    from prismaquant.prismasnap_checkpoint import _fsync_dir
-    _fsync_dir(path.parent)
+    descriptor = os.open(path.parent, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _test_module(filename, name):
@@ -260,7 +263,7 @@ def _production_hook_phases(moe, inputs, binding, record, guard, output, seconds
             record['phases'].append(phase)
             _write(output/(phase['phase']+'.json'),phase)
             _write(output/'partial.json',record)
-            report('measure',1+len(record['phases']),unit='durable_control_phases')
+            log_progress(1+len(record['phases']),'measure',unit='durable_control_phases')
             # The iterator executes while the ordinary production hook scope
             # is installed. No-op forward avoids a second source-model draw.
             yield torch.zeros((1,1),dtype=torch.long)
@@ -469,13 +472,13 @@ def main():
                 record['sync_sites'] = {kind:{name:routing.sync_sites(fn) for name,fn in functions.items()}
                     for kind,functions in dict(derive=calls,check=checks).items()}
                 _write(args.out/'startup.json',record)
-                report('startup',1,unit='durable_control_phases')
+                log_progress(1,'startup',unit='durable_control_phases')
                 for kind,functions in dict(derive=calls,check=checks).items():
                     for i,arm in enumerate(('before','after','after','before')):
                         record['phases'].append(_phase(f'{kind}-{i}-{arm}', functions[arm],
                             args.seconds, guard, args.out))
                         _write(args.out/'partial.json',record)
-                        report('measure',1+len(record['phases']),unit='durable_control_phases')
+                        log_progress(1+len(record['phases']),'measure',unit='durable_control_phases')
                 torch.cuda.synchronize()
                 record['phase_boundary_before_host_cache_release'] = guard.snapshot()
                 torch._C._accelerator_emptyHostCache()
@@ -508,7 +511,7 @@ def main():
         record['gain_fraction'][kind] = 1 - statistics.fmean(after)/statistics.fmean(before)
     record['hotpath_screen_passed'] = all(record['gain_fraction'][k] >= .02 for k in ('hook','check'))
     _write(args.out/'result.json',record)
-    report('publish',2+len(record['phases']),unit='durable_control_phases')
+    log_progress(2+len(record['phases']),'publish',unit='durable_control_phases')
     print(json.dumps(dict(gain_fraction=record['gain_fraction'],hotpath_screen_passed=record['hotpath_screen_passed'])),flush=True)
 
 

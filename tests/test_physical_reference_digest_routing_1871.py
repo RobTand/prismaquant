@@ -206,7 +206,7 @@ def test_readback_template_refuses_before_prewrite_or_write(tmp_path):
             assert str(refused.value) == (
                 "produced files are never read back by the action that writes "
                 "them, so they commit at their origin, which needs a "
-                "write-only produced-output template (PrismaBuild #912)")
+                "write-only produced-output declaration")
             assert sorted(path.name for path in directory.iterdir()) == ["generation.json"]
         finally:
             owner._produced, owner._produced_plan = previous

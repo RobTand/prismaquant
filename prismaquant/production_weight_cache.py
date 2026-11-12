@@ -86,14 +86,16 @@ import torch
 import torch.nn as nn
 
 import prismaquant.native_render_codec as _native_render_codec
+from . import name_projection
 from .native_render_levers import NativeRenderLevers
 from .render_cache_paths import (
     cache_weight_filename, require_injective_cache_filenames,
 )
 from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
-from prismaquant.cost_stage_checkpoint import (
-    atomic_write_bytes, publish_new_bytes, unique_temp_suffix,
+from prismaquant.cost_stage_checkpoint import (  # noqa: F401 -- identity helpers re-exported
+    _IDENTITY_MISSING, atomic_write_bytes, first_identity_difference,
+    identity_value_for_error, publish_new_bytes, unique_temp_suffix,
 )
 from prismaquant.digests import (
     DIRECT_ASCII_INDENT2_LAX,
@@ -103,7 +105,7 @@ from prismaquant.digests import (
     canonical_json,
     text_sha256hex,
 )
-from prismaquant.file_identity import file_stat_signature
+from prismaquant.file_identity import file_stat_signature, _production_cache_identity_paths
 from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.render_score import (
     gate_render_candidate,
@@ -1060,14 +1062,6 @@ class ProductionWeightCache:
             path = str(Path(self.cache_dir) / path)
         return path
 
-    def _name_candidates(self, name: str) -> list[str]:
-        candidates = [name]
-        if name.endswith(".weight"):
-            candidates.append(name[:-len(".weight")])
-        if name.startswith("model.language_model."):
-            candidates.append("model." + name[len("model.language_model."):])
-        return list(dict.fromkeys(candidates))
-
     def _format_candidates(self, fmt: str) -> list[str]:
         raw = str(fmt)
         candidates = [raw, raw.upper()]
@@ -1088,7 +1082,7 @@ class ProductionWeightCache:
 
     def resolve_key(self, name: str, fmt: str) -> tuple[str, str] | None:
         """Resolve recipe aliases to the concrete stored cache key."""
-        for cand in self._name_candidates(name):
+        for cand in name_projection.production_cache_name_candidates(name):
             for fmt_cand in self._format_candidates(fmt):
                 key = (cand, fmt_cand)
                 if key in self.weights:
@@ -1585,7 +1579,10 @@ class ProductionWeightCache:
                 self._file_load_receipts.pop(key, None)
             raise RuntimeError("PWC file receipt has no matching resident tensor")
         receipt, signature, guard = entry[1]
+        # Native manifests authenticate the delivered bytes without a canonical
+        # stat. The resident tensor still has the same mutation/lifetime guard.
         if (self._file_tensor_guard(tensor) != guard or
+                signature is not None and
                 self._file_signature(Path(receipt["path"]).lstat()) != signature):
             self._file_load_receipts.pop(key, None)
             raise RuntimeError("PWC file receipt tensor or source file changed")
@@ -3369,64 +3366,6 @@ def _source_weight_value_identity(
     return shape, digest.hexdigest()
 
 
-_IDENTITY_MISSING = object()
-
-
-def first_identity_difference(
-    stored: object,
-    expected: object,
-    *,
-    path: str = "",
-) -> tuple[str, object, object] | None:
-    """Return the first canonical-identity difference, including its field.
-
-    Resume gates use this rather than a single aggregate digest so an operator
-    is told *which* value-bearing input changed.  Mapping keys are traversed in
-    sorted order and sequences in index order, making the reported field stable.
-    """
-    if isinstance(stored, Mapping) and isinstance(expected, Mapping):
-        keys = sorted(set(str(key) for key in stored) | set(
-            str(key) for key in expected
-        ))
-        stored_by_name = {str(key): value for key, value in stored.items()}
-        expected_by_name = {str(key): value for key, value in expected.items()}
-        for key in keys:
-            child = f"{path}.{key}" if path else key
-            left = stored_by_name.get(key, _IDENTITY_MISSING)
-            right = expected_by_name.get(key, _IDENTITY_MISSING)
-            if left is _IDENTITY_MISSING or right is _IDENTITY_MISSING:
-                return child, left, right
-            different = first_identity_difference(left, right, path=child)
-            if different is not None:
-                return different
-        return None
-    if (
-        isinstance(stored, Sequence)
-        and not isinstance(stored, (str, bytes, bytearray))
-        and isinstance(expected, Sequence)
-        and not isinstance(expected, (str, bytes, bytearray))
-    ):
-        if len(stored) != len(expected):
-            child = f"{path}.length" if path else "length"
-            return child, len(stored), len(expected)
-        for index, (left, right) in enumerate(zip(stored, expected)):
-            child = f"{path}[{index}]" if path else f"[{index}]"
-            different = first_identity_difference(left, right, path=child)
-            if different is not None:
-                return different
-        return None
-    if type(stored) is not type(expected) or stored != expected:
-        return path or "value", stored, expected
-    return None
-
-
-def identity_value_for_error(value: object) -> str:
-    if value is _IDENTITY_MISSING:
-        return "<missing>"
-    text = repr(value)
-    return text if len(text) <= 240 else text[:237] + "..."
-
-
 def _canonical_json_sha256(value: object, *, where: str) -> str:
     canonical = _canonical_json_value(value, where=where)
     encoded = DIRECT_UTF8_STRICT.encoded(canonical)
@@ -3485,21 +3424,6 @@ def _production_cache_source_root(package_root: Path | None) -> Path:
             f"production source identity cannot read package root {root}"
         )
     return root
-
-
-def _production_cache_identity_paths(root: Path) -> list[Path]:
-    """Every file the package-tree digest hashes, in digest order.
-
-    One home for the filter: the digest, and any diagnosis of a digest
-    mismatch, must agree on what counts as a package input (PQ #2218).
-    """
-    return sorted(
-        path
-        for path in root.rglob("*")
-        if path.is_file()
-        and "__pycache__" not in path.relative_to(root).parts
-        and path.suffix not in {".pyc", ".pyo"}
-    )
 
 
 def _production_cache_source_sha256(

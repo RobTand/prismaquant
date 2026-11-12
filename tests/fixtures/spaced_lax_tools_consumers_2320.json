@@ -1,21 +1,21 @@
 {
-  "test_container_wrapper_emits_transformed_spec_and_preserves_input#0": {"returned":"(['python3', '-m', 'tools.tessera_campaign_container', '--spec', '{\"container\": {\"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"env\": {\"LABEL\": \"\\\\u00e9\"}}', '--', 'payload', 'é'], 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')"},
+  "test_container_wrapper_emits_transformed_spec_and_preserves_input#0": {"returned":"['python3', '-m', 'tools.tessera_campaign_container', '--spec', '{\"container\": {\"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"env\": {\"LABEL\": \"\\\\u00e9\"}}', '--', 'payload', 'é']"},
   "test_campaign_row_embeds_the_resolved_container_spec#0": {
     "returned": "{'argv': ['python3', '-m', 'tools.tessera_campaign_container', '--spec', '{\"container\": {\"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"env\": {\"LABEL\": \"\\\\u00e9\"}}', '--', 'python3', '-u', '-m', 'prismaquant.tessera_campaign', '--value', 'é'], 'cwd': '/work', 'demand': {'gpu': 1, 'cpu': 2, 'mem_gb': 16}, 'env': {'LABEL': 'é'}, 'tags': ['gb10'], 'retry_safe': True, 'container_images': ['sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'], 'progress_phases': ['startup=3600', 'pricing=900', 'finalize=1800'], 'timeout_s': 30}"
   },
   "test_campaign_submission_preserves_inline_spec_bytes_and_envelope#0": {
     "returned": "['python3', '/published/pbrun.py', '--demand', 'gpu=1,mem_gb=16', '--cpus', '2', '--tag', 'gb10', '--priority', '0', '--container-image', 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '--data-manifest', '<tmp>/manifest.json', '--detach', '--', 'python3', '-m', 'tools.tessera_campaign_container', '--spec', '{\"container\": {\"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"env\": {\"LABEL\": \"\\\\u00e9\"}}', '--', 'payload', 'é']"
   },
-  "test_chain_spec_removes_spool_environment_and_mounts[no-spy]#0": {
+  "test_chain_spec_emits_the_base_spec_with_scratch_and_spy[no-spy]#0": {
     "returned": "0"
   },
-  "test_chain_spec_removes_spool_environment_and_mounts[no-spy]#1": {
+  "test_chain_spec_emits_the_base_spec_with_scratch_and_spy[no-spy]#1": {
     "returned": "'{\"container\": {\"mounts\": [{\"readonly\": true, \"source\": \"/model-\\\\u00e9\", \"target\": \"/model\"}, {\"readonly\": false, \"source\": \"/scratch-\\\\u00e9\", \"target\": \"/scratch-\\\\u00e9\"}]}, \"env\": {\"KEEP\": \"\\\\u00e9\"}}\\n'"
   },
-  "test_chain_spec_removes_spool_environment_and_mounts[spy]#0": {
+  "test_chain_spec_emits_the_base_spec_with_scratch_and_spy[spy]#0": {
     "returned": "0"
   },
-  "test_chain_spec_removes_spool_environment_and_mounts[spy]#1": {
+  "test_chain_spec_emits_the_base_spec_with_scratch_and_spy[spy]#1": {
     "returned": "'{\"container\": {\"mounts\": [{\"readonly\": true, \"source\": \"/model-\\\\u00e9\", \"target\": \"/model\"}, {\"readonly\": false, \"source\": \"/scratch-\\\\u00e9\", \"target\": \"/scratch-\\\\u00e9\"}, {\"readonly\": true, \"source\": \"/tools/spy-\\\\u00e9\", \"target\": \"/opt/bench/py-spy\"}]}, \"env\": {\"KEEP\": \"\\\\u00e9\"}}\\n'"
   },
   "test_checkpoint_parse_reads_identity_and_counts_interned_menu#0": {

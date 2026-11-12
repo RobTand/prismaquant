@@ -1,0 +1,44 @@
+{
+  "schema": "tessera.test_surface.v3",
+  "role": "population",
+  "worker_id": null,
+  "xdist_workers": 2,
+  "commit": null,
+  "source_identity": {
+    "schema": "tessera.suite_source.v1",
+    "snapshot_commit": null,
+    "sha256": null,
+    "verification": "unknown",
+    "excluded_metadata": [],
+    "reason": "the processes that executed this population did not agree on its source: gw0 did not establish a verified source identity; gw1 did not establish a verified source identity",
+    "measurement_span": {
+      "entry_sha256": null,
+      "entry_snapshot_commit": null,
+      "entry_verification": "unknown",
+      "agrees": false
+    },
+    "workers": {
+      "gw0": "did not establish a verified source identity",
+      "gw1": "did not establish a verified source identity"
+    }
+  },
+  "cuda": true,
+  "device": "torch 2.13.0+cu130, 1 CUDA device(s), device 0 = NVIDIA GB10",
+  "strict_cuda": true,
+  "counts": {
+    "passed": 65,
+    "failed": 0,
+    "error": 0,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0
+  },
+  "skip_reasons": {},
+  "cuda_surface": {
+    "executed": 46,
+    "measured_by": "tests during whose call torch's CUDA allocator recorded a new allocation",
+    "is_a_floor": true,
+    "box_artifact_skips": {}
+  },
+  "not_collected": []
+}

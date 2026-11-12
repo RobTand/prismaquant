@@ -1,48 +1,14 @@
 #!/usr/bin/env python3
-"""Publish the distributed joint-AURA cost campaign's PB rows (§5).
+"""Plan joint-AURA scientific rows and submit them through native Flux.
 
-A receipt-driven **submitter**, never a scheduler. It publishes rows PB
-owns; it never claims, places, retries, reorders, or steers work, holds no
-long-running state, and reads no capacity to choose a box. Placement is the
-static policy one shared GB10 class tag on every quantum row; PB's
-ready-order, loop counts, and tier tokens do the balancing. If the static
-policy starves a box, that is a PB placement capability gap to file, not a
-knob to turn here.
+Application planners retain source, read, plan, calibration and handoff bindings,
+full resource requirements and independent coverage/content gates. Native launch
+facts bind the same intent to saved IDs. Reconnect validates that intent and
+never blindly resubmits an ambiguous attempt. Native producer success is required
+before downstream reuse, including when scientific artifacts appeared early.
 
-Order (§5.2): stage A first; then quanta, published descending by layer id
-as stage A seals them. A quantum is publishable once a sealed stage-A proof
-covers its checkpoint -- the completed ``adjoint-capture.json`` or, before
-it lands, the checkpoint band of the quantum's checkpoint (PQ #993) -- and
-its record's slice validates against that proof (the per-record slice
-gate). A validated proof also stops stage-A republication. Re-run it (cron, a shell loop, or a
-human) as stage A completes; within a run every publishable row is
-published — the tool never waits on a worker.
-
-Idempotence: ``<output_root>/layer-quanta/campaign-state.json`` is the
-campaign's own machine-readable state (atomic append of submission events,
-never edits). A re-run publishes nothing already terminally executed; any
-other re-publication is a CAS attach to the same sealed action key, never a
-repartition.
-
-``--dry-run`` prints the submission plan with digests and submits nothing.
-Its stdout is that one JSON document; every log line goes to stderr.
-It writes nothing either: a band-serial row's handoff template and readset
-are derived and printed with their digests, never published (PQ #1200).
-
-Source-identity proof (PQ #1374, #1392): a GPU row refuses before hashing a
-byte when its checkpoint shards lack an identity proof.  Submit it as two
-rows -- a CPU-only identity quantum
-(``pbrun ... python -m prismaquant.tessera_joint_aura identity --model M
---out D``, which writes the ``prismaquant.source_checkpoint.digest_cache.v1``
-proof) and the GPU row behind it (``pbrun --after <identity action key>``),
-whose plan binds the proof as ``source_digest_cache``.  Stage A, Stage B and
-the sample-parallel workers share one mechanism
-(``tessera_joint_aura.source_identity_proof_kwargs``).
-
-Shapes owned elsewhere (fixtures here, never imports): the layer-quantum
-record (§3, built in parallel by the producer) and the stage-A receipt
-(§3.3, built in parallel by stage A). Real dispatch is the coordinator's
-call after the runtime's cutover check; this tool's tests use fixtures.
+Flux admits GPU rows with an explicit walltime. The container wrapper owns the
+image and device attachment. Dry-run prints neutral rows without submission.
 """
 from __future__ import annotations
 
@@ -50,9 +16,9 @@ import argparse
 import contextlib
 import gzip
 import json
+import os
 import math
 import re
-import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
@@ -63,7 +29,7 @@ if __package__:
         STAGE_B_SPILL_ENV,
         container_cache_environment,
         local_scratch_environment,
-        produced_spool_environment,
+        local_scratch_request_environment,
         stage_b_spill_environment,
     )
     from prismaquant.joint_layer_quanta import (
@@ -76,7 +42,7 @@ else:
         STAGE_B_SPILL_ENV,
         container_cache_environment,
         local_scratch_environment,
-        produced_spool_environment,
+        local_scratch_request_environment,
         stage_b_spill_environment,
     )
     from prismaquant.joint_layer_quanta import (
@@ -84,30 +50,16 @@ else:
     )
     from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 
-from prismaquant.campaign_container_spec import CONTAINER_IMAGE_FLAG, admission_image_reference
+from prismaquant.campaign_container_spec import admission_image_reference, refuse_retired_pb_env
 from prismaquant import joint_quantum_row as quantum_row
 
-PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
-PBWAIT = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbwait.py")
 
-#: §5.1 plan defaults. One shared GB10 class tag on every quantum row; PB
-#: owns which box claims.  PB's matcher requires *every* tag a row lists
-#: (``wanted.issubset(offer.tags)``), and each live Spark offers ``gb10``
-#: plus its own host name -- so the host pair this default used to carry
-#: (``sparky``, ``sparklina``) admitted neither box (#831).
+#: §5.1 plan defaults. One shared GB10 class tag on every quantum row.
+#: Tags retain conjunctive placement intent, subject to native admission.
+#: The historical host pair admitted neither Spark (#831).
 CONSUMER_TAGS = ("gb10",)
-SUBMISSION_PRIORITY = -5
+SUBMISSION_PRIORITY = 0
 ADJOINT_TAG = "sparky"
-DEV_MODE_ENV = "PRISMAQUANT_DEV_MODE=1"
-
-#: The sealed staged-tier declaration every campaign row carries as the
-#: payload ``--allowed-tiers`` flag (never ambient env: the container
-#: forwards no ambient action environment into the payload). RAM first,
-#: SSD explicitly emitted; pool/HDD bulk opens refuse under it. The value
-#: must equal ``prismaquant.staged_tier_policy.DEFAULT_ALLOWED_TIERS``
-#: and the joint entrypoints' parser default — pinned by
-#: ``tests/test_dispatch_joint_quanta.py``.
-STAGED_ALLOWED_TIERS = "ram,ssd"
 
 #: §5.2: each chunk's progress phase seals a 900-second stall allowance.
 #: An executable row's phases inherited it; its compute phases now derive
@@ -120,31 +72,11 @@ CHUNK_PROGRESS_GRACE_S = 900
 #: blanket grace a load phase takes when no floor applies (below).
 HEAD_PROGRESS_GRACE_S = 1800
 
-#: checkpoint-load and handoff-load commit no progress units: a read into a
-#: disposable scratch is not durable work (PB #480). Their grace is therefore
-#: the phase's whole time budget, derived per row as W + ceil(bytes / floor):
-#:
-#: * W is the spec's ``PRISMAQUANT_STAGED_RANGE_WAIT_S``, read with the
-#:   reader's own rules. The reader sets one deadline, start + W, for every
-#:   staged wait in the phase (joint_adjoint_checkpoints.load_adjoint_checkpoint
-#:   and joint_quantum_handoff.load_handoff_inputs). Without a PrismaBuild landing record the phase
-#:   waits at most W in total; with one (PB #989) its waits are declared and
-#:   exempt from the no-progress clock.
-#: * bytes is the phase's byte count in the row's staged read plan, and at
-#:   the floor rate or faster the transfer takes at most ceil(bytes / floor).
-#:
-#: So W + ceil(bytes / floor) bounds the phase's non-exempt time, and
-#: :func:`require_staged_wait_below_grace` holds for any phase with bytes.
+#: Immutable staged reads check coverage immediately. Load-phase planning
+#: retains only the measured transfer term, ceil(bytes / floor).
 LOAD_PHASE_GRACE_SCHEMA = "prismaquant.load_phase_grace.v1"
 LOAD_PHASE_FLOOR_SCHEMA = "prismaquant.load_phase_floor.v1"
-LOAD_PHASE_BOUND = (
-    "grace = W + ceil(bytes / floor). The reader sets one deadline, start + W, "
-    "for every staged wait in the phase "
-    "(prismaquant.joint_adjoint_checkpoints.load_adjoint_checkpoint; "
-    "prismaquant.joint_quantum_handoff.load_handoff_inputs), so without a PrismaBuild landing record the phase "
-    "waits at most W in total, and with one (PB #989) the waits are declared "
-    "and exempt. At or above the floor rate the transfer takes at most "
-    "ceil(bytes / floor).")
+LOAD_PHASE_BOUND = "grace = ceil(bytes / floor); immutable staged coverage never waits."
 #: Who counts as a reader of the link, for every stamp.
 LINK_READERS_SCOPE = (
     "this dispatch's own rows only: readers from other workloads on the same "
@@ -193,22 +125,9 @@ LOAD_PHASE_FLOOR_ONE_READER = {
 COMPUTE_CEILING_SCHEMA = "prismaquant.compute_unit_ceiling.v1"
 COMPUTE_PHASE_GRACE_SCHEMA = "prismaquant.compute_phase_grace.v1"
 COMPUTE_PHASE_BOUND = (
-    "grace = read + the sum of the compute terms. read is W + ceil(bytes / "
-    "floor) with W counted once. The one-deadline property of the load-phase "
-    "bound is shown only for load_adjoint_checkpoint and load_handoff_inputs; "
-    "in a compute phase the staged waits are covered because PrismaBuild "
-    "landing records (PB #989) declare them and exempt them from the "
-    "no-progress clock. More than one undeclared wait is not covered. A "
-    "measured compute term is ceil(units x unit_s), where unit_s is the "
-    "slowest window of at least 30 s of a pass on the same regime and device "
-    "class. An unmeasured term takes the blanket HEAD_PROGRESS_GRACE_S. The "
-    "pass commits no unit (nothing in it is durable), so the grace is its "
-    "whole time budget. The row's last declared phase adds a tail term: the "
-    "quantum's tail after its last window (the payload and teardown spans) "
-    "commits no unit and runs on that phase's clock after its last commit, "
-    "so the term is ceil(1 x unit_s), unit_s the slowest measured tail "
-    "(payload plus teardown wall_s) on the same regime and device class, or "
-    "the blanket.")
+    "grace = measured transfer term + the sum of the compute terms, including the tail in the last phase. "
+    "Immutable staged coverage checks do not wait. Native launch does not "
+    "enforce a progress-stall watchdog; these stamps describe the payload plan.")
 #: What each compute kind counts, and where an unmeasured kind's time will
 #: come from once a run records it.
 COMPUTE_KINDS = {
@@ -334,8 +253,8 @@ DATA_MANIFEST_SCHEMA_V1 = "prismaquant.prismabuild.data_manifest.v1"
 #: plan/prepared digests this dispatcher checks.
 DATA_MANIFEST_SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
 #: gzip magic, for the transparent manifest read below: detection is by
-#: header, never by suffix. The bound digest always covers the wire bytes
-#: pbrun ingests (compressed when compressed); parsing decompresses.
+#: header, never by suffix. The binding hashes stored wire bytes; parsing
+#: decompresses when needed.
 _GZIP_MAGIC = b"\x1f\x8b"
 _HEX64 = frozenset("0123456789abcdef")
 #: The campaign container spec every row seals unless ``--spec`` names
@@ -346,17 +265,8 @@ DEFAULT_SPEC_PATH = Path(
     "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913"
     "/allocation/joint-panel/spec-hostcap32-ram-dev-spool.json")
 SPEC_PATH = DEFAULT_SPEC_PATH
-#: The produced output spool's root and byte bound (``produced_output_spool``).
-PRODUCED_SPOOL_ROOT_ENV = "PRISMABUILD_PRODUCED_SPOOL_ROOT"
-PRODUCED_SPOOL_MAX_ENV = "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"
 #: Bytes per element of the execution dtypes a model config may name.
 _CONFIG_DTYPE_BYTES = {"bfloat16": 2, "float16": 2, "float32": 4}
-#: The host spool window opt-in (PB #910), which the Stage A row seals.
-PRODUCED_SPOOL_HOST_WINDOW_ENV = "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"
-#: Opt-ins PrismaBuild reads from the producer's sealed environment, each "0"
-#: or "1": the paced export (PB #891) and the host spool window (PB #910).
-PRODUCED_SPOOL_OPT_IN_ENV = ("PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT",
-                             PRODUCED_SPOOL_HOST_WINDOW_ENV)
 STATE_FILENAME = "campaign-state.json"
 
 #: Refusal exits: 3 = the stage-A precondition (or the campaign binding)
@@ -390,76 +300,13 @@ class ExecutableBindingUnsupported(DispatchRefused):
 
 
 class ProducedOutputDeclarationUnsupported(DispatchRefused):
-    """The client in front of this dispatcher cannot SEAL a template.
-
-    A produced-output owner is admitted only when the queue row carries the
-    template AND the sealed request carries the matching declaration,
-    validated against an input ingested under
-    ``core.PRODUCED_OUTPUT_TEMPLATE_INPUT_ID``. The deployed ``pbrun`` does
-    all of that behind ``--produced-output-template``; an older one does
-    none of it.
-
-    So this refusal is CONDITIONAL on the client in hand, never blanket:
-    threading a flag an older client ignores would submit a capture that
-    writes its boundary entries and then cannot read them, and adding a
-    payload flag instead would advertise a declaration that admitted
-    nothing.
-    """
+    """Authenticated native publication is unavailable until unit 4."""
 
 
-def _pbrun_seals_produced_output(pbrun: Path = PBRUN) -> bool:
-    """Does THIS client carry the produced-output template seal?
-
-    Asked of the client that will actually run, by its own help, rather
-    than assumed from a version or a date. A client that cannot be asked
-    is treated as not carrying it -- the fail-closed direction.
-    """
-
-    try:
-        probe = subprocess.run([sys.executable, str(pbrun), "--help"],
-                               capture_output=True, text=True, timeout=120)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return "--produced-output-template" in (probe.stdout or "")
-
-
-def build_stage_a_produced_template(*, output_prefix, tier: str,
-                                    artifact_max_bytes: int,
-                                    group_size: int,
-                                    max_entry_tensor_bytes: int,
-                                    concurrent_groups: int = 2) -> dict:
-    """The Stage A boundary template this submission would declare.
-
-    Derived, never constant: ``artifact_max_bytes`` is the EFFECTIVE
-    artifact budget this submission forwards (the plan's sealed
-    ``boundary_storage.max_artifact_bytes`` or the run's
-    ``--artifact-budget-bytes`` override, whichever the payload carries),
-    and it becomes the durable origin class maximum. The tier window is
-    derived from the ACTUAL maximum publication group, which is a
-    different quantity from the retained origin peak.
-
-    ``concurrent_groups`` is how many groups' worth of stage space the
-    window funds. Two is the synchronous loop. Every group past two is
-    read-ahead credit the bound owner spends on publishing at
-    write-complete, retaining a layer's input boundary across probe passes
-    and staging the next plane ahead (#887); the owner derives the count
-    back from the sealed ``window_gib``, so this is the one place it is
-    chosen.
-
-    The single implementation lives with the runtime binding
-    (``prismaquant.stage_a_produced_output.build_boundary_template``) so
-    the submitted declaration and the bound instance cannot drift into two
-    spellings of one contract.
-    """
-
+def build_stage_a_produced_template(**intent) -> dict:
+    """Build explicit immutable application publication intent."""
     from prismaquant.stage_a_produced_output import build_boundary_template
-
-    return build_boundary_template(
-        output_prefix=output_prefix, tier=tier,
-        artifact_max_bytes=int(artifact_max_bytes),
-        group_size=int(group_size),
-        max_entry_tensor_bytes=int(max_entry_tensor_bytes),
-        concurrent_groups=int(concurrent_groups))
+    return build_boundary_template(**intent)
 
 
 def _sha_bytes(data: bytes) -> str:
@@ -576,7 +423,7 @@ def _stage_manifest_binding(adjoint_manifest: Path, campaign: Mapping) -> dict:
     * ``phases``: the read-phase names in manifest order -- v1 from
       ``annotations.phases``, v2 from ``read_plan.phases`` (v2 forbids
       ``annotations.phases``; ``prismabuild.core`` holds that rule, this
-      reader mirrors it). pbrun's linear rule requires every read name
+      reader mirrors it). the submitter's linear rule requires every read name
       declared, in order; the caller declares exactly this list.
 
     Anything else -- an unreadable file, a non-manifest, a phase table that
@@ -747,7 +594,7 @@ def _executable_manifest_digest(record: dict, *, output_root: Path) -> str:
 
     Mirrors :func:`_slice_manifest_digest` for the post-capture executable
     readset: the row's ``executable_readset.manifest_sha256`` names the one
-    manifest pbrun stages for this row, and its wire bytes must hash to the
+    manifest the submitter stages for this row, and its wire bytes must hash to the
     sealed digest; a drifted or absent manifest refuses before anything
     publishes. Records without the block keep the legacy slice path.
     """
@@ -1026,7 +873,7 @@ def _executable_prepared_input(record: dict, *,
 def _slice_manifest_digest(record: dict, *, output_root: Path) -> str:
     """The sealed slice digest a quantum row actually binds.
 
-    The row's ``read_set.manifest_sha256`` names the slice manifest pbrun
+    The row's ``read_set.manifest_sha256`` names the slice manifest the submitter
     stages for this row -- not the campaign parent the record also carries.
     The file is read where the row reads it (relative manifests resolve
     against the output root, as the row builder does) and its wire bytes
@@ -1284,11 +1131,11 @@ def link_readers(*, rows: int, declared: int | None = None,
     return {"readers": readers, "readers_source": source, "floor": floor}
 
 
-def load_phase_grace(name: str, *, phase_bytes: int, staged_wait_s: float,
+def load_phase_grace(name: str, *, phase_bytes: int,
                      link: Mapping | None) -> dict:
     """The stall allowance of one load phase, with the stamp that explains it.
 
-    ``mode`` is ``derived`` (W + ceil(bytes / floor), see
+    ``mode`` is ``derived`` (ceil(bytes / floor), see
     :data:`LOAD_PHASE_BOUND`) when a floor measured at this dispatch's
     reader count applies, and ``blanket`` (:data:`HEAD_PROGRESS_GRACE_S`)
     otherwise, with the reason. No concurrency discount is ever applied.
@@ -1296,7 +1143,6 @@ def load_phase_grace(name: str, *, phase_bytes: int, staged_wait_s: float,
     counted = type(phase_bytes) is int and phase_bytes >= 0
     stamp = {"schema": LOAD_PHASE_GRACE_SCHEMA, "phase": str(name),
              "phase_bytes": phase_bytes if counted else None,
-             "staged_wait_s": staged_wait_s,
              "readers": None if link is None else link["readers"],
              "readers_source": None if link is None else link["readers_source"],
              "readers_scope": LINK_READERS_SCOPE}
@@ -1313,13 +1159,12 @@ def load_phase_grace(name: str, *, phase_bytes: int, staged_wait_s: float,
         return {**blanket,
                 "reason": "the read plan declares no byte count for this phase"}
     if phase_bytes == 0:
-        # W + 0 would equal the reader's own deadline, and the no-progress
-        # clock would race it (require_staged_wait_below_grace).
+        # An empty phase has no transfer measurement to bound.
         return {**blanket, "reason": "the read plan declares 0 bytes for this "
                                      "phase, so there is no transfer to bound"}
     transfer = -(-phase_bytes // int(floor["floor_bytes_per_s"]))
     return {**stamp, "mode": "derived",
-            "grace_s": math.ceil(staged_wait_s) + transfer,
+            "grace_s": transfer,
             "transfer_s": transfer,
             "floor_bytes_per_s": int(floor["floor_bytes_per_s"]),
             "floor_readers": int(floor["readers"]),
@@ -1404,7 +1249,7 @@ def _scope_misses(scope: Mapping, context: Mapping) -> list[str]:
 
 
 def compute_phase_grace(name: str, *, work: Sequence[Mapping], phase_bytes,
-                        staged_wait_s: float, link: Mapping | None,
+                        link: Mapping | None,
                         context: Mapping, ceilings: Mapping) -> dict:
     """The stall allowance of one compute phase, with the stamp that explains it.
 
@@ -1415,9 +1260,9 @@ def compute_phase_grace(name: str, *, work: Sequence[Mapping], phase_bytes,
     ``derived`` only when every term is. See :data:`COMPUTE_PHASE_BOUND`.
     """
     read = load_phase_grace(name, phase_bytes=phase_bytes,
-                            staged_wait_s=staged_wait_s, link=link)
+                            link=link)
     read_term = {key: read[key] for key in (
-        "mode", "grace_s", "phase_bytes", "staged_wait_s", "transfer_s",
+        "mode", "grace_s", "phase_bytes", "transfer_s",
         "floor_bytes_per_s", "readers", "reason") if key in read}
     terms = []
     for item in work:
@@ -1571,49 +1416,12 @@ def _read_plan_phase_bytes(wire: bytes, *, where: str) -> dict:
             if isinstance(phase, Mapping) and "name" in phase}
 
 
-def progress_grace_of(argv: Sequence[str]) -> list | None:
+def progress_grace_of(row: Mapping) -> list | None:
     """The grace stamps (load and compute phases) a row's payload carries, if any."""
+    argv = row["argv"]
     if quantum_row.PROGRESS_GRACE_FLAG not in argv:
         return None
     return json.loads(argv[list(argv).index(quantum_row.PROGRESS_GRACE_FLAG) + 1])
-
-
-def require_staged_wait_below_grace(spec: Mapping,
-                                    progress: Sequence[tuple[str, int]]) -> None:
-    """Refuse a row whose fallback staged-range wait could outlast a phase grace.
-
-    Where PrismaBuild publishes a landing record for the reader's ranges
-    (PB #989), the landing record bounds the wait, not this setting: the
-    reader waits while the range's mover is queued or copying, refuses at
-    once on a mover that ends without a receipt, and declares the wait so
-    PrismaBuild's ``no_progress`` rung does not count it. Only where no
-    landing record covers the range (an older PrismaBuild generation) does
-    the reader wait up to ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` and then
-    refuse with the staging error. PrismaBuild kills a phase that commits no
-    progress for its grace, so that fallback wait at or above the smallest
-    grace turns a staging stall into a no-progress kill, which names no
-    range (R10: 900 s wait against a 900 s chain grace). The wait is read
-    from the spec's ``env`` block with the reader's own rules, so the value
-    compared here is the value the reader will use; the admissible bound is
-    derived from the grace this row declares.
-    """
-    from prismaquant.residency_shard_reader import (
-        STAGED_RANGE_WAIT_ENV, staged_range_wait_from_env)
-
-    env = spec.get("env") or {}
-    try:
-        wait = staged_range_wait_from_env(env)
-    except ValueError as exc:
-        raise DispatchRefused(f"campaign spec: {exc}") from exc
-    name, grace = min(progress, key=lambda phase: phase[1])
-    if not wait < grace:
-        raise DispatchRefused(
-            f"campaign spec {STAGED_RANGE_WAIT_ENV}={wait:g} s is not below "
-            f"the {grace} s progress grace of phase {name!r}. This is the "
-            "reader's fallback wait, used where no PrismaBuild landing record "
-            "covers a range (the landing record bounds every other wait); at "
-            "or above the grace a staging stall would end as a no-progress "
-            f"kill instead of the reader's staging refusal. Set it below {grace} s")
 
 
 def _require_replay_regime(spec: dict, *, emits_handoff: bool = False,
@@ -1696,45 +1504,12 @@ def _slice_chain_batch_size(record: Mapping) -> int:
             f"{exc}") from exc
 
 
-def produced_spool_row_environment(spec: Mapping) -> dict:
-    """The produced output spool a row seals, from its sealed spec.
-
-    The spool's root and byte bound, and each opt-in the spec declares, go
-    into the pbrun request as ``--env``. PrismaBuild reads them from the
-    producer's sealed environment, and the campaign container refuses to
-    launch a spec that declares the spool without them
-    (``tessera_campaign_container.produced_spool_environment``). The
-    container check runs here too, so a spec whose root has no writable
-    identity bind refuses before anything is published. The root must be
-    local to the executing box: a root under ``/mnt/shared`` would write
-    every entry into the pool the spool exists to keep writes out of
-    (PQ #1012). Returns ``{}`` for a spec that declares no spool.
-    """
-
-    declared = spec.get("env", {})
+def refuse_retired_service_environment(spec: Mapping) -> None:
+    """Reject retired PB service settings; spool bounds live in the launch-bound declaration."""
     try:
-        forwarded = produced_spool_environment(spec, declared)
+        refuse_retired_pb_env(spec.get("env", {}))
     except RuntimeError as exc:
-        raise DispatchRefused(str(exc)) from exc
-    if not forwarded:
-        stray = [name for name in PRODUCED_SPOOL_OPT_IN_ENV if name in declared]
-        if stray:
-            raise DispatchRefused(
-                f"spec env declares {', '.join(stray)} without "
-                f"{PRODUCED_SPOOL_ROOT_ENV}")
-        return {}
-    root = PurePosixPath(forwarded[PRODUCED_SPOOL_ROOT_ENV])
-    if PurePosixPath("/mnt/shared") in root.parents:
-        raise DispatchRefused(
-            f"produced spool root {root} is under /mnt/shared; it must be a "
-            "directory on the executing box's own disk")
-    for name in PRODUCED_SPOOL_OPT_IN_ENV:
-        if name in declared:
-            if declared[name] not in ("0", "1"):
-                raise DispatchRefused(
-                    f"spec env {name} must be \"0\" or \"1\", not {declared[name]!r}")
-            forwarded[name] = declared[name]
-    return forwarded
+        raise DispatchRefused(f"retired service environment; use a launch-bound declaration: {exc}") from exc
 
 
 #: The spec field that admits a container cache pinned to the overlay, with
@@ -1784,7 +1559,7 @@ def _admit_overlay_caches(spec: dict, scratch: dict) -> None:
                 "declare a bounded local scratch root to bind them there")
         raise RuntimeError(
             f"the campaign spec pins container caches to the overlay: {named}; "
-            f"these writes are unbounded and invisible to PrismaBuild. {hint}, "
+            f"these writes have no declared filesystem capacity bound. {hint}, "
             f"or name why in the spec's {OVERLAY_CACHE_REASON_FIELD} "
             "(a non-empty string, sealed with the pins it admits)")
     spec[OVERLAY_CACHE_ADMISSION_FIELD] = {
@@ -1798,7 +1573,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                     spill_bound: Mapping | None = None,
                     spec: dict | None = None,
                     handoff_chain_batch_size: int | None = None,
-                    ) -> tuple[list[str], str | None]:
+                    ) -> list[str]:
     """Run a payload inside the qualified campaign container.
 
     The projection backend's runtime identity check (and the workload's own
@@ -1807,43 +1582,29 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     command in ``tools.tessera_campaign_container`` with the campaign spec;
     the distributed rows are the same workload and take the same wrapper.
 
-    Returns the wrapped payload and the image reference PrismaBuild must
-    admit the row against, derived from ONE parse of the spec -- the same
-    parse whose bytes are serialized into ``--spec``.  A second read could
-    race a spec rewrite and seal one image while declaring another; the
-    caller adds the reference to the pbrun envelope (``--container-image``
-    before the payload separator), never inside the payload.
+    The wrapped payload carries the validated container spec.
 
-    ``progress`` is the row's ``--progress-phase`` list; the same parse is
-    checked against it (:func:`require_staged_wait_below_grace`).
+    ``progress`` describes the payload phases; it is independent of staging.
 
-    ``spool_max_bytes`` replaces the spec's produced-spool byte bound (the
-    Stage A row's two-plane window, :func:`stage_a_spool_window_bytes`), in
-    the one parse that is sealed. It replaces only a well-formed bound: a
-    spec that declares a spool root with no bound, or with one that is not a
-    positive decimal byte count, is left as it is, so the row's spool check
-    (:func:`produced_spool_row_environment`) refuses it as before.
+    ``spool_max_bytes`` is an unused historical parameter. Spool bounds now
+    belong to the launch-bound produced declaration. The row's environment
+    check refuses retired produced-service settings.
 
-    Every row whose spec declares a produced spool with a well-formed bound
-    seals the host window opt-in (``PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1``,
-    PB #910), so PrismaBuild charges that window to the executing box's
-    ``spool_gb`` at placement and two rows cannot together overrun one box's
-    spool disk: the Stage A row since PQ #1120, every quantum row since
-    PQ #1364 (a Stage B row's spool had gone uncharged beside its charged
-    spill and cotangent scratch). A spec that declares the opt-in off
-    refuses: the window would go uncharged.
+    A declared produced spool must carry a valid application byte bound.
+    The existing spool and IO owners enforce that bound and reader lifetime.
+    Flux accounts for declared transient memory; persistent disk capacity
+    remains an independently admitted filesystem requirement.
 
     ``spill_bound`` is the row's sealed Stage B spill bound
     (:func:`_sealed_spill_bound`). Its reservation replaces the spec's
     ``PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES`` in the same one parse, so the
-    ceiling the quantum checks and the ``spool_gb`` PrismaBuild charges for
-    the pair (PB #911) are the sealed need, not a spec literal. A spec that
+    ceiling the quantum checks is the sealed need, not a spec literal. A spec that
     declares no spill, or launches another capture batch than the bound
     counts parts for, refuses.
 
     ``spec`` is the caller's one parse of ``spec_path``, when the caller had
     to read it first (the quantum row derives its load grace from the
-    spec's staged wait); the wrapper then seals that parse and reads nothing.
+    spec's resource policy); the wrapper seals that parse and reads nothing.
     """
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     spec = (json.loads(Path(spec_path).read_text()) if spec is None
@@ -1867,30 +1628,12 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                 f"spill bound counts parts for {spill_bound['capture_batch']}; "
                 "regenerate the executable readsets with the spec's regime")
         spec["env"] = {**env, STAGE_B_SPILL_ENV[1]: str(int(spill_bound["reservation_bytes"]))}
-    declared = spec.get("env", {}).get(PRODUCED_SPOOL_MAX_ENV)
-    if (PRODUCED_SPOOL_ROOT_ENV in spec.get("env", {})
-            and isinstance(declared, str) and declared.isascii()
-            and declared.isdigit() and int(declared) > 0):
-        window = spec["env"].get(PRODUCED_SPOOL_HOST_WINDOW_ENV)
-        if window == "0":
-            raise DispatchRefused(
-                f"spec {spec_path} declares {PRODUCED_SPOOL_HOST_WINDOW_ENV}=0, "
-                "but this row writes a produced spool on the executing box's "
-                "disk: its window must be charged to the box at placement "
-                "(PQ #1120, PQ #1364)")
-        spec["env"] = dict(spec["env"])
-        if spool_max_bytes is not None:
-            spec["env"][PRODUCED_SPOOL_MAX_ENV] = str(int(spool_max_bytes))
-        # A value other than "0" or "1" is left for the row's spool check,
-        # which refuses it.
-        if window in (None, "1"):
-            spec["env"][PRODUCED_SPOOL_HOST_WINDOW_ENV] = "1"
-    require_staged_wait_below_grace(spec, progress)
+    refuse_retired_service_environment(spec)
     # Validate a declared workspace before publishing the row. These same
-    # inlined spec bytes supply its outer PB environment below; no ambient
+    # inlined spec bytes supply its explicit row environment below; no ambient
     # coordinator environment or second spec read participates.
     try:
-        scratch = local_scratch_environment(spec, spec.get("env", {}))
+        scratch = local_scratch_request_environment(spec)
         _admit_overlay_caches(spec, scratch)
         _require_replay_regime(spec, emits_handoff="--emit-adjoint-handoff" in payload,
                                chain_batch_size=handoff_chain_batch_size)
@@ -1912,7 +1655,8 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     argv = ["python3", "-m", "tools.tessera_campaign_container",
             "--spec", DIRECT_ASCII_SPACED_LAX.text(spec),
             "--", *payload]
-    return argv, admission_image_reference(spec, portable_refusal=DispatchRefused)
+    admission_image_reference(spec, portable_refusal=DispatchRefused)
+    return argv
 
 #: A checkpoint's shard index, by model directory. A band publishes many rows
 #: of one model; the dispatcher reads the index once.
@@ -2071,63 +1815,20 @@ def _sealed_spill_bound(record: Mapping) -> Mapping | None:
     return bound
 
 
-def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
+def quantum_argv(record: dict, *, record_path: Path, output_root: Path, timeout_s: int,
                  priority: int = SUBMISSION_PRIORITY,
                  head_grace_s: int = HEAD_PROGRESS_GRACE_S,
                  consumer_tags: Sequence[str] = CONSUMER_TAGS,
                  band: Mapping | None = None,
                  link: Mapping | None = None,
-                 ceilings: Mapping | None = None) -> list[str]:
-    """The exact §5.2 submission argv for one quantum. Pinned by tests: a
-    drift here breaks placement.  ``consumer_tags`` is the effective §5.1
-    placement policy, a conjunction PB matches against a worker's offered
-    tags; PB alone decides which matching box claims the row.
+                 ceilings: Mapping | None = None) -> dict:
+    """Build a neutral quantum row with the exact sealed scientific bindings.
 
-    Every binding the consumer CLI requires is threaded from sealed sources:
-    plan/prepared paths+digests from the record's campaign block, the record
-    file's own wire digest as ``--quantum-sha256`` (the consumer checks raw
-    bytes first; the canonical body check inside stays), the record's
-    stage-A slice file and its digest as ``--adjoint-slice`` /
-    ``--adjoint-slice-sha256`` (PQ #993: a quantum reads its slice, never a
-    whole receipt), the verified staged-manifest
-    digest, and ``--resume``. Files are read where the row reads them; an
-    unreadable or drifting file refuses before anything publishes (#838).
-    A record carrying ``executable_readset`` without the sealed
-    static prepared-input contract (PQ #917) is refused with
-    :class:`ExecutableBindingUnsupported`: no PB produced-output binding
-    validator is accepted yet, so those executable rows are
-    sequencing/phase artifacts only, never production-runnable. A row
-    whose bound manifest carries the complete prepared-input contract --
-    the sealed prepared/production-pickle digest and roster, one render
-    phase per retained window sealed before its replays, and a bound
-    block that agrees with the manifest -- submits through the existing
-    ``pbrun --data-manifest`` path with manifest-order progress. Without
-    the block the row keeps the legacy slice manifest with head/chunk
-    progress. Tier flags, tags, demand and environment are identical in
-    all lanes.
-
-    ``band`` (PQ #996) is this row's band-serial role, from
-    :func:`fresh_band_role` or :func:`recorded_band_role`. Its
-    ``handoff`` makes the row a consumer: the payload gains
-    ``--adjoint-handoff`` and its digest, and the row stages the derived
-    band-serial readset, with its phases as the progress declaration,
-    instead of the sealed chain manifest. Its ``emit_template`` makes the
-    row a producer: the payload gains ``--emit-adjoint-handoff`` and the
-    envelope declares the handoff's produced-output template. Without a
-    band the argv is the chain-mode one, byte for byte.
-
-    ``link`` (:func:`link_readers`) is how many of this dispatch's rows can
-    share the link, and the floor measured at that count. It sets the
-    checkpoint-load or handoff-load grace (:func:`load_phase_grace`); the
-    stamps ride the payload as ``--progress-grace-derivation``. Without it
-    a load phase takes the blanket grace and says so.
-
-    ``ceilings`` (:func:`compute_ceilings`; default the built-in
-    :data:`COMPUTE_UNIT_CEILINGS`) sets each compute phase's grace, the read
-    term plus the pass's compute (:func:`compute_phase_grace`, PQ #1165).
-    Its stamps ride the same flag, with one basis entry
-    (:func:`compute_grace_basis`) that carries the bound and the ceilings.
-    """
+    Plan, prepared input, quantum wire, stage-A slice and read-manifest digests
+    reach the payload unchanged. Band roles retain their handoff and publication
+    intent. Progress phases retain measured read/compute derivations. The row
+    keeps all placement, memory, CPU, GPU, container and explicit environment
+    requirements. Native admission refuses unsupported contracts before launch."""
     quantum_id = record["quantum_id"]
     handoff = (band or {}).get("handoff")
     emit_template = (band or {}).get("emit_template")
@@ -2136,16 +1837,11 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         raise DispatchRefused(
             f"quantum {quantum_id!r} is not an executable row: band-serial "
             "quanta stage their reads through an executable readset")
-    if emit_template is not None and not _pbrun_seals_produced_output():
-        raise ProducedOutputDeclarationUnsupported(
-            f"quantum {quantum_id!r} must declare its handoff template "
-            f"({emit_template}), but the client at {PBRUN} carries no "
-            "--produced-output-template")
     resource_policy = None
     prepared_input = None
     executable = record.get("executable_readset")
     # At most one parse of the campaign spec, made when a load phase first
-    # needs its staged wait; _container_wrap then seals that same parse.
+    # needs its resource policy; _container_wrap seals that same parse.
     spec_parse: dict = {}
     grace_stamps: list[dict] = []
     compute_stamps: list[dict] = []
@@ -2156,17 +1852,9 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             spec_parse["spec"] = json.loads(Path(SPEC_PATH).read_text())
         return spec_parse["spec"]
 
-    def staged_wait():
-        from prismaquant.residency_shard_reader import staged_range_wait_from_env
-
-        try:
-            return staged_range_wait_from_env(parsed_spec().get("env") or {})
-        except ValueError as exc:
-            raise DispatchRefused(f"campaign spec: {exc}") from exc
-
     def load_grace(name, phase_bytes):
         stamp = load_phase_grace(name, phase_bytes=phase_bytes,
-                                 staged_wait_s=staged_wait(), link=link)
+                                 link=link)
         grace_stamps.append(stamp)
         return stamp["grace_s"]
 
@@ -2198,7 +1886,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             return None
         stamp = compute_phase_grace(
             name, work=work, phase_bytes=fact.get("bytes"),
-            staged_wait_s=staged_wait(), link=link,
+            link=link,
             context={**context, "entry_bytes": fact.get("entry_bytes")},
             ceilings=ceiling_docs)
         compute_stamps.append(stamp)
@@ -2246,7 +1934,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                 progress.append((name, CHUNK_PROGRESS_GRACE_S
                                  if grace is None else grace))
         else:
-            manifest, staged_sha256, progress = _executable_row_parts(
+            _, staged_sha256, progress = _executable_row_parts(
                 record, output_root=output_root, head_grace_s=head_grace_s,
                 load_grace=load_grace, compute_grace=compute_grace)
         if compute_stamps:
@@ -2254,9 +1942,6 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             grace_stamps.append(compute_grace_basis(
                 compute_stamps, ceilings=ceiling_docs, link=link))
     else:
-        manifest = Path(record["read_set"]["manifest_path"])
-        if not manifest.is_absolute():
-            manifest = output_root / manifest
         staged_sha256 = _slice_manifest_digest(record, output_root=output_root)
         progress = [("head", head_grace_s)]
         for chunk in record.get("chunks", []):
@@ -2350,8 +2035,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         quantum_row.QuantumFileBinding(str(campaign["prepared_path"]), prepared_sha256),
         quantum_row.QuantumFileBinding(str(slice_path), slice_sha256),
         staged_sha256, str(output_root))
-    wrapped, container_image = _container_wrap(
-        SPEC_PATH, inputs.argv(allowed_tiers=STAGED_ALLOWED_TIERS, band=band_arguments),
+    wrapped = _container_wrap(
+        SPEC_PATH, inputs.argv(band=band_arguments),
         progress=progress, resource_policy=resource_policy,
         spill_bound=_sealed_spill_bound(record), spec=spec_parse.get("spec"),
         handoff_chain_batch_size=handoff_chain_batch_size)
@@ -2360,91 +2045,32 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         resource_policy, environment=sealed_spec.get("env", {}),
         source_prefetch=plan["source_prefetch"] if resource_policy is not None else None,
         operator_prefetch=plan["execution"]["operator_windows"] if resource_policy is not None else None)
-    environment = [*local_scratch_environment(sealed_spec, sealed_spec.get("env", {})).items(),
-                   *produced_spool_row_environment(sealed_spec).items()]
-    return quantum_row.QuantumPBEnvelope(
-        str(manifest), progress, demand, consumer_tags, priority, wrapped, environment,
-        produced_output_template=emit_template, container_image=container_image).argv(
-            python=sys.executable, pbrun=str(PBRUN), container_image_flag=CONTAINER_IMAGE_FLAG,
-            dev_mode_assignment=DEV_MODE_ENV)
+    environment = list(local_scratch_request_environment(sealed_spec).items())
+    return quantum_row.QuantumRow(
+        demand, consumer_tags, priority, wrapped, timeout_s, environment,
+        produced_declaration=emit_template,
+        produced_declaration_wire=(band or {}).get("emit_template_wire")).row(
+            checkout=sealed_spec.get("cwd", str(Path(__file__).resolve().parents[1])))
 
 
 def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
-                 *, tag: str = ADJOINT_TAG,
+                 *, timeout_s: int, tag: str = ADJOINT_TAG,
                  prefetch_override: Path | None = None,
                  artifact_budget_bytes: int | str | None = None,
-                 produced_output_template: Path | None = None,
+                 produced_declaration: Path | None = None,
                  binding: dict | None = None,
-                 batch_range: Sequence[int] | None = None) -> list[str]:
-    """The §5.2 stage-A submission argv: the adjoint capture goes first and
-    alone; quanta wait on its receipt.  The campaign binding every record
-    carries names the plan and prepared inputs (with digests) the capture's
-    own CLI requires -- the records are the single source of those paths.
+                 batch_range: Sequence[int] | None = None) -> dict:
+    """Build a neutral Stage A row, preserving every scientific and resource input.
 
-    ``prefetch_override`` (optional, #819): names the explicit prefetch-
-    override document the capture reads through its own ``--prefetch-override``
-    flag -- the IO-side #809 seam for a frozen plan whose sealed budget
-    starves the capture.  The payload flag is the channel that crosses the
-    container boundary (``tessera_campaign_container`` forwards no ambient
-    action environment into the payload), so the dispatcher threads the
-    flag, not ``--env``.  Absent: the plan's sealed budget, argv unchanged.
-
-    ``artifact_budget_bytes`` (optional, #882): the explicit durable
-    artifact ceiling in bytes the capture reads through its own
-    ``--artifact-budget-bytes`` flag -- the durable-side #809 seam for a
-    frozen plan whose sealed ``max_artifact_bytes`` cannot hold the retained
-    peak. Strict positive-integer bytes; the payload flag is the channel
-    that crosses the container boundary, so the dispatcher threads the
-    flag, not ``--env``. Absent: the plan's sealed ceiling, argv unchanged.
-
-    The manifest binding is derived the same way: ``--data-manifest-sha256``
-    and ``--read-manifest-sha256`` ride the payload (a run that bound no
-    manifest digest gets no tier redirect), and the manifest's read phases
-    become the row's ``--progress-phase`` declarations in manifest order --
-    the worker refuses undeclared names, so the list is derived, never
-    hardcoded (#835).
-
-    ``produced_output_template`` (optional): the pre-submit produced-output
-    declaration that lets the capture read its OWN boundary entries back
-    through PrismaBuild. It rides as a pbrun ENVELOPE option, so the client
-    ingests it as a declared input, seals the matching declaration into the
-    request params and carries the template onto the queue row -- and
-    derives the bounded window's tier demand from the template rather than
-    from anything restated here. A client without that flag refuses
-    (:class:`ProducedOutputDeclarationUnsupported`) rather than submitting
-    a capture that could write its entries and not read them.
-
-    ``binding`` (optional) is a precomputed :func:`_stage_manifest_binding`
-    for this manifest and campaign, so a caller that also records the
-    digests does not read the manifest twice.
-
-    ``batch_range`` (optional, PQ #738) is a chain split quantum's
-    ``(start, stop)``: the row's spool window is two planes of those
-    batches (:func:`stage_a_spool_window_bytes`), not of the whole run.
-
-    The spec must declare the produced output spool (PQ #1012): its root on
-    the executing box's own disk and its byte bound, sealed into the request
-    with the opt-ins the spec declares (:func:`produced_spool_row_environment`).
-    A spec without it refuses, because the owner would otherwise write every
-    boundary entry synchronously into the pool. The row also seals the
-    storage box's RAM tier (``--residency-ram auto``), as the quantum row
-    does.
-    """
-    if produced_output_template is not None:
-        if not Path(produced_output_template).is_file():
+    The payload binds plan/prepared/read digests, resume, prefetch
+    and artifact-budget overrides. Demand and spool windows retain their existing
+    derivations, including per-range windows. The immutable produced declaration
+    is bound in argv and authenticated again by the native producer."""
+    if produced_declaration is not None:
+        if not Path(produced_declaration).is_file():
             raise DispatchRefused(
                 "stage-A produced-output template is not a file: "
-                f"{produced_output_template}")
-        if not _pbrun_seals_produced_output():
-            raise ProducedOutputDeclarationUnsupported(
-                "stage-A submission names a produced-output template "
-                f"({produced_output_template}), but the client at {PBRUN} "
-                "carries no --produced-output-template: the owner's request "
-                "must seal the declaration against an ingested "
-                "prismabuild.produced-output-template input and the queue "
-                "row must carry the template itself. Refusing rather than "
-                "submitting a capture that would write its boundary entries "
-                "and then be unable to read them")
+                f"{produced_declaration}")
     if binding is None:
         binding = _stage_manifest_binding(adjoint_manifest, campaign)
     if artifact_budget_bytes is not None:
@@ -2481,7 +2107,6 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         "--prepared-sha256", _argv_file_sha256(campaign, "prepared", where="stage-A"),
         "--data-manifest-sha256", binding["data_manifest_sha256"],
         "--read-manifest-sha256", binding["read_manifest_sha256"],
-        "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--output-root", str(_plan_output_root(campaign)),
         "--resume"]
     if prefetch_override is not None:
@@ -2490,45 +2115,20 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         payload += ["--artifact-budget-bytes", str(artifact_budget_bytes)]
     progress = [(phase, HEAD_PROGRESS_GRACE_S if phase == "head"
                  else CHUNK_PROGRESS_GRACE_S) for phase in binding["phases"]]
-    # The spool's window is the plan's two cotangent planes, not the spec's
-    # bound (PQ #1110): the chain reads its own planes back from it. The
-    # wrapper also seals the host window opt-in, so placement charges that
-    # window to the box (PQ #1120).
-    wrapped, container_image = _container_wrap(
+    # The native produced declaration owns spool bounds. Retired produced
+    # service environment settings are refused before publishing this row.
+    wrapped = _container_wrap(
         SPEC_PATH, payload, progress=progress,
         spool_max_bytes=stage_a_spool_window_bytes(campaign, batch_range))
     sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
-    spool = produced_spool_row_environment(sealed_spec)
-    if not spool:
-        raise DispatchRefused(
-            f"stage-A spec {SPEC_PATH} declares no {PRODUCED_SPOOL_ROOT_ENV}: "
-            "without the produced output spool every boundary entry is "
-            "written synchronously into the pool (PQ #1012)")
-    # The ram leg promotes landed stage ranges into the RAM tier the storage
-    # box announces, as the Stage B row does (#640, PQ #1012).
-    argv = [sys.executable, str(PBRUN),
-            "--tag", tag,
-            "--data-manifest", str(adjoint_manifest),
-            "--residency", "stage", "--residency-ram", "auto"]
-    for phase, grace in progress:
-        argv += ["--progress-phase", f"{phase}={grace}"]
-    argv += ["--demand", f"gpu=1,mem_gb={stage_a_memory_gib(campaign)}",
-             "--gpu-memory-gb", "80", "--cpus", "10"]
-    if produced_output_template is not None:
-        # An ENVELOPE option, before the payload separator, like every
-        # other pbrun flag. Not a payload flag: the seal has to happen on
-        # the request and the queue row, which is the submitting client's
-        # job, and the tier demand for the bounded window is derived by
-        # pbrun from the template itself -- so nothing here adds it again.
-        argv += ["--produced-output-template", str(produced_output_template)]
-    if container_image is not None:
-        # Before the separator, like every other pbrun option; see the
-        # quantum row above and RobTand/prismabuild#714.
-        argv += [CONTAINER_IMAGE_FLAG, container_image]
-    for name, value in spool.items():
-        argv += ["--env", f"{name}={value}"]
-    argv += ["--env", DEV_MODE_ENV, "--detach", "--", *wrapped]
-    return argv
+    refuse_retired_service_environment(sealed_spec)
+    if produced_declaration is None:
+        raise DispatchRefused("Stage A requires an explicit launch-bound produced declaration")
+    return quantum_row.QuantumRow(
+        quantum_row.QuantumRowDemand(str(stage_a_memory_gib(campaign)), 10),
+        [tag], 0, wrapped, timeout_s,
+        produced_declaration=str(produced_declaration)).row(
+            checkout=sealed_spec.get("cwd", str(Path(__file__).resolve().parents[1])))
 
 
 def check_stage_a_proofs(proofs: Sequence[tuple[Path, dict]],
@@ -2643,9 +2243,9 @@ def load_stage_a_proofs(receipt_path: Path | None,
 #
 # Inside a checkpoint band, quantum L-1 can take quantum L's final input
 # cotangent (its handoff) instead of rebuilding the chain from the band's
-# checkpoint. PrismaBuild has no dependency between actions, so the edge is
-# expressed here, as publication order: L carries a declared produced output
-# (its handoff), and L-1 is published only once L has executed, reported
+# checkpoint. Native afterok edges bind saved producer IDs. Independently,
+# L carries a declared produced output (its handoff), and L-1 is published
+# only once L has succeeded, reported
 # complete and published a handoff that binds L-1. L-1 then declares the
 # handoff's bytes as ordinary staged inputs of its own data manifest. Nothing
 # here places, schedules or moves bytes; bands stay independent.
@@ -2779,7 +2379,6 @@ def handoff_template(record: Mapping, *, plan: Mapping,
     from prismaquant.streamed_boundary_artifacts import normalize_boundary_storage
     from prismaquant.joint_campaign_ledger import quantum_id as layer_quantum_id
     from prismaquant.joint_quantum_handoff import handoff_root
-    from prismaquant.stage_a_produced_output import build_boundary_template
 
     quantum_id = record["quantum_id"]
     storage = plan.get("execution", {}).get("boundary_storage")
@@ -2796,12 +2395,12 @@ def handoff_template(record: Mapping, *, plan: Mapping,
                    adjoint_slice["checkpoint"]["activation_entries"]]
 
         def build(name: str) -> dict:
-            return build_boundary_template(
-                output_prefix=policy["directory"], tier=str(tier),
+            return build_stage_a_produced_template(
+                output_prefix=policy["directory"],
                 artifact_max_bytes=int(policy["max_artifact_bytes"]),
                 group_size=int(policy["prefetch_batches"]),
                 max_entry_tensor_bytes=max(tensors), template_id=name,
-                write_only=True, export_rate_family=HANDOFF_EXPORT_RATE_FAMILY)
+                write_only=True)
 
         template = build(HANDOFF_TEMPLATE_ID_PREFIX + str(quantum_id)
                          if template_id is None else template_id)
@@ -2961,6 +2560,8 @@ def fresh_band_role(record: Mapping, *, roles: Mapping, by_id: Mapping,
             output_root=output_root)
         if publish:
             _publish_control_bytes(path, payload, what="handoff template")
+        else:
+            band["emit_template_wire"] = payload
         band["emit_template"] = path
         band["emit_template_sha256"] = _sha_bytes(payload)
         band["emit_template_document"] = json.loads(payload)
@@ -3006,83 +2607,50 @@ def _cotangent_source(band: Mapping | None) -> dict:
 
 
 class Gateway:
-    """How submissions reach PB. The default shells to the published
-    client; tests inject :class:`FakeGateway`."""
+    """Native application rows and saved execution facts; no scientific authority."""
 
-    def submit(self, argv: list[str]) -> dict:
-        proc = subprocess.run(argv, capture_output=True, text=True)
-        if proc.returncode != 0:
-            raise RuntimeError(f"pbrun exited {proc.returncode}: {proc.stderr[-2000:]}")
+    def submit(self, row: dict, *, state_dir: Path, afterok=()) -> dict:
+        from dataclasses import asdict
+        from prismaquant.tessera_campaign_rows import submit_rows
+        submission, = submit_rows([row], state_dir, afterok=afterok)
+        return {**asdict(submission), "record_dir": str(submission.record_dir)}
+
+    def status(self, saved: Mapping) -> dict:
+        from prismaquant.flux_jobs import load_submission
+        from prismaquant.tessera_campaign_rows import collect_rows
         try:
-            answer = json.loads(proc.stdout.strip().splitlines()[-1])
-        except (ValueError, IndexError) as exc:
-            raise RuntimeError(f"pbrun printed no JSON line: {proc.stdout[-500:]}") from exc
-        return {"action_key": answer["action_key"], "status": answer.get("status", "")}
+            submission = load_submission(Path(saved["record_dir"]))
+            if (submission.job_id != saved["job_id"] or
+                    submission.launch_sha256 != saved["launch_sha256"]):
+                raise ValueError("saved native identity differs")
+            result, = collect_rows(submission.record_dir.parents[1], wait=False)
+            return result
+        except (OSError, ValueError, KeyError, RuntimeError) as exc:
+            return {"status": "unknown", "query_error": str(exc), "payload_exit": None}
 
-    def read_verified_result(self, selector):
-        """The exact generation's verified result, through the pinned public SDK.
+    def is_terminal_executed(self, saved: Mapping) -> bool:
+        result = self.status(saved)
+        return result["status"] == "succeeded" and result["payload_exit"] == 0 and not result["query_error"]
 
-        ``selector`` is a :class:`PilotSelector`; a missing SDK surface or a
-        refused/absent/ambiguous result raises :class:`PilotRefused`, never a
-        fallback to the caller's counters or a live path (PQ #1293).
-        """
+    def read_verified_result(self, selector) -> dict:
+        """Authenticate the selected native producer and its publication; caller counters never authorize."""
+        from prismaquant import native_results
         from prismaquant.joint_dispatch_pilot import PilotRefused
-        from prismaquant.staged_lease import client_sdk
-
+        limit = selector.max_result_bytes
         try:
-            sdk = client_sdk()
-        except Exception as exc:  # LeaseRefused subclass; a named availability gap
-            raise PilotRefused(
-                f"the PB verified-result reader is unavailable: {exc}") from exc
-        if not hasattr(sdk, "read_verified_action_result") or not hasattr(
-                sdk, "bind_standard_capture_command"):
-            raise PilotRefused(
-                "the pinned PrismaBuild SDK has no verified-action-result "
-                "reader (SDK_VERSION=%r): legacy unbound results refuse"
-                % getattr(sdk, "SDK_VERSION", None))
-        try:
-            queue = sdk.PoolQueue()
-            return sdk.read_verified_action_result(
-                queue, selector.action_key,
-                published_unix=selector.published_unix, attempt=selector.attempt,
-                max_result_bytes=selector.max_result_bytes,
-                max_evidence_bytes=selector.max_evidence_bytes)
-        except Exception as exc:  # ActionResultError and friends
-            raise PilotRefused(
-                f"pilot PB result {selector.action_key[:12]} "
-                f"pub={selector.published_unix} attempt={selector.attempt} "
-                f"refused: {exc}") from exc
-
-    def bind_capture_command(self, request):
-        from prismaquant.joint_dispatch_pilot import PilotRefused
-        from prismaquant.staged_lease import client_sdk
-
-        try:
-            client_sdk().bind_standard_capture_command(request)
-        except Exception as exc:
-            raise PilotRefused(
-                f"pilot sealed request is not the standard capture recipe: {exc}") from exc
-
-    def is_terminal_executed(self, action_key: str) -> bool:
-        """Whether PB has finished this action's work, as ``pbwait`` says.
-
-        ``pbwait`` prints a row table and returns its verdict as the exit
-        code, 0 when the work is done; it prints no JSON (PQ #1197). Both
-        must say done: the verdict, and this key's own row, ``executed`` or
-        ``cache_hit`` (a memoized result is the same result). The caller
-        then reads the action's outputs and checks them itself.
-        """
-        from prismaquant.pbwait_table import DONE_STATUSES, parse_pbwait_table
-
-        proc = subprocess.run(
-            [sys.executable, str(PBWAIT), "--wait-s", "0", action_key],
-            capture_output=True, text=True)
-        if proc.returncode != 0:
-            return False
-        # The table names a key by its 12-character prefix.
-        rows = [row for row in parse_pbwait_table(proc.stdout)
-                if len(row.get("key", "")) >= 12 and action_key.startswith(row["key"])]
-        return len(rows) == 1 and rows[0].get("status") in DONE_STATUSES
+            selected = native_results.read_selected_result(
+                selector.selection, artifact_limits={"completion": limit, "counters": limit})
+        except (native_results.ProducerFailed, native_results.ResultUnavailable, ValueError, OSError) as exc:
+            raise PilotRefused(f"native pilot result refused: {exc}") from exc
+        return {"schema": NATIVE_PILOT_RESULT_SCHEMA, "job_id": selected.execution.job_id,
+                "launch_sha256": selector.selection["launch_sha256"],
+                "publication_sha256": selector.selection["publication"]["sha256"],
+                "argv": list(selected.launch["argv"]), "source": dict(selected.launch["source"]),
+                "resources": dict(selected.launch["resources"]),
+                "execution": {"status": selected.execution.status,
+                              "payload_exit": selected.execution.payload_exit},
+                "payload": selected.artifact_payloads["completion"],
+                "counters_bytes": selected.artifact_payloads["counters"]}
 
 
 class FakeGateway(Gateway):
@@ -3093,45 +2661,87 @@ class FakeGateway(Gateway):
         self._terminal: set[str] = set()
         self._auto_terminal = terminal
         self._counter = 0
+        self._saved: dict[str, dict] = {}
         self.results: dict[tuple, dict] = {}
         self.result_reads: list = []
 
     def publish_result(self, selector, result: dict) -> None:
         """Make ``selector`` answerable with a canned verified result."""
-        self.results[(selector.action_key, selector.published_unix,
-                      selector.attempt)] = result
+        self.results[selector.job_number] = result
 
     def read_verified_result(self, selector) -> dict:
         from prismaquant.joint_dispatch_pilot import PilotRefused
 
         self.result_reads.append(selector)
-        key = (selector.action_key, selector.published_unix, selector.attempt)
-        if key not in self.results:
+        if selector.job_number not in self.results:
             raise PilotRefused(
                 f"no verified result published for {selector!r}")
-        return self.results[key]
+        return self.results[selector.job_number]
 
-    def bind_capture_command(self, request):
-        """The SDK proof boundary is a test double in this fake gateway."""
+    def mark_terminal(self, job_id: str) -> None:
+        self._terminal.add(job_id)
 
-    def mark_terminal(self, action_key: str) -> None:
-        self._terminal.add(action_key)
-
-    def submit(self, argv: list[str]) -> dict:
+    def submit(self, row: dict, *, state_dir: Path, afterok=()) -> dict:
+        # A fixture still models once-only identical-intent resume.
+        if str(state_dir) in self._saved:
+            entry = self._saved[str(state_dir)]
+            if entry["row"] != row:
+                raise ValueError("fake saved intent differs")
+            if entry["job_id"] not in self._terminal:
+                self.submitted.append(entry)
+            return entry["submission"]
         self._counter += 1
-        key = f"fake-action-key-{self._counter:04d}"
-        kind = ("stage-a" if any("joint_adjoint_capture" in word for word in argv)
-                else "quantum")
-        entry: dict = {"kind": kind, "argv": argv, "action_key": key}
+        job_id = f"fake-flux-job-{self._counter:04d}"
+        argv = row["argv"]
+        kind = "stage-a" if "prismaquant.joint_adjoint_capture" in argv else "quantum"
+        from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+        saved = {"job_id": job_id, "record_dir": str(state_dir / "rows" / "00000"),
+                 "launch_sha256": _sha_bytes(DIRECT_ASCII_SPACED_LAX.encoded(row))}
+        entry = {"kind": kind, "row": row, "job_id": job_id, "submission": saved,
+                 "state_dir": str(state_dir), "afterok": list(afterok)}
         if kind == "quantum":
-            entry["quantum_id"] = argv[argv.index("--quantum") + 1].split("/")[-1].replace(".json", "")
+            entry["quantum_id"] = Path(argv[argv.index("--quantum") + 1]).stem
         self.submitted.append(entry)
+        self._saved[str(state_dir)] = entry
         if self._auto_terminal:
-            self._terminal.add(key)
-        return {"action_key": key, "status": "submitted"}
+            self._terminal.add(job_id)
+        return saved
 
-    def is_terminal_executed(self, action_key: str) -> bool:
-        return action_key in self._terminal
+    def status(self, saved: Mapping) -> dict:
+        done = saved["job_id"] in self._terminal
+        return {"status": "succeeded" if done else "running", "query_error": None,
+                "payload_exit": 0 if done else None}
+
+
+def recover_events(events, state_path: Path) -> list[dict]:
+    from dataclasses import asdict
+    from prismaquant.flux_jobs import load_submission, validate_launch
+    from prismaquant.tessera_campaign_rows import _row_resources
+    recovered = list(events)
+    completed = {event["submission"]["record_dir"] for event in events if "submission" in event}
+    for intent in events:
+        if intent["event"] != "native-intent":
+            continue
+        state = Path(intent["state_dir"])
+        record = state / "rows" / "00000"
+        if str(record) in completed or not state.exists():
+            continue
+        # Any partial/unknown native record fails closed in load_submission.
+        submission = load_submission(record)
+        manifest = json.loads((state / "manifest.json").read_bytes())
+        if manifest["rows"] != [intent["row"]]:
+            raise DispatchRefused("recovered native intent differs from the scientific row")
+        if str(Path(intent["row"]["cwd"]).resolve()) != manifest["sources"][0]["checkout"]:
+            raise DispatchRefused("recovered row source differs from saved source")
+        validate_launch(submission, argv=intent["row"]["argv"], source=manifest["sources"][0],
+                        resources=_row_resources(intent["row"]),
+                        afterok=[p["job_id"] for p in manifest["producers"]], environment=intent["row"].get("env"))
+        event = {**intent["metadata"], "schema": "prismaquant.joint.native-event.v1",
+                 "submission": {**asdict(submission), "record_dir": str(submission.record_dir)}}
+        _append_state(state_path, event)
+        recovered.append(event)
+        completed.add(str(record))
+    return recovered
 
 
 def _read_state(state_path: Path) -> list[dict]:
@@ -3141,16 +2751,26 @@ def _read_state(state_path: Path) -> list[dict]:
     for line in state_path.read_text().splitlines():
         line = line.strip()
         if line:
-            events.append(json.loads(line))
+            event = json.loads(line)
+            if event.get("schema") != "prismaquant.joint.native-event.v1" or "action_key" in event:
+                raise DispatchRefused("old PB/invalid dispatch state cannot resume as Flux; use a fresh state path")
+            events.append(event)
     return events
 
 
 def _append_state(state_path: Path, event: dict) -> None:
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    line = (DIRECT_ASCII_SPACED_LAX.text({**event, "unix": time.time()}) + "\n").encode()
+    line = (DIRECT_ASCII_SPACED_LAX.text({**event, "schema": "prismaquant.joint.native-event.v1", "unix": time.time()}) + "\n").encode()
     with open(state_path, "ab") as handle:
         handle.write(line)
+        handle.flush()
+        os.fsync(handle.fileno())
+    descriptor = os.open(state_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _plan_block(plan_path: Path | None) -> dict:
@@ -3165,8 +2785,8 @@ def plan_consumer_tags(block: Mapping) -> tuple[str, ...]:
     """The effective §5.1 placement tags for the quantum rows.
 
     The plan's ``distributed_campaign.consumer_tags`` when it declares them,
-    else the shared GB10 class tag.  PB requires *every* listed tag
-    (``wanted.issubset(offer.tags)``), so the list is a conjunction, never a
+    else the shared GB10 class tag.  Placement requires *every* listed tag
+    to be offered by the box, so the list is a conjunction, never a
     menu of acceptable boxes: an empty list would publish an unconstrained
     row, and two host names would publish a row no single box can claim (the
     defect this default fixes).  A plan that pins one box names that host
@@ -3241,63 +2861,55 @@ PILOT_RESULT_MAX_BYTES = 8 * 1024 * 1024
 PILOT_EVIDENCE_MAX_BYTES = 8 * 1024 * 1024
 
 
-class PilotSelector:
-    """One exact PB action generation a pilot's counter bytes must answer for.
+NATIVE_PILOT_RESULT_SCHEMA = "prismaquant.native_pilot_result.v1"
 
-    ``--pilot-selector ACTION_KEY PUBLISHED_UNIX ATTEMPT`` names the action,
-    its publication time and its attempt. It is repeatable and bound to the
-    counters by the pilot's ``action_key``; no current/canonical ending is
-    inferred. The selector is what makes the counters answerable to an
-    immutable result rather than to a live path (PQ #1293).
+
+class PilotSelector:
+    """One exact native producer execution a pilot's counters must answer for.
+
+    ``--pilot-selector SELECTION_PATH SELECTION_SHA256`` names a document of the
+    existing ``native_results`` selection schema: the saved job, its launch, the
+    expected launch intent and the exact publication. It is repeatable and bound
+    to the counters by the pilot's own native ``job_id``; no job is discovered
+    by name or time. The selection is what makes the counters answerable to one
+    immutable, authenticated execution (PQ #1293).
     """
 
-    __slots__ = ("action_key", "published_unix", "attempt",
-                 "max_result_bytes", "max_evidence_bytes")
+    __slots__ = ("selection", "job_number", "max_result_bytes", "max_evidence_bytes")
 
-    def __init__(self, action_key, published_unix, attempt, *, result_cap=None,
-                 evidence_cap=None):
-        self.action_key = str(action_key)
-        self.published_unix = float(published_unix)
-        self.attempt = int(attempt)
-        self.max_result_bytes = int(
-            PILOT_RESULT_MAX_BYTES if result_cap is None else result_cap)
-        self.max_evidence_bytes = int(
-            PILOT_EVIDENCE_MAX_BYTES if evidence_cap is None else evidence_cap)
+    def __init__(self, selection, *, result_cap=None, evidence_cap=None):
+        from prismaquant.flux_jobs import job_id_number
+        self.selection = dict(selection)
+        self.job_number = job_id_number(self.selection["job_id"])
+        self.max_result_bytes = int(PILOT_RESULT_MAX_BYTES if result_cap is None else result_cap)
+        self.max_evidence_bytes = int(PILOT_EVIDENCE_MAX_BYTES if evidence_cap is None else evidence_cap)
 
     def __repr__(self):
-        return (f"PilotSelector({self.action_key[:12]!r}, "
-                f"{self.published_unix!r}, {self.attempt!r})")
+        return f"PilotSelector(job {self.job_number})"
 
 
 def parse_pilot_selector(raw: Sequence[str]) -> PilotSelector:
-    """One ``--pilot-selector`` triple, validated as an exact selection."""
-    from prismaquant.digests import is_sha256hex
+    """One ``--pilot-selector`` pair, validated as an exact native selection."""
+    from prismaquant import native_results
+    from prismaquant.digests import bytes_sha256hex, is_sha256hex
     from prismaquant.joint_dispatch_pilot import PilotRefused
 
-    action_key, published, attempt = raw
-    if not is_sha256hex(action_key):
-        raise PilotRefused(
-            f"pilot selector action key is not a full lowercase SHA-256: "
-            f"{action_key!r}")
+    path, digest = raw
+    if not is_sha256hex(digest):
+        raise PilotRefused(f"pilot selection digest is not a full lowercase SHA-256: {digest!r}")
     try:
-        published_unix = float(published)
-    except (TypeError, ValueError) as exc:
-        raise PilotRefused(
-            f"pilot selector publication time is not a finite number: "
-            f"{published!r}") from exc
-    if not math.isfinite(published_unix) or published_unix <= 0:
-        raise PilotRefused(
-            f"pilot selector publication time is not positive and finite: "
-            f"{published!r}")
-    try:
-        number = int(attempt)
-    except (TypeError, ValueError) as exc:
-        raise PilotRefused(
-            f"pilot selector attempt is not a positive integer: {attempt!r}") from exc
-    if number <= 0 or str(number) != str(attempt).strip():
-        raise PilotRefused(
-            f"pilot selector attempt is not a positive integer: {attempt!r}")
-    return PilotSelector(action_key, published_unix, number)
+        wire = _bounded_pilot_bytes(Path(path), PILOT_EVIDENCE_MAX_BYTES)
+        if bytes_sha256hex(wire) != digest:
+            raise PilotRefused("pilot selection document SHA-256 does not match")
+        selection = _pilot_json(wire)
+        if (not isinstance(selection, dict) or selection.get("schema") != native_results.SELECTION_SCHEMA
+                or set(selection) != native_results.SELECTION_KEYS):
+            raise PilotRefused("pilot selection is not an exact native result selection")
+        return PilotSelector(selection)
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        if isinstance(exc, PilotRefused):
+            raise
+        raise PilotRefused(f"pilot selection {path}: {exc}") from exc
 
 
 def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
@@ -3332,8 +2944,8 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
             document = _pilot_json(raw)
             if not isinstance(document, dict) or not isinstance(document.get("pilot"), dict):
                 raise ValueError("counters and their pilot must be JSON objects")
-            if not is_sha256hex(document["pilot"].get("action_key")):
-                raise ValueError("pilot counter action key is not a full SHA-256")
+            from prismaquant.flux_jobs import job_id_number
+            job_id_number(document["pilot"].get("job_id"))
         except (OSError, ValueError) as exc:
             raise DispatchRefused(f"pilot counters {path}: {exc}") from exc
         documents.append((document, {"path": str(path), "sha256": digest,
@@ -3344,12 +2956,13 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
             selector = parse_pilot_selector(raw_selector)
         except PilotRefused as exc:
             raise DispatchRefused(f"pilot selector: {exc}") from exc
-        if selector.action_key in selectors:
+        if selector.job_number in selectors:
             raise DispatchRefused(
-                f"pilot selector names {selector.action_key[:12]} twice; an "
+                f"pilot selector names native job {selector.job_number} twice; an "
                 "explicit selector must be unique")
-        selectors[selector.action_key] = selector
-    named_keys = {document.get("pilot", {}).get("action_key") for document, _ in documents}
+        selectors[selector.job_number] = selector
+    from prismaquant.flux_jobs import job_id_number
+    named_keys = {job_id_number(document["pilot"]["job_id"]) for document, _ in documents}
     if set(selectors) != named_keys:
         raise DispatchRefused("pilot selectors must name exactly the supplied counter actions; an unbound counter document cannot certify a row")
     implementation = _pilot_code_sha256()
@@ -3369,7 +2982,7 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
     by_id = {record["quantum_id"]: record for _, record in records}
     verified = {}
     for row in quanta:
-        argv = row["argv"]
+        argv = row["row"]["argv"]
         spec = json.loads(argv[argv.index("--spec") + 1])
         expected = pilot_binding(
             by_id[row["quantum_id"]], implementation_sha256=implementation,
@@ -3386,13 +2999,13 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
                 "code/plan/replay-regime/row-shape receipt, "
                 f"found {len(matching)}")
         counters, reference = matching[0]
-        key = counters.get("pilot", {}).get("action_key")
+        key = job_id_number(counters["pilot"]["job_id"])
         selector = selectors.get(key)
         if selector is None:
             raise DispatchRefused(
-                f"pilot for {row['quantum_id']}: counters name PB action "
-                f"{str(key)[:12]}, for which --pilot-selector ACTION_KEY "
-                "PUBLISHED_UNIX ATTEMPT was not supplied; an unbound counter "
+                f"pilot for {row['quantum_id']}: counters name native job "
+                f"{key}, for which --pilot-selector SELECTION_PATH "
+                "SELECTION_SHA256 was not supplied; an unbound counter "
                 "document cannot certify the row")
         if key not in verified:
             try:
@@ -3404,7 +3017,7 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
                     f"pilot for {row['quantum_id']}: {exc}") from exc
         evidence, authenticated_record, invocation = verified[key]
         try:
-            proposed = _parse_pilot_invocation(argv[argv.index("--") + 1:])
+            proposed = _parse_pilot_invocation(argv)
             if _pilot_semantic_arguments(invocation) != _pilot_semantic_arguments(proposed):
                 raise PilotRefused("pilot sealed invocation differs from the proposed row")
             actual_binding = pilot_binding(
@@ -3444,25 +3057,31 @@ def _bounded_pilot_bytes(path: Path, cap: int) -> bytes:
 
 def _verify_pilot_result(gateway, selector, counters, reference, *, contracts,
                          quantum_records):
-    """Authenticate a selected result, then bind independent source approval."""
+    """Authenticate a selected native result, then bind independent source approval."""
+    from prismaquant.digests import bytes_sha256hex
+    from prismaquant.flux_jobs import job_id_number
     from prismaquant.joint_dispatch_pilot import PilotRefused, validate_pilot_completion
 
     result = gateway.read_verified_result(selector)
-    if (not isinstance(result, Mapping)
-            or result.get("schema") != "prismabuild.verified_action_result.v1"
-            or result.get("action_key") != selector.action_key
-            or type(result.get("attempt")) is not int or result["attempt"] != selector.attempt
-            or type(result.get("published_unix")) not in (int, float)
-            or result["published_unix"] != selector.published_unix):
-        raise PilotRefused("pilot PB result differs from the explicit execution selector")
-    request = result.get("request")
-    if not isinstance(request, Mapping):
-        raise PilotRefused("pilot PB result carries no validated sealed request")
-    invocation = _sealed_quantum_command(result, gateway=gateway)
-    source, source_ref = _accepted_pilot_source(request, invocation, contracts)
+    try:
+        selected_job = job_id_number(result.get("job_id")) if isinstance(result, Mapping) else None
+    except ValueError:
+        selected_job = None
+    if (not isinstance(result, Mapping) or result.get("schema") != NATIVE_PILOT_RESULT_SCHEMA
+            or selected_job != selector.job_number):
+        raise PilotRefused("pilot native result differs from the explicit execution selection")
+    if result.get("execution") != {"status": "succeeded", "payload_exit": 0}:
+        raise PilotRefused("pilot native result is not a succeeded execution")
+    invocation = _parse_pilot_invocation(result.get("argv"))
+    source, source_ref = _accepted_pilot_source(result.get("source"), invocation, contracts)
     payload = result.get("payload")
     if not isinstance(payload, bytes) or len(payload) > PILOT_RESULT_MAX_BYTES:
-        raise PilotRefused("pilot PB result carries no bounded owned result payload")
+        raise PilotRefused("pilot native result carries no bounded owned completion")
+    published_counters = result.get("counters_bytes")
+    if (not isinstance(published_counters, bytes)
+            or bytes_sha256hex(published_counters) != reference["sha256"]
+            or len(published_counters) != reference["bytes"]):
+        raise PilotRefused("pilot counters differ from the counters the native result published")
     completion = _single_completion(payload)
     original_paths = [path for path, digest in quantum_records
                       if digest == invocation["--quantum-sha256"]]
@@ -3484,13 +3103,9 @@ def _verify_pilot_result(gateway, selector, counters, reference, *, contracts,
     except (KeyError, ValueError, TypeError) as exc:
         raise PilotRefused(f"pilot authenticated quantum record refuses: {exc}") from exc
     return ({
-        "action_key": selector.action_key,
-        "published_unix": selector.published_unix,
-        "attempt": selector.attempt,
-        "generation": result.get("generation"),
-        "worker_id": result.get("worker_id"),
-        "host": result.get("host"),
-        "receipt_sha256": (result.get("receipt") or {}).get("receipt_sha256"),
+        "job_id": result["job_id"],
+        "launch_sha256": result["launch_sha256"],
+        "publication_sha256": result["publication_sha256"],
         "quantum_sha256": invocation["--quantum-sha256"],
         "quantum_bytes": len(evidence["quantum_record"]),
         "quantum_record_producer": dict(completion["quantum_record"]),
@@ -3499,15 +3114,8 @@ def _verify_pilot_result(gateway, selector, counters, reference, *, contracts,
                                     "bytes": len(evidence["quantum_record"])},
         "record_identity_sha256": record["identity_sha256"],
         "source_contract": source_ref,
-        "source_snapshot": source["snapshot"],
+        "source": dict(source),
     }, record, invocation)
-
-
-def _sealed_quantum_command(result, *, gateway=None) -> dict:
-    """Prove the wrapper with the SDK, then read its authenticated command."""
-    request = result["request"]
-    (Gateway() if gateway is None else gateway).bind_capture_command(request)
-    return _parse_pilot_invocation(request.get("params", {}).get("command"))
 
 
 def _parse_pilot_invocation(command) -> dict:
@@ -3548,35 +3156,21 @@ def _pilot_semantic_arguments(invocation) -> dict:
             **{key: value for key, value in vars(invocation["args"]).items() if key not in paths}}
 
 
-def _accepted_pilot_source(request, invocation, contracts):
+def _accepted_pilot_source(launch_source, invocation, contracts):
+    """The unique reviewed contract naming the authenticated launch's commit/tree and container spec."""
     from prismaquant.joint_dispatch_pilot import PilotRefused
 
-    params = request.get("params", {})
-    snapshot = params.get("checkout_snapshot", {})
-    descriptor = snapshot.get("input") if isinstance(snapshot, Mapping) else None
-    if (not isinstance(snapshot, Mapping)
-            or snapshot.get("schema") != "prismaquant.prismabuild.pbrun_checkout_snapshot.v2"
-            or snapshot.get("subdirectory") != "." or params.get("cwd") != "."
-            or request.get("task", {}).get("working_directory") != "."):
-        raise PilotRefused("pilot sealed request has no supported checkout snapshot invocation")
-    inputs = request.get("inputs", [])
-    if not isinstance(inputs, list) or inputs.count(descriptor) != 1:
-        raise PilotRefused("pilot source snapshot is not exactly one declared PB input")
-    variables = request.get("environment", {}).get("variables", {})
-    if not isinstance(variables, Mapping):
-        raise PilotRefused("pilot sealed request carries no explicit environment")
-    # These two PB-created containment fields are execution-specific. They do
-    # not select a Python interpreter, import root or workload environment.
-    outer = {k: v for k, v in variables.items()
-             if k not in {"PRISMABUILD_CONTAINER_OWNER", "PRISMABUILD_CONTAINER_MARKER"}}
+    if (not isinstance(launch_source, Mapping)
+            or not isinstance(launch_source.get("commit"), str)
+            or not isinstance(launch_source.get("tree"), str)):
+        raise PilotRefused("pilot native result carries no authenticated source commit and tree")
+    source = {"commit": launch_source["commit"], "tree": launch_source["tree"]}
     matching = [(contract, reference) for contract, reference in contracts
-                if contract["snapshot"] == descriptor
-                and contract["snapshot_selection"] == dict(snapshot)
-                and contract["outer_environment"] == outer
+                if contract["source"] == source
                 and contract["container_spec"] == invocation["spec"]]
     if len(matching) != 1:
-        raise PilotRefused("pilot source snapshot, interpreter or environment has no unique independently reviewed contract")
-    return matching[0]
+        raise PilotRefused("pilot source commit/tree or container spec has no unique independently reviewed contract")
+    return source, matching[0][1]
 
 
 def _single_completion(payload: bytes) -> dict:
@@ -3601,7 +3195,7 @@ def _single_completion(payload: bytes) -> dict:
             found.append(parsed)
     if len(found) != 1:
         raise PilotRefused(
-            f"pilot PB result payload carries {len(found)} quantum completion "
+            f"pilot native result payload carries {len(found)} quantum completion "
             "announcements; exactly one is required")
     return found[0]
 
@@ -3647,6 +3241,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                              "stamps a digest that differs from the sealed "
                              "one; certified mode refuses it")
     parser.add_argument("--priority", type=int, default=SUBMISSION_PRIORITY)
+    parser.add_argument("--timeout-s", type=int, required=True)
     parser.add_argument("--head-grace-s", type=int, default=HEAD_PROGRESS_GRACE_S)
     parser.add_argument("--stage-a-prefetch-override", type=Path, default=None,
                         help="explicit source_prefetch override document for "
@@ -3659,17 +3254,14 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                              "payload's --artifact-budget-bytes; the run stamps "
                              "the deviation into its provenance; the sealed "
                              "plan is unchanged")
-    parser.add_argument("--stage-a-produced-output-template", type=Path,
+    parser.add_argument("--stage-a-produced-declaration", type=Path,
                         default=None,
                         help="produced-output template JSON declaring the "
                              "bounded window the stage-A action will stage "
                              "for the boundary entries it produces itself "
-                             "(RobTand/prismaquant#881). Sealed by pbrun as "
-                             "a declared input plus request params and "
-                             "carried onto the queue row, so the capture can "
-                             "read its OWN entries back; its window demand is "
-                             "derived by pbrun from the template. Without it "
-                             "the capture writes entries it cannot read.")
+                             "(RobTand/prismaquant#881). Retained in the row "
+                             "as explicit publication intent. Native produced-output "
+                             "authentication is unavailable and refuses before launch.")
     parser.add_argument("--band-serial", action="store_true",
                         help="PQ #996: inside a checkpoint band, quantum L-1 "
                              "takes quantum L's final input cotangent (its "
@@ -3716,17 +3308,18 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                         help="producer counters certifying this code, replay "
                              "regime and row shape (repeatable); mandatory "
                              "before publishing more than one quantum")
-    parser.add_argument("--pilot-selector", action="append", nargs=3, default=[],
-                        metavar=("ACTION_KEY", "PUBLISHED_UNIX", "ATTEMPT"),
-                        help="the exact PB action generation each "
+    parser.add_argument("--pilot-selector", action="append", nargs=2, default=[],
+                        metavar=("SELECTION_PATH", "SELECTION_SHA256"),
+                        help="the exact native result selection (the "
+                             "native_results selection document) each "
                              "--pilot-counters document must answer for "
-                             "(repeatable); the counters' own action_key binds "
+                             "(repeatable); the counters' own job_id binds "
                              "them to one selector, and a missing, ambiguous or "
                              "duplicate selector refuses (PQ #1293)")
     parser.add_argument("--pilot-source-contract", action="append", nargs=2, default=[],
                         metavar=("PATH", "SHA256"),
                         help="independently reviewed versioned source and invocation contract; "
-                             "must bind the exact PB snapshot input and expected environments")
+                             "must bind the exact native source commit and tree and the container spec")
     parser.add_argument("--pilot-quantum-record", action="append", nargs=2, default=[],
                         metavar=("PATH", "SHA256"),
                         help="consumer-visible copy of the original pilot quantum wire; "
@@ -3804,8 +3397,14 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
     adjoint_tag = str(block.get("adjoint", {}).get("tag", ADJOINT_TAG)
                       if isinstance(block.get("adjoint"), dict)
                       else ADJOINT_TAG)
-    events = _read_state(state_path)
-    submitted_keys = {event.get("quantum_id"): event.get("action_key")
+    try:
+        events = _read_state(state_path)
+        if type(gateway) is Gateway:
+            events = recover_events(events, state_path)
+    except (DispatchRefused, OSError, ValueError, RuntimeError) as exc:
+        print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
+        return EXIT_PRECONDITION_REFUSED
+    submitted_keys = {event.get("quantum_id"): event.get("submission")
                       for event in events if event.get("event") == "quantum-submitted"}
     last_submission = {event.get("quantum_id"): event for event in events
                        if event.get("event") == "quantum-submitted"}
@@ -3829,7 +3428,7 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
         except DispatchRefused as exc:
             print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
             return EXIT_PRECONDITION_REFUSED
-    stage_a_keys = [event.get("action_key") for event in events
+    stage_a_keys = [event.get("submission") for event in events
                     if event.get("event") == "stage-a-submitted"]
 
     receipt_path = (Path(args.adjoint_receipt) if args.adjoint_receipt
@@ -3850,28 +3449,36 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
             print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
             return EXIT_PRECONDITION_REFUSED
     receipt_ok = bool(publishable)
+    if receipt_ok and not stage_a_keys and type(gateway) is Gateway:
+        print("dispatch_joint_quanta: refused: scientific Stage A proof has no saved native producer; execution success is required independently of its artifacts", file=sys.stderr)
+        return EXIT_PRECONDITION_REFUSED
+    if stage_a_keys and not gateway.is_terminal_executed(stage_a_keys[-1]):
+        status = gateway.status(stage_a_keys[-1])
+        if status["status"] != "running":
+            print(f"dispatch_joint_quanta: refused: stage A is {status['status']}; explicit failure/unknown evidence retained", file=sys.stderr)
+            return EXIT_PRECONDITION_REFUSED
+        receipt_ok = False
 
     rows: list[dict] = []
     coverage_rows: list[dict] = []
-    # A stage A that was submitted but did not terminally execute (failed,
-    # withdrawn, lost) is republished: the state file records the attempt,
-    # never the outcome, and retry is free (#5 contract).  Only a terminally
-    # executed capture, or a validated receipt, stops republication.
+    # Rebuild a saved Stage A row to validate its exact launch intent on resume.
+    # Failed and unknown executions retain their evidence and refuse reuse.
     stage_a_done = bool(stage_a_keys) and gateway.is_terminal_executed(stage_a_keys[-1])
     stage_a_binding: dict | None = None
     try:
-        if not stage_a_done and not receipt_ok:
+        if stage_a_keys or not receipt_ok:
             manifest = (Path(args.adjoint_manifest) if args.adjoint_manifest
                         else records_dir / "adjoint.data-manifest.json.gz")
             stage_a_binding = _stage_manifest_binding(
                 manifest, records[0][1]["campaign"])
             rows.append({"kind": "stage-a",
-                         "argv": stage_a_argv(manifest, records[0][1]["campaign"],
+                         "row": stage_a_argv(manifest, records[0][1]["campaign"],
+                                              timeout_s=args.timeout_s,
                                               tag=adjoint_tag,
                                               prefetch_override=args.stage_a_prefetch_override,
                                               artifact_budget_bytes=args.stage_a_artifact_budget_bytes,
-                                              produced_output_template=(
-                                                  args.stage_a_produced_output_template),
+                                              produced_declaration=(
+                                                  args.stage_a_produced_declaration),
                                               binding=stage_a_binding)})
         if receipt_ok:
             # Pass 1: the quantum rows this dispatch publishes. Their count
@@ -3890,8 +3497,6 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                         f"quantum {quantum_id}: recorded request identity differs; "
                         "use a new --state/output-root for a changed request")
                 key = submitted_keys.get(quantum_id)
-                if key is not None and gateway.is_terminal_executed(key):
-                    continue
                 band = None
                 # A dry run derives the band's control files and publishes
                 # none of them (PQ #1200).
@@ -3929,7 +3534,7 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                         record, output_root=output_root, band=band))
                 argv = quantum_argv(
                     record, record_path=record_path,
-                    output_root=output_root, priority=priority,
+                    output_root=output_root, timeout_s=args.timeout_s, priority=priority,
                     head_grace_s=args.head_grace_s,
                     consumer_tags=tags, band=band, link=link,
                     ceilings=ceilings)
@@ -3953,7 +3558,7 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                                      "sha256": handoff["manifest_sha256"]}),
                              "link": link,
                              "progress_grace": progress_grace_of(argv),
-                             "argv": argv})
+                             "row": argv})
         check_source_coverage(coverage_rows, coverage=_coverage)
         _admit_dispatch_pilots(args, rows, records, gateway)
     except DispatchRefused as exc:
@@ -3989,17 +3594,32 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                                         **{key: by_id[row["quantum_id"]]["adjoint"][key]
                                            for key in ("checkpoint_boundary", "chain_layers")}}
                                        if row["kind"] == "quantum" else {}),
-                                    "argv": row["argv"]}
+                                    "row": row["row"]}
                                    for row in rows]},
                          indent=2, sort_keys=True), file=report)
         return 0
 
     try:
+        # Preflight every row before launching any production work.
+        if type(gateway) is Gateway:
+            from prismaquant.tessera_campaign_rows import validate_row
+            for row in rows:
+                validate_row(row["row"])
         for row in rows:
-            answer = gateway.submit(row["argv"])
+            label = row.get("quantum_id", "stage-a")
+            producers = []
+            if row["kind"] == "quantum":
+                saved_producers = list(stage_a_keys[-1:])
+                source = roles[label]["takes_from"] if args.band_serial else None
+                if source is not None and source in submitted_keys:
+                    saved_producers.append(submitted_keys[source])
+                if type(gateway) is Gateway:
+                    from prismaquant.flux_jobs import load_submission
+                    producers = [load_submission(Path(p["record_dir"])) for p in saved_producers]
+                else:
+                    producers = saved_producers
             if row["kind"] == "stage-a":
-                _append_state(state_path, {"event": "stage-a-submitted",
-                                           "action_key": answer["action_key"],
+                event = {"event": "stage-a-submitted",
                                            "data_manifest_sha256": (
                                                stage_a_binding or {}
                                            ).get("data_manifest_sha256"),
@@ -4015,10 +3635,9 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                                                if args.stage_a_artifact_budget_bytes
                                                is not None
                                                else None),
-                                           "execution_plan": execution_stamp})
+                                           "execution_plan": execution_stamp}
             else:
-                _append_state(state_path,
-                              {"event": "quantum-submitted",
+                event = {"event": "quantum-submitted",
                                "quantum_id": row["quantum_id"],
                                "identity_sha256": row["identity_sha256"],
                                "data_manifest_sha256": row.get("manifest_sha256"),
@@ -4027,13 +3646,17 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                                "link": row["link"],
                                "progress_grace": row["progress_grace"],
                                "pilot_admission": row["pilot_admission"],
-                               "execution_plan": execution_stamp,
-                               "action_key": answer["action_key"]})
+                               "execution_plan": execution_stamp}
+            native_state = state_path.parent / (state_path.name + ".flux") / label
+            _append_state(state_path, {"event": "native-intent", "state_dir": str(native_state),
+                                       "row": row["row"], "metadata": event})
+            answer = gateway.submit(row["row"], state_dir=native_state, afterok=producers)
+            _append_state(state_path, {**event, "submission": answer})
             print(json.dumps({"published": row.get("quantum_id", "stage-a"),
-                              "action_key": answer["action_key"],
+                              "submission": answer,
                               "status": answer.get("status", "")},
                              sort_keys=True))
-    except (RuntimeError, OSError) as exc:
+    except (RuntimeError, OSError, ValueError) as exc:
         print(f"dispatch_joint_quanta: submission failed: {exc}", file=sys.stderr)
         return EXIT_SUBMIT_FAILED
     for waiting in band_pending:

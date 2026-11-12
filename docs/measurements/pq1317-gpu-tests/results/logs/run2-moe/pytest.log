@@ -1,0 +1,160 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0
+cachedir: /mnt/shared/tessera-measurements/pq1317-gpu-tests/run-moe.ap8gp5um/pytest-cache
+tessera surface: CUDA -- torch 2.13.0+cu130, 1 CUDA device(s), device 0 = NVIDIA GB10
+rootdir: /mnt/shared/tessera-measurements/pq1317-gpu-tests/run-moe.ap8gp5um/tessera-source
+configfile: pyproject.toml
+created: 2/2 workers
+2 workers [71 items]
+
+.......................................................................  [100%]
+=============================== warnings summary ===============================
+tests/test_serving_moe_tp2.py: 14 warnings
+tests/test_native_window_moe_method.py: 14 warnings
+  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+tests/test_native_window_moe_method.py::test_router_weight_on_input_matches_actual_stock_placement
+  /usr/local/lib/python3.12/dist-packages/flashinfer/cute_dsl/availability.py:136: DeprecationWarning: Arch from arch.py is deprecated. Use Arch from enums.py instead.
+    from cutlass.base_dsl.arch import Arch
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+_____ test_window_intake_reuses_one_body_staging_buffer_across_experts[0] ______
+[gw1] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+_____ test_window_intake_reuses_one_body_staging_buffer_across_experts[1] ______
+[gw1] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+_________ test_native_loader_shape_produces_rank_local_packed_tiles[0] _________
+[gw1] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+_________ test_native_loader_shape_produces_rank_local_packed_tiles[1] _________
+[gw1] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+_____ test_native_tp2_refuses_unsupported_activation_and_swiglu_modifiers ______
+[gw1] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+_______ test_ordinary_fp8_native_tp2_uses_the_same_rank_local_slices[0] ________
+[gw1] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+_______ test_ordinary_fp8_native_tp2_uses_the_same_rank_local_slices[1] ________
+[gw1] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+________ test_tp2_each_load_keeps_only_rank_local_packed_projection[0] _________
+[gw1] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+________ test_tp2_each_load_keeps_only_rank_local_packed_projection[1] _________
+[gw1] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+____________ test_tp2_finishing_the_load_copies_no_packed_expert[0] ____________
+[gw1] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+____________ test_tp2_finishing_the_load_copies_no_packed_expert[1] ____________
+[gw1] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+_____ test_fp8_native_method_tp1_loads_compacts_and_matches_the_reference ______
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+__________ test_fp8_native_method_tp2_shard_shapes_are_rank_local[0] ___________
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+__________ test_fp8_native_method_tp2_shard_shapes_are_rank_local[1] ___________
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+____________ test_bf16_folded_native_route_matches_folded_reference ____________
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+_ test_bf16_production_route_is_folded_compact_and_matches_the_reference[0-1] __
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+_ test_bf16_production_route_is_folded_compact_and_matches_the_reference[0-2] __
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+_ test_bf16_production_route_is_folded_compact_and_matches_the_reference[1-2] __
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+___ test_bf16_production_and_research_owners_are_bit_identical[1-triton-0-1] ___
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+___ test_bf16_production_and_research_owners_are_bit_identical[1-triton-0-2] ___
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+___ test_bf16_production_and_research_owners_are_bit_identical[1-triton-1-2] ___
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+___ test_bf16_production_and_research_owners_are_bit_identical[8-torch-0-1] ____
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+___ test_bf16_production_and_research_owners_are_bit_identical[8-torch-0-2] ____
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+___ test_bf16_production_and_research_owners_are_bit_identical[8-torch-1-2] ____
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a value stack of 2 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+__________ test_router_weight_on_input_matches_actual_stock_placement __________
+[gw0] linux -- Python 3.12.3 /usr/bin/python3
+----------------------------- Captured stdout call -----------------------------
+INFO 10-09 23:12:36 [fp8.py:438] Using TRITON Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'VLLM_CUTLASS', 'TRITON', 'MARLIN', 'HUMMING', 'BATCHED_DEEPGEMM', 'BATCHED_VLLM_CUTLASS', 'BATCHED_TRITON', 'XPU', 'CPU', 'HPC'].
+INFO 10-09 23:12:36 [fp8.py:740] Using MoEPrepareAndFinalizeNoDPEPModular
+WARNING 10-09 23:12:36 [fused_moe.py:1167] Using default MoE config. Performance might be sub-optimal! Config file not found at /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/fused_moe/configs/E=3,N=32,device_name=NVIDIA_GB10,dtype=fp8_w8a8.json
+------------------------------ Captured log call -------------------------------
+INFO     tessera.native_window_moe:native_window_moe.py:665 compact window MoE adapter kept for a e4m3 stack of 3 experts: gate has 64 columns; the lane needs a multiple of 32 and at least 128
+- generated xml file: /mnt/shared/tessera-measurements/pq1317-gpu-tests/run-moe.ap8gp5um/junit.xml -
+
+tessera surface: CUDA -- torch 2.13.0+cu130, 1 CUDA device(s), device 0 = NVIDIA GB10
+tessera surface: 0 test(s) skipped, 0 module(s) not collected
+tessera surface: 38 test(s) allocated on the device
+tessera surface: population written to /mnt/shared/tessera-measurements/pq1317-gpu-tests/run-moe.ap8gp5um/surface.json sha256:0d0507d034fb16666eacba7add18067272d776c1713fecd9c50e2de89523b273
+============================= slowest 20 durations =============================
+5.79s call     tests/test_native_window_moe_method.py::test_fp8_native_method_tp1_loads_compacts_and_matches_the_reference
+3.94s call     tests/test_serving_moe_tp2.py::test_window_intake_reuses_one_body_staging_buffer_across_experts[0]
+3.21s call     tests/test_native_window_moe_method.py::test_router_weight_on_input_matches_actual_stock_placement
+3.19s setup    tests/test_serving_moe_tp2.py::test_window_intake_reuses_one_body_staging_buffer_across_experts[0]
+1.81s call     tests/test_serving_moe_tp2.py::test_native_loader_shape_produces_rank_local_packed_tiles[0]
+1.72s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[e4m3-epilogue-False]
+1.57s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-epilogue-False]
+1.39s call     tests/test_native_window_moe_method.py::test_fp8_native_method_tp2_shard_shapes_are_rank_local[0]
+1.39s call     tests/test_native_window_moe_method.py::test_fp8_native_method_tp2_shard_shapes_are_rank_local[1]
+1.28s call     tests/test_native_window_moe_method.py::test_native_method_refuses_missing_duplicate_and_wrong_rung
+0.90s setup    tests/test_native_window_moe_method.py::test_bf16_folded_native_route_matches_folded_reference
+0.67s call     tests/test_native_window_moe.py::test_packed_window_units_prepare_matches_the_direct_adapter
+0.66s call     tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[1-triton-0-1]
+0.66s call     tests/test_native_window_moe_method.py::test_bf16_folded_native_route_matches_folded_reference
+0.62s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-folded-False]
+0.61s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[e4m3-epilogue-True]
+0.59s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-folded-True]
+0.58s call     tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-epilogue-True]
+0.46s call     tests/test_serving_moe_tp2.py::test_native_loader_shape_produces_rank_local_packed_tiles[1]
+0.20s call     tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[8-torch-0-1]
+======================= 71 passed, 29 warnings in 30.75s =======================

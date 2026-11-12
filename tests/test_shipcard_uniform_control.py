@@ -17,6 +17,8 @@ import pathlib
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
+
 if not (pathlib.Path(__file__).resolve().parents[1] / "tools").is_dir():
     pytest.skip("requires a repo checkout (tools/ scripts)",
                 allow_module_level=True)
@@ -53,6 +55,7 @@ from prismaquant.validate_quantized_model import (
     DEFAULT_MIN_MTP_ACCEPT_P0,
 )
 from tools.publish_artifact import check_shipcard, main as publish_cli
+from graph_lane_fixtures import synthetic_graph_lane
 
 _FAKE_FINGERPRINT = "f" * 64
 _CONTROL_FINGERPRINT = "e" * 64
@@ -321,6 +324,12 @@ def _close_base_slots(model_dir, candidate_kl=_ALLOCATED_KL):
     for slot in REQUIRED_SLOTS:
         if slot == "ship_gate":
             fill_slot(path, slot, _ship_gate_record(sha, source=str(model_dir)))
+            continue
+        if slot == "native_export.graph":
+            from tests.graph_receipt_fixtures import graph_fixture
+
+            record, _ = graph_fixture(model_dir)
+            fill_slot(path, slot, record)
             continue
         if slot.startswith("native_export."):
             fill_slot(path, slot, _native_record(slot, sha))

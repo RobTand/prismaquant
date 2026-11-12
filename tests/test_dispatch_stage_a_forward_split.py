@@ -1,4 +1,4 @@
-"""A fresh run's forward split as PrismaBuild rows (PQ #738).
+"""A fresh run's forward split as native rows (PQ #738).
 
 The package builder derives the forward split's manifests from the fresh
 run's own submitted manifest; the dispatcher seals a prep row, one quantum
@@ -7,11 +7,11 @@ only once the rows it follows have finished. These tests hold:
 
 * The prep stages the head only; each quantum stages the head and every
   forward layer, and reads no entry another row wrote.
-* The manifests pass PrismaBuild's own validator.
-* Every Stage A row carries the gb10 tag alone, priority -10 and its own
+* The manifests preserve exact declared phase bytes.
+* Every Stage A row carries the gb10 tag alone, priority 0 and its own
   manifest and template; the join is a CPU row.
 * The quanta wait for the prep's record and ending; the join waits for every
-  quantum's ending and receipt. The rows the fake ``pbrun`` "runs" are the
+  quantum's ending and receipt. The rows the native transport fixture "runs" are the
   fixture's own core calls, so the gates read real records.
 * A forward walk's read-ahead depth looks up the walk, not down.
 
@@ -33,10 +33,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.joint_adjoint_checkpoints import adjoint_space
+from prismaquant.stage_a_produced_output import build_boundary_template, DECLARATION_FLAG
+from staged_native_fixtures import native_staged_state
 from prismaquant.stage_a_chain_resume import chain_state_path
 from prismaquant.tessera_joint_aura import HEAD_WALK_INPUT_KEYS
 
-from stage_a_spool_spec import stage_a_plan, with_spool
+from stage_a_spool_spec import stage_a_plan
 from test_stage_a_chain_resume import _offline_tier_policy, _run  # noqa: F401
 from test_stage_a_chain_split import RANGES
 
@@ -128,17 +130,15 @@ def test_the_prep_stages_the_head_and_each_quantum_the_forward_walk(tmp_path):
         "source_bytes"]
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
-def test_the_forward_manifests_pass_the_prismabuild_validator(tmp_path):
-    from test_quantum_executable_readset import _pb
-    core, tiers, _plans = _pb()
+def test_the_forward_manifests_preserve_exact_phase_bytes(tmp_path):
     _plan, package = _package(tmp_path, tmp_path / "run")
     for described, names in [(package["prep"], ["head"]),
                              *((quantum, ["head", *FORWARD]) for quantum in package["quanta"])]:
         manifest, _ = _phases(described["data_manifest"]["path"])
-        for entry in manifest["entries"]:
-            entry["path"] = "/mnt/shared/fixture" + entry["path"][len(str(tmp_path)):]
-        ranges = tiers.manifest_phase_ranges(core.validate_data_manifest(manifest))
+        ranges = manifest["read_plan"]["phases"]
+        assert ranges[-1]["cumulative_bytes"] == manifest["read_plan"]["read_bytes"]
+        assert all(p["bytes"] == sum(manifest["entries"][i]["bytes"]
+                   for i in p["entry_indices"]) for p in ranges)
         assert [item["name"] for item in ranges] == names
 
 
@@ -185,23 +185,19 @@ def sealed(tmp_path, monkeypatch):
     campaign = {"plan_path": str(plan), "plan_sha256": _sha(plan),
                 "prepared_path": str(tmp_path / "prepared.json"),
                 "prepared_sha256": "b" * 64, "read_manifest_sha256": "d" * 64}
-    spec = _json(tmp_path / "spec.json", with_spool(
-        {"container": {"image": "sha256:" + "0" * 64}, "env": {}}))
+    spec = _json(tmp_path / "spec.json",
+        {"container": {"image": "sha256:" + "0" * 64}, "env": {}})
     prefetch = _json(tmp_path / "prefetch.json",
                      {"source_prefetch": {"prefetch_lookahead": 2}})
     space = adjoint_space(root)
-    base = _json(tmp_path / "template.json", {
-        "schema": "prismaquant.prismabuild.produced_output_template.v1", "version": 1,
-        "template_id": "fixture-base", "output_prefix": str(space),
-        "slots": {"boundary_entries": {"class": "payload"}},
-        "durable_maxima": {"payload_max_bytes": BUDGET, "checkpoint_max_bytes": BUDGET,
-                           "temp_max_bytes": BUDGET},
-        "working_demands": {TIER: {"minimum_gib": 2, "window_gib": 48}},
-        "permitted_tiers": [TIER]})
-    monkeypatch.setattr(dispatch_joint_quanta, "_pbrun_seals_produced_output", lambda *a: True)
+    base = _json(tmp_path / "template.json", build_boundary_template(
+        output_prefix=space, artifact_max_bytes=BUDGET, group_size=2,
+        max_entry_tensor_bytes=1 << 20, concurrent_groups=24,
+        spool={"root": str(tmp_path / "native-spool"), "max_bytes": BUDGET},
+        template_id="fixture-base"))
     monkeypatch.setattr(split_dispatch, "checkout_commit", lambda checkout: "c" * 40)
     monkeypatch.setattr(split_dispatch, "implementation_sha256", lambda checkout: "1" * 64)
-    document = seal_forward_round(
+    document = seal_forward_round(timeout_s=3600,
         round_dir=tmp_path / "round", checkout=tmp_path / "checkout",
         forward_package=tmp_path / "package" / "forward-package.json", campaign=campaign,
         spec=spec, prefetch_override=prefetch, base_template=base, tier=TIER,
@@ -212,7 +208,7 @@ def sealed(tmp_path, monkeypatch):
 
 
 def _payload(row):
-    return row["argv"][row["argv"].index("prismaquant.joint_adjoint_capture") + 1:]
+    return row["row"]["argv"][row["row"]["argv"].index("prismaquant.joint_adjoint_capture") + 1:]
 
 
 def _flag(argv, flag):
@@ -220,7 +216,7 @@ def _flag(argv, flag):
 
 
 def _envelope(row):
-    return row["argv"][:row["argv"].index("--")]
+    return row["row"]
 
 
 def test_a_sealed_forward_round_names_every_row(sealed):
@@ -241,45 +237,26 @@ def test_a_sealed_forward_round_names_every_row(sealed):
     templates = set()
     for name in ["forward-prep", *labels]:
         envelope = _envelope(rows[name])
-        assert [envelope[i + 1] for i, word in enumerate(envelope) if word == "--tag"] == [
-            "gb10"]
-        assert _flag(envelope, "--priority") == "-10"
-        assert _flag(envelope, "--data-manifest") == rows[name]["data_manifest"]["path"]
+        assert envelope["tags"] == ["gb10"]
+        assert str(envelope["priority"]) == "0"
+        assert envelope["timeout_s"] == 3600
         assert "--host-class" not in envelope and "--measurement" not in envelope
-        templates.add(json.loads(Path(_flag(
-            envelope, "--produced-output-template")).read_text())["template_id"])
+        templates.add(json.loads(Path(_flag(envelope["argv"], DECLARATION_FLAG)).read_text())["template_id"])
         # A forward walk reads up: two layers ahead of the one it reads.
         depth = rows[name]["reader"]["depth"]
         if name != "forward-prep":
             ahead = {row["reading"]: row["ahead"] for row in depth["rows"]}
             assert ahead["forward-001"] == ["forward-002", "forward-003"]
     assert len(templates) == 3
-    join = rows["forward-join"]["argv"]
-    assert "--data-manifest" not in join and "gpu" not in _flag(join, "--demand")
-    assert join[join.index("--", join.index("--detach")) + 1:] == [
+    join = rows["forward-join"]["row"]["argv"]
+    assert rows["forward-join"]["row"]["demand"] == {"gpu": 0, "cpu": 2, "mem_gb": 8}
+    assert join == [
         "/venv/bin/python", "-m", "prismaquant.stage_a_forward_split",
         "--output-root", str(sealed["root"]),
         "--receipt", str(sealed["round"] / "joins" / "forward-join.json")]
 
 
-class _FakePbrun:
-    def __init__(self, tmp_path):
-        self.root = tmp_path / "queue"
-        self.submitted = []
-
-    def __call__(self, argv, **kw):
-        import subprocess
-
-        key = hashlib.sha256(json.dumps(argv).encode()).hexdigest()
-        self.submitted.append(key)
-        line = json.dumps({"action_key": key, "status": "submitted",
-                           "done": str(self.root / "done" / f"{key}.json"),
-                           "failed": str(self.root / "failed" / f"{key}.json")})
-        return subprocess.CompletedProcess(argv, 0, stdout=line + "\n", stderr="")
-
-    def finish(self, key, returncode=0):
-        _json(self.root / "done" / f"{key}.json",
-              {"status": "executed", "detail": {"returncode": returncode}})
+from native_dispatch_fixture import FakeNative
 
 
 def test_each_forward_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkeypatch):
@@ -288,15 +265,15 @@ def test_each_forward_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkey
 
     round_dir, root, space = sealed["round"], sealed["root"], sealed["space"]
     labels = sealed["document"]["labels"]
-    fake = _FakePbrun(tmp_path)
+    fake = FakeNative(monkeypatch)
 
     def go(*names):
-        return submit(round_dir, list(names), run=fake)
+        return submit(round_dir, list(names))
 
-    with pytest.raises(SplitDispatchRefused, match="forward-prep was never submitted"):
+    with pytest.raises(SplitDispatchRefused, match="native state unavailable"):
         go(labels[0])
     go("forward-prep")
-    with pytest.raises(SplitDispatchRefused, match="has not finished"):
+    with pytest.raises(SplitDispatchRefused, match="running"):
         go(labels[0])
     fake.finish(fake.submitted[-1])
     with pytest.raises(SplitDispatchRefused, match="no forward split prep"):
@@ -304,7 +281,7 @@ def test_each_forward_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkey
     _write_split_receipt(space, _run(root, monkeypatch, forward_split={
         "role": "prep", "ranges": RANGES}))
     go(*labels)
-    with pytest.raises(SplitDispatchRefused, match="has not finished"):
+    with pytest.raises(SplitDispatchRefused, match="running"):
         go("forward-join")
     for key, samples in zip(fake.submitted[-2:], RANGES):
         fake.finish(key)
@@ -317,12 +294,12 @@ def test_each_forward_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkey
     assert chain_state_path(space).is_file()
 
 
-def test_a_failed_forward_prep_holds_the_quanta(sealed, tmp_path):
-    fake = _FakePbrun(tmp_path)
-    submit(sealed["round"], ["forward-prep"], run=fake)
+def test_a_failed_forward_prep_holds_the_quanta(sealed, tmp_path, monkeypatch):
+    fake = FakeNative(monkeypatch)
+    submit(sealed["round"], ["forward-prep"])
     fake.finish(fake.submitted[-1], returncode=3)
-    with pytest.raises(SplitDispatchRefused, match="ended executed with exit 3"):
-        submit(sealed["round"], [sealed["document"]["labels"][0]], run=fake)
+    with pytest.raises(SplitDispatchRefused, match="failed"):
+        submit(sealed["round"], [sealed["document"]["labels"][0]])
 
 
 def test_the_forward_readahead_depth_looks_up_the_walk():

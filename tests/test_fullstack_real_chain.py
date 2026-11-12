@@ -1,37 +1,9 @@
-"""Full-stack real chain: producer -> PB validation -> movers -> readers -> join.
+"""Real producer slices, native staged readers and scientific result joining.
 
-Bounded actual chain on tiny fixtures, every leg through real production
-code. New tests only; no production file is edited here.
-
-- Real PQ producer: ``joint_layer_quanta.layer_quanta`` on a two-layer
-  fixture whose manifest entries point at real tmp safetensors/plain
-  files with real digests (one manifest end to end, no remap).
-- Real PB parsing: pinned PB ``core`` manifest validation and
-  ``storage_tiers`` phase ranges from the immutable shared source generation
-  (see fullstack_pb_generation). Staged source is not active-fleet evidence. Slice phase tables carry chunk phases
-  only (producer #852); the storage legs move the real per-layer slices
-  under their own wire digests -- no substitute manifest anywhere.
-- Real movers: pinned ``stage_move`` (each slice in two entry-aligned
-  legs under distinct keys, including a nonzero source-offset
-  ``.pbrange`` range) and ``ram_promote`` with epoch into tmp tiers (the
-  wire blob on layer-000, the payload range on layer-001); each slice's
-  PQ map is the real PB ``compose`` overlaid with its real RAM fragments
-  plus the current epoch announcement.
-- Real PQ readers: source shards via ``staged_shard_opener`` (whole and
-  nonzero-offset range, bit-identical, range hits counted), a wire blob
-  via the real wire reader served from RAM, and a ``.pt`` render via the
-  real production weight cache served from stage.
-- Real receipts/join: ``joint_quanta_join`` CLI on payloads built from
-  this producer's own records with cost signs and activation maxima
-  measured off the actual staged reads and sealed by the real row
-  constructor; coverage accepted, absent-record named gap (with the
-  downstream allocation gate refusing the gapped payload),
-  tampered/duplicate refusals (exit 1).
-- Gap posture: an uncovered span reads the pool silently (demonstrated,
-  named gap — not conformance). Strict SDK enforcement belongs to the
-  owning workers (PR #846 glue with real context/proof).
-
-Only CPU fixtures (torch CPU, safetensors); no model launch, no GPU work.
+The bounded CPU chain uses exact producer readsets, immutable materialized
+extents and real safetensors, wire and PWC readers. Known tensor bytes seed
+the sealed cost/activation rows consumed by the actual join and allocation
+gates. PB mover, queue, RAM-epoch and fragment protocols are retired.
 """
 from __future__ import annotations
 
@@ -41,78 +13,30 @@ import json
 import pickle
 import struct
 from pathlib import Path
-import sys
 
 import pytest
-
-from fleet_sdk import require_prismabuild_sdk
 import torch
 from safetensors.torch import save_file
 
-ROOT = Path(__file__).resolve().parents[1]
-for _entry in (ROOT, ROOT / "tools"):
-    if str(_entry) not in sys.path:
-        sys.path.insert(0, str(_entry))
-
-import fullstack_pb_generation as pbgen  # noqa: E402
-from prismaquant.joint_layer_quanta import (  # noqa: E402
-    layer_quanta,
-    seal_manifest_bytes,
-    verify_quanta_coverage,
-)
-from prismaquant.joint_quanta_join import (  # noqa: E402
-    GappedPayloadRefused,
-    load_joint_cost_for_allocation,
-    main as join_main,
-)
-
-from tests.test_joint_quanta_join import (  # noqa: E402
-    FORMATS,
-    _payload_provenance,
-    _roster_digest_of,
-    _row,
-    _units_of_layer,
-    probe as join_probe_fixture,
-)
-
-
-STAGE_TIER = "prismabuild-stage:dl380g10"
-RAM_TIER = "ram:dl380g10"
+from staged_native_fixtures import bind, native_staged_state, publish_inputs
+from prismaquant.staged_manifest import load_staged_manifest
+from prismaquant.staged_launch import read_contract_document
+from prismaquant.staged_tier_policy import staged_tier_policy_test_context
+from prismaquant.residency_map import StagedReadRefused
+from test_streamed_metadata_staged_reads import _deny_pool_opens
+from prismaquant.joint_layer_quanta import layer_quanta, seal_manifest_bytes, verify_quanta_coverage
+from prismaquant.joint_quanta_join import (
+    GappedPayloadRefused, load_joint_cost_for_allocation, main as join_main)
+from tests.test_joint_quanta_join import probe as join_probe_fixture
 
 
 @pytest.fixture(autouse=True)
-def _reader_sdk_bound():
-    with pbgen.reader_sdk_bound():
+def _native_policy(native_staged_state):
+    with staged_tier_policy_test_context('ssd'):
         yield
 
 
-@pytest.fixture(scope="module")
-def pb():
-    """One authenticated source package for the module's real mover fixtures."""
-    require_prismabuild_sdk()
-    with pbgen.source_bound():
-        info = pbgen.require_paths()
-        import prismabuild.core as core  # noqa: E402
-        import prismabuild.storage_tiers as tiers  # noqa: E402
-        import prismabuild.residency_plan as plans  # noqa: E402
-        import prismabuild.pool as pool  # noqa: E402
-        import prismabuild.residency_map as pb_map  # noqa: E402
-        import stage_move  # noqa: E402
-        import ram_promote  # noqa: E402
-        root = info["root"]
-        for module in (core, tiers, plans, pool, pb_map, stage_move,
-                       ram_promote):
-            location = Path(getattr(module, "__file__", "")).resolve()
-            assert location.is_relative_to(Path(root)), (
-                f"{module.__name__} loaded from {location}, not {root}")
-        assert info["generation"], "generation recorded once per admitted action"
-        yield {"generation": info["generation"], "root": root, "core": core,
-                "tiers": tiers, "plans": plans, "pool": pool,
-                "pb_map": pb_map, "stage_move": stage_move,
-                "ram_promote": ram_promote}
-
-
-@pytest.fixture(scope="module")
+@pytest.fixture(scope='module')
 def probe():
     return join_probe_fixture.__wrapped__()
 
@@ -176,21 +100,22 @@ def campaign(tmp_path_factory):
     range_path = files / "shard-range.safetensors"
     _write_shard(range_path, _tensors())
     range_off, range_len = _safetensors_tensor_span(range_path, "w0")
-    range_raw = range_path.read_bytes()[range_off:range_off + range_len]
+    range_source = range_path.read_bytes()
+    range_raw = range_source[range_off:range_off + range_len]
     entries = [
         _entry(head, 0, head_raw),
         _entry(files / "shard-l0.safetensors", 0, l0_raw),
         _entry(wire, 0, wire_raw),
         _entry(files / "shard-l1.safetensors", 0, l1_raw),
         _entry(pt_path, 0, pt_raw),
+        _entry(range_path, 0, range_source[:range_off]),
         _entry(range_path, range_off, range_raw),
     ]
     total = sum(e["bytes"] for e in entries)
     bounds, phases, running = [], [], 0
     for name, size in (("head", entries[0]["bytes"]),
                        ("layer-0", entries[1]["bytes"] + entries[2]["bytes"]),
-                       ("layer-1", entries[3]["bytes"] + entries[4]["bytes"]
-                        + entries[5]["bytes"])):
+                       ("layer-1", sum(entry['bytes'] for entry in entries[3:]))):
         running += size
         bounds.append(running)
         phases.append({"name": name, "bytes": size,
@@ -284,390 +209,131 @@ def _slice_file(campaign, record) -> tuple[Path, dict]:
     return rel, json.loads(gzip.decompress(raw).decode())
 
 
-def test_pb_validates_producer_slices(pb, produced, campaign) -> None:
-    """Published PB parses the real slice tables into stageable ranges."""
-    core, tiers = pb["core"], pb["tiers"]
-    assert pb["generation"], "generation recorded once per admitted action"
-    assert pb["root"], "dependency identity recorded once per admitted action"
-    for record in produced["records"]:
-        path, slice_manifest = _slice_file(campaign, record)
-        validated = core.validate_data_manifest(slice_manifest)
-        assert validated["entry_count"] == len(validated["entries"])
-        assert all(p["bytes"] > 0
-                   for p in validated["annotations"]["phases"]), path
-        ranges = tiers.manifest_phase_ranges(validated)
-        assert ranges, f"slice stages nothing: {record['quantum_id']}"
-        assert [r["name"] for r in ranges] == [
-            p["name"] for p in validated["annotations"]["phases"]]
-        assert ranges[0]["start_bytes"] == 0
-        assert ranges[-1]["end_bytes"] == validated["total_bytes"]
+@pytest.fixture
+def staged(produced, campaign, tmp_path):
+    """Materialize each persisted producer slice without a substitute readset."""
+    bindings = {}
+    for record in produced['records']:
+        directory = tmp_path / record['quantum_id']
+        directory.mkdir()
+        path, manifest = _slice_file(campaign, record)
+        files, ranges = {}, {}
+        for entry in manifest['entries']:
+            source = Path(entry['path'])
+            files[source] = None
+            ranges.setdefault(source, []).append((entry['offset'], entry['offset'] + entry['bytes']))
+        binding = publish_inputs(directory, files, ranges=ranges, read_contract=path.read_bytes())
+        assert binding['read_contract_sha256'] == record['read_set']['manifest_sha256']
+        bindings[record['quantum_id']] = binding
+    return bindings
 
 
-def _slice_spans(slice_manifest) -> list[tuple[int, int]]:
-    """Manifest-byte spans of a slice's entries, in entry order."""
-    spans, cursor = [], 0
-    for entry in slice_manifest["entries"]:
-        spans.append((cursor, cursor + entry["bytes"]))
-        cursor += entry["bytes"]
-    assert cursor == slice_manifest["total_bytes"]
-    return spans
+def _bind_slice(monkeypatch, staged, campaign, quantum_id):
+    resolver = bind(monkeypatch, staged[quantum_id])
+    _deny_pool_opens(monkeypatch, campaign['tmp'] / 'pool' / 'model',
+        names=[Path(e.source_path).name for e in resolver.manifest.extents])
+    return resolver
 
 
-def _run_mover(stage_move, queue, pool, tmp, stage, *, consumer, mover, digest,
-               manifest_file, start, end, receipts) -> None:
-    args = stage_move.build_parser().parse_args([
-        "--pool-root", str(tmp / "pb-queue"),
-        "--cas-root", str(tmp / "pb-queue" / "cas"),
-        "--action-key", mover,
-        "--consumer-action-key", consumer,
-        "--tier-id", STAGE_TIER,
-        "--stage-root", str(stage),
-        "--manifest-sha256", digest,
-        "--range-start-bytes", str(start),
-        "--range-end-bytes", str(end),
-        "--manifest", str(manifest_file),
-        "--residency-root", str(tmp / "pb-queue" / pool.RESIDENCY),
-        "--block", str(1 << 16),
-        "--readers", "1", "--max-readers", "1", "--unpaced",
-    ])
-    receipt = stage_move.move(args)
-    assert receipt["complete"] is True, (mover, receipt.get("refusal"))
-    assert receipt.get("refusal") is None
-    queue.record_move(mover, receipt)
-    receipts[mover] = receipt
+def test_native_binding_authenticates_producer_slices(staged, produced, campaign):
+    for record in produced['records']:
+        path, manifest = _slice_file(campaign, record)
+        assert read_contract_document(path.read_bytes()) == manifest
+        assert manifest['entry_count'] == len(manifest['entries'])
+        assert all(p['bytes'] > 0 for p in manifest['annotations']['phases'])
+        assert sum(e['bytes'] for e in manifest['entries']) == manifest['total_bytes']
+        binding = staged[record['quantum_id']]
+        native = load_staged_manifest(binding['path'], binding['sha256'])
+        assert native.read_contract_sha256 == record['read_set']['manifest_sha256']
+        assert {(e.source_path, e.source_offset, e.length, e.sha256) for e in native.extents} == {
+            (e['path'], e['offset'], e['bytes'], e['sha256']) for e in manifest['entries']}
 
 
-def _run_promotion(ram_promote, queue, pool, tmp, stage, ram, *, consumer, mover,
-                   digest, manifest_file, start, end, promotions) -> None:
-    args = ram_promote.build_parser().parse_args([
-        "--pool-root", str(tmp / "pb-queue"),
-        "--action-key", mover,
-        "--consumer-action-key", consumer,
-        "--tier-id", RAM_TIER,
-        "--ram-root", str(ram),
-        "--source-stage-root", str(stage),
-        "--manifest-sha256", digest,
-        "--range-start-bytes", str(start),
-        "--range-end-bytes", str(end),
-        "--manifest", str(manifest_file),
-        "--residency-root", str(tmp / "pb-queue" / pool.RESIDENCY),
-    ])
-    promotion = ram_promote.promote(args)
-    assert promotion["complete"] is True, (mover, promotion.get("refusal"))
-    assert promotion.get("refusal") is None
-    queue.record_move(mover, promotion)
-    promotions[mover] = promotion
+def test_native_materializes_both_slices_byte_identical(staged, produced, campaign):
+    for record in produced['records']:
+        binding = staged[record['quantum_id']]
+        native = load_staged_manifest(binding['path'], binding['sha256'])
+        for extent in native.extents:
+            raw = Path(extent.object_path).read_bytes()
+            source = Path(extent.source_path).read_bytes()[extent.source_offset:extent.source_offset + extent.length]
+            assert raw[extent.object_offset:extent.object_offset + extent.length] == source
+            assert hashlib.sha256(source).hexdigest() == extent.sha256
+            assert len(raw) == extent.object_bytes
+            assert hashlib.sha256(raw).hexdigest() == extent.object_sha256
 
 
-@pytest.fixture(scope="module")
-def staged(pb, produced, campaign):
-    """Real movers stage both real slices; RAM promotions ride the same roots.
-
-    Each slice moves in two entry-aligned legs under distinct mover keys,
-    and one entry span per slice promotes to RAM (the wire blob on
-    layer-000, the nonzero-offset payload range on layer-001).
-    """
-    require_prismabuild_sdk()
-    stage_move, ram_promote = pb["stage_move"], pb["ram_promote"]
-    pool = pb["pool"]
-    tmp = campaign["tmp"]
-    queue = pool.PoolQueue(tmp / "pb-queue")
-    queue.ensure_layout()
-    stage = tmp / "stage"
-    stage.mkdir()
-    ram = tmp / "ram"
-    ram.mkdir()
-    from prismabuild import storage_tiers as tiers  # noqa: E402
-    epoch = tiers.ensure_ram_epoch(ram, host="dl380g10")
-    assert epoch is not None
-    ran, promotions, slices = {}, {}, {}
-    stage_keys = iter(["aa" * 32, "ab" * 32, "ac" * 32, "ad" * 32])
-    ram_keys = iter(["bb" * 32, "bc" * 32])
-    for record in produced["records"]:
-        quantum_id = record["quantum_id"]
-        manifest_file, slice_manifest = _slice_file(campaign, record)
-        digest = record["read_set"]["manifest_sha256"]
-        # Separate quantum actions must have separate material namespaces.
-        # Reuse the fixture record's sealed identity as its stable key.
-        consumer = record["identity_sha256"]
-        spans = _slice_spans(slice_manifest)
-        total = slice_manifest["total_bytes"]
-        first, second = next(stage_keys), next(stage_keys)
-        _run_mover(stage_move, queue, pool, tmp, stage, consumer=consumer, mover=first,
-                   digest=digest, manifest_file=manifest_file,
-                   start=0, end=spans[0][1], receipts=ran)
-        _run_mover(stage_move, queue, pool, tmp, stage, consumer=consumer, mover=second,
-                   digest=digest, manifest_file=manifest_file,
-                   start=spans[0][1], end=total, receipts=ran)
-        if quantum_id == "layer-000":
-            entry = next(e for e in slice_manifest["entries"]
-                         if e["path"].endswith("wire-0.bin"))
-        else:
-            entry = next(e for e in slice_manifest["entries"]
-                         if e["path"].endswith("shard-range.safetensors"))
-        index = slice_manifest["entries"].index(entry)
-        _run_promotion(ram_promote, queue, pool, tmp, stage, ram,
-                       consumer=consumer,
-                       mover=next(ram_keys), digest=digest,
-                       manifest_file=manifest_file,
-                       start=spans[index][0], end=spans[index][1],
-                       promotions=promotions)
-        slices[quantum_id] = {"consumer": consumer,
-                              "manifest_file": manifest_file,
-                              "manifest_sha256": digest,
-                              "manifest": slice_manifest, "spans": spans}
-    assert set(slices) == {"layer-000", "layer-001"}
-    assert len({view["consumer"] for view in slices.values()}) == 2
-    return {"queue": queue, "stage": stage, "ram": ram,
-            "epoch": str(epoch["epoch"]), "receipts": ran,
-            "promotions": promotions, "slices": slices}
-
-
-def test_movers_stage_both_slices_byte_identical(staged, campaign) -> None:
-    """Every slice entry's staged bytes equal the source span by digest."""
-    assert len(staged["receipts"]) == 4, "two entry-aligned legs per slice"
-    for mover, receipt in staged["receipts"].items():
-        assert receipt["complete"] is True
-        assert receipt.get("refusal") is None
-    assert len(staged["promotions"]) == 2, "one RAM promotion per slice"
-    for mover, promotion in staged["promotions"].items():
-        assert promotion["complete"] is True
-        assert promotion.get("refusal") is None
-    queue = staged["queue"]
-    frags = [fragment for view in staged["slices"].values()
-             for fragment in _pq_read_fragments(queue, view["consumer"])]
-    assert len(frags) == 6, "four stage movers plus two ram promotions filed"
-    for fragment in frags:
-        for key, entry in fragment["entries"].items():
-            data = Path(entry["stage_path"]).read_bytes()
-            assert len(data) == entry["bytes"], key
-            assert hashlib.sha256(data).hexdigest() == entry["sha256"], key
-    for quantum_id, view in staged["slices"].items():
-        for entry in view["manifest"]["entries"]:
-            data = Path(entry["path"]).read_bytes()[
-                entry["offset"]:entry["offset"] + entry["bytes"]]
-            assert hashlib.sha256(data).hexdigest() == entry["sha256"], (
-                quantum_id, entry["path"], entry["offset"])
-
-
-def _pq_read_fragments(queue, consumer):
-    root = Path(queue.root) / "residency" / consumer
-    return [json.loads(p.read_text()) for p in sorted(root.glob("*.json"))]
-
-
-def _announce_ram_tier(tmp: Path, epoch: str) -> Path:
-    """File the tier record the PQ reader compares the map's ram epoch against."""
-    tiers = tmp / "tiers"
-    tiers.mkdir(parents=True, exist_ok=True)
-    record = {"schema": "prismabuild.storage_tier.v1", "tier": "ram",
-              "tier_id": RAM_TIER, "mountpoint": "/ram/prewarm",
-              "epoch": epoch}
-    (tiers / f"{RAM_TIER}.json").write_text(json.dumps(record))
-    return tiers
-
-
-def _slice_fragments(pb, staged, quantum_id) -> tuple[list, list]:
-    """A slice's own stage + RAM fragments, selected by its wire digest."""
-    pool, pb_map = pb["pool"], pb["pb_map"]
-    queue = staged["queue"]
-    view = staged["slices"][quantum_id]
-    digest = view["manifest_sha256"]
-    frags = [pb_map.validate_fragment(f) for f in
-             pb_map.read_fragments(queue.root / pool.RESIDENCY, view["consumer"])]
-    assert all(f["manifest_sha256"] == digest for f in frags)
-    stage_frags = [f for f in frags if f["tier_id"] == STAGE_TIER]
-    ram_frags = [f for f in frags if f["tier_id"] == RAM_TIER]
-    assert len(stage_frags) == 2, (quantum_id, "both legs filed")
-    assert len(ram_frags) == 1, (quantum_id, "the promotion filed")
-    return stage_frags, ram_frags
-
-
-def _write_pq_map(pb, staged, campaign, tmp, quantum_id):
-    """PQ map for one slice: real compose overlaid with its real RAM."""
-    _, pb_map = pb["pool"], pb["pb_map"]
-    stage_frags, ram_frags = _slice_fragments(pb, staged, quantum_id)
-    digest = staged["slices"][quantum_id]["manifest_sha256"]
-    composed = pb_map.compose(stage_frags)
-    assert composed["manifest_sha256"] == digest
-    overlaid = pb_map.overlay_ram(
-        composed, ram_frags, ram_tier_id=RAM_TIER,
-        ram_root=str(staged["ram"]), ram_epoch=staged["epoch"])
-    assert overlaid.get("ram_tier_id") == RAM_TIER
-    assert overlaid.get("ram_epoch") == staged["epoch"]
-    assert any("ram_path" in entry for entry in overlaid["entries"].values())
-    for key, entry in overlaid["entries"].items():
-        data = Path(entry["stage_path"]).read_bytes()
-        assert hashlib.sha256(data).hexdigest() == entry["sha256"], key
-        if "ram_path" in entry:
-            ram_data = Path(entry["ram_path"]).read_bytes()
-            assert hashlib.sha256(ram_data).hexdigest() == entry["sha256"], key
-    _announce_ram_tier(tmp, staged["epoch"])
-    residency = tmp / "residency"
-    residency.mkdir(parents=True, exist_ok=True)
-    map_path = residency / f"residency-{quantum_id}.json"
-    map_path.write_text(json.dumps(overlaid))
-    return map_path
-
-
-def test_real_reader_serves_staged_tensors_bit_identical(
-        pb, staged, campaign, monkeypatch) -> None:
-    """REAL PQ source open over mover-staged safetensors: bit-identical."""
-    from prismaquant import layer_streaming  # noqa: E402
-    from prismaquant.residency_map import (  # noqa: E402
-        ENV_VAR, TIERS_DIR_ENV_VAR, bind_residency_manifest,
-        residency_resolver, reset_residency_resolver_for_tests,
-    )
-    from safetensors import safe_open  # noqa: E402
-    tmp = campaign["tmp"]
-    monkeypatch.setenv(TIERS_DIR_ENV_VAR, str(tmp / "tiers"))
-    for quantum_id in ("layer-000", "layer-001"):
-        digest = staged["slices"][quantum_id]["manifest_sha256"]
-        map_path = _write_pq_map(pb, staged, campaign, tmp, quantum_id)
-        monkeypatch.setenv(ENV_VAR, str(map_path))
-        reset_residency_resolver_for_tests()
-        bind_residency_manifest(digest)
-        resolver = residency_resolver()
-        assert resolver is not None
-        rows = [Path(e["path"])
-                for e in staged["slices"][quantum_id]["manifest"]["entries"]
-                if e["path"].endswith(".safetensors") and e["offset"] == 0]
-        assert rows, f"whole-file shard present: {quantum_id}"
+def test_real_reader_serves_staged_tensors_bit_identical(staged, campaign, monkeypatch):
+    from prismaquant import layer_streaming
+    for quantum_id in ('layer-000', 'layer-001'):
+        resolver = _bind_slice(monkeypatch, staged, campaign, quantum_id)
+        rows = {e.source_path for e in resolver.manifest.extents
+                if e.source_path.endswith('.safetensors') and e.source_offset == 0
+                and e.length == e.source_bytes}
+        assert rows
         for declared in rows:
-            with layer_streaming._source_safe_open(
-                    str(declared), framework="pt") as reader:
-                with safe_open(str(declared), framework="pt") as reference:
-                    for name in reference.keys():
-                        got = reader.get_tensor(name)
-                        want = reference.get_tensor(name)
-                        if got.numel():
-                            assert torch.equal(
-                                got.view(torch.uint8),
-                                want.view(torch.uint8)), (quantum_id, name)
-        report = resolver.report()
-        assert report["fallback_count"] == 0, quantum_id
+            with layer_streaming._source_safe_open(declared, framework='pt') as reader:
+                for name, expected in _tensors().items():
+                    got = reader.get_tensor(name)
+                    assert torch.equal(got.view(torch.uint8), expected.view(torch.uint8))
+                assert resolver._windows > 0
+                with pytest.raises(RuntimeError, match='live reader windows'):
+                    resolver.close()
+            assert resolver._windows == 0
+        assert resolver.report()['bytes_from_pool'] == 0
 
 
-def test_nonzero_offset_range_serves_its_tensor_from_stage(
-        pb, staged, campaign, monkeypatch) -> None:
-    """A ``.pbrange`` payload range stages, promotes, and serves its tensor."""
-    from prismaquant import layer_streaming  # noqa: E402
-    from prismaquant.residency_map import (  # noqa: E402
-        ENV_VAR, TIERS_DIR_ENV_VAR, bind_residency_manifest,
-        residency_resolver, reset_residency_resolver_for_tests,
-    )
-    from safetensors import safe_open  # noqa: E402
-    tmp = campaign["tmp"]
-    map_path = _write_pq_map(pb, staged, campaign, tmp, "layer-001")
-    monkeypatch.setenv(ENV_VAR, str(map_path))
-    monkeypatch.setenv(TIERS_DIR_ENV_VAR, str(tmp / "tiers"))
-    reset_residency_resolver_for_tests()
-    bind_residency_manifest(staged["slices"]["layer-001"]["manifest_sha256"])
-    resolver = residency_resolver()
-    assert resolver is not None
-    span = campaign["range"]
-    assert span["offset"] > 0, "nonzero source offset, not a logical split"
-    key = f"{span['offset']}:{span['path']}"
-    assert key in json.loads(map_path.read_text())["entries"]
-    with layer_streaming._source_safe_open(
-            span["path"], framework="pt") as reader:
-        with safe_open(span["path"], framework="pt") as reference:
-            assert torch.equal(reader.get_tensor(span["tensor"]),
-                               reference.get_tensor(span["tensor"]))
-    report = resolver.report()
-    assert report["range_hits"] >= 1
-    assert report["fallback_count"] == 0
+def test_nonzero_offset_range_serves_its_tensor_from_stage(staged, campaign, monkeypatch):
+    from prismaquant import layer_streaming
+    resolver = _bind_slice(monkeypatch, staged, campaign, 'layer-001')
+    span = campaign['range']
+    assert span['offset'] > 0
+    entry = resolver.staged_range(span['path'], span['offset'], span['offset'] + span['bytes'])
+    assert entry['offset'] == span['offset'] and entry['object_offset'] == 0
+    with layer_streaming._source_safe_open(span['path'], framework='pt') as reader:
+        got = reader.get_tensor(span['tensor'])
+        assert torch.equal(got.view(torch.uint8), _tensors()[span['tensor']].view(torch.uint8))
+    assert resolver.report()['range_hits'] >= 1
+    assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0
 
 
-def test_wire_blob_is_served_from_ram(pb, staged, campaign, monkeypatch) -> None:
-    """The real wire reader prefers the live RAM copy under the staged one."""
-    from prismaquant.residency_map import (  # noqa: E402
-        ENV_VAR, TIERS_DIR_ENV_VAR, bind_residency_manifest,
-        residency_resolver, reset_residency_resolver_for_tests,
-    )
-    from prismaquant.tessera_joint_aura import (  # noqa: E402
-        _read_verified_wire_blob,
-    )
-    tmp = campaign["tmp"]
-    map_path = _write_pq_map(pb, staged, campaign, tmp, "layer-000")
-    monkeypatch.setenv(ENV_VAR, str(map_path))
-    monkeypatch.setenv(TIERS_DIR_ENV_VAR, str(tmp / "tiers"))
-    reset_residency_resolver_for_tests()
-    bind_residency_manifest(staged["slices"]["layer-000"]["manifest_sha256"])
-    resolver = residency_resolver()
-    assert resolver is not None
-    wire = campaign["wire"]
-    cell = {"record": {"blob_bytes": wire["bytes"],
-                       "blob_sha256": wire["sha256"]},
-            "wire": wire["path"]}
+def test_wire_blob_is_served_from_native_stage(staged, campaign, monkeypatch):
+    from prismaquant.tessera_joint_aura import _read_verified_wire_blob
+    resolver = _bind_slice(monkeypatch, staged, campaign, 'layer-000')
+    wire = campaign['wire']
+    cell = {'record': {'blob_bytes': wire['bytes'], 'blob_sha256': wire['sha256']}, 'wire': wire['path']}
     blob, digest = _read_verified_wire_blob(cell)
-    assert blob == Path(wire["path"]).read_bytes()
-    assert digest == wire["sha256"]
-    report = resolver.report()
-    assert report["ram_hits"] >= 1
-    assert report["fallback_count"] == 0
+    assert blob == hashlib.sha256(b'chain-wire').digest() * 64
+    assert digest == wire['sha256']
+    assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0
 
 
-def test_pwc_render_is_served_from_stage(pb, staged, campaign, monkeypatch) -> None:
-    """The real production weight cache reads its render off the stage."""
-    from prismaquant.production_weight_cache import (  # noqa: E402
-        ProductionWeightCache,
-    )
-    from prismaquant.residency_map import (  # noqa: E402
-        ENV_VAR, TIERS_DIR_ENV_VAR, bind_residency_manifest,
-        residency_report, residency_resolver,
-        reset_residency_resolver_for_tests,
-    )
-    tmp = campaign["tmp"]
-    map_path = _write_pq_map(pb, staged, campaign, tmp, "layer-001")
-    monkeypatch.setenv(ENV_VAR, str(map_path))
-    monkeypatch.setenv(TIERS_DIR_ENV_VAR, str(tmp / "tiers"))
-    reset_residency_resolver_for_tests()
-    bind_residency_manifest(staged["slices"]["layer-001"]["manifest_sha256"])
-    assert residency_resolver() is not None
-    pt = campaign["pt"]
-    key = ("chain-pwc", "pt")
-    cache = ProductionWeightCache(weights={key: pt["path"]}, levers={})
+def test_pwc_render_is_served_from_stage(staged, campaign, monkeypatch):
+    from prismaquant.production_weight_cache import ProductionWeightCache
+    resolver = _bind_slice(monkeypatch, staged, campaign, 'layer-001')
+    pt = campaign['pt']
+    key = ('chain-pwc', 'pt')
+    cache = ProductionWeightCache(weights={key: pt['path']}, levers={})
     cache.enable_lru(1 << 20)
-    cache.require_file_load_sha256({key: pt["sha256"]},
-                                   max_file_bytes=pt["bytes"])
+    cache.require_file_load_sha256({key: pt['sha256']}, max_file_bytes=pt['bytes'])
     assert cache.prefetch([key], max_workers=1) == 1
     tensor = cache.get(*key)
-    assert torch.equal(tensor, pt["tensor"])
-    assert cache.file_load_receipt(key, tensor)["path"] == pt["path"]
-    report = residency_report()
-    assert report is not None
-    assert report["hits"] >= 1
-    assert report["fallbacks"] == []
+    assert torch.equal(tensor, torch.arange(16, dtype=torch.float32).reshape(4, 4))
+    assert cache.file_load_receipt(key, tensor)['path'] == pt['path']
+    assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0
 
 
-def test_uncovered_span_reads_pool_silently_gap_not_conformance(
-        pb, staged, campaign, monkeypatch) -> None:
-    """Unmapped span reads the pool with no stage service: the demonstrated gap."""
-    from prismaquant import layer_streaming  # noqa: E402
-    from prismaquant.residency_map import (  # noqa: E402
-        ENV_VAR, TIERS_DIR_ENV_VAR, bind_residency_manifest,
-        residency_resolver, reset_residency_resolver_for_tests,
-    )
-    from safetensors import safe_open  # noqa: E402
-    tmp = campaign["tmp"]
-    map_path = _write_pq_map(pb, staged, campaign, tmp, "layer-000")
-    monkeypatch.setenv(ENV_VAR, str(map_path))
-    monkeypatch.setenv(TIERS_DIR_ENV_VAR, str(tmp / "tiers"))
-    reset_residency_resolver_for_tests()
-    bind_residency_manifest(staged["slices"]["layer-000"]["manifest_sha256"])
-    resolver = residency_resolver()
-    missing = tmp / "pool" / "model" / "never-staged.safetensors"
+def test_uncovered_span_refuses_without_pool_reads(staged, campaign, tmp_path, monkeypatch):
+    from prismaquant import layer_streaming
+    resolver = _bind_slice(monkeypatch, staged, campaign, 'layer-000')
+    missing = tmp_path / 'never-staged.safetensors'
     _write_shard(missing, _tensors())
-    assert resolver.stages(str(missing)) is False
-    with layer_streaming._source_safe_open(
-            str(missing), framework="pt") as reader:
-        with safe_open(str(missing), framework="pt") as reference:
-            assert torch.equal(reader.get_tensor("w0"),
-                               reference.get_tensor("w0"))
-    report = resolver.report()
-    assert report["fallback_count"] == 0
-    assert report["hits"] == 0
-
+    assert not resolver.stages(str(missing))
+    _deny_pool_opens(monkeypatch, tmp_path, names=[missing.name])
+    with pytest.raises(StagedReadRefused, match='source is not declared'):
+        with layer_streaming._source_safe_open(str(missing), framework='pt') as reader:
+            reader.get_tensor('w0')
+            pytest.fail('undeclared source granted tensor bytes')
+    assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0
 
 
 def _seal_join_inputs(root: Path, campaign) -> dict:
@@ -799,28 +465,18 @@ def _join_argv(root: Path, out: Path, binding) -> list[str]:
 
 
 def test_join_accepts_producer_records_with_coverage(
-        pb, staged, produced, campaign, probe, tmp_path, monkeypatch) -> None:
+        staged, produced, campaign, probe, tmp_path, monkeypatch) -> None:
     """REAL join CLI over this producer's records; costs seed from staged reads."""
     from prismaquant import layer_streaming  # noqa: E402
-    from prismaquant.residency_map import (  # noqa: E402
-        ENV_VAR, TIERS_DIR_ENV_VAR, bind_residency_manifest,
-        residency_resolver, reset_residency_resolver_for_tests,
-    )
-    from safetensors import safe_open  # noqa: E402
     from tests.test_joint_quanta_join import FORMATS  # noqa: E402
     tmp = campaign["tmp"]
-    map_path = _write_pq_map(pb, staged, campaign, tmp, "layer-000")
-    monkeypatch.setenv(ENV_VAR, str(map_path))
-    monkeypatch.setenv(TIERS_DIR_ENV_VAR, str(tmp / "tiers"))
-    reset_residency_resolver_for_tests()
-    bind_residency_manifest(staged["slices"]["layer-000"]["manifest_sha256"])
-    assert residency_resolver() is not None
+    resolver = _bind_slice(monkeypatch, staged, campaign, 'layer-000')
     shard_l0 = str(tmp / "pool" / "model" / "shard-l0.safetensors")
     with layer_streaming._source_safe_open(
             shard_l0, framework="pt") as reader:
-        with safe_open(shard_l0, framework="pt") as reference:
-            got = reader.get_tensor("w0")
-            assert torch.equal(got, reference.get_tensor("w0"))
+        got = reader.get_tensor("w0")
+        assert torch.equal(got, _tensors()['w0'])
+    assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0
     sign = _derive_sign_from_read(got)
     measured_max_abs = _measure_activation_max_abs(got)
     root = tmp_path / "join-in"

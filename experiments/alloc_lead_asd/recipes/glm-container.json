@@ -10,16 +10,6 @@
         "readonly": true
       },
       {
-        "source": "/mnt/shared/prismabuild-fleet/pb-queue",
-        "target": "/mnt/shared/prismabuild-fleet/pb-queue",
-        "readonly": false
-      },
-      {
-        "source": "/ram/prewarm",
-        "target": "/ram/prewarm",
-        "readonly": true
-      },
-      {
         "source": "/mnt/shared/tessera-measurements/pq1962-sol-20261002",
         "target": "/mnt/shared/tessera-measurements/pq1962-sol-20261002",
         "readonly": false
@@ -27,11 +17,6 @@
       {
         "source": "/home/rob/tmp",
         "target": "/home/rob/tmp",
-        "readonly": false
-      },
-      {
-        "source": "/mnt/shared/prismabuild-fleet/cas",
-        "target": "/mnt/shared/prismabuild-fleet/cas",
         "readonly": false
       }
     ]
@@ -49,8 +34,6 @@
     "XDG_CACHE_HOME": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tmp/xdg",
     "TMPDIR": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tmp",
     "PRISMAQUANT_TMPDIR": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tmp",
-    "PRISMABUILD_PRODUCED_SPOOL_ROOT": "/home/rob/tmp/pq1962-tiny-produced-spool",
-    "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": "16777216",
     "PRISMAQUANT_DEV_MODE": "1",
     "PRISMAQUANT_STAGE_B_SPILL_ROOT": "/home/rob/tmp/pq1962-tiny-spill",
     "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES": "16777216",

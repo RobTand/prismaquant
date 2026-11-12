@@ -16,10 +16,10 @@ collector that joins per-quantum journals into the one journal a resumed walk
 consumes unchanged.
 
 Deliberately absent: any dispatcher. Sharding, placement, admission and
-balancing are PrismaBuild's job -- these descriptors are rows a submitter may
-publish through ``pbcampaign`` (each quantum one action, residency-gated on
+balancing belong to the execution system -- these descriptors are rows a submitter may
+publish as campaign rows (each quantum one action, residency-gated on
 the stage tier like a movement node), never an application-side scheduler.
-Per the repo's work-granularity policy, if PrismaBuild cannot subdivide a
+Per the repo's work-granularity policy, if the execution system cannot subdivide a
 workload the response is a reported capability gap, not a second dispatcher.
 
 Fleet execution of these quanta additionally waits on the D45 measurement
@@ -70,8 +70,8 @@ def head_walk_quanta(names, *, max_units_per_quantum) -> list:
     The roster is ``sorted(names)`` -- the one order every reader already
     walks -- cut into contiguous half-open ``[lo, hi)`` slices of at most
     ``max_units_per_quantum`` units. The output is JSON data: no threads, no
-    placement, no execution. Publishing these rows (e.g. one ``pbcampaign``
-    row per quantum) is the submitter's job; running them is PrismaBuild's.
+    placement, no execution. Publishing these rows (e.g. one campaign
+    row per quantum) is the submitter's job; running them is the execution system's.
     """
     roster = _checked_names(names)
     _require(type(max_units_per_quantum) is int and max_units_per_quantum > 0,

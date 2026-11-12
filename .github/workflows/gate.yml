@@ -1,0 +1,231 @@
+name: Merge gate
+'on':
+  pull_request:
+    types:
+    - opened
+    - synchronize
+    - reopened
+permissions:
+  contents: read
+  issues: read
+concurrency:
+  group: merge-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+env:
+  PYTHONPATH: .
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  OPENBLAS_NUM_THREADS: '1'
+  NUMEXPR_NUM_THREADS: '1'
+  TORCHINDUCTOR_COMPILE_THREADS: '1'
+  MAX_JOBS: '1'
+  CUDA_VISIBLE_DEVICES: ''
+  GIT_AUTHOR_NAME: PrismaQuant CI
+  GIT_AUTHOR_EMAIL: ci@example.invalid
+  GIT_COMMITTER_NAME: PrismaQuant CI
+  GIT_COMMITTER_EMAIL: ci@example.invalid
+  GATE_BASE: ${{ github.event.pull_request.base.sha }}
+  GATE_HEAD: ${{ github.event.pull_request.head.sha }}
+  GATE_GRAPH_BASE_MODE: ${{ github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162 && 'batch' || 'pr' }}
+  GATE_MODE: ${{ github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) && 'full' || 'selection' }}
+  TRUSTED: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+jobs:
+  remote:
+    name: Remote Bazel selection and shards
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 140
+    outputs:
+      verdict: ${{ steps.controller.outputs.verdict }}
+      base: ${{ steps.refs.outputs.base }}
+      head: ${{ steps.refs.outputs.head }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      id: scan-python
+      with:
+        python-version: '3.14'
+    - id: refs
+      uses: Mergifyio/gha-mergify-ci@392d123d84a27960993927aec1f2cbb059fb95c1
+      with:
+        action: scopes-git-refs
+    - name: Run source-bound Remote Bazel controller
+      id: controller
+      env:
+        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+        BASE: ${{ steps.refs.outputs.base }}
+        HEAD: ${{ steps.refs.outputs.head }}
+        BRANCH: ${{ github.head_ref }}
+      run: |
+        set -Eeuo pipefail
+        python tools/ci/remote_gate.py pr --base "$BASE" --head "$HEAD" --branch "$BRANCH" --timeout 20 --output bazel-upload
+        python - <<'REMOTE_VERDICT'
+        import json, os
+        from pathlib import Path
+        result = json.loads(Path('bazel-upload/result.json').read_text())
+        if result['verdict'] not in ('pass', 'skipped'):
+            raise SystemExit('Remote Bazel evidence failed')
+        with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+            output.write('verdict=' + result['verdict'] + '\n')
+        REMOTE_VERDICT
+    - name: Require configured scope token
+      id: token
+      if: ${{ !cancelled() && steps.controller.outputs.scopes_ready == 'true' }}
+      env:
+        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+      run: |
+        test -n "$MERGIFY_TOKEN" || { echo "Mergify scope token unavailable"; exit 1; }
+    - id: scopes
+      if: ${{ !cancelled() && steps.token.outcome == 'success' }}
+      uses: Mergifyio/gha-mergify-ci@392d123d84a27960993927aec1f2cbb059fb95c1
+      with:
+        action: scopes-upload
+        token: ${{ secrets.MERGIFY_TOKEN }}
+        scopes: ${{ steps.controller.outputs.scopes }}
+        all_scopes: ${{ steps.controller.outputs.all_scopes }}
+    - id: scope-verdict
+      if: ${{ !cancelled() }}
+      env:
+        OUTCOME: ${{ steps.scopes.outcome }}
+      run: |
+        test "$OUTCOME" = success || { echo "Mergify scopes were not uploaded"; exit 1; }
+    - name: Scan exact JSON upload set
+      id: scan
+      if: ${{ !cancelled() && env.TRUSTED == 'true' && steps.controller.outputs.scopes_ready == 'true' }}
+      env:
+        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+      run: |
+        python tests/bazel_scan_runtime.py
+        python - <<'SCAN_JSON'
+        from pathlib import Path
+        from tools.ci.bazel_artifacts import scan_upload
+        raise SystemExit(scan_upload(Path('bazel-upload'), ['BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN']))
+        SCAN_JSON
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
+      with:
+        name: bazel-pr-${{ github.run_attempt }}
+        path: bazel-upload/
+        if-no-files-found: error
+        retention-days: 7
+  hosted:
+    name: Hosted exception lane
+    needs:
+    - remote
+    if: ${{ !cancelled() && needs.remote.result == 'success' }}
+    uses: ./.github/workflows/bazel-hosted.yml
+    with:
+      architecture: amd64
+      mode: pr
+      base: ${{ needs.remote.outputs.base || github.event.pull_request.base.sha }}
+      head: ${{ needs.remote.outputs.head || github.event.pull_request.head.sha }}
+      trusted: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+      receipt: bazel-pr-${{ github.run_attempt }}
+    secrets:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+      MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+  graph-impact:
+    name: Graph impact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      verdict: ${{ steps.check.outputs.verdict }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      with:
+        python-version: '3.12'
+    - name: Install graph check dependencies
+      run: |
+        unset BUILDBUDDY_API_KEY
+        python -m pip install -c .github/ci-constraints.txt pytest
+    - name: Run required graph impact check
+      id: check
+      shell: bash
+      run: |
+        unset BUILDBUDDY_API_KEY
+        set -Eeuo pipefail
+        mkdir -p graph-impact
+        python -m pytest tests/test_graph_impact.py::test_graph_impact_gate --noconftest \
+          -q --junitxml=graph-impact/junit.xml 2>&1 | tee graph-impact/tests.txt
+        python - <<'GRAPH_VERDICT'
+        import os
+        from pathlib import Path
+        import xml.etree.ElementTree as ET
+        cases = ET.parse('graph-impact/junit.xml').findall('.//testcase')
+        if len(cases) != 1 or cases[0].get('name') != 'test_graph_impact_gate' or any(
+            case.find(tag) is not None for case in cases
+                                  for tag in ('failure', 'error', 'skipped')):
+            raise SystemExit('NO_VERDICT: expected exactly one passing graph impact test')
+        import json
+        Path('graph-impact/result.json').write_text(json.dumps({'verdict': 'pass', 'base': os.environ['GATE_BASE'], 'head': os.environ['GATE_HEAD']}) + '\n')
+        with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+            output.write('verdict=pass\n')
+        GRAPH_VERDICT
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      id: scan-python
+      with:
+        python-version: '3.14'
+    - name: Scan exact JSON upload set
+      id: scan
+      if: ${{ !cancelled() && env.TRUSTED == 'true' && steps.check.outcome == 'success' }}
+      env:
+        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+      run: |
+        python tests/bazel_scan_runtime.py
+        python - <<'SCAN_JSON'
+        from pathlib import Path
+        from tools.ci.bazel_artifacts import publish_json
+        import os
+        upload = Path('graph-upload')
+        upload.mkdir(parents=True, exist_ok=True)
+        publish_json(upload, {'result.json': Path('graph-impact/result.json').read_bytes()}, ['BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN'])
+        SCAN_JSON
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
+      with:
+        name: graph-impact-${{ github.run_attempt }}
+        path: graph-upload/
+        if-no-files-found: error
+        retention-days: 7
+  gate:
+    name: gate
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) }}
+    needs:
+    - remote
+    - hosted
+    - graph-impact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+    - name: Require complete cutover evidence
+      env:
+        TRUSTED: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        REMOTE_RESULT: ${{ needs.remote.result }}
+        REMOTE_VERDICT: ${{ needs.remote.outputs.verdict }}
+        HOSTED_RESULT: ${{ needs.hosted.result }}
+        HOSTED_VERDICT: ${{ needs.hosted.outputs.verdict }}
+        GRAPH_RESULT: ${{ needs.graph-impact.result }}
+        GRAPH_VERDICT: ${{ needs.graph-impact.outputs.verdict }}
+      run: |
+        set -Eeuo pipefail
+        test "$HOSTED_RESULT" = success
+        test "$HOSTED_VERDICT" = pass
+        test "$GRAPH_RESULT" = success
+        test "$GRAPH_VERDICT" = pass
+        case "$TRUSTED" in
+          true) test "$REMOTE_RESULT" = success; case "$REMOTE_VERDICT" in pass|skipped) ;; *) exit 1;; esac;;
+          false) test "$REMOTE_RESULT" = skipped; test -z "$REMOTE_VERDICT";;
+          *) exit 1;;
+        esac

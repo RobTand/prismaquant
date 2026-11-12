@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+### Token digest owner integration (#2638/#3012)
+
+- Add exactly one tensor-owner recipe, `token_ids_int32_sha256`, and route
+  `tessera_hessian.token_ids_sha256` through it once with the original batches.
+  Caller-ordered, unframed int32 bytes and existing digest values are preserved.
+- Admit the additive owner source through its current integration pin, preserving
+  historical pins and guarded-read retention contracts. Remove only the token
+  consumer's primitive-baseline scope (277 to 276 sites); leave other local
+  retentions and census evidence unchanged. Qualification and limitations are
+  recorded in `docs/audits/tensor_digest_token_2638_integration.md`.
+
 ### Added
+- Reconcile shipcard's existing file-digest routes and descriptor retention (#2635, #1301).
+  Reuse 40 original frozen outcomes and check current consumers against the original recipe.
+  Preserve runtime code, the historical census and the existing baseline.
 - External quantum completions retain original descriptors without base64 bytes (#2625).
   The shared reader enforces explicit limits on local reads, memo hits, and staged reads.
   Bounded local reads retain digest-valid symlink behavior, independent of memo state.
@@ -50,6 +64,11 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- Graph shipcard replay requires original producer-bound equality evidence (#1586).
+  It checks raw receipt/config bytes, artifact identity, observed scope, and rank
+  transport before the lane's shared population and numerical verifier runs.
+  The current pinned verifier remains incompatible; synthetic CPU checks do not
+  qualify a release. The required graph slot and research-card refusal remain.
 - Qualify launch-owned SDK6 artifact-CAS bytes without changing the staged-reader SDK pin (#2683).
 - Remove the host-local spool-default assertion; retain explicit row behavior coverage (#2682).
 - Restore the source-page stat probe before Python 3.14 temp cleanup (#2681).

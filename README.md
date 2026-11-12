@@ -80,7 +80,10 @@ python -m prismaquant.allocator --formats NVFP4,FP8_DYNAMIC,BF16 \
   --target-bits 4.75
 ```
 
-The pipeline runs probe → cost → allocator → export → serve-smoke end-to-end, with fail-fast gates on any configuration that would break the measurement contract (it will tell you exactly why and what to set). Models too large for memory (200B+ MoE) run the streaming layer-by-layer path — peak memory is bounded by ~1 layer + a tunable cache.
+The native pipeline runs probe → cost → allocator → export with fail-fast
+configuration gates. It prints the open shipcard slots after export; the serving
+lane must complete the serving and quality gates separately before shipping.
+Models too large for memory (200B+ MoE) run the streaming layer-by-layer path — peak memory is bounded by ~1 layer + a tunable cache.
 
 ---
 
@@ -116,7 +119,7 @@ identities. These outputs are diagnostic research, refused by shipping allocatio
 they do not turn an old capture into a new context or establish held-out quality.
 Probe-count forecasts from a small retained pilot are conditional planning numbers,
 not population-variance or served-KL precision guarantees. CPU/GPU execution and
-staged NVMe/RAM consumption use PrismaBuild admission and byte-integrity checks.
+staged NVMe/RAM consumption use Flux admission and byte-integrity checks.
 In default dev mode, recorded-versus-running identity or provenance differences
 are stamped and continue under `dev_mode.seal_check`; no re-seal or cache adoption
 is required. Certified mode remains explicit.

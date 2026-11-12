@@ -1,41 +1,52 @@
-"""Submit the G3 harness with PB's phased residency and resource admission."""
+"""Submit the G3 harness as one native Flux job over an explicit staged-input binding."""
 import argparse
+import json
 from pathlib import Path
-import subprocess
 import sys
 
-from g3_progress_launch import select_arms, comparison_phases
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 
 
-def main():
+def main(argv=None):
+    from prismaquant import flux_jobs
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-manifest", required=True)
-    parser.add_argument("--cpus", type=int, required=True)
-    parser.add_argument("--mem-gb", type=int, required=True)
-    parser.add_argument("--gpu-memory-gb", type=int, required=True)
-    parser.add_argument("--quiet-s", type=int, default=900)
-    parser.add_argument("--detach", action="store_true")
+    parser.add_argument("--record-dir", required=True, type=Path)
+    parser.add_argument("--resume", action="store_true",
+                        help="reconnect to the saved native ID and never submit")
+    parser.add_argument("--staged-launch", type=Path, help="a prismaquant.staged_launch.v1 binding file")
+    parser.add_argument("--read-plan")
+    parser.add_argument("--read-plan-sha256")
+    parser.add_argument("--cpus", type=int, default=1)
+    parser.add_argument("--mem-gb", type=int, default=1)
+    parser.add_argument("--gpu-memory-gb", type=int, default=0)
+    parser.add_argument("--walltime-s", type=int, default=1800)
     parser.add_argument("launch_args", nargs=argparse.REMAINDER)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.resume:
+        print(flux_jobs.load_submission(args.record_dir).job_id)
+        return 0
+    if not (args.staged_launch and args.read_plan and args.read_plan_sha256):
+        parser.error("a submission requires --staged-launch, --read-plan and --read-plan-sha256")
     launch = args.launch_args[1:] if args.launch_args[:1] == ["--"] else args.launch_args
-    arms = select_arms(launch)
-    phases = ["setup", *(f"layer-{i:02d}" for i in range(45)), "teachers"] if arms else ["smoke"]
-    if "--real-arm-smoke" in launch:
-        phases = comparison_phases()
-    root = Path(__file__).resolve().parents[2]
-    command = [sys.executable, "/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py",
-               "--cwd", str(root), "--tag", "gb10", "--gpu", "--priority", "0",
-               "--cpus", str(args.cpus), "--demand", f"mem_gb={args.mem_gb}",
-               "--gpu-memory-gb", str(args.gpu_memory_gb),
-               "--data-manifest", args.data_manifest, "--residency", "stage",
-               "--residency-share", "auto", "--residency-ram", "auto",
-               "--env", "TMPDIR=/tmp"]
-    for phase in phases:
-        command.extend(["--progress-phase", f"{phase}={args.quiet_s}"])
-    if args.detach:
-        command.append("--detach")
-    command.extend(["--", "python3", "tools/g3job/g3_progress_launch.py", *launch])
-    return subprocess.run(command, check=False).returncode
+    try:
+        resources = flux_jobs.FluxResources(cores=args.cpus, memory_gib=args.mem_gb,
+                                            gpus=1 if args.gpu_memory_gb else 0,
+                                            walltime_s=args.walltime_s)
+    except ValueError as exc:
+        print(f"G3 submission refused at the native profile: {exc}", file=sys.stderr)
+        return 2
+    command = ["/usr/bin/python3", "-s", "tools/g3job/g3_progress_launch.py", *launch,
+               "--read-plan", args.read_plan, "--read-plan-sha256", args.read_plan_sha256]
+    try:
+        submission = flux_jobs.submit_job(command, checkout=ROOT, resources=resources,
+                                          record_dir=args.record_dir,
+                                          staged_input=json.loads(args.staged_launch.read_bytes()))
+    except flux_jobs.SubmissionUnknown as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 3
+    print(submission.job_id)
+    return 0
 
 
 if __name__ == "__main__":

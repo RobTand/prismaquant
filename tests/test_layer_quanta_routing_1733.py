@@ -12,18 +12,7 @@ from prismaquant import joint_campaign_ledger as ledger
 
 import prismaquant.joint_layer_quanta as quanta
 from prismaquant.digests import bytes_sha256hex
-
-
-def _spies(monkeypatch):
-    calls = {"hash": []}
-    real_hash = getattr(quanta, "bytes_sha256hex", None)
-
-    def stand_in_hash(value):
-        calls["hash"].append(value)
-        return real_hash(value) if real_hash is not None else None
-
-    monkeypatch.setattr(quanta, "bytes_sha256hex", stand_in_hash, raising=False)
-    return calls
+from tests.delegation_recording import record_unary_calls
 
 
 def _parent():
@@ -55,7 +44,9 @@ def _record(campaign):
 
 
 def test_layer_quanta_hash_routes_to_owner(monkeypatch):
-    calls = _spies(monkeypatch)
+    calls = {
+        "hash": record_unary_calls(monkeypatch, quanta, "bytes_sha256hex"),
+    }
     campaign = {"plan": "p", "n": 1}
     proof = quanta.verify_quanta_coverage([_record(campaign)], _parent())
     assert proof["campaign_sha256"] == hashlib.sha256(

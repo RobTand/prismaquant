@@ -9,6 +9,7 @@ state is an error; it is never silently overwritten or recomputed.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 import json
 import os
 import pickle
@@ -27,6 +28,7 @@ from .digests import (  # noqa: F401 -- re-exported: one spelling
     canonical_json_sha256_normalized,
 )
 from .digests import bytes_sha256hex, text_sha256hex
+from .io_buffers import open_nofollow_directory as open_directory
 
 
 MANIFEST_SCHEMA = "prismaquant.cost_stage_checkpoint.manifest.v1"
@@ -69,44 +71,39 @@ def unique_temp_suffix() -> str:
     return _TEMP_SUFFIX[1]
 
 
-def atomic_write_bytes(path: Path, payload: bytes) -> None:
+def atomic_write_bytes(path: Path, payload: bytes, *, writer_identities=None,
+                       writer_directories=None) -> None:
     """Publish bytes durably; a crash leaves either the old or new file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + unique_temp_suffix())
-    with temporary.open("wb") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
-    directory_fd = os.open(path.parent, os.O_RDONLY)
+    if writer_directories is None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+    else:
+        directory_fd = open_directory(str(path.parent), identity=writer_directories[str(path.parent)])
     try:
-        os.fsync(directory_fd)
+        handle = (temporary.open('wb') if writer_directories is None else
+                  os.fdopen(os.open(temporary.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                    0o600, dir_fd=directory_fd), 'wb'))
+        with handle, (nullcontext() if writer_identities is None else
+                      writer_identities.capture(handle, (temporary, path), directory_fd=directory_fd)):
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+            if writer_directories is None:
+                os.replace(temporary, path)
+            else:
+                os.link(temporary.name, path.name, src_dir_fd=directory_fd,
+                        dst_dir_fd=directory_fd, follow_symlinks=False)
+                os.unlink(temporary.name, dir_fd=directory_fd)
+            os.fsync(directory_fd)
+            if writer_identities is not None:
+                writer_identities.retain(path, handle)
     finally:
         os.close(directory_fd)
 
 
-def _publication_parent_nofollow(parent: Path) -> int:
-    """Create/open the publication parent without following any component."""
-    if not parent.is_absolute():
-        raise ValueError("no-follow publication needs an absolute destination")
-    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    fd = os.open("/", flags)
-    try:
-        for component in parent.parts[1:]:
-            try:
-                os.mkdir(component, dir_fd=fd)
-            except FileExistsError:
-                pass
-            next_fd = os.open(component, flags, dir_fd=fd)
-            os.close(fd)
-            fd = next_fd
-        return fd
-    except BaseException:
-        os.close(fd)
-        raise
-
-
-def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False) -> bool:
+def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False,
+                      writer_identities=None, writer_directories=None) -> bool:
     """Publish ``payload`` at ``path`` as a NEW file; never replace one already there.
 
     ``os.link`` is the atomic no-clobber publication on one filesystem: the
@@ -132,8 +129,11 @@ def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False) -> 
     temporary = None
     owns_temporary = False
     try:
-        if nofollow:
-            directory_fd = _publication_parent_nofollow(path.parent)
+        if writer_directories is not None or nofollow:
+            if writer_directories is not None:
+                directory_fd = open_directory(str(path.parent), identity=writer_directories[str(path.parent)])
+            else:
+                directory_fd = open_directory(str(path.parent), create=True)
             target = path.name
             try:
                 os.stat(target, dir_fd=directory_fd, follow_symlinks=False)
@@ -163,23 +163,30 @@ def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False) -> 
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        try:
-            if directory_fd is None:
-                os.link(temporary, target)
+            try:
+                if directory_fd is None:
+                    os.link(temporary, target)
+                else:
+                    os.link(temporary, target, src_dir_fd=directory_fd,
+                            dst_dir_fd=directory_fd, follow_symlinks=False)
+            except FileExistsError:
+                return False
+            if nofollow or writer_directories is not None:
+                os.unlink(temporary, dir_fd=directory_fd)
             else:
-                os.link(temporary, target, src_dir_fd=directory_fd,
-                        dst_dir_fd=directory_fd, follow_symlinks=False)
-        except FileExistsError:
-            return False
-        if directory_fd is None:
-            directory_fd = os.open(path.parent, os.O_RDONLY)
-        os.fsync(directory_fd)
+                temporary.unlink()
+            owns_temporary = False
+            if directory_fd is None:
+                directory_fd = os.open(path.parent, os.O_RDONLY)
+            os.fsync(directory_fd)
+            if writer_identities is not None:
+                writer_identities.retain(path, handle)
         return True
     finally:
         try:
             if owns_temporary:
                 try:
-                    if nofollow:
+                    if nofollow or writer_directories is not None:
                         os.unlink(temporary, dir_fd=directory_fd)
                     else:
                         temporary.unlink()
@@ -236,6 +243,64 @@ def unit_path(root: Path, qname: str) -> Path:
     return root / "units" / f"{text_sha256hex(str(qname))}.pkl"
 
 
+_IDENTITY_MISSING = object()
+
+
+def first_identity_difference(
+    stored: object,
+    expected: object,
+    *,
+    path: str = "",
+) -> tuple[str, object, object] | None:
+    """Return the first canonical-identity difference, including its field.
+
+    Resume gates use this rather than a single aggregate digest so an operator
+    is told *which* value-bearing input changed.  Mapping keys are traversed in
+    sorted order and sequences in index order, making the reported field stable.
+    """
+    if isinstance(stored, Mapping) and isinstance(expected, Mapping):
+        keys = sorted(set(str(key) for key in stored) | set(
+            str(key) for key in expected
+        ))
+        stored_by_name = {str(key): value for key, value in stored.items()}
+        expected_by_name = {str(key): value for key, value in expected.items()}
+        for key in keys:
+            child = f"{path}.{key}" if path else key
+            left = stored_by_name.get(key, _IDENTITY_MISSING)
+            right = expected_by_name.get(key, _IDENTITY_MISSING)
+            if left is _IDENTITY_MISSING or right is _IDENTITY_MISSING:
+                return child, left, right
+            different = first_identity_difference(left, right, path=child)
+            if different is not None:
+                return different
+        return None
+    if (
+        isinstance(stored, Sequence)
+        and not isinstance(stored, (str, bytes, bytearray))
+        and isinstance(expected, Sequence)
+        and not isinstance(expected, (str, bytes, bytearray))
+    ):
+        if len(stored) != len(expected):
+            child = f"{path}.length" if path else "length"
+            return child, len(stored), len(expected)
+        for index, (left, right) in enumerate(zip(stored, expected)):
+            child = f"{path}[{index}]" if path else f"[{index}]"
+            different = first_identity_difference(left, right, path=child)
+            if different is not None:
+                return different
+        return None
+    if type(stored) is not type(expected) or stored != expected:
+        return path or "value", stored, expected
+    return None
+
+
+def identity_value_for_error(value: object) -> str:
+    if value is _IDENTITY_MISSING:
+        return "<missing>"
+    text = repr(value)
+    return text if len(text) <= 240 else text[:237] + "..."
+
+
 def _mismatch(
     stage: str,
     *,
@@ -243,8 +308,6 @@ def _mismatch(
     stored: object,
     expected: object,
 ) -> None:
-    from prismaquant.production_weight_cache import identity_value_for_error
-
     raise RuntimeError(
         f"{stage} checkpoint identity mismatch at {field}: "
         f"stored={identity_value_for_error(stored)} "
@@ -479,8 +542,6 @@ def prepare_journal(
         # pays for the field walk that names where it is.
         if (manifest.get("identity_sha256") != identity_sha256
                 or manifest.get("identity") != canonical_identity):
-            from prismaquant.production_weight_cache import first_identity_difference
-
             stored_identity = manifest.get("identity")
             original_difference = first_identity_difference(stored_identity, canonical_identity)
             if seal_fields and isinstance(stored_identity, Mapping):
@@ -504,7 +565,6 @@ def prepare_journal(
                                    or stored_identity.get(key) != canonical_identity.get(key)))
                 if moved:
                     from .dev_mode import seal_check
-                    from .production_weight_cache import identity_value_for_error
 
                     changes = "; ".join(
                         f"{key}: stored={identity_value_for_error(stored_identity.get(key, '<absent>'))} "

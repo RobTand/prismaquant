@@ -417,7 +417,7 @@ class QuantumRunInputs:
     manifest_sha256: str
     output_root: str
 
-    def argv(self, *, allowed_tiers: str, band: QuantumBandArguments | None = None) -> list[str]:
+    def argv(self, *, band: QuantumBandArguments | None = None) -> list[str]:
         band_arguments = [] if band is None else band.argv()
         return [
             "python3", "-m", QUANTUM_ENTRY_POINT,
@@ -430,58 +430,57 @@ class QuantumRunInputs:
             "--adjoint-slice", str(self.adjoint_slice.path),
             "--adjoint-slice-sha256", self.adjoint_slice.sha256,
             "--data-manifest-sha256", self.manifest_sha256,
-            "--allowed-tiers", allowed_tiers,
             "--resume", "--output-root", str(self.output_root), *band_arguments]
 
 
 @dataclass(frozen=True)
 class QuantumRowDemand:
     memory_gib: str
-    gpu_gib: str
     cpus: int
 
     @classmethod
     def from_policy(cls, policy, *, environment, source_prefetch=None, operator_prefetch=None):
         if policy is None:
-            return cls("104", "80", 10)
+            return cls("104", 10)
         limits = policy["limits"]
-        memory, gpu = (f"{limits[key] / 1024 ** 3:g}"
-                       for key in ("physical_bytes", "gpu_bytes"))
+        memory = f"{limits['physical_bytes'] / 1024 ** 3:g}"
         cpus = max(int(environment.get("PRISMAQUANT_LAYER_READ_THREADS", 1)),
                    int(source_prefetch["prefetch_workers"]) + 1,
                    int(operator_prefetch["prefetch_workers"]) + 1)
-        return cls(memory, gpu, cpus)
+        return cls(memory, cpus)
 
 
 @dataclass(frozen=True)
-class QuantumPBEnvelope:
-    manifest_path: str
-    progress: Sequence[tuple[str, int]]
+class QuantumRow:
     demand: QuantumRowDemand
     tags: Sequence[str]
     priority: int
     command: Sequence[str]
+    timeout_s: int
     environment: Sequence[tuple[str, str]] = ()
-    produced_output_template: str | None = None
-    container_image: str | None = None
+    produced_declaration: str | None = None
+    produced_declaration_wire: bytes | None = None
 
-    def argv(self, *, python: str, pbrun: str, container_image_flag: str,
-             dev_mode_assignment: str) -> list[str]:
-        argv = [python, str(pbrun)]
-        for tag in self.tags:
-            argv += ["--tag", str(tag)]
-        argv += ["--data-manifest", str(self.manifest_path),
-                 "--residency", "stage", "--residency-ram", "auto"]
-        for name, grace in self.progress:
-            argv += ["--progress-phase", f"{name}={grace}"]
-        argv += ["--priority", str(self.priority),
-                 "--demand", f"gpu=1,mem_gb={self.demand.memory_gib}",
-                 "--gpu-memory-gb", self.demand.gpu_gib,
-                 "--cpus", str(self.demand.cpus)]
-        if self.produced_output_template is not None:
-            argv += ["--produced-output-template", str(self.produced_output_template)]
-        if self.container_image is not None:
-            argv += [container_image_flag, self.container_image]
+    def row(self, *, checkout: str) -> dict:
+        """Scientific launch intent. Admission and resource rendering belong to Flux."""
+        if self.produced_declaration is None and self.produced_declaration_wire is not None:
+            raise ValueError('unpublished declaration bytes need an explicit path')
+        from decimal import Decimal
+        def number(text):
+            value = Decimal(text)
+            return int(value) if value == value.to_integral_value() else float(value)
+        environment = {}
         for name, value in self.environment:
-            argv += ["--env", f"{name}={value}"]
-        return [*argv, "--env", dev_mode_assignment, "--detach", "--", *self.command]
+            if name in environment and environment[name] != value:
+                raise ValueError(f"conflicting explicit environment setting {name}")
+            environment[name] = value
+        row = {"argv": list(self.command), "cwd": checkout,
+               "demand": {"gpu": 1, "mem_gb": number(self.demand.memory_gib),
+                          "cpu": self.demand.cpus},
+               "tags": list(self.tags), "priority": self.priority,
+               "env": environment, "retry_safe": True, "timeout_s": self.timeout_s}
+        if self.produced_declaration is not None:
+            from .stage_a_produced_output import declaration_launch_arguments
+            row['argv'] += declaration_launch_arguments(
+                self.produced_declaration, wire=self.produced_declaration_wire)
+        return row

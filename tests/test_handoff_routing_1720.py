@@ -16,6 +16,7 @@ import pytest
 
 import prismaquant.joint_quantum_handoff as handoff
 from prismaquant.digests import bytes_sha256hex, indent2_json_file_bytes
+from tests.delegation_recording import record_unary_calls
 
 
 def _record():
@@ -25,27 +26,11 @@ def _record():
             "handoff_sha256": "0" * 64}
 
 
-def _spies(monkeypatch):
-    calls = {"dumps": [], "hash": []}
-    real_dumps = getattr(handoff, "indent2_json_file_bytes", None)
-    real_hash = getattr(handoff, "bytes_sha256hex", None)
-
-    def stand_in_dumps(value):
-        calls["dumps"].append(value)
-        return real_dumps(value) if real_dumps is not None else None
-
-    def stand_in_hash(value):
-        calls["hash"].append(value)
-        return real_hash(value) if real_hash is not None else None
-
-    monkeypatch.setattr(handoff, "indent2_json_file_bytes", stand_in_dumps,
-                        raising=False)
-    monkeypatch.setattr(handoff, "bytes_sha256hex", stand_in_hash, raising=False)
-    return calls
-
-
 def test_handoff_hashes_route_to_owners(monkeypatch, tmp_path):
-    calls = _spies(monkeypatch)
+    calls = {
+        "dumps": record_unary_calls(monkeypatch, handoff, "indent2_json_file_bytes"),
+        "hash": record_unary_calls(monkeypatch, handoff, "bytes_sha256hex"),
+    }
     record = _record()
     assert handoff.handoff_record_bytes(record) == indent2_json_file_bytes(record)
     with pytest.raises(handoff.QuantumHandoffRefused):

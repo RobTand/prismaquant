@@ -252,7 +252,7 @@ def test_qualification_journal_restarts_from_durable_unit(tmp_path, monkeypatch)
     def committed(units, phase, unit=None):
         assert unit_path(journal, unit).is_file(), 'PB progress preceded durable receipt'
         progress.append((units, phase, unit))
-    monkeypatch.setattr(bridge, '_pb_commit', committed)
+    monkeypatch.setattr(bridge, 'log_progress', committed)
     with pytest.raises(RuntimeError, match='intentional verification failure'):
         bridge.prepare_cache(runner, data, **options)
     assert unit_path(journal, 'model.layers.0.a').is_file()
@@ -423,7 +423,7 @@ def test_a_sealed_replay_frontier_announces_only_the_phases_it_reads(
               'model.layers.0.b': 'layer-0-part-0'}
     monkeypatch.setattr(bridge, 'verify_anchor_render', _passing_verify)
     progress = []
-    monkeypatch.setattr(bridge, '_pb_commit',
+    monkeypatch.setattr(bridge, 'log_progress',
                         lambda units, phase, unit=None:
                         progress.append((units, phase, unit)))
     cache = bridge.prepare_cache(runner, data, **options, qualification_resume=True,
@@ -483,7 +483,7 @@ def test_a_fully_completed_resume_verifies_and_publishes(tmp_path, monkeypatch):
         tmp_path, monkeypatch, fail_unit=None)
     sealed = _sealed_over(journal, data, data.formats_by_qname)
     progress = []
-    monkeypatch.setattr(bridge, '_pb_commit',
+    monkeypatch.setattr(bridge, 'log_progress',
                         lambda units, phase, unit=None:
                         progress.append((units, phase, unit)))
     cache = bridge.prepare_cache(
@@ -529,7 +529,7 @@ def test_the_counter_continues_from_the_head_walk_rather_than_restarting(
               'model.layers.0.b': 'layer-0-part-0'}
     monkeypatch.setattr(bridge, 'verify_anchor_render', _passing_verify)
     progress = []
-    monkeypatch.setattr(bridge, '_pb_commit',
+    monkeypatch.setattr(bridge, 'log_progress',
                         lambda units, phase, unit=None:
                         progress.append((units, phase, unit)))
     cache = bridge.prepare_cache(runner, data, **options, qualification_resume=True,
@@ -556,7 +556,7 @@ def test_an_empty_sealed_frontier_is_accepted_and_a_later_unit_is_refused(
     starts = {name: 'layer-0-part-0' for name in data.formats_by_qname}
     monkeypatch.setattr(bridge, 'verify_anchor_render', _passing_verify)
     progress = []
-    monkeypatch.setattr(bridge, '_pb_commit',
+    monkeypatch.setattr(bridge, 'log_progress',
                         lambda units, phase, unit=None:
                         progress.append((units, phase, unit)))
     cache = bridge.prepare_cache(
@@ -598,7 +598,7 @@ def test_a_source_only_layer_phase_is_announced_before_its_reads(
     runner.context.install = lambda layer, **kw: order.append(('install', layer))
     runner.context.schedule_prefetch = lambda depth: order.append(('prefetch', depth))
     runner.context.unload = lambda layer: order.append(('unload', layer))
-    monkeypatch.setattr(bridge, '_pb_commit',
+    monkeypatch.setattr(bridge, 'log_progress',
                         lambda units, phase, unit=None:
                         order.append(('announce', units, phase, unit)))
     monkeypatch.setattr(bridge, 'verify_anchor_render', _passing_verify)
@@ -643,7 +643,7 @@ def test_a_fully_completed_resume_announces_every_declared_source_phase(
     runner.context.install = lambda layer, **kw: order.append(('install', layer))
     runner.context.schedule_prefetch = lambda depth: order.append(('prefetch', depth))
     runner.context.unload = lambda layer: order.append(('unload', layer))
-    monkeypatch.setattr(bridge, '_pb_commit',
+    monkeypatch.setattr(bridge, 'log_progress',
                         lambda units, phase, unit=None:
                         order.append(('announce', units, phase, unit)))
 

@@ -807,8 +807,10 @@ def select_priced_unit_upgrades(costs: Mapping[str, Mapping[str, Any]],
             "it is reserved from")
     spend_cap = byte_budget - reserve_bytes
 
+    from functools import cache
     from .tessera_formats import parse_tessera_format_name
 
+    @cache
     def _grid_rung(fmt: str):
         parsed = parse_tessera_format_name(fmt)
         if parsed is None:

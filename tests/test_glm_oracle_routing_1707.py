@@ -14,23 +14,12 @@ import pytest
 
 from prismaquant import glm_source_derivative as gsl
 from prismaquant.digests import bytes_sha256hex, file_sha256hex
-
-
-def _spy(monkeypatch, name):
-    calls = []
-    real = getattr(gsl, name, None)
-
-    def stand_in(value):
-        calls.append(value)
-        return real(value) if real is not None else None
-
-    monkeypatch.setattr(gsl, name, stand_in, raising=False)
-    return calls
+from tests.delegation_recording import record_unary_calls
 
 
 def test_oracle_routes_to_owners(monkeypatch, tmp_path):
-    hash_calls = _spy(monkeypatch, "bytes_sha256hex")
-    file_calls = _spy(monkeypatch, "file_sha256hex")
+    hash_calls = record_unary_calls(monkeypatch, gsl, "bytes_sha256hex")
+    file_calls = record_unary_calls(monkeypatch, gsl, "file_sha256hex")
     blob = tmp_path / "blob.bin"
     blob.write_bytes(b"\x00\x01glm-oracle")
     assert gsl.sha256(blob) == file_sha256hex(blob)

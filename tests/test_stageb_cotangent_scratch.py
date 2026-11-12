@@ -111,7 +111,7 @@ def test_scratch_quantum_matches_single_run_bitwise(tmp_path, monkeypatch):
 
 
 def test_scratch_quantum_preserves_executable_phase_and_resume_order(
-        tmp_path, monkeypatch, pinned_pb_source):
+        tmp_path, monkeypatch):
     import test_quantum_executable_readset as phases
     scratch = tmp_path / 'scratch'; scratch.mkdir()
     monkeypatch.setenv('PRISMAQUANT_STAGE_B_COTANGENT_ROOT', str(scratch))

@@ -1,4 +1,4 @@
-"""Static prepared-input bridge: real derivation, real wait, integrated route (PQ #917).
+"""Prepared-input derivation, dispatch and native immutable PWC route (PQ #917).
 
 The three completion requirements execute here against a tiny fixture
 with an ACTUAL prepared pickle (a real ProductionWeightCache with real
@@ -11,26 +11,25 @@ render files and sealed verified cells, loaded once by the generator):
 2. The production ``before_window`` body
    (``prepare_retained_window_read``) enters the render phase and then
    awaits the window's exact sealed entries through the existing
-   bounded strict readiness API -- the loading pool cannot read before
-   the movers land the bytes.
+   strict readiness API before the loading pool reads its immutable inputs.
 3. The integrated fixture runs normal generator CLI -> normal
    dispatcher CLI (FakeGateway submission seam only, no private
-   validator) -> real leased staging with a delayed second-window
-   handoff -> the production readiness body -> strict PWC leased
-   reads, proving the wait precedes the pool read with exact tensor
-   bytes, pin release and zero pool bytes.
+   validator) -> immutable staged inputs -> the production readiness
+   body -> strict PWC reads, with exact tensor bytes, reader closure and
+   zero pool bytes. The separate native bridge proof delays second-window
+   warming and uses stock afterok to exclude the consumer until publication.
 
 CPU/meta scope: model kernels are tiny synthetic tensors; no GPU
-campaign claim. PB suite budget: priority -10, portable gb10.
+campaign claim. Progress transport remains a separate migration obligation.
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
+import os
 import pickle
 import sys
-import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -47,85 +46,16 @@ from prismaquant.production_weight_cache import ProductionWeightCache
 from test_quantum_executable_readset import (
     N_PROBES, N_BATCHES, STRIDED, _tiny_parent, _tiny_receipt, _write_boundary,
 )
-import test_strict_reader_tier_enforcement as strict
-from test_strict_reader_tier_enforcement import _forget_state  # noqa: F401
+from prismaquant.staged_tier_policy import staged_tier_policy_test_context
+from staged_native_fixtures import bind, native_staged_state, publish_inputs
 
-LAYERS = [0, 1, 2, 3]
-FMT = "NVFP4"
-SHAPE = (16, 32)
-STATISTICS_CAP = 5000
-WINDOWS_PER_LAYER = 2
+from prepared_input_fixtures import (LAYERS, FMT, SHAPE, STATISTICS_CAP, WINDOWS_PER_LAYER, _qnames, _render_files, _production_pkl, _execution)
 
 
-def _qnames(layer):
-    return [f"model.layers.{layer}.mlp.gate_proj",
-            f"model.layers.{layer}.mlp.up_proj"]
-
-
-def _render_files(tmp_path):
-    files = {}
-    for layer in LAYERS:
-        for index, name in enumerate(_qnames(layer)):
-            path = tmp_path / "renders" / f"layer{layer}-{index}.pt"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save((torch.arange(512, dtype=torch.float32).reshape(
-                *SHAPE) + layer * 100 + index), path)
-            raw = path.read_bytes()
-            files[(name, FMT)] = {
-                "qname": name, "fmt": FMT, "path": str(path),
-                "sha256": hashlib.sha256(raw).hexdigest()}
-    return files
-
-
-def _production_pkl(tmp_path, files):
-    weights = {pair: spec["path"] for pair, spec in files.items()}
-    verified = {
-        pair: {"rendered_weight": {
-            "shape": list(SHAPE),
-            "logical_bytes": SHAPE[0] * SHAPE[1] * 4},
-            "render_file_sha256": spec["sha256"]}
-        for pair, spec in files.items()}
-    cache = ProductionWeightCache(
-        weights=weights, levers={},
-        metadata={"verified_cells": verified})
-    path = tmp_path / "production.pkl"
-    path.write_bytes(pickle.dumps(cache))
-    return path
-
-
-def _execution():
-    from prismaquant.joint_retained_window_plan import (
-        EXECUTION_SCHEMA, RetainedWindowBudget)
-    budget = RetainedWindowBudget(
-        50 << 20, 1 << 20, 1 << 20, 1 << 20, 1 << 20, 1 << 20,
-        1 << 20, 1 << 20, 1 << 20, 1 << 20, STATISTICS_CAP,
-        4 << 20, 4)
-    return {
-        "n_probes": N_PROBES,
-        "operator_windows": {
-            "schema": "prismaquant.joint_operator_windows.v1",
-            "max_statistics_bytes": 1 << 20,
-            "max_candidate_bytes": 1 << 20,
-            "max_render_resident_bytes": 1 << 20,
-            "max_load_buffer_bytes": 1 << 20,
-            "workspace_reserve_bytes": 1 << 20,
-            "max_replay_cotangent_bytes": 1 << 20,
-            "prefetch_workers": 1},
-        "retained_operator_windows": {
-            "schema": EXECUTION_SCHEMA,
-            "budget": budget.as_dict(),
-            "source_reserve_bytes": 1 << 20,
-            "source_loading_reserve_bytes": 2 << 20},
-        "boundary_storage": {
-            "schema": "prismaquant.aura.boundary_storage.v2",
-            "capture_order": "layer_major",
-            "directory": "/tmp/bridge-boundary",
-            "max_resident_bytes": 1 << 20,
-            "max_auxiliary_bytes": 1 << 20,
-            "max_artifact_bytes": 1 << 20,
-            "prefetch_batches": 2},
-    }
-
+@pytest.fixture(autouse=True)
+def _native_policy(native_staged_state):
+    with staged_tier_policy_test_context("ssd"):
+        yield
 
 def _campaign_files(tmp_path, *, execution=None, model_config=None):
     """Plan/prepared/parent/derivation/partition/receipt files + digests.
@@ -243,9 +173,7 @@ def test_regen_cli_derives_prepared_contracts(tmp_path):
             "prepared_sha256"]
         assert [w["window_index"] for w in prepared["windows"]] == list(
             range(WINDOWS_PER_LAYER))
-        manifest = json.loads(
-            __import__("gzip").decompress(
-                Path(block["manifest_path"]).read_bytes()).decode("utf-8"))
+        manifest = json.loads(gzip.decompress(Path(block["manifest_path"]).read_bytes()))
         names = [p["name"] for p in manifest["read_plan"]["phases"]]
         for window in range(WINDOWS_PER_LAYER):
             assert names.index(f"render-{window:02d}") + 1 == names.index(
@@ -433,35 +361,9 @@ def _offset_files(tmp_path):
     return out
 
 
-@pytest.fixture
-def shared_bridge_path():
-    # Executable manifests declare /mnt/shared. Keep actual fixture bytes
-    # under that mount so the real PB validator accepts the unchanged wire.
-    from fleet_sdk import require_prismabuild_sdk
-    require_prismabuild_sdk()
-    import tempfile
-    root = Path("/mnt/shared/prismaquant-test-fixtures")
-    root.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="pq917-", dir=root) as directory:
-        yield Path(directory)
-
-
-def test_generator_dispatch_waits_for_delayed_leased_render(shared_bridge_path, monkeypatch):
-    """Generated declarations reach production readiness before strict pool loads.
-
-    Submission and progress transport are the only replaced boundaries. The
-    private admitted queue uses PB's fragment/material writers and map composer;
-    window 1 has no staged file or publication until its read phase is entered.
-    """
-    tmp_path = shared_bridge_path
+def _dispatch_bridge(tmp_path, monkeypatch):
+    """Normal generator/dispatcher CLI, replacing only native submission."""
     import dispatch_joint_quanta as dispatch
-    from prismaquant.joint_cost_quantum import (
-        ChunkFrontier, QuantumProgress, prepare_retained_window_read)
-    from prismaquant import prismabuild_progress
-    from prismaquant.residency_map import (
-        ENV_VAR, bind_residency_manifest, residency_map_key,
-        residency_resolver, reset_residency_resolver_for_tests)
-    from prismaquant.staged_tier_policy import activate_staged_tier_policy
 
     layout, records = _run_regen(tmp_path)
     spec = tmp_path / "spec.json"
@@ -472,7 +374,7 @@ def test_generator_dispatch_waits_for_delayed_leased_render(shared_bridge_path, 
     # Four fake quanta and no pilot run: the explicit, recorded override
     # (production pilot admission is unchanged; PQ #1811 did the same).
     assert dispatch.main([
-        "--records", str(records), "--output-root", str(tmp_path / "dispatch"),
+        "--timeout-s", "3600", "--records", str(records), "--output-root", str(tmp_path / "dispatch"),
         "--adjoint-receipt", str(layout["receipt_path"]),
         "--force-unverified-pilot"], _gateway=gateway,
         # No checkpoint behind the fixture; coverage is tested on its own
@@ -484,63 +386,40 @@ def test_generator_dispatch_waits_for_delayed_leased_render(shared_bridge_path, 
     wire = Path(block["manifest_path"]).read_bytes()
     digest = hashlib.sha256(wire).hexdigest()
     submitted = next(row for row in gateway.submitted
-                     if block["manifest_path"] in row["argv"])
-    argv = submitted["argv"]
-    assert digest in " ".join(argv)
-    phases = [argv[i + 1].split("=", 1)[0]
-              for i, word in enumerate(argv) if word == "--progress-phase"]
+                     if row["quantum_id"] == record["quantum_id"])
+    application_row = submitted["row"]
+    argv = application_row["argv"]
+    assert argv[argv.index("--data-manifest-sha256") + 1] == digest
+    phases = [phase["name"] for phase in json.loads(gzip.decompress(wire))["read_plan"]["phases"]]
     assert phases == block["phases"]
+    return layout, record, phases
 
-    rl, pool_mod, map_mod = strict._pb()
-    consumer = strict._hex64(f"bridge-consumer-{tmp_path}")
-    mover = strict._hex64(f"bridge-mover-{tmp_path}")
-    _queue, stage = strict._pb_queue(tmp_path, pool_mod, consumer)
-    cas_root = tmp_path / "cas"
-    blob = cas_root / "blobs" / digest[:2] / digest
-    blob.parent.mkdir(parents=True)
-    blob.write_bytes(wire)
-    strict._publish_readset_on_the_claim(
-        tmp_path, consumer, cas_root, digest, len(wire))
-    root = tmp_path / "residency"
-    live = map_mod.map_path(root, consumer)
-    staged = {}
+
+def _consume_bridge(layout, record, phases, resolver, monkeypatch):
+    """Actual readiness and PWC byte/lifetime checks, also used by Flux proof."""
+    from prismaquant.joint_cost_quantum import (
+        ChunkFrontier, QuantumProgress, prepare_retained_window_read)
+    from test_native_strict_reader_contract import _forbid_source
+
+    windows = record["executable_readset"]["prepared_input"]["windows"]
     order = []
-
-    def publish_window(window):
-        for entry in window["entries"]:
-            declared = Path(entry["path"])
-            target = stage / declared.name
-            # Only the mover side reads the original bytes. Consumer reads
-            # below go through PWC's actual strict lease SDK and stage fd.
-            target.write_bytes(declared.read_bytes())
-            staged[residency_map_key(str(declared), 0)] = (declared, target)
-        strict._pb_publish(rl, map_mod, root, stage, consumer, mover,
-                           digest, staged)
-        map_mod.write_map(live, map_mod.compose(
-            map_mod.read_fragments(root, consumer)))
-        order.append(f"published:{window['window_index']}")
-
-    windows = block["prepared_input"]["windows"]
-    publish_window(windows[0])
-    monkeypatch.setenv(ENV_VAR, str(live))
-    strict._launch_env(monkeypatch, consumer)
-    reset_residency_resolver_for_tests()
-    bind_residency_manifest(digest)
-    activate_staged_tier_policy("ram,ssd")
-    resolver = residency_resolver()
-    assert resolver.declared_readset()["state"] == "bound", resolver.declared_readset()
-    monkeypatch.setenv(strict.STAGED_RANGE_WAIT_ENV, "10")
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PHASES", json.dumps(phases))
-    render_one = threading.Event()
-
-    def report(phase, units, **kwargs):
-        order.append(f"phase:{phase}")
-        if phase == "render-01":
-            render_one.set()
-        return True
-
-    monkeypatch.setattr(prismabuild_progress, "report", report)
+    sources = [_forbid_source(monkeypatch, Path(entry["path"]))
+               for window in windows for entry in window["entries"]]
+    assert resolver.declared_readset() == {
+        entry["path"]: [(0, entry["bytes"])]
+        for window in windows for entry in window["entries"]}
     progress = QuantumProgress(frontier=ChunkFrontier(chunks=[], windows=[]))
+    # Local phase data is the actual dispatched roster. Progress transport is
+    # deliberately not injected; its independent migration stays in slice4.
+    progress._phases = tuple(phases)
+    real_enter = progress.enter_read_phase
+
+    def enter(phase):
+        real_enter(phase)
+        assert progress._phase == phase
+        order.append(f"phase:{phase}")
+
+    monkeypatch.setattr(progress, "enter_read_phase", enter)
     cache = pickle.loads(Path(layout["prepared"]["production_cache"][
         "path"]).read_bytes())
     cache.enable_lru(1 << 20)
@@ -557,53 +436,57 @@ def test_generator_dispatch_waits_for_delayed_leased_render(shared_bridge_path, 
         return real_load(path, limit, **kwargs)
 
     monkeypatch.setattr(io_engine, "load_file", load_file)
-    failures = []
-
-    def delayed_mover():
-        try:
-            assert render_one.wait(timeout=10), "production never entered render-01"
-            time.sleep(0.2)
-            assert "open:render-01" not in order, "pool raced unpublished window"
-            publish_window(windows[1])
-        except BaseException as exc:
-            failures.append(exc)
-
-    thread = threading.Thread(target=delayed_mover, name="delayed-stageb-mover")
-    thread.start()
-    try:
-        for window in windows:
-            index = window["window_index"]
-            keys = [tuple(pair) for pair in window["members"]]
-            assert prepare_retained_window_read(
-                index, record=record, progress=progress) == "ready"
-            order.append(f"ready:{index}")
-            with cache.retained_window(keys, max_resident_bytes=1 << 20,
-                                       max_workers=1, max_load_buffer_bytes=1 << 20):
-                for key in keys:
-                    actual = cache.get(*key)
-                    name_index = _qnames(2).index(key[0])
-                    expected = torch.arange(512, dtype=torch.float32).reshape(
-                        *SHAPE) + 200 + name_index
-                    assert torch.equal(actual.view(torch.uint8),
-                                       expected.view(torch.uint8))
-                    assert cache.file_load_receipt(key, actual)["serving_tier"] == "stage"
-            for probe in range(N_PROBES):
-                progress.enter_read_phase(f"replay-{index:02d}-p{probe}")
-    finally:
-        thread.join(timeout=15)
-        assert not thread.is_alive()
-    assert failures == []
-    assert order.index("phase:render-01") < order.index("published:1")
+    for window in windows:
+        index = window["window_index"]
+        keys = [tuple(pair) for pair in window["members"]]
+        assert prepare_retained_window_read(
+            index, record=record, progress=progress) == "ready"
+        order.append(f"ready:{index}")
+        with cache.retained_window(keys, max_resident_bytes=1 << 20,
+                                   max_workers=1, max_load_buffer_bytes=1 << 20):
+            for key in keys:
+                actual = cache.get(*key)
+                name_index = _qnames(2).index(key[0])
+                expected = torch.arange(512, dtype=torch.float32).reshape(
+                    *SHAPE) + 200 + name_index
+                assert torch.equal(actual.view(torch.uint8),
+                                   expected.view(torch.uint8))
+                assert cache.file_load_receipt(key, actual)["serving_tier"] == "stage"
+        for probe in range(N_PROBES):
+            progress.enter_read_phase(f"replay-{index:02d}-p{probe}")
     for index in range(2):
-        assert order.index(f"published:{index}") < order.index(f"ready:{index}")
+        assert order.index(f"phase:render-{index:02d}") < order.index(f"ready:{index}")
         assert order.index(f"ready:{index}") < order.index(f"open:render-{index:02d}")
         assert order.index(f"open:render-{index:02d}") < order.index(
             f"phase:replay-{index:02d}-p0")
     report = resolver.report()
-    assert report["range_wait_polls"] >= 1
-    assert report["range_waits_served"] >= 1
     assert report["bytes_from_pool"] == 0
     assert report["bytes_from_stage"] > 0
     assert report["serving_tiers"] and all(
         row["pin_id"] for row in report["serving_tiers"])
-    assert strict._pins_live(tmp_path, consumer) == []
+    assert all(not opened for opened in sources)
+    assert resolver._windows == 0
+    descriptors = [fd for fd, _signature in resolver._fds.values()]
+    assert descriptors
+    resolver.close()
+    assert not resolver._fds and not resolver._pins
+    for fd in descriptors:
+        with pytest.raises(OSError):
+            os.fstat(fd)
+    return {"order": order, "reads": report, "descriptors_closed": len(descriptors),
+            "known_tensor_checks": 2, "canonical_payload_opens": 0}
+
+
+def test_generator_dispatch_waits_for_delayed_leased_render(tmp_path, monkeypatch):
+    """Generated declarations reach native readiness before strict pool loads.
+
+    Native afterok/delayed-warm execution is proved separately with these same
+    helpers; this test owns the application CLI, tensor and reader predicates.
+    """
+    layout, record, phases = _dispatch_bridge(tmp_path, monkeypatch)
+    block = record["executable_readset"]
+    entries = [entry for window in block["prepared_input"]["windows"]
+               for entry in window["entries"]]
+    binding = publish_inputs(tmp_path, [Path(entry["path"]) for entry in entries])
+    resolver = bind(monkeypatch, binding)
+    _consume_bridge(layout, record, phases, resolver, monkeypatch)

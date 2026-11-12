@@ -275,6 +275,7 @@ def test_a_plan_that_names_a_malformed_reuse_block_is_refused_at_load(tmp_path):
 
 
 @pytest.mark.parametrize("command", ["prepare", "run"])
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_execute_passes_the_plan_policy_to_the_intake(tmp_path, monkeypatch, command):
     """Strict default unchanged; a named policy reaches the one intake call."""
     import torch
@@ -364,3 +365,9 @@ def test_synthesize_reports_the_same_reuse_it_read(tmp_path, monkeypatch):
         plan_sha256="p" * 64, mirror_root=tmp_path / "mirror")
     assert seen[0]["historical_encoder_reuse"] == policy
     assert record["encoder_source_reuse"]["status"] == bridge.ENCODER_REUSE_STATUS
+
+
+from cpu_staged_fixtures import (  # noqa: E402,F401
+    empty_native_staged_inputs, native_staged_state,
+)
+

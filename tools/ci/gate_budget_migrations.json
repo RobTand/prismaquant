@@ -1,0 +1,48 @@
+{
+  "schema": "prismaquant.gate_budget_migration.v1",
+  "migrations": [
+    {
+      "base_policy": "d5119a3e82d2fb0430da363a2b2de6d390af5e40",
+      "base_sha": "f1335b0333749c1f400934b9e0f6ac06a99cf706",
+      "reason": "dependency change: PrismaBuild SDK installed, #3223",
+      "approved": "readiness lead via coordinator, 2026-11-02",
+      "issue": 3216,
+      "pull_request": 3223,
+      "slow": {
+        "tests/test_prismabuild_import_leak_1281.py::test_source_consumers_restore_the_public_plugin_import_graph": {
+          "seconds": 232,
+          "evidence": [
+            {
+              "run": 41487683378,
+              "attempt": 1,
+              "runner": "ubuntu-24.04",
+              "seconds": 115.91,
+              "artifact": "gate-pr-final-1/effective/9/junit.xml"
+            },
+            {
+              "run": 41494600504,
+              "attempt": 1,
+              "runner": "ubuntu-24.04",
+              "seconds": 104.585,
+              "artifact": "gate-pr-final-1/effective/9/junit.xml"
+            },
+            {
+              "run": 41496609481,
+              "attempt": 1,
+              "runner": "ubuntu-24.04",
+              "seconds": 91.302,
+              "artifact": "gate-pr-final-1/effective/8/junit.xml"
+            },
+            {
+              "run": 41498903103,
+              "attempt": 1,
+              "runner": "ubuntu-24.04-arm",
+              "seconds": 58.751,
+              "artifact": "gate-pr-final-1/effective/1/junit.xml"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

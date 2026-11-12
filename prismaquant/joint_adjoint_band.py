@@ -60,6 +60,7 @@ from .joint_adjoint_checkpoints import (
     exact_entry_record,
     normalize_chain_regime,
     reference_from_record,
+    resolve_stride,
     stage_a_run_header,
     stage_a_run_header_sha256,
     stage_a_slice,
@@ -225,7 +226,7 @@ def _exact_metadata(path: Path) -> dict:
 
 def own_boundary_entry(directory: Path, session: dict, *, batch: int, boundary: int) -> dict:
     """The receipt record of a forward boundary entry this generation wrote."""
-    from .perturbed_x_cache import EXACT_ACTIVATION_SCHEMA, activation_cache_filename
+    from .exact_activation_contract import EXACT_ACTIVATION_SCHEMA, activation_cache_filename
     name = f"boundary-{batch}-{boundary}-at-{boundary}"
     path = Path(directory) / str(session["generation"]) / "entries" / activation_cache_filename(name)
     metadata = _exact_metadata(path)
@@ -275,8 +276,8 @@ def capsule_recovery(forward_recovery: dict | None, *, plan_sha256, prepared_sha
     receipt_binding = {
         "schema": SCHEMA, "capsule": {"path": path, "sha256": digest},
         "frontier": document["frontier"], "original_session": document["session"],
-        "original_owner": document["instance"]["owner_action_key"],
-        "original_attempt": document["instance"]["owner_attempt"]}
+        "producer": document["selection"]["job_id"],
+        "checkpoint_exit": document['checkpoint_exit']}
     records = chain_records(document)
     for rows in records.values():
         for row in rows:
@@ -615,8 +616,6 @@ def sealed_chain_state(space, *, plan_sha256: str, prepared_sha256: str,
 
 def band_from_request(request_path, *, boundary: int, request_sha256: str | None = None) -> dict:
     """The band of ``boundary`` for the Stage A run a sealed PB request names."""
-    from .joint_cost_stage_a import resolve_stride
-
     request_path = Path(request_path)
     raw = request_path.read_bytes()
     digest = bytes_sha256hex(raw)

@@ -55,7 +55,7 @@ def main(argv=None):
     from prismaquant.matmul_arithmetic import pin_matmul_arithmetic
     from prismaquant.memory_management import enforce_device_envelope
     from prismaquant.native_moe_panel import routed_boundary_inputs
-    from prismaquant.prismabuild_progress import report
+    from prismaquant.joint_run_progress import log_progress
     from prismaquant.tessera_calibration_cache import (
         authenticate_selected_capture_source,
         require_capture_contract,
@@ -127,7 +127,7 @@ def main(argv=None):
         entries.append({"layer": layer, "unit": result["metadata"]["unit"],
                         "path": str(target), "sha256": hashlib.sha256(raw).hexdigest(),
                         "bytes": len(raw)})
-        report("capture", len(entries), unit=result["metadata"]["unit"])
+        log_progress(len(entries), "capture", unit=result["metadata"]["unit"])
         print(json.dumps({"captured": layer, "count": len(entries),
                           "elapsed_s": time.monotonic() - started}), flush=True)
 
@@ -215,7 +215,7 @@ def _capture_original(args):
     from prismaquant.joint_cost_quantum import build_quantum_source_runner
     from prismaquant.memory_management import CaptureMemoryGuard, enforce_device_envelope
     from prismaquant.native_moe_panel import routed_boundary_inputs, FIRST_SEQUENCE_ORIGINAL_SCHEMA
-    from prismaquant.prismabuild_progress import report
+    from prismaquant.joint_run_progress import log_progress
     from prismaquant.source_generation import (_control, _resources, observe_original_source_execution,
         original_source_runtime, validate_original_source_runtime)
     from prismaquant.stage_a_selected_row_diagnostic import load_original_diagnostic_issued_context
@@ -336,7 +336,7 @@ def _capture_original(args):
                     total_artifact_bytes += len(raw)
                     entries.append({"layer": layer, "unit": result["metadata"]["unit"], "path": str(target),
                                     "sha256": bytes_sha256hex(raw), "bytes": len(raw)})
-                report("capture", len(entries), unit=result["metadata"]["unit"])
+                log_progress(len(entries), "capture", unit=result["metadata"]["unit"])
 
             layers = capture_streamed_glm_routes(runner, ids, calibration=calibration, producer_source=producer,
                 consume=publish, original_authority_input=authority_ref, original_plan_input=plan_ref,

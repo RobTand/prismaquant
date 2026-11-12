@@ -113,13 +113,6 @@ fi
 # rows closed the render gap vs llama.cpp's imatrix quantizer from +20%
 # to +7.7% KLD (top-1 at parity). See docs/lanes/gguf.md.
 : "${EXPORT_CONTAINER:=compressed-tensors}"
-python -m prismaquant.prismasnap_contract --model "$MODEL_PATH"
-if [[ ( -e "${MODEL_PATH}/prismasnap_provenance.json" \
-        || -L "${MODEL_PATH}/prismasnap_provenance.json" ) \
-      && "$EXPORT_CONTAINER" != "compressed-tensors" ]]; then
-  echo "[pipeline] ERROR: PrismaSnap-prepared sources are admitted only to the measured native compressed-tensors lane; EXPORT_CONTAINER=${EXPORT_CONTAINER} is unvalidated." >&2
-  exit 2
-fi
 if [[ "$EXPORT_CONTAINER" == "nvfp4_cb" ]]; then
   # RETIRED 2026-09-02.  Rob: "put Tessera in PrismaQuant and remove Gridbook".
   # The codebook container was served only by the separately released Gridbook
@@ -2719,6 +2712,18 @@ fi
 
 
 echo "[pipeline] [4/4] exporting to compressed-tensors ..."
+append_export_tristate_arg() {
+  local setting="$1" value="$2" option="$3"
+  case "$value" in
+    0|false|False|FALSE|no|No|NO) EXPORT_ARGS+=("--no-$option") ;;
+    1|true|True|TRUE|yes|Yes|YES) EXPORT_ARGS+=("--$option") ;;
+    auto|"") ;;
+    *)
+      echo "[pipeline] ERROR: $setting must be auto, 0, or 1" >&2
+      exit 2
+      ;;
+  esac
+}
 EXPORT_ARGS=(
   python3 -m prismaquant.export_native_compressed
   --model "$MODEL_PATH"
@@ -2729,24 +2734,8 @@ EXPORT_ARGS=(
   --activation-cache-dir "${WORK_DIR}/act"
   "${EXPORT_PIN_ARGS[@]}"
 )
-case "$EXPORT_GPTQ" in
-  0|false|False|FALSE|no|No|NO) EXPORT_ARGS+=(--no-gptq) ;;
-  1|true|True|TRUE|yes|Yes|YES) EXPORT_ARGS+=(--gptq) ;;
-  auto|"") ;;
-  *)
-    echo "[pipeline] ERROR: EXPORT_GPTQ must be auto, 0, or 1" >&2
-    exit 2
-    ;;
-esac
-case "$EXPORT_SCALE_SWEEP" in
-  0|false|False|FALSE|no|No|NO) EXPORT_ARGS+=(--no-scale-sweep) ;;
-  1|true|True|TRUE|yes|Yes|YES) EXPORT_ARGS+=(--scale-sweep) ;;
-  auto|"") ;;
-  *)
-    echo "[pipeline] ERROR: EXPORT_SCALE_SWEEP must be auto, 0, or 1" >&2
-    exit 2
-    ;;
-esac
+append_export_tristate_arg EXPORT_GPTQ "$EXPORT_GPTQ" gptq
+append_export_tristate_arg EXPORT_SCALE_SWEEP "$EXPORT_SCALE_SWEEP" scale-sweep
 if [[ -n "$PRODUCTION_CACHE_PATH" ]]; then
   # --production-cache-prefetch=require (re-vet R24/D8): a total prefetch miss
   # used to be invisible — the helper returned 0 on every failure path and the

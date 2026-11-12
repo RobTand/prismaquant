@@ -48,10 +48,9 @@ from prismaquant.joint_campaign_ledger import (quantum_id, roster_digest)
 from prismaquant.joint_layer_quanta import (phase_ranges, qname_layer)
 from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex
 
-from .joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA as RECORD_SCHEMA,
+from .joint_campaign_ledger import (JOINED_RESULTS_SCHEMA, LAYER_QUANTUM_SCHEMA as RECORD_SCHEMA,
                                    require_quantum_identity, require_quantum_campaign)
 STATUS_SCHEMA = "prismaquant.joint_layer_quantum.status.v1"
-JOINED_RESULTS_SCHEMA = "prismaquant.joint_layer_quanta.joined_results.v1"
 
 #: The producer's quantum-id spelling (§3.1: ``f"layer-{layer:03d}"``),
 #: imported so the joiner's padding cannot drift from the sealed records.

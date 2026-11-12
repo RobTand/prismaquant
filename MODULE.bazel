@@ -1,0 +1,51 @@
+module(name = "prismaquant")
+
+bazel_dep(name = "rules_python", version = "2.4.6")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "toolchains_buildbuddy", version = "0.0.4")
+
+# gcc 13 from the remote image, for amd64 and arm64 executors alike, as on TL3.
+# Without an arm64 cc toolchain an arm64 run resolves no test (PB's first one
+# executed nothing). The image is the multi-arch index whose manifests
+# tools/bazel:linux_* pin.
+buildbuddy = use_extension("@toolchains_buildbuddy//:extensions.bzl", "buildbuddy")
+buildbuddy.platform(container_image = "docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:be9853fc45092d2cf2bda3abed30d22182881659a50bf35c7125161d7cfc8a75")
+use_repo(buildbuddy, "buildbuddy_toolchain")
+
+# The module registers //toolchains/cc:all, but those are aliases, which a
+# target-pattern registration skips. Register the toolchains themselves.
+register_toolchains(
+    "@buildbuddy_toolchain//:ubuntu_cc_toolchain",
+    "@buildbuddy_toolchain//:ubuntu_cc_toolchain_arm64",
+)
+
+# The hosted gate runs Python 3.12 (actions/setup-python); so does Bazel.
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.defaults(python_version = "3.12")
+python.toolchain(python_version = "3.12")
+use_repo(python, "python_3_12", "pythons_hub")
+register_toolchains("@pythons_hub//:all")
+
+# What the hosted gate installs: '.[test]' under .github/ci-constraints.txt, CPU
+# torch and the pinned Tessera commit (tools/bazel/requirements.py). Each
+# distribution is its own repository, so a dependency change re-runs only the
+# tests whose libraries name it.
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pq_pip",
+    python_version = "3.12",
+    # amd64 for PR gates, arm64 for the post-merge run.
+    requirements_by_platform = {
+        "//tools/bazel:requirements_linux_aarch64.txt": "linux_aarch64",
+        "//tools/bazel:requirements_linux_x86_64.txt": "linux_x86_64",
+    },
+    # torch comes only from the CPU index, per platform, by the Bazel downloader:
+    # pip on the amd64 runner would install an x86 torch for arm64 executors.
+    experimental_index_url_overrides = {"torch": "https://download.pytorch.org/whl/cpu"},
+    target_platforms = ["linux_x86_64", "linux_aarch64"],
+)
+use_repo(pip, "pq_pip")
+
+# The hosted gate has no tests/__init__.py; an implicit one would change imports.
+rules_python_config = use_extension("@rules_python//python/extensions:config.bzl", "config")
+rules_python_config.explicit_init_py(default = True)

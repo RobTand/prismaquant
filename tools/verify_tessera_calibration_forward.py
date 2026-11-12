@@ -1,6 +1,7 @@
 """Compare the calibration-owner move on fixed model and calibration bytes.
 
-Execute only inside a PrismaBuild-admitted known-image GPU action. The baseline
+Execute only inside an admitted GPU job in the known-good image.
+The native GPU lane must be qualified before using Flux for this work. The baseline
 is the actual pre-move campaign source, sealed separately in the input checkout.
 This records numerical parity and instrument coverage, not a performance claim.
 """

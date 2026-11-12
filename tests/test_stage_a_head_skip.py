@@ -183,6 +183,7 @@ def _entry(monkeypatch, *, implementation, walk, generation):
         matmul_arithmetic,
         model_profiles,
         tessera_joint_aura,
+        residency_map,
     )
     from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant.joint_cost_stage_a import KernelTimeProfiler
@@ -211,6 +212,9 @@ def _entry(monkeypatch, *, implementation, walk, generation):
     monkeypatch.setattr(stage_a, "_run_artifact_preflight",
                         lambda *a, **k: {"fixture": True})
     monkeypatch.setattr(stage_a, "bind_stage_a_produced_output", lambda **k: None)
+    # This private scientific fixture supplies its own CPU tensors. Immutable
+    # staged launch and native authority are exercised by their own populations.
+    monkeypatch.setattr(residency_map, "bind_residency_manifest", lambda digest: None)
     monkeypatch.setattr(torch.cuda, "synchronize", lambda *a: None)
     monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda *a: 0)
     monkeypatch.setattr(torch.cuda, "max_memory_reserved", lambda *a: 0)
@@ -311,22 +315,19 @@ def test_a_fresh_root_completes_without_the_walk(tmp_path, monkeypatch):
     assert "head" not in receipt["run_identity"]
 
 
-def test_the_skip_reports_the_roster_once_under_the_head_phase(tmp_path, monkeypatch):
+def test_the_skip_uses_the_head_roster_once_as_local_progress_base(tmp_path, monkeypatch):
     campaign = _campaign(tmp_path, implementation=ONE)
-    progress = tmp_path / "progress.json"
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(progress))
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "t")
     seen = []
-    from prismaquant import prismabuild_progress
-    commit = prismabuild_progress.commit
+    from prismaquant.joint_run_progress import JointRunProgress
+    initialize = JointRunProgress.__init__
 
-    def recorded(units, phase, unit=None):
-        seen.append((units, phase))
-        return commit(units, phase, unit=unit)
+    def recorded(self, **arguments):
+        seen.append(arguments['base_units'])
+        initialize(self, **arguments)
 
-    monkeypatch.setattr(prismabuild_progress, "commit", recorded)
+    monkeypatch.setattr(JointRunProgress, "__init__", recorded)
     _capture(campaign, tmp_path / "run", monkeypatch)
-    assert seen[0] == (len(campaign.names), "head")
+    assert seen == [len(campaign.names)]
 
 
 # -- with and without the walk: one roster, one set of checkpoint bytes -------
@@ -448,9 +449,9 @@ def _capsule(base, monkeypatch, *, frontier, identity, record):
     """R9's forward pass, contained after ``frontier``, frozen into a capsule
     that publishes ``identity`` and names its campaign ``record``."""
     from prismaquant import joint_forward_resume as recovery_mod
-    from test_joint_forward_resume import _bound, _chain_sdk, _owner_spool
+    from test_joint_forward_resume import _bound
+    from produced_native_fixtures import recovery_publication, selected_publications
 
-    monkeypatch.setattr(recovery_mod, "_sdk", _chain_sdk)
     base.mkdir(parents=True, exist_ok=True)
     refs, identities = {}, []
     last = len(draw()) - 1
@@ -458,21 +459,20 @@ def _capsule(base, monkeypatch, *, frontier, identity, record):
                  identities=identities,
                  interrupt=lambda kw: kw.get("probe_index") is None and (
                      kw["boundary_index"], kw["batch_index"]) == (frontier, last))
-    spool, instance, template = _owner_spool(base, "e" * 64, refs)
     ref = refs[0, 0]
     capsule = base / "r9-capsule.json"
-    recovery_mod.build_forward_recovery(specification={
-        "schema": recovery_mod.SCHEMA, "queue_root": str(base / "queue"),
-        "instance": instance, "template": template,
-        "session": json.loads(ref.metadata_json)["identity"]["session"],
+    specification = {
         "original_bind_identity": identities[-1],
         "campaign_identity": dict(identity),
         "published_campaign_identity": dict(identity),
         "source_campaign_record": dict(record),
         "implementation_compatibility": {"original": ONE, "recovery": TWO,
                                          "scope": "forward-identical-memory-only"},
-        "n_batches": len(draw()), "entry_shape": list(ref.shape), "entry_dtype": ref.dtype},
-        spool_directory=spool, output=capsule, frontier=frontier)
+        "n_batches": len(draw()), "entry_shape": list(ref.shape), "entry_dtype": ref.dtype}
+    selection, _pub, _result = recovery_publication(base / "publication", refs,
+        specification, selected_publications(monkeypatch))
+    recovery_mod.build_forward_recovery(selection=selection, specification=specification,
+        output=capsule, frontier=frontier)
     return _bound(capsule)
 
 
@@ -507,7 +507,8 @@ def test_a_capsule_whose_campaign_record_changed_refuses(tmp_path, monkeypatch):
     capsule = _capsule(tmp_path / "capsule", monkeypatch, frontier=3,
                        identity=identity, record=record)
     Path(record["path"]).write_text("{}")
-    with pytest.raises(ValueError, match="forward recovery source campaign record"):
+    from prismaquant.joint_forward_resume import ForwardRecoveryRefused
+    with pytest.raises(ForwardRecoveryRefused, match="recovery proof SHA256 mismatch"):
         _capture(campaign, tmp_path / "A", monkeypatch, implementation=TWO,
                  forward_recovery=capsule)
     assert not (adjoint_space(tmp_path / "A") / "checkpoints").exists()

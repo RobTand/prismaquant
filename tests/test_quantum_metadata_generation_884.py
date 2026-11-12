@@ -845,10 +845,9 @@ def test_dispatcher_accepts_prepared_executable_rows(tmp_path, monkeypatch):
            "--executable-readsets"]) == 0
     record_path = meta / "records" / "layer-000.json"
     record = json.loads(record_path.read_text())
-    argv = dispatch.quantum_argv(
-        record, record_path=record_path,
+    argv = dispatch.quantum_argv(record, timeout_s=3600, record_path=record_path,
         output_root=Path(str(campaign["root"])))
-    assert "--data-manifest" in argv
+    assert argv["timeout_s"] == 3600
     assert "prepared_input" in record["executable_readset"]
 
 

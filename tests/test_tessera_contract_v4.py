@@ -16,6 +16,7 @@ import pytest
 
 from prismaquant import tessera_runtime_contract as contract
 from prismaquant import tessera_serving_runtime_pin as release
+from lane_table_fixtures import legacy_v4_contract
 
 
 def _packaged():

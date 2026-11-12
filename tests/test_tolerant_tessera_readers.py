@@ -34,7 +34,7 @@ from prismaquant import native_receipt_table as emitter
 from prismaquant import tessera_runtime_contract as trc
 from prismaquant.measured_runtime_prices import RuntimePriceError
 
-from conftest import _installed_contract
+from lane_table_fixtures import _installed_contract
 from test_full_engine_resource_report import _v2_with_admission, consume, supplied
 from test_native_operator_panel import joined  # noqa: F401  (fixture for `emitted`)
 from test_native_receipt_table import emitted  # noqa: F401  (fixture)

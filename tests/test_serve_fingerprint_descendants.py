@@ -321,3 +321,20 @@ def test_required_engine_descendant_fails_closed(monkeypatch):
 )
 def test_engine_witness_requires_engine_argv(argv, expected):
     assert serve_fingerprint.argv_identifies_vllm_engine(argv) is expected
+
+
+def test_normalize_performance_argv_masks_only_arm_identity():
+    """Ported from the archived pq87 paired-validation test: the arms differ only in model identity."""
+    placeholder = serve_fingerprint._ARM_MODEL_PLACEHOLDER
+    control = ["vllm", "serve", "/models/control", "--served-model-name", "control", "--max-num-seqs", "1",
+               "--kv-cache-memory-bytes", str(1 << 30)]
+    candidate = ["vllm", "serve", "/models/candidate", "--served-model-name=candidate", "--max-num-seqs", "1",
+                 "--kv-cache-memory-bytes", str(1 << 30)]
+    assert serve_fingerprint.normalize_performance_argv(control) == [
+        "vllm", "serve", placeholder, "--served-model-name", placeholder, "--max-num-seqs", "1",
+        "--kv-cache-memory-bytes", str(1 << 30)]
+    assert serve_fingerprint.normalize_performance_argv(candidate)[:3] == ["vllm", "serve", placeholder]
+    assert serve_fingerprint.normalize_performance_argv(candidate)[3] == "--served-model-name=" + placeholder
+    # a performance flag that differs is not masked
+    changed = [*candidate[:-1], "2"]
+    assert serve_fingerprint.normalize_performance_argv(changed) != serve_fingerprint.normalize_performance_argv(candidate)

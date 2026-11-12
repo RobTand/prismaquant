@@ -1,16 +1,17 @@
-"""Forward completed G3 work to PB's matching linear read phases (PQ #2301).
+"""Record completed G3 work against the linear read phases (PQ #2301).
 
-Run pbrun with setup, layer-00..44, and teachers phases in that order.
-Use the g3_readset v2 manifest with stage/share auto and qualified RAM auto.
-No timer/scheduler, phase restarts, proof barrier or quality replay lives here.
+Phases are setup, layer-00..44 and teachers, in that order, over the g3_readset v2 plan bound
+to the staged manifest. Each completed unit is written to the durable semantic ledger and then
+logged locally. No timer/scheduler, phase restarts, proof barrier or quality replay lives here.
 """
 import json
 import os
 from pathlib import Path
 import re
-import runpy
 import subprocess
 import sys
+
+from g3_pq_policy.joint_run_progress import log_progress
 
 
 class ReadProgress:
@@ -44,8 +45,7 @@ class ReadProgress:
                 if layer != len(self.layers) or layer >= self.num_layers:
                     raise ValueError('completed layer sequence changed')
                 self.layers.add(layer)
-                # PB's current phase frees only preceding phases. Announce the
-                # next layer after this layer's entire arm population completed.
+                # Name the next layer only after this layer's entire arm population completed.
                 phase = f'layer-{layer + 1:02d}' if layer + 1 < self.num_layers else 'teachers'
                 kind = 'completed_used_byte_checked_layer'
             else:
@@ -113,7 +113,6 @@ def select_arms(args):
 def main():
     args = sys.argv[1:]
     arms = select_arms(args)
-    commit = runpy.run_path(os.environ['PRISMABUILD_ACTION_PROGRESS_HELPER'])['commit']
     out = Path(args[args.index('--output-root') + 1])
     out.mkdir(parents=True, exist_ok=True)
     smoke = "--reader-smoke" in args
@@ -131,8 +130,7 @@ def main():
                 ledger.write(json.dumps(event) + '\n')
                 ledger.flush()
                 os.fsync(ledger.fileno())
-                if not commit(event['units_completed'], phase=event['phase'], unit=event['unit']):
-                    raise RuntimeError('semantic progress did not reach the admitted PB channel')
+                log_progress(event['units_completed'], event['phase'], event['unit'])
         except BaseException:
             child.terminate()
             child.wait()

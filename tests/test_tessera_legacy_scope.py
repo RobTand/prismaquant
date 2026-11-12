@@ -25,7 +25,7 @@ import json
 
 from tests.tessera_metadata_fixture import install_metadata
 import pytest
-from conftest import (
+from lane_table_fixtures import (
     down_convert_lane_table, lane_cells_on_one_image, project_lane_cells_onto_structures)
 
 from prismaquant import lane_eligibility as lane

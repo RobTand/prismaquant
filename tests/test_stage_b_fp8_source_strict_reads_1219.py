@@ -43,6 +43,8 @@ for _entry in (ROOT, ROOT / "tools"):
 
 from prismaquant import layer_streaming as ls  # noqa: E402
 from prismaquant import stage_b_prep_io as io  # noqa: E402
+from prismaquant.staged_manifest import READ_ENV  # noqa: E402
+from staged_native_fixtures import native_staged_state  # noqa: E402
 from test_quantum_executable_readset import (  # noqa: E402
     _exec_campaign, _exec_receipt)
 from test_stage_b_prep_io_1070 import (  # noqa: E402
@@ -66,14 +68,13 @@ QWEN35_MOE_FP8_CONFIG = {
 
 
 @pytest.fixture(autouse=True)
-def _unbind_staged_reads():
-    io.reset_staged_reads_for_tests()
+def _unbind_staged_reads(native_staged_state):
     yield
-    io.reset_staged_reads_for_tests()
 
 
 def _fp8(rows, cols):
-    return torch.randn(rows, cols).clamp(-4, 4).to(torch.float8_e4m3fn)
+    values = torch.arange(rows * cols, dtype=torch.float32).reshape(rows, cols)
+    return ((values % 17 - 8) / 2).to(torch.float8_e4m3fn)
 
 
 def _fp8_model(root: Path, config: dict, *, experts: bool = False) -> Path:
@@ -213,6 +214,7 @@ def _dsv4_model(root: Path) -> tuple[Path, dict, dict]:
     return model, raw, config
 
 
+@pytest.mark.own_process
 def test_deepseek_v4_pairs_its_scales_from_the_callers_index(tmp_path, monkeypatch):
     from prismaquant.model_profiles import detect_profile
     from prismaquant import streaming_model as sm
@@ -310,8 +312,8 @@ def test_a_strict_run_over_an_fp8_source_never_opens_its_config_or_index_in_the_
     assert len(expected) == 4
 
     built = _spy_fp8_map(monkeypatch)
-    copies = _bind_stage(tmp_path, monkeypatch, manifest,
-                         argv[argv.index("--data-manifest-sha256") + 1])
+    copies = _bind_stage(tmp_path, monkeypatch, manifest)
+    argv[argv.index('--data-manifest-sha256') + 1] = os.environ[READ_ENV]
     capsys.readouterr()
     code, opened = _recorded_reads(lambda: regen.main(argv))
     assert code == 0
@@ -326,3 +328,16 @@ def test_a_strict_run_over_an_fp8_source_never_opens_its_config_or_index_in_the_
     in_pool = sorted(path for path in opened
                      if path.startswith(str(model) + os.sep))
     assert not in_pool, f"read at their pool paths: {in_pool}"
+
+
+def test_stage_b_fp8_profile_survives_a_native_dsv4_import(tmp_path):
+    """The real staged-read oracle must survive the suite's native-import predecessor."""
+    from test_layer_streaming_mxfp4_isolation import native_dsv4_session
+
+    proc, output, outcomes, _ = native_dsv4_session(
+        tmp_path,
+        '../test_stage_b_fp8_source_strict_reads_1219.py::'
+        'test_deepseek_v4_pairs_its_scales_from_the_callers_index')
+    assert proc.returncode == 0, output
+    assert outcomes['test_deepseek_v4_pairs_its_scales_from_the_callers_index'][0] == 'passed', output
+    assert outcomes['test_native_dsv4_import_still_refuses_the_vendored_override'][0] == 'passed', output

@@ -254,6 +254,25 @@ class TestAliasMaterialization:
 # --------------------------------------------------------------------------
 # The streaming context itself — the path that actually broke
 # --------------------------------------------------------------------------
+@pytest.mark.parametrize("explicit,environment,expected", [(None, "auto", 26), (None, "11", 11), (7, "11", 7)])
+def test_cache_headroom_uses_resolved_shard_count(tmp_path, monkeypatch, explicit, environment, expected):
+    from prismaquant import autoscale, streaming_model
+    monkeypatch.setenv("LAYERS_PER_SHARD", "auto")
+    monkeypatch.setenv("CACHE_HEADROOM_GB", environment)
+    monkeypatch.setenv("PRISMAQUANT_TMPDIR", str(tmp_path / "stage"))
+    monkeypatch.setattr(autoscale, "estimate_per_layer_bytes", lambda *a, **k: (0, 2 * 1024**3))
+    monkeypatch.setattr(streaming_model, "mem_available_bytes", lambda: 128 * 1024**3)
+    path = _write_ckpt(tmp_path, "headroom", tied=False, with_lm_head=True)
+    ctx = streaming_model._build_streaming_context(path, device=torch.device("cpu"),
+        dtype=torch.bfloat16, offload_folder=str(tmp_path / "offload"), layers_per_shard=3,
+        cache_headroom_gb=explicit, prefetch_workers=1, prefetch_min_available_gb=0)
+    try:
+        assert ctx.layer_cache.max_bytes == (128 - expected) * 1024**3
+        assert ctx.layer_cache._dynamic_reserve_bytes == expected * 1024**3
+    finally:
+        ctx.shutdown()
+
+
 class TestStreamingContext:
     @pytest.mark.parametrize("tied,with_head", [(True, False), (False, True)])
     def test_head_is_never_left_on_meta(self, tmp_path, tied, with_head):
@@ -265,7 +284,7 @@ class TestStreamingContext:
             path,
             device=torch.device("cpu"),
             dtype=torch.bfloat16,
-            offload_folder=str(tmp_path / f"off{int(tied)}"),
+            offload_folder=str(tmp_path / f"off{int(tied)}"), layers_per_shard=1,
             log_prefix="[test]",
         )
         head = ctx.model.get_output_embeddings()

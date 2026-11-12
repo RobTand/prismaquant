@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure the opt-in #87 instrument inside an already running serve container.
 
-Use one PrismaBuild action for sequential BF16-control/candidate serves. This
+Use one admitted job for sequential BF16-control and candidate serves. This
 client starts no server and allocates no GPU context. The same immutable image,
 source snapshot, prompt contract and action/campaign ID must cover both arms.
 """

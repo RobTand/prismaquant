@@ -66,7 +66,7 @@ def test_a_measured_tail_longer_than_the_last_grace_raises_that_grace(
     assert (term["mode"], term["units"], term["unit_s"], term["grace_s"]) == (
         "derived", 1, LONG_TAIL_S, math.ceil(LONG_TAIL_S))
     # The phase's own pass is still priced; the tail is added to it.
-    assert stamp["grace_s"] == graces[last] == stamp["read"]["grace_s"] + sum(
+    assert stamp["grace_s"] == stamp["read"]["grace_s"] + sum(
         item["grace_s"] for item in stamp["compute"])
     assert [item["kind"] for item in stamp["compute"]][-1] == "tail"
     assert len(stamp["compute"]) >= 2, stamp["compute"]

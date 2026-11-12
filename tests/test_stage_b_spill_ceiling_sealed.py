@@ -8,14 +8,14 @@ PB action ``6f4f058751e6`` (layer 44 of GLM-5.3-Flash, regime (d), sparklina,
     alignment) but its ceiling is 196494753792
 
 The ceiling was the spec's hand-set ``PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES``
-(183 GiB), and pbrun charged the same literal to the box's ``spool_gb``. The
+(183 GiB), and the submitter charged the same literal to the box's ``spool_gb``. The
 payload alone reached it; the direct-I/O slot padding that #1060 added to the
 file's reservation was never in it. The need is known before dispatch: it is
 ``spill_geometry``'s payload plus ``max_parts`` slots of padding on the
 spill's direct-I/O grid, the arithmetic ``StageBSpillScratch`` reserves.
 
 The record builder seals that need beside the read plan, and the dispatcher
-sets the row's ceiling from it. PrismaBuild's ``spool_gb`` charge is that
+sets the row's ceiling from it. The submitter's ``spool_gb`` charge is that
 ceiling rounded up to whole GiB, so the demand and the ceiling are one
 number, and both cover the need.
 """
@@ -128,18 +128,15 @@ def _dispatch_row(tmp_path, monkeypatch, *, bound, spec):
         record["executable_readset"]["spill_bound"] = bound
     path = records / "layer-002.json"
     path.write_text(json.dumps(_reseal(record)))
-    return dispatch, dispatch.quantum_argv(record, record_path=path, output_root=out)
+    return dispatch, dispatch.quantum_argv(record, timeout_s=3600, record_path=path, output_root=out)
 
 
-def _row_ceiling(tmp_path, monkeypatch):
+def _row_ceiling(tmp_path, monkeypatch) -> int:
     """Dispatch the spill row under the 183 GiB spec; return the sealed ceilings."""
     _dispatch, argv = _dispatch_row(tmp_path, monkeypatch, bound=_sealed_bound(),
                                     spec=_spill_spec(183 * GIB, regime=REGIME))
-    outer = argv[:argv.index("--")]
-    sealed = dict(outer[i + 1].split("=", 1) for i, word in enumerate(outer[:-1])
-                  if word == "--env" and "=" in outer[i + 1])
-    inner = json.loads(argv[argv.index("--spec") + 1])["env"]
-    return int(sealed[SPILL_ENV[1]]), int(inner[SPILL_ENV[1]])
+    inner = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])["env"]
+    return int(inner[SPILL_ENV[1]])
 
 
 def test_the_refused_shape_needed_more_than_its_ceiling():
@@ -161,17 +158,14 @@ def test_the_seal_reproduces_the_refused_layer_and_its_need():
     assert spill_mod.check_spill_bound(json.loads(json.dumps(bound))) == NEED
 
 
-def test_the_row_ceiling_and_pb_demand_cover_the_sealed_need(tmp_path, monkeypatch):
-    outer, inner = _row_ceiling(tmp_path, monkeypatch)
-    # The container reads the same ceiling pbrun charges.
-    assert inner == outer
-    # PB #911 charges the pair's ceiling rounded up to whole GiB.
-    demand_gib = math.ceil(outer / GIB)
-    assert outer >= NEED, (
-        f"the row seals a {outer}-byte spill ceiling for a {NEED}-byte need")
+def test_the_native_row_carries_the_sealed_spill_need(tmp_path, monkeypatch):
+    ceiling = _row_ceiling(tmp_path, monkeypatch)
+    demand_gib = math.ceil(ceiling / GIB)
+    assert ceiling >= NEED, (
+        f"the row seals a {ceiling}-byte spill ceiling for a {NEED}-byte need")
     assert demand_gib * GIB >= NEED
     # The ceiling is the sealed need itself, not a padded literal.
-    assert outer == NEED and demand_gib == 186
+    assert ceiling == NEED and demand_gib == 186
 
 
 def test_the_scratch_reserves_the_one_rule_and_fits_a_sealed_ceiling(tmp_path):

@@ -13,33 +13,28 @@ Use one of these source inputs:
 - An explicit model repository identifier and its full forty-character commit.
 
 The local source can use an index or a single `model.safetensors` file.
-The indexed path uses the existing PrismaSnap checkpoint grammar.
-The physical check uses the existing export-structure validator.
+The indexed path and physical check use the existing export-structure validator.
 These owners refuse symlinked files and inconsistent index or header data.
 The tool does not add an artifact cache.
 Remote acquisition uses Hugging Face `snapshot_download` with an explicit `local_dir`.
 
 ## Central processor intake
 
-Submit agent checks through PrismaBuild.
-Select an x86 worker and declare zero graphics processors.
+Submit agent checks as admitted Flux jobs through `prismaquant/flux_jobs.py` (`submit_job`, `FluxResources`) and read results through `prismaquant/native_results.py`.
+Declare an x86 CPU job with zero graphics processors.
 Use one native thread per test worker.
 Keep validation output under `/tmp`.
 
 Local checkpoint example:
 
 ```bash
-CLIENT=/home/rob/tmp/pb-submit-celestia-20261003/bin/python
-PB=/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py
 CHECKOUT=/path/to/committed/prismaquant
 PYTHON=/path/to/qualified/python
 SOURCE=/path/to/local/checkpoint
 
 fleet-diskcheck --need-gb 0.1 --paths /tmp
-"$CLIENT" "$PB" --cwd "$CHECKOUT" --tag x86 \
-  --cpus 1 --demand mem_gb=4,gpu=0 \
-  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
-  -- "$PYTHON" tools/day0_model_intake.py \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  "$PYTHON" tools/day0_model_intake.py \
   --checkpoint "$SOURCE" --output /tmp/model-intake
 ```
 
@@ -49,16 +44,14 @@ Remote metadata example:
 MODEL_ID=organization/model
 REVISION=full-forty-character-model-repository-commit
 
-"$CLIENT" "$PB" --cwd "$CHECKOUT" --tag x86 \
-  --cpus 1 --demand mem_gb=4,gpu=0 \
-  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
-  -- "$PYTHON" tools/day0_model_intake.py \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  "$PYTHON" tools/day0_model_intake.py \
   --model-id "$MODEL_ID" --revision "$REVISION" \
   --download-dir /tmp/model-source --output /tmp/model-intake
 ```
 
 Use real values for these variables.
-Declare source files through the normal PrismaBuild data interface when a worker needs external local inputs.
+Declare source files as admitted job inputs when a worker needs external local inputs.
 A temporary path belongs to the worker that executes the action.
 Retain its outputs before that worker removes them.
 
@@ -123,13 +116,11 @@ For Ray, pass `--ray-address` and mount the same `/model` and `/source` paths on
 Normal rank-agreement and byte-integrity checks remain mandatory.
 No identity seal or new qualification gate is added.
 
-First, submit the same entry point on an x86 worker:
+First, submit the same entry point as an x86 CPU job (the command line below is the job's `argv`):
 
 ```bash
-"$CLIENT" "$PB" --cwd "$CHECKOUT" --tag x86 \
-  --cpus 1 --demand mem_gb=4,gpu=0 \
-  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
-  -- "$PYTHON" tools/day0_model_intake.py \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  "$PYTHON" tools/day0_model_intake.py \
   --checkpoint "$SOURCE" --output /tmp/model-preflight \
   --bf16-tp2-preflight --runtime-image "$IMAGE" --runtime-gpus all
 ```
@@ -148,7 +139,7 @@ Later, execute the real check with approved graphics processor admission:
   --gpu-memory-utilization 0.35
 ```
 
-Agent batch checks must run inside PrismaBuild admission.
+Agent batch checks must run as admitted Flux jobs.
 Declare actual memory and device demand for the selected runtime population.
 The central processor example does not authorize a graphics processor action.
 A remote `--bf16-tp2` request downloads remaining source files only after metadata checks.
@@ -162,4 +153,4 @@ The report never changes `native_serving_qualified` to true.
 Review unsupported kinds and the draft through the normal model-profile process.
 Use the existing profile validator for registered-profile checks.
 Use the serving-runtime census and native correctness checks before any native export promotion.
-Retain the source commit, tool commit, PrismaBuild action key, logs, and receipt with each result.
+Retain the source commit, tool commit, job id, logs, and result record with each result.

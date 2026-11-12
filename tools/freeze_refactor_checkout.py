@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze source edits in a separate checkout before PrismaBuild submission."""
+"""Freeze source edits in a separate checkout before native job submission."""
 from __future__ import annotations
 
 import argparse

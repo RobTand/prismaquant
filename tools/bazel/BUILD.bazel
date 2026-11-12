@@ -1,0 +1,59 @@
+load("@rules_python//python:py_library.bzl", "py_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# Tests read these files by path; tools/bazel/build_files.py names them.
+exports_files(glob(["**"]))
+
+filegroup(
+    name = "files",
+    srcs = glob(["**"], exclude = ["BUILD.bazel"]),
+)
+
+# One pinned rbe-ubuntu24-04 index: these are its amd64 and arm64 manifests,
+# the same images TL3's and PrismaBuild's gates use, so BuildBuddy's executors
+# keep them warm. gcc selects the cc toolchain MODULE.bazel registers.
+platform(
+    name = "linux_amd64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+        "@bazel_tools//tools/cpp:gcc",
+    ],
+    exec_properties = {
+        "Pool": "selfhosted-amd64",
+        "use-self-hosted-executors": "true",
+        "OSFamily": "Linux",
+        "container-image": "docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:5f0c01e5f6d79e58d7a996330de33aa38ce599bf8431eaf27521e7602daadf50",
+        # Hermetic by default; tests in nonhermetic.bzl opt back in.
+        "dockerNetwork": "off",
+        "dockerUser": "1000:1000",
+    },
+)
+
+platform(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:aarch64",
+        "@bazel_tools//tools/cpp:gcc",
+    ],
+    exec_properties = {
+        "Pool": "selfhosted-arm64",
+        "use-self-hosted-executors": "true",
+        "Arch": "arm64",
+        "OSFamily": "Linux",
+        "container-image": "docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:2f48fc6c0c7f0794a76c74d77ff23b1a80944e05acacff22c63da2ef002ebf9b",
+        "dockerNetwork": "off",
+        "dockerUser": "1000:1000",
+    },
+)
+
+# The runner's own modules. Every pq_py_test depends on these.
+py_library(
+    name = "runner",
+    srcs = [
+        "python_runner.py",
+        "runtime.py",
+    ],
+)

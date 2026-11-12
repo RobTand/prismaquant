@@ -1,0 +1,33 @@
+{
+  "argv": [
+    "python3",
+    "-m",
+    "tools.tessera_campaign_container",
+    "--spec",
+    "{\"container\": {\"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"env\": {\"LABEL\": \"\\u00e9\"}}",
+    "--",
+    "python3",
+    "-u",
+    "-m",
+    "prismaquant.tessera_campaign",
+    "--model",
+    "\u00e9"
+  ],
+  "cwd": "/work",
+  "demand": {
+    "gpu": 1,
+    "cpu": 2,
+    "mem_gb": 16
+  },
+  "env": {
+    "LABEL": "\u00e9"
+  },
+  "tags": [
+    "gb10"
+  ],
+  "retry_safe": true,
+  "container_images": [
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "timeout_s": 30
+}

@@ -9,6 +9,7 @@ import pytest
 from prismaquant import serving_profiles as profiles
 from prismaquant import tessera_campaign as campaign
 from prismaquant import tessera_menu as menu
+from lane_table_fixtures import legacy_v4_contract, legacy_v5_contract
 
 
 def _context(**changed):
@@ -24,7 +25,7 @@ def _context(**changed):
 def _contract(monkeypatch, payload, *, context=None):
     import copy
     from prismaquant import tessera_runtime_contract as runtime
-    from tests.conftest import set_cell_census
+    from lane_table_fixtures import set_cell_census
 
     payload = copy.deepcopy(payload)
     selected = {}

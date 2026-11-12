@@ -104,6 +104,7 @@ from .joint_quantum_handoff import (
 )
 from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE, PROGRESS_GRACE_FLAG)
 from .tessera_joint_aura import restores_activation_scale_env
+from .joint_run_progress import log_progress
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
 #: the clean gap (status.json says gapped; PB retries the sealed action key).
@@ -557,10 +558,9 @@ class QuantumProgress:
     only once the journal shard is on disk.
     """
 
-    def __init__(self, *, frontier: ChunkFrontier, base_units=0, log=None):
-        from .joint_run_progress import declared_phases
-
-        self._phases = declared_phases()
+    def __init__(self, *, frontier: ChunkFrontier, base_units=0, log=None,
+                 phases=None):
+        self._phases = None if phases is None else tuple(phases)
         self._log = log or (lambda message: print(message, flush=True))
         self._base_units = int(base_units)
         self._units = 0
@@ -573,6 +573,7 @@ class QuantumProgress:
 
     def _enter(self, name: str) -> None:
         if self._phases is None:
+            self._phase = str(name)
             return
         try:
             index = self._phases.index(str(name))
@@ -621,9 +622,7 @@ class QuantumProgress:
             self._enter(self._frontier.phase_name)
 
     def commit(self) -> bool:
-        """Report the cumulative count under the current phase (inert no-op)."""
-        from .prismabuild_progress import report
-
+        """Log local cumulative advancement after the durable journal boundary."""
         if self._phase is None:
             return False
         advanced = (self._committed == (None, None)
@@ -631,8 +630,8 @@ class QuantumProgress:
                     or self._phase != self._committed[1])
         if not advanced:
             return False
-        if report(self._phase, self.units(), unit="quantum_units"):
-            self.commits += 1
+        log_progress(self.units(), self._phase, unit="quantum_units", log=self._log)
+        self.commits += 1
         self._committed = (self.units(), self._phase)
         return True
 
@@ -896,7 +895,7 @@ class QuantumCounters:
             power = gpu.get("gpu_power_w_p50")
             counters["pilot"] = {
                 "binding": self.pilot_binding,
-                "action_key": os.environ.get("PRISMABUILD_ACTION_KEY"),
+                "job_id": os.environ.get("FLUX_JOB_ID"),
                 "gpu_envelope_fraction": None if power is None else power / 140.0,
             }
         if self._kernel_error:
@@ -1567,9 +1566,8 @@ def await_retained_window_read(window_index: int, *, record: Mapping,
     from .residency_map import RANGE_HIT, residency_resolver
     from .residency_shard_reader import (
         await_staged_spans,
-        staged_range_wait_s,
     )
-    from .staged_lease import stage_cover_is_published, stage_covers_are_published
+    from .staged_lease import stage_cover_is_published
 
     window_index = int(window_index)
     block = record.get("executable_readset")
@@ -1594,9 +1592,8 @@ def await_retained_window_read(window_index: int, *, record: Mapping,
     # entry is missing falls back to one lookup per entry.
     verdict = await_staged_spans(
         resolver, wanted,
-        deadline=_time.monotonic() + staged_range_wait_s(),
         published=stage_cover_is_published,
-        published_batch=stage_covers_are_published, cancel=cancel)
+        cancel=cancel)
     print(f"[residency] retained render window {window_index:02d}: "
           f"{verdict} for {len(wanted)} staged entr"
           f"{'y' if len(wanted) == 1 else 'ies'}", flush=True)
@@ -3841,7 +3838,7 @@ def run_layer_quantum(
     from .joint_projection_backend import executing_image, prewarm_projection_backend
     from .model_profiles import detect_profile
     from .production_weight_cache import ProductionWeightCache
-    from .residency_map import bind_residency_manifest, residency_report
+    from .residency_map import residency_report
     from .stage_inputs import bound as _bound, same as _same
     from .tessera_joint_aura import (
         ACTIVATION_SCALE_ENV,
@@ -3920,10 +3917,6 @@ def run_layer_quantum(
             raise QuantumIdentityRefused(refusal)
         handoff_capture_batch = normalize_replay_regime(replay_regime)["capture_batch"]
     from .joint_stageb_resources import enforce_device_policy
-    # Bind the readset before the first head read, so the head slice and
-    # every declared entry after it resolve through residency (PQ #1024).
-    bind_residency_manifest(
-        data_manifest_sha256 or record["campaign"].get("read_manifest_sha256"))
     head_slice = None
     readset_block = record.get("executable_readset")
     if isinstance(readset_block, dict) and readset_block.get("head_slice") is not None:
@@ -4261,7 +4254,7 @@ def run_layer_quantum(
 
 
 def quantum_completion_record(result: Mapping, *, record_path, record_bytes: bytes) -> dict:
-    """The producer's single completion record carried by PB stdout.
+    """The producer's single completion record, printed on stdout and published natively when the job is native.
 
     ``record_bytes`` is the exact owned quantum wire read the identity gate
     authenticated (PQ #1293); ``record_path`` is the sealed ``--quantum``
@@ -4314,6 +4307,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run one layer quantum of the distributed joint-AURA "
                     "cost campaign (contract §6).")
+    from .stage_a_produced_output import add_declaration_arguments
+    add_declaration_arguments(parser)
     parser.add_argument("--quantum", type=Path, required=True,
                         help="the producer's sealed layer-quantum record")
     parser.add_argument("--quantum-sha256", required=True)
@@ -4346,12 +4341,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help="band-serial (PQ #996): publish this quantum's "
                              "final input cotangent and owner states for "
                              "layer-1")
-    from .staged_tier_policy import DEFAULT_ALLOWED_TIERS
-    parser.add_argument("--allowed-tiers", default=DEFAULT_ALLOWED_TIERS,
-                        help="sealed staged-tier declaration for GPU-consumed "
-                             "bulk inputs: comma subset of {ram,ssd}, RAM "
-                             "first (default %(default)s). Pool/HDD bulk "
-                             "opens refuse under this declaration.")
     return parser
 
 
@@ -4403,21 +4392,12 @@ def main(argv=None) -> int:
         return EXIT_IDENTITY_REFUSED
     from .tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
-    # The readset is bound inside run_layer_quantum; until then the plan
-    # itself is the only input read (PQ #1024).
     config = _load_plan(args.plan, args.plan_sha256, defer_pool_reads=True)
     if Path(config["output_root"]).resolve() != Path(args.output_root).resolve():
         print(f"{IDENTITY_REFUSED_MARKER}: plan output_root "
               f"{config['output_root']} is not --output-root {args.output_root}",
               flush=True)
         return EXIT_IDENTITY_REFUSED
-    from .staged_tier_policy import activate_staged_tier_policy
-    try:
-        allowed = activate_staged_tier_policy(args.allowed_tiers)
-    except ValueError as exc:
-        parser.error(str(exc))
-    print(f"[STAGED-TIER] bulk inputs serve from {','.join(sorted(allowed))}; "
-          f"pool/HDD bulk opens refuse", flush=True)
     profiler = None
     if args.profile_tool == "cprofile":
         import cProfile
@@ -4451,7 +4431,15 @@ def main(argv=None) -> int:
                 "cumulative").print_stats(100)
             (Path(record["output_space"]["root"]) / "profile.txt").write_text(
                 text.getvalue())
-    print(json.dumps(quantum_completion_record(result, record_path=args.quantum, record_bytes=record_bytes)))
+    completion = quantum_completion_record(result, record_path=args.quantum, record_bytes=record_bytes)
+    print(json.dumps(completion))
+    counters_path = Path(completion["counters"]["path"])
+    # Only a pilot (counters carrying a pilot binding) is published, and only by a native job.
+    if (os.environ.get("FLUX_JOB_ID") and os.environ.get("OUT")
+            and "pilot" in json.loads(counters_path.read_bytes())):
+        from .joint_dispatch_pilot import publish_pilot_result
+        publish_pilot_result(counters_path.with_name("pilot-publication.json"), completion=completion,
+                             counters_path=counters_path, quantum_record=completion["quantum_record"])
     if result["status"] != "complete":
         return EXIT_GAPPED
     return EXIT_OK

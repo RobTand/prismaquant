@@ -1,0 +1,6 @@
+# Retained logs are immutable offline qualification inputs, not transient output.
+!results/
+!results/logs/
+!results/logs/**/
+!results/logs/**/*.log
+__pycache__/

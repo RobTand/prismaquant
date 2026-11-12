@@ -16,6 +16,8 @@ import types
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
+
 if not (pathlib.Path(__file__).resolve().parents[1] / "tools").is_dir():
     pytest.skip(
         "requires a repo checkout (tools/ scripts)",
@@ -48,6 +50,7 @@ from prismaquant.validate_quantized_model import (
     DEFAULT_MIN_GEN_LEN,
     DEFAULT_MIN_MTP_ACCEPT_P0,
 )
+from graph_lane_fixtures import synthetic_graph_lane
 
 
 def _license_card(model_dir):
@@ -200,6 +203,13 @@ def _close_all_slots(model_dir, *, passed=True, spec=False):
         if slot == "ship_gate":
             fill_slot(path, slot, _ship_gate_record(
                 sha, source=str(model_dir), passed=passed))
+            continue
+        if slot == "native_export.graph":
+            from tests.graph_receipt_fixtures import graph_fixture
+
+            record, _ = graph_fixture(model_dir)
+            record["passed"] = passed
+            fill_slot(path, slot, record)
             continue
         if slot.startswith("native_export."):
             fill_slot(path, slot, _native_record(slot, sha, passed=passed))

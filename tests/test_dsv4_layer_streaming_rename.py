@@ -118,7 +118,6 @@ def test_compressor_and_indexer_keep_faithful_mapping():
 
 
 @pytest.mark.own_process
-@pytest.mark.usefixtures("pinned_pb_source")
 def test_indexer_pooling_carries_the_coff_overlap_widening():
     """The Lightning Indexer pools at ``coff * index_head_dim``, not ``index_head_dim``.
 
@@ -169,7 +168,6 @@ def test_indexer_pooling_carries_the_coff_overlap_widening():
 
 
 @pytest.mark.own_process
-@pytest.mark.usefixtures("pinned_pb_source")
 def test_csa_compressor_returns_indices_not_a_gather():
     """CSA must hand its top-k out as indices, never gather with them.
 

@@ -1,11 +1,11 @@
-"""G3's requested-arm source reads and PB read-order manifest (PQ #2301).
+"""G3's requested-arm source reads and read-order plan (PQ #2301).
 
 An omitted tensor has writable storage with its original shape and dtype.
 Each requested arm replaces the whole tensor before its forward.
 Null and SOURCE rows retain their bytes and their source digest checks.
 Partial or unknown replacement shapes retain their source tensor.
 
-CPU manifest construction runs through pbrun with G3_PQ_ROOT naming the
+Plan construction is CPU work run as an admitted job with G3_PQ_ROOT naming the
 unchanged pinned PQ host checkout; /pq is only the container's mount path.
 """
 from collections import defaultdict

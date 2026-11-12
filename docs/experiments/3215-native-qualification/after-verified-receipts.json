@@ -1,0 +1,86 @@
+{
+  "invocation": "71abbbe1-eed3-426c-ae0d-58f6299ae3a5",
+  "commit": "73e9c040151226bb164b23350e88bf033434169c",
+  "terminal": "COMPLETE_INVOCATION_STATUS",
+  "verdict": "Failed",
+  "artifacts": [
+    {
+      "name": "assertions-73e9c040151226bb164b23350e88bf033434169c.json",
+      "sha256": "b41c59346fb5245e6fe81d518f4f6aa4303ea02483c8bfaa2a6c54f7eefba3fd",
+      "bytes": 226532,
+      "verified": true
+    },
+    {
+      "name": "assertions-73e9c040151226bb164b23350e88bf033434169c.json.source.json",
+      "sha256": "37b28989d4f88c20ac51e11841aafc95152af2d2c725f834bf7854ee6a1e4a4c",
+      "bytes": 29714,
+      "verified": true
+    },
+    {
+      "name": "assertions-f1335b0333749c1f400934b9e0f6ac06a99cf706.json",
+      "sha256": "4a040d5b3a5e6a034b37b87cfde65679ca934c5ac7b1221ec9281502bf197cb2",
+      "bytes": 220554,
+      "verified": true
+    },
+    {
+      "name": "assertions-f1335b0333749c1f400934b9e0f6ac06a99cf706.json.source.json",
+      "sha256": "8436e1e08cbd0c36be234746d9331754d3cd2dd738b999325eb766a584c3af12",
+      "bytes": 28485,
+      "verified": true
+    },
+    {
+      "name": "equivalence-73e9c040151226bb164b23350e88bf033434169c.log.gz",
+      "sha256": "6678d09681cad470f08b54b3e33886a7e7edb357fb4b23a70ffb3fd76e561f7d",
+      "bytes": 237,
+      "verified": true
+    },
+    {
+      "name": "equivalence-73e9c040151226bb164b23350e88bf033434169c.xml.gz",
+      "sha256": "51b00f4a33406a52618aa0997ef836c3fa6b99561bae428e782d7c391f1e4d37",
+      "bytes": 2018,
+      "verified": true
+    },
+    {
+      "name": "equivalence-f1335b0333749c1f400934b9e0f6ac06a99cf706.log.gz",
+      "sha256": "73c31747f15ae15e5cb1cdc5b3ef9e2ba173a409e937e4f3ce59bf6eb950b61e",
+      "bytes": 238,
+      "verified": true
+    },
+    {
+      "name": "equivalence-f1335b0333749c1f400934b9e0f6ac06a99cf706.xml.gz",
+      "sha256": "e6e3b32198586310ee622f435a9a4288e69562419f275451f2b259237308ff17",
+      "bytes": 1958,
+      "verified": true
+    },
+    {
+      "name": "equivalence-summary.json",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "verified": true
+    },
+    {
+      "name": "freeze.txt",
+      "sha256": "5e55a152f5e41fd6c5a0843aa2c5cee85c9d4e48aa90cd03b9c9fefaac4c189a",
+      "bytes": 1303,
+      "verified": true
+    },
+    {
+      "name": "junit.xml.gz",
+      "sha256": "4714a2194d6fcf0abbb338fc23c3ed730e1d6f34d29ad7ba6186eae15c5573a9",
+      "bytes": 1963,
+      "verified": true
+    },
+    {
+      "name": "pytest.log.gz",
+      "sha256": "ee6b3dd38eae61ad4080229422866bf2abf963b2288682ad1bb89bfc7ef33ed0",
+      "bytes": 1120,
+      "verified": true
+    },
+    {
+      "name": "timing.json",
+      "sha256": "087b53ddb2af2f241c4b94d72c3a141eae3a71762d740c5a59369bae9d31ce53",
+      "bytes": 5226309,
+      "verified": true
+    }
+  ]
+}

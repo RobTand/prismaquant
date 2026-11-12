@@ -446,7 +446,7 @@ def test_final_scope_retains_rank_local_shape_m_activation_and_recipe(monkeypatc
 
 def _shape_price_fixture():
     from dataclasses import replace
-    from conftest import set_cell_census
+    from lane_table_fixtures import set_cell_census
     from prismaquant import lane_eligibility as lane, shape_runtime_prices as prices
     from test_shape_runtime_prices import (_payload, _doc, _row, DENSE_E4M3, SCOPE, COMMIT, SHA)
     payload = _payload()

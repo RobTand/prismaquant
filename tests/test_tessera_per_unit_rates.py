@@ -670,7 +670,7 @@ def _synthetic_two_rung_contract(monkeypatch):
     import dataclasses
     from prismaquant import tessera_menu as menu
     from prismaquant import tessera_runtime_contract as contract
-    from conftest import (
+    from lane_table_fixtures import (
         down_convert_lane_table, lane_cells_on_one_image,
         project_lane_cells_onto_structures)
     from prismaquant.lane_eligibility import LANE_ELIGIBILITY_SCHEMAS
@@ -986,3 +986,28 @@ def test_mixed_nvfp4_stack_refuses_by_name():
         tep.require_unit_assignment(
             mixed, stack_of, units,
             capability=dict(trc.ROUTED_UNIT_ASSIGNMENT_BLOCK))
+
+
+def test_allocator_parses_each_format_once_per_selection(monkeypatch):
+    from collections import Counter
+    from prismaquant import tessera_formats
+
+    costs, budget, _delta = _small_priced_world()
+    assignment = {unit: BASE_FMT for unit in costs}
+    calls = Counter()
+    parse = tessera_formats.parse_tessera_format_name
+
+    def counted(fmt):
+        calls[fmt] += 1
+        return parse(fmt)
+
+    monkeypatch.setattr(tessera_formats, "parse_tessera_format_name", counted)
+    expected = {"s.4.w1": UP_FMT, "s.5.w1": UP_FMT, "s.2.w1": UP_FMT}
+    for selection in (1, 2):
+        picks, record = tep.select_priced_unit_upgrades(
+            costs, assignment, byte_budget=budget)
+        assert picks == expected
+        assert list(picks) == list(expected)
+        assert record["spent_wire_delta_bytes"] == 300
+        assert record["remaining_wire_delta_bytes"] == 50
+        assert calls == {BASE_FMT: selection, UP_FMT: selection}

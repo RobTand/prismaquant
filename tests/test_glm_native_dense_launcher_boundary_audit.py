@@ -32,7 +32,7 @@ def _launcher(monkeypatch, *, forbid_serving=False, matching_digest=True):
     inspections = []
 
     def run(argv, *args, **kwargs):
-        assert list(argv[:3]) == ["docker", "image", "inspect"], argv
+        assert list(argv[:3]) == ["/usr/bin/podman", "image", "inspect"], argv
         assert argv[3] == IMAGE
         inspections.append(list(argv))
         return subprocess.CompletedProcess(argv, 0, stdout=json.dumps([inspection]), stderr="")

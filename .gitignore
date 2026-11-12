@@ -45,3 +45,8 @@ tmp/
 # these behind, and they are never artifacts anyone means to track.
 .prismaquant_tmp/
 .worktrees/
+
+# Bazel output links and the logs .bazelrc asks for.
+/bazel-*
+/*bazel-remote-grpc.log
+/*execution_log.binpb.zst

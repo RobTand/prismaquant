@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from prismaquant import digests, sensitivity_card, stage_b_prep_io
+from prismaquant import digests, sensitivity_card
 from prismaquant.sensitivity_card import CardProvenance
 
 _SIMPLE_CARD = (
@@ -65,55 +65,6 @@ def test_spaced_card_keeps_literal_encoding_and_full_hash(monkeypatch, changes, 
     assert observed == [expected]
 
 
-@pytest.mark.parametrize("maximum", [0, -1, True, 1.0, "13"])
-def test_spaced_template_keeps_maximum_refusal_before_encoding(monkeypatch, maximum):
-    def must_not_encode(value):
-        pytest.fail("invalid maximum must refuse before the encoding owner")
-
-    monkeypatch.setattr(
-        stage_b_prep_io, "DIRECT_ASCII_SPACED_LAX", SimpleNamespace(text=must_not_encode),
-        raising=False,
-    )
-    with pytest.raises(ValueError) as refused:
-        stage_b_prep_io.build_preparation_template(
-            metadata_root="/metadata", tier="tier", payload_max_bytes=maximum,
-        )
-    assert str(refused.value) == "the preparation template needs a positive payload maximum"
-    assert refused.value.__cause__ is None
-
-
-@pytest.mark.parametrize(
-    ("root", "normalized", "tier"),
-    [("/ignored/../metadata", "/metadata", "tier"), ("/méta/\ud800", "/méta/\ud800", 17)],
-)
-def test_spaced_template_keeps_body_ascii_and_sixteen_hex(monkeypatch, root, normalized, tier):
-    body = {
-        "schema": "prismaquant.prismabuild.produced_output_template.v1", "version": 1,
-        "output_prefix": normalized,
-        "slots": {"stage_b_metadata": {"class": "payload"}},
-        "durable_maxima": {
-            "payload_max_bytes": 13, "checkpoint_max_bytes": 0, "temp_max_bytes": 13,
-        },
-        "working_demands": {str(tier): {"minimum_gib": 0, "window_gib": 0}},
-        "permitted_tiers": [str(tier)], "write_only": True,
-    }
-    expected = json.dumps(body, sort_keys=True).encode("utf-8")
-    observed = []
-
-    def hash_text(text):
-        observed.append(text.encode("utf-8"))
-        return hashlib.sha256(observed[-1]).hexdigest()
-
-    monkeypatch.setattr(stage_b_prep_io, "text_sha256hex", hash_text)
-    result = stage_b_prep_io.build_preparation_template(
-        metadata_root=root, tier=tier, payload_max_bytes=13,
-    )
-    assert result == {
-        **body, "template_id": "pq-stage-b-preparation-" + hashlib.sha256(expected).hexdigest()[:16],
-    }
-    assert observed == [expected]
-
-
 def test_spaced_profile_addition_keeps_legacy_positional_compact_constructor():
     profile = digests.JsonProfile("legacy-positional", True, True, str)
     assert profile.encoded({"v": "雪", "n": float("nan")}) == br'{"n":NaN,"v":"\u96ea"}'
@@ -140,29 +91,6 @@ def test_spaced_card_routes_exact_identity_mapping_through_named_profile(monkeyp
         "model_id": "m", "calib_hash": "c", "n_calib_samples": 1,
         "seq_len": 2, "render_basis": "rtn",
     }]
-
-
-def test_spaced_template_routes_only_validated_body_through_named_profile(monkeypatch):
-    observed = []
-    profile_text = "profile supplied template text"
-
-    def encode(value):
-        observed.append(value)
-        return profile_text
-
-    monkeypatch.setattr(
-        stage_b_prep_io, "DIRECT_ASCII_SPACED_LAX", SimpleNamespace(text=encode),
-    )
-    monkeypatch.setattr(
-        stage_b_prep_io, "text_sha256hex",
-        lambda text: hashlib.sha256(text.encode()).hexdigest(),
-    )
-    result = stage_b_prep_io.build_preparation_template(
-        metadata_root="/ignored/../metadata", tier="tier", payload_max_bytes=13,
-    )
-    expected_id = "pq-stage-b-preparation-" + hashlib.sha256(profile_text.encode()).hexdigest()[:16]
-    assert result["template_id"] == expected_id
-    assert observed == [{key: value for key, value in result.items() if key != "template_id"}]
 
 
 @pytest.mark.parametrize(

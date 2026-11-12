@@ -69,22 +69,22 @@ def _dispatch(tmp_path, monkeypatch, capsys, *, replay_mode, ceilings,
                         raising=False)
     gateway = dispatch.FakeGateway()
     code = dispatch.main(
-        ["--records", str(records), "--output-root", str(out),
+        ["--timeout-s", "3600", "--records", str(records), "--output-root", str(out),
          "--adjoint-receipt", str(receipt_path), *extra], _gateway=gateway,
         # No checkpoint behind the fixture; coverage has its own tests.
         _coverage=lambda rows: [])
     assert code == 0, capsys.readouterr().err
     (row,) = gateway.submitted
-    return dispatch, manifest, row["argv"]
+    return dispatch, manifest, row["row"]
 
 
 def _graces(argv):
-    return {name: int(value) for name, value in (
-        argv[i + 1].split("=", 1) for i, word in enumerate(argv)
-        if word == "--progress-phase")}
+    return {stamp["phase"]: stamp["grace_s"] for stamp in _stamps(argv)
+            if "phase" in stamp}
 
 
 def _stamps(argv):
+    argv = argv["argv"]
     flag = "--progress-grace-derivation"
     return json.loads(argv[argv.index(flag) + 1]) if flag in argv else []
 
@@ -96,11 +96,10 @@ def _plan(manifest):
 def _read_term(dispatch, phase_bytes):
     """W + ceil(bytes / floor): the fixture dispatch has one row, so the
     built-in one-reader floor applies."""
-    from prismaquant.residency_shard_reader import staged_range_wait_from_env
 
     env = json.loads(Path(dispatch.SPEC_PATH).read_text()).get("env") or {}
     floor = dispatch.LOAD_PHASE_FLOOR_ONE_READER["floor_bytes_per_s"]
-    return math.ceil(staged_range_wait_from_env(env)) + -(-phase_bytes // floor)
+    return -(-phase_bytes // floor)
 
 
 # -- red: the defect, at the dispatcher ------------------------------------
@@ -164,8 +163,7 @@ def test_spill_window_replays_carry_their_pass(tmp_path, monkeypatch, capsys):
         # The last declared phase also runs the quantum's tail (PQ #1190).
         assert [item["kind"] for item in rest] == (
             ["tail"] if name == last else [])
-    # render-00 only reads: it keeps the chunk grace and no stamp.
-    assert graces["render-00"] == dispatch.CHUNK_PROGRESS_GRACE_S
+    # render-00 only reads and has no compute stamp.
     assert "render-00" not in stamps
 
 
@@ -182,9 +180,6 @@ def test_windowed_replays_carry_their_pass(tmp_path, monkeypatch, capsys):
         assert graces[name] >= need, (
             f"{name}: a {graces[name]} s grace cannot cover a replay "
             f"backward over {len(plan[name]['entry_indices'])} stored batches")
-    for name in plan:
-        if name.startswith("render-"):
-            assert graces[name] == dispatch.CHUNK_PROGRESS_GRACE_S, name
 
 
 def test_a_row_outside_the_measured_scope_takes_the_blanket_and_says_why(
@@ -225,10 +220,9 @@ def test_no_compute_phase_carries_the_load_bound_alone(
              if stamp.get("schema") == LOAD_STAMP]
     assert loads == ["checkpoint-load"]
     computes = [stamp for stamp in stamps if stamp.get("schema") == COMPUTE_STAMP]
-    graces = _graces(argv)
     for stamp in computes:
         assert stamp["compute"], stamp["phase"]
-        assert stamp["grace_s"] == graces[stamp["phase"]] == (
+        assert stamp["grace_s"] == (
             stamp["read"]["grace_s"]
             + sum(term["grace_s"] for term in stamp["compute"]))
     (basis,) = [stamp for stamp in stamps if stamp.get("schema")
@@ -318,19 +312,19 @@ def _r13_grace(name, *, phase_bytes, entries, context=V7_CONTEXT):
     work = quantum_row.compute_phase_work(
         name, replay_mode="spill", entries=entries, n_probes=4, capture_batch=4)
     return dispatch.compute_phase_grace(
-        name, work=work, phase_bytes=phase_bytes, staged_wait_s=300.0,
+        name, work=work, phase_bytes=phase_bytes,
         link=dispatch.link_readers(rows=1), context=context,
         ceilings=dispatch.compute_ceilings())
 
 
 def test_the_r13_row_shape_derives_from_the_built_in_measurements():
     bound = _r13_grace("chain-044-bound", phase_bytes=8_591_036_928, entries=512)
-    assert (bound["mode"], bound["grace_s"]) == ("derived", 300 + 137 + 1686)
+    assert (bound["mode"], bound["grace_s"]) == ("derived", 137 + 1686)
     spill = _r13_grace("spill-p0", phase_bytes=8_591_036_928, entries=512)
     assert [term["grace_s"] for term in spill["compute"]] == [4393, 1800]
-    assert (spill["mode"], spill["grace_s"]) == ("blanket", 300 + 137 + 4393 + 1800)
+    assert (spill["mode"], spill["grace_s"]) == ("blanket", 137 + 4393 + 1800)
     render = _r13_grace("render-01", phase_bytes=5_940_033_993, entries=354)
-    assert (render["mode"], render["grace_s"]) == ("blanket", 300 + 95 + 1800)
+    assert (render["mode"], render["grace_s"]) == ("blanket", 95 + 1800)
     # Layer 43 spills less per batch than the measured layer 44: in scope.
     smaller = {**V7_CONTEXT, "spill.geometry.batch_bytes": 545259520,
                "spill.geometry.batch_x_bytes": 243269632}

@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from staged_native_fixtures import native_staged_state
 
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tools"):
@@ -33,7 +34,6 @@ from dispatch_joint_quanta import (  # noqa: E402
     DispatchRefused,
     link_readers,
     load_phase_grace,
-    require_staged_wait_below_grace,
 )
 from tests.test_band_serial_dispatch import (  # noqa: E402,F401
     _by_id,
@@ -61,12 +61,12 @@ def test_the_layer_044_gate_derives_846_seconds_from_the_one_reader_floor():
     link = link_readers(rows=1)
     stamp = load_phase_grace("checkpoint-load",
                              phase_bytes=LAYER_044_CHECKPOINT_BYTES,
-                             staged_wait_s=300.0, link=link)
+                             link=link)
     assert stamp["mode"] == "derived"
-    assert stamp["grace_s"] == 846
+    assert stamp["grace_s"] == 546
     assert stamp["transfer_s"] == 546
     assert stamp["phase_bytes"] == LAYER_044_CHECKPOINT_BYTES
-    assert stamp["staged_wait_s"] == 300.0
+    assert "staged_wait_s" not in stamp
     assert stamp["floor_bytes_per_s"] == FLOOR == 62_954_973
     assert stamp["floor_readers"] == stamp["readers"] == 1
     assert stamp["readers_source"] == "the quantum rows this dispatch publishes"
@@ -77,16 +77,10 @@ def test_the_layer_044_gate_derives_846_seconds_from_the_one_reader_floor():
     # The floor is the slower of the two measured gates.
     assert FLOOR == min(s["bytes_per_s"] for s in stamp["floor_sources"])
     assert stamp["floor_document"] is None
-    # The derived grace clears the reader's own deadline, so the staged-wait
-    # rule holds with the gate's 300 s wait.
-    require_staged_wait_below_grace(
-        {"env": {"PRISMAQUANT_STAGED_RANGE_WAIT_S": "300"}},
-        [("head", HEAD_PROGRESS_GRACE_S), ("checkpoint-load", 846),
-         ("chain-043", 900)])
 
 
 @pytest.mark.parametrize("loader", ["checkpoint", "handoff"])
-def test_real_loaders_share_one_deadline_across_their_verified_reads(tmp_path, monkeypatch, loader):
+def test_real_loaders_check_immutable_entries_without_a_wait_budget(tmp_path, monkeypatch, loader):
     from prismaquant import joint_adjoint_checkpoints as checkpoints
     from prismaquant import joint_quantum_handoff as handoffs
     from prismaquant import residency_shard_reader as reader
@@ -107,23 +101,16 @@ def test_real_loaders_share_one_deadline_across_their_verified_reads(tmp_path, m
             adjoint_slice=source, kda_capture_kernel=None)
         load = lambda: handoffs.load_handoff_inputs(
             handoff, source["checkpoint"], n_probes=handoff["n_probes"], n_batches=handoff["n_batches"])
-    wait_calls, deadlines = [], []
-    def wait_budget():
-        wait_calls.append(17.5)
-        return 17.5
+    checked = []
     await_entry = checkpoints._await_checkpoint_entry
-    def record_wait(entry, *, deadline):
-        deadlines.append(deadline)
-        return await_entry(entry, deadline=deadline)
-    monkeypatch.setattr(reader, "staged_range_wait_s", wait_budget)
-    monkeypatch.setattr(checkpoints, "_await_checkpoint_entry", record_wait)
+    def record_check(entry):
+        checked.append(entry)
+        return await_entry(entry)
+    monkeypatch.setattr(checkpoints, "_await_checkpoint_entry", record_check)
     try:
         plane, _shared, _pass = load()
         assert plane
-        assert wait_calls == [17.5]
-        assert len(deadlines) >= 2
-        assert deadlines[0] is not None
-        assert set(deadlines) == {deadlines[0]}
+        assert len(checked) >= 2
     finally:
         if owner is not None:
             owner.__exit__(None, None, None)
@@ -135,7 +122,7 @@ def test_more_than_one_reader_without_a_floor_takes_the_blanket_grace(rows, decl
     assert link["floor"] is None
     stamp = load_phase_grace("checkpoint-load",
                              phase_bytes=LAYER_044_CHECKPOINT_BYTES,
-                             staged_wait_s=300.0, link=link)
+                             link=link)
     assert stamp["mode"] == "blanket"
     assert stamp["grace_s"] == HEAD_PROGRESS_GRACE_S
     readers = rows if declared is None else declared
@@ -157,9 +144,9 @@ def test_a_floor_measured_at_the_row_count_derives_and_names_its_document():
                                                    "sha256": "d" * 64}}
     link = link_readers(rows=3, floor_document=document)
     stamp = load_phase_grace("checkpoint-load", phase_bytes=40_000_001,
-                             staged_wait_s=299.5, link=link)
+                             link=link)
     assert stamp["mode"] == "derived"
-    assert stamp["grace_s"] == 300 + 3
+    assert stamp["grace_s"] == 3
     assert stamp["floor_readers"] == 3
     assert stamp["floor_document"] == {"path": "/x/floor.json", "sha256": "d" * 64}
     assert [s["action_key"] for s in stamp["floor_sources"]] == ["c" * 64]
@@ -169,7 +156,7 @@ def test_a_floor_measured_at_the_row_count_derives_and_names_its_document():
                                              (0, "0 bytes")])
 def test_a_phase_without_bytes_to_bound_takes_the_blanket_grace(phase_bytes, why):
     stamp = load_phase_grace("handoff-load", phase_bytes=phase_bytes,
-                             staged_wait_s=300.0, link=link_readers(rows=1))
+                             link=link_readers(rows=1))
     assert stamp["mode"] == "blanket"
     assert stamp["grace_s"] == HEAD_PROGRESS_GRACE_S
     assert why in stamp["reason"]
@@ -177,7 +164,7 @@ def test_a_phase_without_bytes_to_bound_takes_the_blanket_grace(phase_bytes, why
 
 def test_a_row_built_without_a_link_count_says_so():
     stamp = load_phase_grace("checkpoint-load", phase_bytes=1,
-                             staged_wait_s=300.0, link=None)
+                             link=None)
     assert stamp["mode"] == "blanket"
     assert stamp["readers"] is None
     assert "without a link-reader count" in stamp["reason"]
@@ -198,12 +185,6 @@ def test_a_declared_reader_count_below_one_refuses():
 
 
 # The dispatch edge, on the band-serial test's four bound executable rows.
-
-
-def _graces(argv):
-    return {name: int(value) for name, value in (
-        argv[i + 1].split("=", 1) for i, word in enumerate(argv)
-        if word == "--progress-phase")}
 
 
 def _stamps(argv):
@@ -234,11 +215,10 @@ def test_a_filtered_dispatch_counts_only_its_own_rows(tmp_path, monkeypatch):
     assert _main(dispatch, gateway, records, receipt_path, out,
                  "--quantum", "layer-003") == 0
     assert sorted(_by_id(gateway)) == ["layer-003"]
-    argv = _by_id(gateway)["layer-003"]["argv"]
+    argv = _by_id(gateway)["layer-003"]["row"]
     phase_bytes = _checkpoint_bytes(bound[3])
     assert phase_bytes > 0
-    expected = 300 + -(-phase_bytes // FLOOR)
-    assert _graces(argv)["checkpoint-load"] == expected
+    expected = -(-phase_bytes // FLOOR)
     (stamp,) = _load_stamps(argv)
     assert (stamp["mode"], stamp["readers"], stamp["grace_s"]) == (
         "derived", 1, expected)
@@ -257,13 +237,13 @@ def test_an_unfiltered_dispatch_counts_every_row_it_publishes(tmp_path, monkeypa
     assert len(rows) == len(bound) > 1
     loads = 0
     for row in rows.values():
-        graces = _graces(row["argv"])
-        if "checkpoint-load" not in graces:
+        stamps = _load_stamps(row["row"])
+        if not stamps:
             continue
         loads += 1
-        assert graces["checkpoint-load"] == HEAD_PROGRESS_GRACE_S
-        (stamp,) = _load_stamps(row["argv"])
-        assert (stamp["mode"], stamp["readers"]) == ("blanket", len(bound))
+        (stamp,) = stamps
+        assert (stamp["phase"], stamp["mode"], stamp["readers"], stamp["grace_s"]) == (
+            "checkpoint-load", "blanket", len(bound), HEAD_PROGRESS_GRACE_S)
     assert loads > 0
 
 
@@ -283,11 +263,11 @@ def test_a_resubmitted_row_keeps_the_link_it_was_first_submitted_with(
     _, _bound, records, receipt_path, out = _dispatch_layout(tmp_path, monkeypatch)
     gateway = dispatch.FakeGateway()
     assert _main(dispatch, gateway, records, receipt_path, out) == 0
-    first = _by_id(gateway)["layer-003"]["argv"]
+    first = _by_id(gateway)["layer-003"]["row"]
     gateway.submitted = []
     assert _main(dispatch, gateway, records, receipt_path, out,
                  "--quantum", "layer-003") == 0
-    assert _by_id(gateway)["layer-003"]["argv"] == first
+    assert _by_id(gateway)["layer-003"]["row"] == first
     assert _load_stamps(first)[0]["readers"] == 4
 
 
@@ -300,7 +280,7 @@ def test_a_floor_document_at_the_dispatch_count_derives_every_row(
     assert _main(dispatch, gateway, records, receipt_path, out,
                  "--checkpoint-load-floor", str(floor)) == 0
     stamps = [stamp for row in _by_id(gateway).values()
-              for stamp in _load_stamps(row["argv"])]
+              for stamp in _load_stamps(row["row"])]
     assert stamps and {s["mode"] for s in stamps} == {"derived"}
     assert {s["floor_document"]["path"] for s in stamps} == {str(floor)}
 

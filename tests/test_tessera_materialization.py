@@ -108,7 +108,7 @@ def _plan(selection, monkeypatch):
     def row(spec, argv, **kwargs):
         calls.append((argv, kwargs))
         return dict(argv=argv, **kwargs)
-    monkeypatch.setattr(campaign_rows, 'prismabuild_row', row)
+    monkeypatch.setattr(campaign_rows, 'campaign_row', row)
     result = tm.plan(selection.request, selection.census, selection.workspace, selection.spec)
     return selection.workspace / 'plan.json', result, calls
 
@@ -737,4 +737,3 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
         assert len(links) == 1 and len(reads) == 3
         assert seen_cache[-1]._campaign_wire_coordinates == set(group["assignment"].items())
     assert seed_path.read_bytes() == seed_blob
-

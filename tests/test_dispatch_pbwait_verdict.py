@@ -1,75 +1,43 @@
-"""The dispatcher reads ``pbwait``'s answer the way ``pbwait`` gives it (PQ #1197).
-
-``Gateway.is_terminal_executed`` decides whether a band-serial producer has
-run, and so whether its consumer may dispatch (``_producer_handoff``).
-``pbwait`` prints its ``key status transport job host elapsed rc receipt
-note`` table and returns its verdict as the exit code; it prints no JSON. A
-gateway that parsed the last line as JSON read every key as not executed, so
-no band-serial row could ever dispatch. These tests run the real gateway
-against a stand-in ``pbwait`` that prints that table.
-"""
-from __future__ import annotations
-
-import sys
-import textwrap
+"""Native completion is exact-ID success, never a display table or early artifact."""
 from pathlib import Path
-
+from types import SimpleNamespace
 import pytest
+from tools import dispatch_joint_quanta as dispatch
+from prismaquant import flux_jobs, tessera_campaign_rows
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+SAVED = {"job_id": "f123", "record_dir": "/records/rows/00000", "launch_sha256": "a" * 64}
 
-import dispatch_joint_quanta  # noqa: E402
+@pytest.mark.parametrize("status,exit_code,error,admitted", [
+    ("succeeded", 0, None, True), ("failed", 7, None, False),
+    ("running", None, None, False), ("unknown", 0, "query rejected", False),
+    ("canceled", None, None, False), ("dependency-failed", None, None, False),
+    ("succeeded", 1, None, False)])
+def test_native_gateway_requires_complete_success(monkeypatch, status, exit_code, error, admitted):
+    monkeypatch.setattr(flux_jobs, "load_submission", lambda path: flux_jobs.FluxSubmission("f123", Path(path), "a" * 64))
+    observed = []
+    def collect(path, *, wait):
+        observed.append((path, wait))
+        return [{"status": status, "payload_exit": exit_code, "query_error": error}]
+    monkeypatch.setattr(tessera_campaign_rows, "collect_rows", collect)
+    assert dispatch.Gateway().is_terminal_executed(SAVED) is admitted
+    assert observed == [(Path("/records"), False)]
 
-KEY = "d106121a45e4e1d4dcaa88bc3beb26badc314aef70c27d560e5918247411699d"
-HEADER = "key           status    transport  job  host    elapsed  rc  receipt  note"
+def test_another_id_cannot_authorize_reuse(monkeypatch):
+    monkeypatch.setattr(flux_jobs, "load_submission", lambda path: flux_jobs.FluxSubmission("other", Path(path), "a" * 64))
+    monkeypatch.setattr(tessera_campaign_rows, "collect_rows", lambda *a, **k: pytest.fail("must refuse before collection"))
+    result = dispatch.Gateway().status(SAVED)
+    assert result["status"] == "unknown" and "identity differs" in result["query_error"]
 
-
-def _fake_pbwait(tmp_path, monkeypatch, *, rows, exit_code):
-    """Point the gateway at a ``pbwait`` that prints ``rows`` and exits."""
-    script = tmp_path / "pbwait.py"
-    table = "\n".join([HEADER, *rows])
-    script.write_text(textwrap.dedent(f"""\
-        import sys
-        assert sys.argv[1:3] == ["--wait-s", "0"], sys.argv
-        print({table!r})
-        sys.exit({exit_code})
-        """))
-    monkeypatch.setattr(dispatch_joint_quanta, "PBWAIT", script)
-    return dispatch_joint_quanta.Gateway()
-
-
-def test_an_executed_producer_reads_as_executed(tmp_path, monkeypatch):
-    # The row pbwait printed for layer 043 (PB d106121a45e4), 2026-09-24.
-    gateway = _fake_pbwait(tmp_path, monkeypatch, exit_code=0, rows=[
-        "d106121a45e4  executed  pool       -    sparky  2504.8s  0   -        -"])
-    assert gateway.is_terminal_executed(KEY) is True
-
-
-def test_a_memoized_producer_reads_as_executed(tmp_path, monkeypatch):
-    """``pbwait.verdict`` counts ``cache_hit`` as done: the same result."""
-    gateway = _fake_pbwait(tmp_path, monkeypatch, exit_code=0, rows=[
-        "d106121a45e4  cache_hit  cas        -    -       -        -   cas/a    -"])
-    assert gateway.is_terminal_executed(KEY) is True
-
-
-@pytest.mark.parametrize("row, exit_code", [
-    ("d106121a45e4  waiting   pool       -    sparky  12.0s    -   -        running", 3),
-    ("d106121a45e4  failed    pool       -    sparky  12.0s    1   -        -", 1),
-])
-def test_an_unfinished_or_failed_producer_does_not(tmp_path, monkeypatch, row, exit_code):
-    gateway = _fake_pbwait(tmp_path, monkeypatch, rows=[row], exit_code=exit_code)
-    assert gateway.is_terminal_executed(KEY) is False
-
-
-def test_the_verdict_must_be_about_this_key(tmp_path, monkeypatch):
-    """A zero exit about another action says nothing about this one."""
-    gateway = _fake_pbwait(tmp_path, monkeypatch, exit_code=0, rows=[
-        "9bf8f58d174f  executed  pool       -    lina    12.0s    0   -        -"])
-    assert gateway.is_terminal_executed(KEY) is False
-
-
-def test_a_row_that_says_executed_under_a_failing_verdict_does_not(tmp_path, monkeypatch):
-    """The exit code is the fleet's own reading; the row alone is not enough."""
-    gateway = _fake_pbwait(tmp_path, monkeypatch, exit_code=1, rows=[
-        "d106121a45e4  executed  pool       -    sparky  12.0s    1 (action 137)  -  killed"])
-    assert gateway.is_terminal_executed(KEY) is False
+def test_native_pilot_authority_reads_only_a_saved_native_execution(tmp_path):
+    """A selection naming no saved native record refuses; the capture-command hold is gone."""
+    from prismaquant import native_results
+    from prismaquant.joint_dispatch_pilot import PilotRefused
+    gateway = dispatch.Gateway()
+    assert not hasattr(gateway, "bind_capture_command")
+    publication = {"path": str(tmp_path / "publication.json"), "sha256": "b" * 64, "bytes": 1}
+    selection = {"schema": native_results.SELECTION_SCHEMA, "job_id": "f123", "record_dir": str(tmp_path / "missing"),
+                 "launch_sha256": "a" * 64, "publication": publication, "expected_launch": {},
+                 "producer_id": "x", "inputs": {}, "runtime": {}, "max_publication_bytes": 1,
+                 "max_evidence_bytes": 1, "max_artifact_bytes": 1}
+    with pytest.raises(PilotRefused, match="native pilot result refused"):
+        gateway.read_verified_result(dispatch.PilotSelector(selection))

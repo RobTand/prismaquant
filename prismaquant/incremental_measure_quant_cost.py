@@ -880,7 +880,7 @@ def _run_visual_cost_shard(
                 model_path,
                 device=torch.device(device),
                 dtype=dtype,
-                offload_folder=mm_offload_folder,
+                offload_folder=mm_offload_folder, layers_per_shard=1,
                 log_prefix="[incremental-cost/visual]",
                 multimodal=True,
                 visual_requires_grad=False,
@@ -1211,7 +1211,7 @@ def main():
             str(source_root),
             device=torch.device(args.device),
             dtype=dtype,
-            offload_folder=offload_folder,
+            offload_folder=offload_folder, layers_per_shard=args.layers_per_shard,
             log_prefix="[incremental-cost]",
         )
         # Watchdog is armed AFTER model skeleton is up — baseline is the

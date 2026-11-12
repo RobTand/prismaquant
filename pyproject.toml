@@ -10,12 +10,9 @@ version = "0.16.2"
 description = "Mixed-precision quantization allocator for LLMs: every layer refracts into a different format based on its sensitivity."
 readme = "README.md"
 license = "LicenseRef-PrismaQuant-Attribution-1.0"
-# 3.12 is the supported floor as of 2026-08-29. 3.11 was technically
-# sufficient for the language features used (prismaquant/schemas.py needs
-# typing.NotRequired, 3.11+), but nothing is exercised on it: the reference
-# box, the release workflow and every venv run 3.12. Claiming support we do
-# not test is the same class of error as the old ">=3.10" claim, which was
-# untrue and went unnoticed because nothing ever installed on 3.10.
+# 3.12 is the supported floor as of 2026-08-29. Hosted CI and release checks
+# exercise that floor; a newer interpreter is also supported.
+# Python 3.11 is no longer tested or claimed as supported.
 requires-python = ">=3.12"
 authors = [
     { name = "Rob Tand" },
@@ -59,10 +56,10 @@ serve = ["vllm>=0.19"]
 task-suite = ["lm-eval[hf]==0.4.12"]
 # pytest-timeout is not optional in practice: CI runs the suite unattended,
 # and a hung test without it burns the whole job timeout instead of failing.
-test = ["pytest>=8", "pytest-cov>=5", "pytest-timeout>=2.3", "pytest-xdist>=3.8",
+test = ["torch>=2.6", "pytest>=8", "pytest-cov>=5", "pytest-timeout>=2.3", "pytest-xdist>=3.8",
         # tests/test_prismaquant_visual_phase2.py imports PIL at module
         # level; a venv without pillow fails at collection (observed in the
-        # PB campaign venvs, 2026-10-04). Runtime deps already declare it;
+        # a campaign venv, 2026-10-04). Runtime deps already declare it;
         # this records the test-scope need for --no-deps provisions.
         "pillow>=10.0"]
 
@@ -88,3 +85,29 @@ prismaquant = [
     "tessera_runtime/reviewed_answer.json",
     "tessera_runtime/tessera_serving_runtime_pin.json",
 ]
+
+[tool.tl3.harness]
+command = ["python", "-m", "pytest"]
+test-files = ["tests/**/*.py"]
+
+[tool.uv]
+# Match the hosted gate's .github/ci-constraints.txt pins without narrowing
+# published dependency ranges. tests/test_uv_lock_ci_constraints.py checks
+# every hosted pin against the resolved lock.
+constraint-dependencies = ["transformers==5.16.1", "pytest==9.1.1"]
+# Resolve the hosted test environment separately from optional serving and
+# evaluation stacks, whose torch/numpy pins otherwise constrain the test lock.
+conflicts = [
+    [{ extra = "test" }, { extra = "serve" }],
+    [{ extra = "test" }, { extra = "task-suite" }],
+]
+
+[tool.uv.sources]
+# Keep ordinary uv sync and serving on PyPI; only the test extra uses CPU wheels.
+torch = { index = "pytorch-cpu", extra = "test" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+# Only torch uses this index; its aarch64 triton must not enter the x64 hub.
+explicit = true

@@ -26,34 +26,22 @@ Transport:
   ``StreamedBoundaryArtifacts`` generation under
   ``<quantum output space>/handoff/<generation>/``. That owner is Stage A's
   writer, so the entries are digest-checked exact entries under a fresh
-  session. When the action is an admitted PrismaBuild owner with a
-  produced-output template, the same owner binds that publication and
-  writes through PrismaBuild's produced-output lifecycle, and through the
-  local spool when the sealed environment enables it. Nothing here
-  moves bytes itself.
+  session. An admitted native producer binds an immutable launch declaration
+  and the same application lifecycle, including its local spool when declared.
+  The existing IO engine owns every copy.
 * ``owner-states.pkl`` (the harvested ``SharedStateCotangents`` states) and
   ``handoff.json`` (the sealed record) are one more group of the same
   publication, of kind ``handoff-record`` (PQ #1015). The owner writes it
   (``StreamedBoundaryArtifacts.write_produced_files``) only after every
   entry group is durable, and ``handoff.json`` is its last file, so the
   record's presence implies complete entries and owner states. Through the
-  spool, durable means PrismaBuild acknowledged the group's export.
+  spool, durable means verified destination and immutable batch publication.
   Unbound (a local or test run), the two files are written directly.
-* The handoff's template is **write-only** (PrismaBuild #912, PQ #1075):
-  the producer never reads its handoff back, so the template reserves no
-  stage window, and every group -- each entry group, then the record
-  group -- is committed at its origin as its own batch with the
-  ``consumed`` lifetime (PrismaBuild #914). Without the spool a group
-  commits when its last file lands; through the spool, once PrismaBuild
-  acknowledged its export. The emitter returns the batch refs in commit
-  order (``origin_batches``). PrismaBuild's retirement tick deletes a batch
-  once every consumer that declared it has succeeded; a batch no consumer
-  declared waits while its producer attempt succeeded and is swept once
-  that attempt is dead. Today's consumer stages the handoff through a
-  static readset and declares nothing, so its producer's batches wait;
-  declaring them needs PrismaQuant's consumer integration with the public
-  mixed-read-plan API and runtime retirement qualification (PQ #1007).
-  PrismaBuild #946 is closed and supplies that API's upstream implementation.
+* The handoff declaration is write-only. Every entry group, followed by
+  the record group, publishes with lifetime ``consumed``. The emitter returns
+  immutable bindings in commit order under ``origin_batches``. Consumed
+  lifetime grants no background cleanup service; explicit consumer and
+  retirement barriers still precede disposal.
 * The consumer streams the plane through ``stream_exact_entry_tensors``
   (windows of the verified exact-entry reader, strict-tier staged when the
   policy is active) and the owner states through the checkpoint's staged small-file
@@ -110,10 +98,7 @@ HANDOFF_OWNER_STATES_NAME = "owner-states.pkl"
 #: The produced-output group kind of ``owner-states.pkl`` and
 #: ``handoff.json`` (PQ #1015): one group per handoff, group index 0.
 HANDOFF_RECORD_BATCH_KIND = "handoff-record"
-#: The lifetime every handoff group is committed at its origin with
-#: (PrismaBuild #914, PQ #1075): PrismaBuild retires the batch once every
-#: consumer that declared it has succeeded, or sweeps it once the producer
-#: attempt is dead and no consumer declared it.
+#: Write-only application lifetime; explicit consumer barriers govern disposal.
 HANDOFF_ORIGIN_LIFETIME = "consumed"
 #: The ``annotations.band_serial`` block of a derived band-serial readset.
 #: v2 (PQ #1143): a spill-sealed readset stages each probe's incoming plane
@@ -237,11 +222,8 @@ def _checkpoint_coordinates(entry: Mapping) -> tuple[int, int]:
 def _owner_export_report(owner) -> dict | None:
     """What the handoff owner's exports did, for the row's counters.
 
-    The owner's ``produced_output_report``: per group the export action's
-    key, bytes, and when it was submitted, seen landed and released, with
-    the seconds the end-of-action drain waited on it (``local_spool.
-    exports``), and the owner's origin-commit seconds (PQ #1225). None for
-    an unbound owner. A report that cannot be read is recorded as that,
+    The application report records each immutable batch binding, copy failure,
+    durable destination, reader hold and local release. None for an unbound owner. A report that cannot be read is recorded as that,
     never raised: it must not replace the error the emit is raising.
     """
     try:
@@ -285,7 +267,7 @@ class HandoffEmitter:
                 "the handoff's produced-output template is not write-only: the "
                 "producer never reads its handoff back, so each group commits "
                 "at its origin, which only a write-only template allows "
-                "(PrismaBuild #912, PQ #1075)")
+                "under its immutable native declaration")
         self.record = record
         self.adjoint_slice = adjoint_slice
         self.boundary_storage = dict(boundary_storage)
@@ -430,10 +412,6 @@ class HandoffStream:
             "tee_misses": 0,
             "finish_wait_s": 0.0,
             "writer_s": 0.0,
-            # Origins PrismaBuild's origin commit hashed again because their
-            # timestamps moved after the spool's poll (PQ #1262, PB #1111).
-            # The spool's own re-pins are in its receipts, not here.
-            "landed_repins": 0,
             "cancelled": False,
             "error": None,
         }
@@ -550,6 +528,9 @@ class HandoffStream:
             with self._cond:
                 self._cancelled = True
                 self._cond.notify_all()
+                owner = getattr(self, '_storage_owner', None)
+            if owner is not None:
+                owner.cancel_waits()
             self._thread.join()
         self._release()
         self.telemetry["cancelled"] = self._cancelled
@@ -570,7 +551,7 @@ class HandoffStream:
 
         # The writer drives this owner, so its waits are the writer's own
         # (PQ #1262), not the compute thread's.
-        owner = StreamedBoundaryArtifacts(self._policy, driven_by="writer")
+        owner = StreamedBoundaryArtifacts(self._policy)
         try:
             self._write(owner)
         except BaseException as exc:            # noqa: BLE001 - handed over
@@ -581,8 +562,6 @@ class HandoffStream:
             # of a row that died in its export drain name the exports it
             # waited on.
             self._emitter.export_report = _owner_export_report(owner)
-            self.telemetry["landed_repins"] = int(
-                owner.telemetry.get("produced_landed_repins", 0))
             self.telemetry["writer_s"] = time.monotonic() - self._started
             with self._cond:
                 self._done = True
@@ -662,6 +641,9 @@ class HandoffStream:
             # follows a failure is bounded by the work in hand.
             owner.cancel_waits_when(lambda: self._cancelled)
             with self._cond:
+                self._storage_owner = owner
+                if self._cancelled:
+                    owner.cancel_waits()
                 self._ready = True
                 self._cond.notify_all()
             for probe in range(self._n_probes):
@@ -679,10 +661,11 @@ class HandoffStream:
                     tensor = None
                     self._release_tee(key)
                     self.telemetry["writer_busy_s"] += time.monotonic() - busy
-                    phase = ("after" if self._states is not None else "before")
-                    self.telemetry[f"entries_{phase}_finish"] += 1
-                    self.telemetry[f"bytes_{phase}_finish"] += int(
-                        references[-1].file_bytes)
+                    with self._cond:
+                        phase = ("after" if self._states is not None else "before")
+                        self.telemetry[f"entries_{phase}_finish"] += 1
+                        self.telemetry[f"bytes_{phase}_finish"] += int(references[-1].file_bytes)
+                        self._cond.notify_all()
             self._await(lambda: self._states is not None)
             states = self._states
             # Every entry is durable at its canonical path before the
@@ -1034,7 +1017,6 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
         stream_exact_entry_tensors,
     )
     from .joint_adjoint_slices import checkpoint_is_packed
-    from .residency_shard_reader import staged_range_wait_s
 
     if (handoff["n_probes"], handoff["n_batches"]) != (int(n_probes), int(n_batches)):
         raise QuantumHandoffRefused(
@@ -1048,7 +1030,6 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
                 int(entry["file_bytes"]) for entry in shared_pass_entries) \
                 > shared_state_max_bytes:
             raise RuntimeError("handoff shared-state payloads exceed auxiliary byte ceiling")
-    deadline = time.monotonic() + staged_range_wait_s()
     entries = sorted(handoff["activation_entries"],
                      key=lambda entry: _plane_coordinates(entry)[:2])
     scratch_rows = []
@@ -1059,14 +1040,13 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
                              "tensor_bytes": entry["tensor_bytes"]})
     plane = {} if cotangent_factory is None else cotangent_factory(scratch_rows)
     if not stream_incoming:
-        # The rate and ETA lines of the checkpoint loader; no PrismaBuild units.
+        # The rate and ETA lines of the checkpoint loader; no executor resource units.
         rate = ReadRateReporter(
             "handoff-load", total_entries=len(entries),
             total_bytes=sum(_entry_bytes(entry) for entry in entries))
         with closing(stream_exact_entry_tensors(
                 entries, expected_session=handoff["session"],
-                max_resident_bytes=max_resident_bytes, residency_check=residency_check,
-                deadline=deadline)) as stream:
+                max_resident_bytes=max_resident_bytes, residency_check=residency_check)) as stream:
             for entry, tensor in stream:
                 probe, batch, _at = _plane_coordinates(entry)
                 plane[(probe, batch)] = tensor
@@ -1075,7 +1055,7 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
         rate.done()
 
     def staged(path, entry, label):
-        _await_checkpoint_entry(entry, deadline=deadline)
+        _await_checkpoint_entry(entry)
         payload = _read_shared_state_payload(Path(path), entry)
         if (bytes_sha256hex(payload) != entry["sha256"]
                 or len(payload) != entry["file_bytes"]):
@@ -1098,7 +1078,7 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     shared_pass = {}
     if checkpoint_is_packed(checkpoint_record):
         (pack,) = shared_pass_entries
-        for name, member in read_shared_state_pack(pack, deadline=deadline):
+        for name, member in read_shared_state_pack(pack):
             kind, batch = shared_state_slot(name)
             if kind == "pass":
                 shared_pass[batch] = pickle.loads(member)
@@ -1185,8 +1165,7 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
     the incoming plane (PQ #1143): ``handoff-load`` keeps the owner states
     and the shared-pass entries, and each ``spill-p{p}`` phase stages probe
     ``p``'s plane entries, each right after the boundary entry of its batch,
-    the order its final pass reads them and the order PrismaBuild's movers
-    walk a phase. The phase sequence is unchanged.
+    the order its final pass and existing staged IO read them. The phase sequence is unchanged.
     ``annotations.band_serial.streamed_incoming`` names each phase's moved
     count, so the dispatcher still counts a capture by its stored batches.
 
@@ -1392,41 +1371,11 @@ def require_band_serial_readset(record: Mapping, handoff: Mapping,
 
 
 def bind_handoff_publication(*, boundary_storage: Mapping, env=None):
-    """This admitted action's produced-output publication for its handoff.
-
-    ``None`` only when the process carries no PrismaBuild launch context
-    (a local or test run): the handoff then writes its entries directly.
-    An admitted action that cannot bind refuses, and so does a template
-    that is not write-only (PQ #1075) or whose durable payload maximum is
-    not the handoff owner's artifact ceiling -- the same rule Stage A
-    applies to its own entries.
-    """
-    from .stage_a_produced_output import (
-        BoundaryProducedBindingError, BoundaryProducedPublication)
-
-    source = dict(os.environ) if env is None else dict(env)
-    if not source.get("PRISMABUILD_ACTION_KEY"):
-        return None
-    try:
-        publication = BoundaryProducedPublication.bind_from_admitted_owner(
-            queue_root=None, tier=None, env=source, command_extra=())
-    except BoundaryProducedBindingError as exc:
-        raise QuantumHandoffRefused(
-            "this quantum is an admitted PrismaBuild action "
-            f"({source['PRISMABUILD_ACTION_KEY'][:12]}) and cannot bind the "
-            f"produced output its handoff needs: {exc}") from exc
-    if publication.write_only is not True:
-        raise QuantumHandoffRefused(
-            "the handoff's produced-output template is not write-only: the "
-            "producer never reads its handoff back, so each group commits at "
-            "its origin, which only a write-only template allows "
-            "(PrismaBuild #912, PQ #1075)")
-    declared = int(publication.durable_maxima().get("payload_max_bytes", 0))
-    if declared != int(boundary_storage["max_artifact_bytes"]):
-        raise QuantumHandoffRefused(
-            "the handoff's produced-output template declares a durable payload "
-            f"maximum of {declared} bytes, but the handoff owner runs under "
-            f"{int(boundary_storage['max_artifact_bytes'])}")
+    """Additionally require a write-only declaration for handoff publication."""
+    from .streamed_boundary_artifacts import bind_stage_a_publication
+    publication = bind_stage_a_publication(boundary_storage=boundary_storage)
+    if publication is not None and not publication.write_only:
+        raise QuantumHandoffRefused('handoff requires a write-only declaration')
     return publication
 
 

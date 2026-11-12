@@ -162,3 +162,28 @@ def test_image_side_patch_scripts_are_outside_the_scan_and_their_loader_is_not(t
     (tmp_path / "prismaquant" / "serving_runtime_patch_set.py").write_text(raw)
     live = set(inventory.scan(tmp_path)["primitive_digest_sites"])
     assert live == {"hashlib:prismaquant/serving_runtime_patch_set.py::<module>"}
+
+
+def test_shared_stdlib_core_has_an_independent_helper_namespace(tmp_path):
+    body = ('import hashlib\n'
+            'def summary(rows):\n'
+            '    total = 0\n'
+            '    for row in rows:\n'
+            '        if row.ready:\n'
+            '            total += row.size\n'
+            '        else:\n'
+            '            total -= row.size\n'
+            '    return hashlib.sha256(str(total).encode()).hexdigest()\n')
+    namespace, = inventory.STANDALONE_HELPER_NAMESPACES
+    core_path = '/'.join(namespace.split('.')) + '.py'
+    adapter = str(Path(core_path).with_name('ordinary_adapter.py'))
+    ordinary = 'tools/ordinary.py'
+    paths = [core_path, adapter, ordinary]
+    for name in paths:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body)
+    live = inventory.scan(tmp_path)
+    assert live['same_name_helpers']['summary'] == [adapter, ordinary]
+    assert [f'{core_path}::summary', f'{ordinary}::summary'] in live['near_duplicates']
+    assert f'hashlib:{core_path}::summary' in live['primitive_digest_sites']

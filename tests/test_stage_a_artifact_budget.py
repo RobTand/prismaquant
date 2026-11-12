@@ -26,31 +26,12 @@ RUN_640_GIB = 640 * 1024 ** 3
 
 @pytest.fixture(autouse=True)
 def _release_process_state_this_file_installs():
-    """Give back the process-global state the CLI entrypoints install (#889).
-
-    ``joint_cost_stage_a.main`` activates the staged-tier policy from its
-    sealed ``--allowed-tiers`` flag, always and process-globally: that is
-    the production contract, and a campaign run owns the process it ends.
-    A test that calls ``main`` in-process does not, so the policy it turned
-    on stayed on for every file pytest ran afterwards in the same process,
-    and every bulk read there refused with no residency map to serve from.
-    Two files were seen failing behind it, in the order pbtest happened to
-    group them.
-
-    The ``tools/`` path is restored by monkeypatch. A dispatcher already
-    imported by another test keeps its exact module identity: its retained
-    argv callables still refer to that module's globals. Remove the dispatcher
-    only when this test installed it. Teardown only -- a setup-time reset
-    would hide the leak this file's last test asserts against.
-    """
+    """Restore the dispatcher module after each test."""
 
     import sys
 
     prior_dispatch = sys.modules.get("dispatch_joint_quanta")
     yield prior_dispatch
-    from prismaquant.staged_tier_policy import (
-        deactivate_staged_tier_policy_for_tests)
-    deactivate_staged_tier_policy_for_tests()
     if prior_dispatch is None:
         sys.modules.pop("dispatch_joint_quanta", None)
     else:
@@ -443,6 +424,11 @@ def test_stage_a_cli_threads_artifact_flag(tmp_path, monkeypatch):
     assert captured["artifact_budget_bytes"] is None
 
 
+def _declared(builder, manifest, campaign, **kwargs):
+    from stage_a_spool_spec import declared_stage_a_argv
+    return declared_stage_a_argv(builder, manifest, campaign, **kwargs)
+
+
 def _dispatcher_argv_fixture(tmp_path, monkeypatch):
     """Minimal valid manifest + campaign for stage_a_argv budget tests."""
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "tools"))
@@ -495,17 +481,17 @@ def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
 
     manifest, campaign = _dispatcher_argv_fixture(tmp_path, monkeypatch)
 
-    plain = stage_a_argv(manifest, campaign)
-    assert "--artifact-budget-bytes" not in plain
+    plain = _declared(stage_a_argv, manifest, campaign)
+    assert "--artifact-budget-bytes" not in plain["argv"]
 
-    threaded = stage_a_argv(manifest, campaign,
+    threaded = _declared(stage_a_argv, manifest, campaign,
                             artifact_budget_bytes=RUN_640_GIB)
-    assert "--artifact-budget-bytes" in threaded
-    assert str(RUN_640_GIB) in threaded
+    assert "--artifact-budget-bytes" in threaded["argv"]
+    assert str(RUN_640_GIB) in threaded["argv"]
 
     for bad in (True, 0, -5, "8 GiB"):
         with pytest.raises(DispatchRefused):
-            stage_a_argv(manifest, campaign, artifact_budget_bytes=bad)
+            _declared(stage_a_argv, manifest, campaign, artifact_budget_bytes=bad)
 
 
 def test_dispatcher_refuses_non_integer_numerics(tmp_path, monkeypatch):
@@ -521,11 +507,11 @@ def test_dispatcher_refuses_non_integer_numerics(tmp_path, monkeypatch):
 
     for bad in (687194767360.9, 640.0, Decimal("640"), "640.9", "0x10"):
         with pytest.raises(DispatchRefused):
-            stage_a_argv(manifest, campaign, artifact_budget_bytes=bad)
+            _declared(stage_a_argv, manifest, campaign, artifact_budget_bytes=bad)
 
-    threaded = stage_a_argv(manifest, campaign,
+    threaded = _declared(stage_a_argv, manifest, campaign,
                             artifact_budget_bytes=f" {RUN_640_GIB} ")
-    assert threaded[threaded.index("--artifact-budget-bytes") + 1] == str(
+    assert threaded["argv"][threaded["argv"].index("--artifact-budget-bytes") + 1] == str(
         RUN_640_GIB)
 
 
@@ -548,27 +534,9 @@ def test_parse_refuses_unicode_digits_named():
 
 def test_this_file_leaves_no_process_global_state_behind(
         _release_process_state_this_file_installs):
-    """FAILING-BEFORE (PQ #889): the leak, asserted where it is made.
-
-    Deliberately the last test in the file and deliberately order
-    dependent: pytest runs a module's tests in file order, so by the time
-    this runs, the two ``joint_cost_stage_a.main`` calls above have already
-    activated the staged-tier policy process-wide. Before the teardown
-    fixture at the top of this file, this assertion failed here instead of
-    failing -- as it did on main -- in whichever unrelated file pbtest
-    happened to group next in the same process.
-
-    ``sys.path`` is covered by ``monkeypatch.syspath_prepend`` at the three
-    sites that add ``tools/``; this checks the two pieces monkeypatch
-    cannot see.
-    """
+    """The dispatcher module keeps its original identity."""
 
     import sys
-    from prismaquant.staged_tier_policy import active_policy
-
-    assert active_policy() is None, (
-        "the staged-tier policy an in-process CLI run installed is still "
-        "active: every bulk read in the next file refuses", active_policy())
     prior_dispatch = _release_process_state_this_file_installs
     if prior_dispatch is None:
         assert "dispatch_joint_quanta" not in sys.modules

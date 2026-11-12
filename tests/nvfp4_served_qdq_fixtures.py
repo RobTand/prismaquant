@@ -1,7 +1,8 @@
 """Shared inputs for the served NVFP4 activation leg's tests (RobTand/prismaquant#1211).
 
-A helper module, not a test module: ``tests/test_nvfp4_served_qdq_no_sync.py``
-and ``tests/test_nvfp4_served_dequant_kernel.py`` import it.
+A helper module, not a test module: ``tests/test_nvfp4_served_qdq_no_sync.py``,
+``tests/test_nvfp4_served_dequant_kernel.py`` and
+``tests/test_nvfp4_empty_activation_batch.py`` import it.
 """
 from __future__ import annotations
 
@@ -41,6 +42,18 @@ def cpu_kernels():
 
     return types.SimpleNamespace(group_abs_max=group_abs_max,
                                  dequantize_codes=dequantize_codes)
+
+
+def cpu_positive_table(device):
+    """The eight positive E2M1 magnitudes, without the format registry.
+
+    ``owner._e2m1_positive_table`` imports ``prismaquant.format_registry`` on its
+    first call, which pulls in compressed_tensors and transformers, and that stack
+    reads ``torch.ops._c10d_functional`` while it loads.  A test that has
+    replaced ``torch.ops`` with a namespace must not be its first importer, and
+    the dispatch tests that use ``cpu_kernels`` never read the table values.
+    """
+    return torch.tensor(owner._E2M1_POSITIVE, dtype=torch.float32, device=device)
 
 
 def activation(rows: int, width: int, *, seed: int, dtype=torch.bfloat16) -> torch.Tensor:

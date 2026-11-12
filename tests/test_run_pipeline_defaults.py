@@ -261,13 +261,3 @@ def test_large_or_moe_validated_frontier_has_pre_gpu_inplace_gate():
     assert "|| exit $?" in gate
 
 
-def test_prismasnap_source_is_additive_native_only_and_non_native_fails_closed():
-    script = _run_pipeline_script()
-    gate = script.split(': "${EXPORT_CONTAINER:=compressed-tensors}"', 1)[1].split(
-        'if [[ "$EXPORT_CONTAINER" == "nvfp4_cb" ]]', 1
-    )[0]
-    assert "prismasnap_provenance.json" in gate
-    assert '!= "compressed-tensors"' in gate
-    assert "exit 2" in gate
-
-

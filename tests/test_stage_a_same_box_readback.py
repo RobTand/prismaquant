@@ -1,133 +1,19 @@
-"""Same-box cotangent readback and write-behind export (RobTand/prismaquant#1110).
-
-The reverse chain reads each cotangent plane on the box that wrote it one
-layer earlier. Before #1110 every such read went through PrismaBuild: the
-group's local export had to land, the local copy was released, and the group
-was published and staged back from the pool to the same box. These tests pin
-the fix:
-
-* a chain of at least three steps on one host asks PrismaBuild to stage none
-  of its own cotangent groups, and its output is bitwise identical to the
-  staged path's;
-* an export that failed refuses at the barrier that waits for it at once,
-  naming the export and its state, and leaves a record;
-* a slow but live export is waited on at a barrier with no clock.
-
-The writer, the owner, the strict reader, the queue and the fleet are the
-real ones. Only PrismaBuild's asynchronous exporter is replaced by a
-transport whose receipt the test controls (``test_produced_output_spool``).
-"""
+"""Exact four-step/two-probe arithmetic through bounded same-box IO owners."""
 from __future__ import annotations
-
 import threading
-import time
-
+from pathlib import Path
 import pytest
 import torch
+from produced_native_fixtures import owner
+from prismaquant import io_engine
+from prismaquant.produced_output_spool import ProducedExportRefused
 
-import test_produced_output_spool as spool_tests
-import test_stage_a_produced_boundary_chain as chain
-# Autouse, and it must apply HERE too (RobTand/prismaquant#889).
-from test_stage_a_produced_boundary_chain import (  # noqa: F401
-    _isolated_launch_context)
-
-# PQ #1008: one pinned prismabuild per process (tests/conftest.py).
-pytestmark = pytest.mark.own_process
-
-GROUP_SIZE = chain.GROUP_SIZE
+GROUP_SIZE = 4
 N_BATCHES = 2 * GROUP_SIZE
 N_PROBES = 2
-#: Boundaries 0..TOP-1 are the forward's; TOP is the tail cotangent plane.
 TOP = 4
-#: The owner's durable payload maxima, priced as production prices its
-#: artifact budget (``joint_cost_stage_a`` planning allowance): every file at
-#: its tensor bound plus the 64 KiB envelope, which is also PrismaBuild's
-#: prewrite ceiling. A group read only on this box is never committed, so its
-#: prewrite stays charged at that ceiling until its last file goes (PQ #1110).
-#: The forward's boundary groups are never retired here, so they stay; the
-#: roll needs two cotangent planes at once. Without the group-final prewrite
-#: release the chain would hold every plane it wrote (TOP + 1 of them) and
-#: this refuses the first write past two.
 GROUP_CEILING_BYTES = GROUP_SIZE * ((1 << 14) + 65536)
-PAYLOAD_MAX_BYTES = GROUP_CEILING_BYTES * (
-    TOP * N_BATCHES // GROUP_SIZE + 2 * N_PROBES * N_BATCHES // GROUP_SIZE)
-
-#: Finite integration-harness allowance for real queue movers and settlement.
-#: This chain asserts staging calls and exact output bytes, not elapsed time.
-#: The separate failure/live-export tests retain their deliberately small bounds.
-CHAIN_HARNESS_TIMEOUT_S = 900.0
-
-
-class LandingExport(spool_tests.ControlledExport):
-    """Acknowledges an export the first time it is polled.
-
-    PrismaBuild's exporter runs on the producing host beside the owner; here
-    the copy to the canonical destination happens at the first poll, so every
-    path that waits for a landing (the staged read included) reaches the step
-    after it.
-    """
-
-    def poll_group(self, batch_id):
-        group = self.groups[batch_id]
-        if group["entries"] and not group["complete"] and not group["failure"]:
-            self.acknowledge(batch_id)
-        return super().poll_group(batch_id)
-
-
-@pytest.fixture
-def closing():
-    """Close every owner a test made, so no stager thread outlives it."""
-
-    owners = []
-    yield owners.append
-    for storage in owners:
-        storage._produced_stop_stager()
-
-
-def _spool_owner(tmp_path, *, backend_type=LandingExport, capacity=1 << 30,
-                 staging_timeout_s=60.0):
-    from prismaquant.produced_output_spool import ProducedOutputSpool
-
-    storage, publication, q, env, pb_repo = chain._bound_owner(
-        tmp_path, n_batches=N_BATCHES, window_gib=8, gib=16,
-        payload_max_bytes=PAYLOAD_MAX_BYTES, n_probes=N_PROBES,
-        staging_timeout_s=staging_timeout_s)
-    storage._published = True
-    backend = backend_type(tmp_path / "local", capacity=capacity)
-    storage._local_output_spool = ProducedOutputSpool(
-        backend, capacity_deferred=spool_tests.CapacityDeferred)
-    return storage, publication, q, env, pb_repo, backend
-
-
-def _count_staging_requests(publication):
-    """Count PrismaBuild staging calls per group kind.
-
-    ``publish`` seals a group's first mover and ``ensure_batch_materialized``
-    a repeat one; ``await_materialized`` waits for a mover's receipt and
-    ``reader_context`` composes a staged read. Each is a request to stage a
-    group through PrismaBuild, so an own group read on its own box must make
-    none of them.
-    """
-
-    counts = {}
-
-    def wrap(name):
-        real = getattr(publication, name)
-
-        def call(*args, **kwargs):
-            batch_id = str(kwargs.get("batch_id", args[0] if args else ""))
-            kind = batch_id.split("-")[1] if batch_id.startswith("stagea-") else "?"
-            counts.setdefault(kind, {}).setdefault(name, 0)
-            counts[kind][name] += 1
-            return real(*args, **kwargs)
-
-        setattr(publication, name, call)
-
-    for name in ("publish", "ensure_batch_materialized", "await_materialized",
-                 "reader_context"):
-        wrap(name)
-    return counts
-
+PAYLOAD_MAX_BYTES = GROUP_CEILING_BYTES * (TOP * 2 + 2 * N_PROBES * 2)
 
 def _boundary(layer, batch):
     return torch.full((2, 8), float(layer)) + torch.arange(8.0) * (batch + 1)
@@ -198,180 +84,101 @@ def _payload_digests(planes):
     return {p: [tensor_payload_sha256(t) for t in planes[p]] for p in sorted(planes)}
 
 
-def test_a_chain_on_one_host_stages_none_of_its_own_cotangent_groups(
-        tmp_path, monkeypatch, closing):
-    """RED on the parent: every cotangent plane was staged back to its own box.
-
-    ``TOP`` (4) chain steps over a two-probe plane of two groups each. The
-    local run reads every own cotangent group from the spool that wrote it,
-    so PrismaBuild is asked to stage none of them. The staged run is the same
-    chain with the local read switched off, which is the path every read took
-    before #1110; both produce the in-memory chain's exact bytes.
-    """
-
-    local = _spool_owner(tmp_path / "local-run",
-                         staging_timeout_s=CHAIN_HARNESS_TIMEOUT_S)
-    storage, publication, q, env, pb_repo, _backend = local
-    closing(storage)
-    counts = _count_staging_requests(publication)
-    with chain._fleet(q, tmp_path / "local-run"):
-        chain._strict(monkeypatch, env, pb_repo, q)
-        local_final, _ = _run_chain(storage)
-        assert storage.drain_produced_stager(CHAIN_HARNESS_TIMEOUT_S), (
-            "local chain stager did not drain within the harness allowance")
-        storage.settle_local_output()
-        storage.settle_produced_releases()
-        # The last plane's prewrite releases run on the stager.
-        assert storage.drain_produced_stager(CHAIN_HARNESS_TIMEOUT_S), (
-            "local prewrite releases did not drain within the harness allowance")
-    assert counts.get("cotangent", {}) == {}, (
-        "an own cotangent group read on its own box was staged through "
-        "PrismaBuild", counts)
-    assert storage.telemetry.get("produced_local_reads", 0) > 0
-    # Every rolled-away plane gave its prewrite back (the tail and planes
-    # TOP-1..1; plane 0 is written with no read to follow and settles).
-    assert storage.telemetry["produced_groups_prewrite_released"] >= (
-        TOP * N_PROBES * N_BATCHES // GROUP_SIZE)
-
-    staged = _spool_owner(tmp_path / "staged-run",
-                          staging_timeout_s=CHAIN_HARNESS_TIMEOUT_S)
-    s_storage, s_publication, s_q, s_env, s_pb_repo, _s_backend = staged
-    closing(s_storage)
-    # The path every read took before #1110: no entry is read locally, so
-    # every group a read needs is published and staged through PrismaBuild.
-    from contextlib import nullcontext
-    monkeypatch.setattr(s_storage._local_output_spool, "local_reads",
-                        lambda references: nullcontext({}))
-    s_counts = _count_staging_requests(s_publication)
-    with chain._fleet(s_q, tmp_path / "staged-run"):
-        chain._strict(monkeypatch, s_env, s_pb_repo, s_q)
-        staged_final, _ = _run_chain(s_storage)
-        assert s_storage.drain_produced_stager(CHAIN_HARNESS_TIMEOUT_S), (
-            "staged chain stager did not drain within the harness allowance")
-        s_storage.settle_local_output()
-        s_storage.settle_produced_releases()
-    assert s_counts["cotangent"]["publish"] > 0, s_counts
-    assert s_storage.telemetry.get("produced_local_reads", 0) == 0
-
-    expected = _payload_digests(_reference_chain())
-    assert _payload_digests(staged_final) == expected
-    assert _payload_digests(local_final) == expected, (
-        "the local read changed the chain's bytes")
+def _spool_owner(tmp_path, monkeypatch):
+    storage, pub = owner(tmp_path, n_batches=N_BATCHES, n_probes=N_PROBES,
+        group_size=GROUP_SIZE, tensor_bytes=1 << 14, payload_max=PAYLOAD_MAX_BYTES,
+        spool_bytes=2 * 2 * N_BATCHES * ((1 << 14) + 65536))
+    monkeypatch.setattr(pub, 'finalize', lambda *a, **k: None)
+    return storage, pub
 
 
-class FailingExport(spool_tests.ControlledExport):
-    """An export that PrismaBuild reports failed, as ``poll_group`` does."""
-
-    def submit_group(self, batch_id, *, entries):
-        answer = super().submit_group(batch_id, entries=entries)
-        self.groups[batch_id]["export_key"] = answer["export_key"]
-        return answer
-
-    def poll_group(self, batch_id):
-        self.polls += 1
-        group = self.groups[batch_id]
-        if group["failure"]:
-            return {"ok": False, "complete": False,
-                    "export_key": group["export_key"],
-                    "refusal": group["failure"]}
-        return {"ok": True, "complete": group["complete"],
-                "export_key": group["export_key"]}
+def test_a_chain_on_one_host_reads_exact_local_cotangents(tmp_path, monkeypatch):
+    storage, _ = _spool_owner(tmp_path, monkeypatch)
+    with storage:
+        actual, _ = _run_chain(storage)
+    assert _payload_digests(actual) == _payload_digests(_reference_chain())
+    assert storage.telemetry['produced_local_reads'] > 0
+    assert not storage._deferred_unlinks
 
 
-def _write_cotangent_group(storage, *, probe=0, layer=TOP):
-    return [storage.write(_tail(probe, b), batch_index=b, boundary_index=layer,
-                          probe_index=probe)
-            for b in range(GROUP_SIZE)]
-
-
-def _barrier(storage, which, references):
-    if which == "settle":
-        storage.settle_local_output()
-    else:
-        storage.await_checkpoint_references(references)
-
-
-@pytest.mark.parametrize("barrier", ["settle", "checkpoint"])
-def test_a_failed_export_refuses_at_its_barrier_at_once_with_a_record(
-        tmp_path, closing, barrier):
-    """The barrier asks once, reads a failed export, and refuses.
-
-    The refusal names the export action and PrismaBuild's state for it, and
-    the owner's report carries the same record; a line on stdout is not a
-    record.
-    """
-
-    from prismaquant.produced_output_spool import ProducedOutputSpoolRefused
-
-    storage, _pub, _q, _env, _pb, backend = _spool_owner(
-        tmp_path, backend_type=FailingExport, staging_timeout_s=2.0)
-    closing(storage)
-    references = _write_cotangent_group(storage)
-    assert storage.drain_produced_stager(60.0)
-    (batch_id,) = [batch for batch, group in backend.groups.items()
-                   if group["entries"]]
-    backend.groups[batch_id]["failure"] = "export-failed-without-ack"
-    export_key = backend.groups[batch_id]["export_key"]
-    started = time.monotonic()
-    with pytest.raises(ProducedOutputSpoolRefused) as refused:
-        _barrier(storage, barrier, references)
-    assert time.monotonic() - started < 1.0, "a failed export is not waited on"
-    message = str(refused.value)
-    assert export_key in message and "export-failed-without-ack" in message
-    records = storage.produced_output_report()["local_spool"]["refusals"]
-    assert [(r["batch_id"], r["export_key"], r["state"]) for r in records] == [
-        (batch_id, export_key, "export-failed-without-ack")], records
-    # A failed capture writes no receipt, so Stage A keeps the same record
-    # in the adjoint space, one line per failed attempt.
+@pytest.mark.parametrize('barrier', ['settle', 'checkpoint'])
+def test_failed_copy_refuses_at_its_barrier_and_retains_evidence(tmp_path, monkeypatch, barrier):
+    storage, pub = _spool_owner(tmp_path, monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+    def fail(*args, **kwargs):
+        entered.set()
+        assert release.wait(30)
+        raise OSError('owned copy failed')
+    monkeypatch.setattr(io_engine, 'publish_copy', fail)
+    refs = [storage.write(_tail(0, b), batch_index=b, boundary_index=TOP,
+        probe_index=0) for b in range(GROUP_SIZE)]
+    assert entered.wait(30)
+    release.set()
+    with pytest.raises(ProducedExportRefused, match='owned copy failed'):
+        if barrier == 'settle':
+            storage.settle_local_output()
+        else:
+            storage.await_checkpoint_references(refs)
+    storage._local_output_spool.join_copies()
+    records = storage.produced_output_report()['local_spool']['refusals']
+    assert len(records) == 1 and 'owned copy failed' in records[0]['publication_error']
+    assert not pub._groups and all(not Path(ref.path).exists() for ref in refs)
+    assert all(Path(row[0].path).is_file() for group in storage._local_output_spool._groups.values()
+               for row in group['references'])
     import json
-    from prismaquant.joint_cost_stage_a import (
-        FAILED_PRODUCED_OUTPUT_RECORDS, _failed_produced_output_record)
-    space = tmp_path / "space"
-    space.mkdir()
-    with pytest.raises(ProducedOutputSpoolRefused):
+    from prismaquant.joint_cost_stage_a import FAILED_PRODUCED_OUTPUT_RECORDS, _failed_produced_output_record
+    space = tmp_path / 'space'; space.mkdir()
+    error = ProducedExportRefused('owned copy failed')
+    with pytest.raises(ProducedExportRefused) as caught:
         with _failed_produced_output_record(space, storage):
-            raise refused.value
-    (line,) = (space / FAILED_PRODUCED_OUTPUT_RECORDS).read_text().splitlines()
-    kept = json.loads(line)["produced_output"]["local_spool"]["refusals"]
-    assert [(r["batch_id"], r["export_key"], r["state"]) for r in kept] == [
-        (batch_id, export_key, "export-failed-without-ack")]
+            raise error
+    assert caught.value is error
+    kept = json.loads((space / FAILED_PRODUCED_OUTPUT_RECORDS).read_text())
+    assert kept['produced_output']['local_spool']['refusals'] == records
 
 
-@pytest.mark.parametrize("barrier", ["settle", "checkpoint"])
-def test_a_slow_live_export_is_waited_on_without_a_clock(
-        tmp_path, closing, barrier):
-    """A live export that outlasts every configured budget is still waited on.
-
-    The owner's staging budget is 0.2 s and the export lands after ten times
-    that. Before #1110 the barrier raised ``TimeoutError`` at its own clock
-    while PrismaBuild still had the export in hand; now nothing but the
-    export's state ends the wait.
-    """
-
-    storage, _pub, _q, _env, _pb, backend = _spool_owner(
-        tmp_path, backend_type=FailingExport, staging_timeout_s=0.2)
-    closing(storage)
-    references = _write_cotangent_group(storage)
-    assert storage.drain_produced_stager(60.0)
-    (batch_id,) = [batch for batch, group in backend.groups.items()
-                   if group["entries"]]
-    landed = threading.Event()
-
-    def land_later():
-        time.sleep(2.0)
-        backend.acknowledge(batch_id)
-        landed.set()
-
-    thread = threading.Thread(target=land_later)
-    thread.start()
+@pytest.mark.parametrize('barrier', ['settle', 'checkpoint'])
+def test_live_copy_finishes_before_the_barrier_publishes_completion(tmp_path, monkeypatch, barrier):
+    storage, pub = _spool_owner(tmp_path, monkeypatch)
+    entered, release, completed = threading.Event(), threading.Event(), threading.Event()
+    waiting = threading.Event()
+    real_copy = io_engine.publish_copy
+    def gated(*args, **kwargs):
+        entered.set()
+        assert release.wait(30)
+        return real_copy(*args, **kwargs)
+    monkeypatch.setattr(io_engine, 'publish_copy', gated)
+    refs = [storage.write(_tail(0, b), batch_index=b, boundary_index=TOP,
+        probe_index=0) for b in range(GROUP_SIZE)]
+    assert entered.wait(30)
+    condition = storage._local_output_spool._cond
+    actual_wait = condition.wait
+    def observed_wait(*args, **kwargs):
+        waiting.set()
+        return actual_wait(*args, **kwargs)
+    monkeypatch.setattr(condition, 'wait', observed_wait)
+    failures = []
+    def wait():
+        try:
+            if barrier == 'settle':
+                storage.settle_local_output()
+            else:
+                storage.await_checkpoint_references(refs)
+        except BaseException as error:
+            failures.append(error)
+        finally:
+            completed.set()
+    waiter = threading.Thread(target=wait)
+    waiter.start()
     try:
-        _barrier(storage, barrier, references)
+        assert waiting.wait(30)
+        # Completion cannot precede the copy's explicit release event.
+        assert not completed.is_set() and not pub._groups
     finally:
-        thread.join(timeout=10)
-    assert landed.is_set()
-    assert storage._local_output_spool.landed(batch_id)
-    # The wait is a record: which export, where, and for how long.
-    waits = [w for w in storage.produced_output_report()["local_spool"]["waits"]
-             if w["kind"] == "export" and w["batch_id"] == batch_id]
-    assert waits and waits[0]["export_key"] == backend.groups[batch_id]["export_key"]
-    assert sum(w["seconds"] for w in waits) >= 1.5, waits
+        release.set()
+        waiter.join(30)
+    assert completed.is_set() and not failures and not waiter.is_alive()
+    assert all(Path(ref.path).is_file() for ref in refs)
+    with storage.prefetch(refs) as window:
+        for b, ref in enumerate(refs):
+            assert torch.equal(storage.get(window, ref), _tail(0, b))

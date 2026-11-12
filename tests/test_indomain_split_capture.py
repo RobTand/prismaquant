@@ -65,8 +65,9 @@ def test_join_refuses_role_metadata_not_verified_by_its_quantum(tmp_path, change
         capture_root=str(root), calibration_census=str(tmp_path / "census.json"),
         model=str(tmp_path / "source"), source_snapshot_root=None, max_act_rows=7,
         attention_implementation="eager", units=str(tmp_path / "units.json"))
-    with pytest.raises(capture.ResearchRefused, match="verified"):
+    with pytest.raises(capture.ResearchRefused, match="verified") as refused:
         capture.mode_join(args, lambda _label: None)
+    assert str(refused.value) == f"{name}.fit: published data differs from verified receipt"
 
 
 def test_one_action_completes_two_prepared_layers_with_disjoint_roles(tmp_path):
@@ -190,7 +191,21 @@ def test_completed_matching_binding_adopts_the_stored_result_without_a_forward(t
     assert "research_quantum_replay" not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("tamper", ["role_bytes", "layer_manifest"])
+def test_completed_adoption_and_rejoin_preserve_canonical_join_document(tmp_path, monkeypatch, capsys):
+    capture._toy_control_preflight(tmp_path, lambda _label: None)
+    args = _resume_args(tmp_path)
+    join_path = capture.join_document_path(tmp_path / "capture")
+    stored = join_path.read_bytes()
+    monkeypatch.setattr(capture, "build_streamed_causal_lm",
+                        lambda *_args, **_kwargs: pytest.fail("an unchanged capture forwarded"))
+    capsys.readouterr()
+    capture.mode_quantum(args, lambda _label: None)
+    capture.mode_join(args, lambda _label: None)
+    assert join_path.read_bytes() == stored
+    assert "research_quantum_replay" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("tamper", ["role_bytes", "role_bytes_with_local_receipt", "layer_manifest"])
 def test_completed_adoption_refuses_a_publication_that_differs_from_its_verified_receipt(
         tmp_path, monkeypatch, capsys, tamper):
     """A matching binding adopts only a publication that equals the quantum's verified receipt.
@@ -201,14 +216,21 @@ def test_completed_adoption_refuses_a_publication_that_differs_from_its_verified
     """
     capture._toy_control_preflight(tmp_path, lambda _label: None)
     root = tmp_path / "capture"
+    fragment_path = root / "chain/capture-000-001.fragment.json"
+    stored_fragment = fragment_path.read_bytes()
     manifest_path = root / "layers/L000/manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    roles = manifest["units"][sorted(manifest["units"])[0]]
-    if tamper == "role_bytes":
+    name = sorted(manifest["units"])[0]
+    roles = manifest["units"][name]
+    if tamper in ("role_bytes", "role_bytes_with_local_receipt"):
         payload_path = root / roles["fit"]["file"]
         payload = torch.load(payload_path, weights_only=True)
         payload["hessian"][0, 0] += 1
         torch.save(payload, payload_path)
+        if tamper == "role_bytes_with_local_receipt":
+            roles["fit"]["sha256"] = capture._sha256_file(payload_path)
+            roles["fit"]["bytes"] = payload_path.stat().st_size
+            manifest_path.write_text(json.dumps(manifest))
     else:
         roles["fit"]["count"] += 1
         roles["heldout"]["count"] -= 1
@@ -216,8 +238,11 @@ def test_completed_adoption_refuses_a_publication_that_differs_from_its_verified
     monkeypatch.setattr(capture, "build_streamed_causal_lm",
                         lambda *_args, **_kwargs: pytest.fail("a changed publication reached a forward"))
     capsys.readouterr()
-    with pytest.raises(capture.ResearchRefused, match="verified"):
+    with pytest.raises(capture.ResearchRefused, match="verified") as refused:
         capture.mode_quantum(_resume_args(tmp_path), lambda _label: None)
+    if tamper != "role_bytes":
+        assert str(refused.value) == f"{name}.fit: published data differs from verified receipt"
+    assert fragment_path.read_bytes() == stored_fragment
     assert "research_quantum_replay" not in capsys.readouterr().out
 
 

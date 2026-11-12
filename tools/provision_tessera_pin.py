@@ -6,7 +6,7 @@ GitHub CI checks out ``RobTand/tessera`` at the commit
 ``pip install --no-deps`` on that directory.  Nothing did the same for the
 fleet interpreters, so ``/home/rob/venvs/pq-cpu312`` sat on a Tessera from an
 ancestor of the pin: answer-equivalent, different bytes, and every
-byte-identity assertion red in PrismaBuild while green in CI (issue #455).
+byte-identity assertion red on fleet workers while green in CI (issue #455).
 
 This is that missing step, written so a re-pin can carry it.  A re-pin is
 already a reviewed change to the pin JSON and the module constants together;
@@ -404,7 +404,7 @@ def installed_identity(python: str,
     probe = (
         "import hashlib,json,sys\n"
         "from fnmatch import fnmatch\n"
-        "from importlib import resources\n"
+        "from importlib import metadata,util\n"
         "from pathlib import Path\n"
         "SKIP_DIRS={'__pycache__','.git'}\n"
         "SKIP_SUF={'.pyc','.pyo'}\n"
@@ -421,21 +421,36 @@ def installed_identity(python: str,
         "        h.update(b'\\n'); n+=1\n"
         "    return h.hexdigest(), n\n"
         "try:\n"
-        "    c = resources.files('tessera')"
-        ".joinpath('serving', 'runtime_contract.json')\n"
-        "    pkg = Path(str(resources.files('tessera')))\n"
+        "    spec = util.find_spec('tessera')\n"
+        "    if spec is None or not spec.submodule_search_locations:\n"
+        "        raise ModuleNotFoundError('No module named tessera')\n"
+        "    roots = list(spec.submodule_search_locations)\n"
+        "    if len(roots) != 1: raise ValueError('ambiguous tessera package roots')\n"
+        "    pkg = Path(roots[0])\n"
+        "    if pkg.is_symlink() or any(p.is_symlink() for p in pkg.rglob('*')):\n"
+        "        raise ValueError('symlinked Tessera package refused')\n"
+        "    c = pkg / 'serving' / 'runtime_contract.json'\n"
         "    d, n = digest(pkg)\n"
         "    out = {'contract_sha256': hashlib.sha256(c.read_bytes()).hexdigest(),\n"
         "           'package_sha256': d, 'package_files': n,\n"
         "           'package_path': str(pkg)}\n"
+        "    try:\n"
+        "        dist = metadata.distribution('tessera-quant')\n"
+        "        out.update(distribution=dist.metadata['Name'],\n"
+        "            direct_url=json.loads(dist.read_text('direct_url.json') or '{}'),\n"
+        "            import_owners=metadata.packages_distributions().get('tessera', []),\n"
+        "            distribution_package_path=str(dist.locate_file('tessera')))\n"
+        "    except metadata.PackageNotFoundError:\n"
+        "        out.update(distribution=None, direct_url=None, import_owners=[],\n"
+        "            distribution_package_path=None)\n"
         "except Exception as exc:\n"
         "    out = {'reason': type(exc).__name__ + ': ' + str(exc)}\n"
         "sys.stdout.write(json.dumps(out))\n"
     )
     try:
-        done = subprocess.run([python, "-I", "-c", probe],
-                              capture_output=True, text=True)
-    except OSError as exc:
+        done = subprocess.run([python, "-I", "-B", "-c", probe],
+                              capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
         # No such interpreter, or one that will not start.  The caller wants
         # "not the reviewed source", and an exception here would make a routine
         # audit of a machine that has no such venv look like a tool failure.
@@ -444,7 +459,9 @@ def installed_identity(python: str,
         out = json.loads(done.stdout.strip() or "{}")
     except ValueError:
         out = {}
-    if out.get("contract_sha256") and out.get("package_sha256"):
+    if not isinstance(out, dict):
+        out = {}
+    if done.returncode == 0 and isinstance(out, dict) and out.get("contract_sha256") and out.get("package_sha256"):
         return out, None
     reason = out.get("reason") or (done.stderr.strip().splitlines() or
                                    ["the probe printed nothing"])[-1]
@@ -482,6 +499,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python", required=True,
                         help="interpreter to provision")
+    parser.add_argument("--prefix", type=Path,
+                        help="explicit install prefix; jobs use a private scratch venv")
     parser.add_argument("--clone", type=Path, default=DEFAULT_CLONE,
                         help="local Tessera clone to archive the pin from")
     parser.add_argument("--pins-root", type=Path, default=DEFAULT_PINS_ROOT,
@@ -565,8 +584,9 @@ def main(argv: list[str] | None = None) -> int:
         # parses.  Its output is worth keeping and belongs on stderr with the
         # rest of the narration.
         done = subprocess.run(
-            [args.python, "-m", "pip", "install", "--no-deps",
-             "--no-build-isolation", "--force-reinstall", str(copy)],
+            [args.python, "-I", "-m", "pip", "install", "--no-deps",
+             "--no-build-isolation", "--force-reinstall",
+             *(["--prefix", str(args.prefix)] if args.prefix is not None else []), str(copy)],
             capture_output=True, text=True,
         )
         sys.stderr.write(done.stdout)

@@ -1,4 +1,5 @@
 """Metadata/admission composition; no Docker, GPU, Netdata or native profiler."""
+from container_admission import ADMISSION
 import copy
 import json
 import subprocess
@@ -6,9 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_tessera_campaign_namespace_1986 import arguments, replace_fixture_request
+from tests.test_tessera_campaign_namespace_1986 import arguments, replace_fixture_request, owned_native_admission
 from tools import dispatch_tessera_campaign as dispatch
 from tools import pq_admitted_profile as profiler
+from tools import pq_profile_artifact as profile_contract
 from tools import tessera_campaign_namespace as namespace
 from tools import tessera_campaign_container as adapter
 
@@ -16,7 +18,7 @@ from tools import tessera_campaign_container as adapter
 @pytest.fixture(autouse=True)
 def owned_local_policy(tmp_path, monkeypatch):
     # Isolate metadata fixtures, preserving the same deterministic root rule.
-    monkeypatch.setattr(profiler, "PROFILE_LOCAL_ROOT", tmp_path.parent / (tmp_path.name + "-host-local"))
+    monkeypatch.setattr(profile_contract, "PROFILE_LOCAL_ROOT", tmp_path.parent / (tmp_path.name + "-host-local"))
 
 
 def profiled_arguments(tmp_path):
@@ -27,10 +29,10 @@ def profiled_arguments(tmp_path):
         "schema": "prismaquant.tessera_namespace_profile.v1",
         "profiler": {"path": "/readonly/py-spy", "sha256": "3" * 64},
         "observations": "/old/profile",
-        "profile_local": str(profiler.PROFILE_LOCAL_ROOT / "unbound"),
+        "profile_local": str(profile_contract.PROFILE_LOCAL_ROOT / "unbound"),
         "row_s": 900,
     }
-    local = str(profiler.PROFILE_LOCAL_ROOT)
+    local = str(profile_contract.PROFILE_LOCAL_ROOT)
     spec["container"]["mounts"].append({"source": local, "target": local, "readonly": False})
     row["argv"][4] = json.dumps(spec)
     row["argv"] = profiler.profiled_row_command(row["argv"],
@@ -81,7 +83,7 @@ def test_public_composer_preserves_payload_and_input_row(tmp_path):
     original = copy.deepcopy(kwargs["requests"][0])
     row = namespace.prepare_namespace_profile_request(original,
         profiler_reference={"path": "/readonly/py-spy", "sha256": "3" * 64},
-        observations="/old/profile", profile_local=str(profiler.PROFILE_LOCAL_ROOT / "unbound"), row_s=900)
+        observations="/old/profile", profile_local=str(profile_contract.PROFILE_LOCAL_ROOT / "unbound"), row_s=900)
     assert original == kwargs["requests"][0]
     payload = profiler.profiled_workload_parts(row["argv"],
         destination="/old/profile/child-profile.speedscope", profiler_executable="/readonly/py-spy")
@@ -98,10 +100,10 @@ def test_owned_outputs_and_key_placeholder_are_bound_before_publication(tmp_path
     record = profile(row)
     key = binding["request_key"]
     assert record["observations"] == str(tmp_path / "new" / key / "profile" / "observations")
-    assert record["profile_local"] == str(profiler.PROFILE_LOCAL_ROOT / key)
+    assert record["profile_local"] == str(profile_contract.PROFILE_LOCAL_ROOT / key)
     normalized = profile(binding["normalized_request"])
     assert normalized["observations"] == "{namespace-row}/profile/observations"
-    assert normalized["profile_local"] == str(profiler.PROFILE_LOCAL_ROOT / "{namespace-row}")
+    assert normalized["profile_local"] == str(profile_contract.PROFILE_LOCAL_ROOT / "{namespace-row}")
     assert key not in normalized["profile_local"]
     destinations = namespace.namespace_destinations(binding["request"], binding)
     assert (Path(record["observations"]), True) in destinations
@@ -142,6 +144,7 @@ def test_real_git_composed_admission_reaches_docker_boundary_only_after_checks(t
     def inspect(container):
         reached.append(container)
         raise DockerBoundary()
+    monkeypatch.setattr(adapter, "native_admission", lambda environ: ADMISSION)
     monkeypatch.setattr(adapter, "inspect_or_load", inspect)
     with pytest.raises(DockerBoundary):
         adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
@@ -185,7 +188,7 @@ def test_published_instrumentation_tamper_refuses_before_docker(tmp_path, monkey
     row["argv"][4] = json.dumps(spec)
     monkeypatch.chdir(checkout)
     for key, value in row["env"].items(): monkeypatch.setenv(key, value)
-    monkeypatch.setattr(adapter, "inspect_or_load", lambda *args: pytest.fail("Docker reached"))
+    monkeypatch.setattr(adapter, "inspect_or_load", lambda *args: pytest.fail("container engine reached"))
     with pytest.raises(RuntimeError):
         adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
 
@@ -287,6 +290,7 @@ def test_declared_profile_without_namespace_binding_refuses_before_docker(tmp_pa
         pass
     def inspect(*args):
         raise DockerReached("unbound instrumentation reached Docker")
+    monkeypatch.setattr(adapter, "native_admission", lambda environ: ADMISSION)
     monkeypatch.setattr(adapter, "inspect_or_load", inspect)
     with pytest.raises(RuntimeError, match="namespace"):
         adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])

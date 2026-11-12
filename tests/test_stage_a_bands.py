@@ -32,7 +32,8 @@ from prismaquant.joint_adjoint_checkpoints import (
     write_band_receipt,
 )
 
-from test_joint_forward_resume import _bound, _chain_sdk, _owner_spool
+from test_joint_forward_resume import _bound
+from produced_native_fixtures import recovery_publication, selected_publications
 from test_layer_major_boundary_capture import draw
 
 CAMPAIGN = {"plan_sha256": "b" * 64, "prepared_sha256": "c" * 64,
@@ -51,7 +52,6 @@ def runs(tmp_path, monkeypatch):
     from test_joint_cost_quantum_runtime import _execution, _stage_a
     from test_streamed_cost_checkpoints import _model_identity
 
-    monkeypatch.setattr(recovery_mod, "_sdk", _chain_sdk)
     identities = []
     bind = StreamedBoundaryArtifacts.bind
 
@@ -92,18 +92,17 @@ def runs(tmp_path, monkeypatch):
         return None, retained
 
     _, first = capture(tmp_path / "r9", "1" * 64, stop_after=1)
-    spool, instance, template = _owner_spool(tmp_path, "e" * 64, first)
     ref = first[0, 0]
     capsule = tmp_path / "r9-to-r10.json"
-    recovery_mod.build_forward_recovery(specification={
-        "schema": recovery_mod.SCHEMA, "queue_root": str(tmp_path / "queue"),
-        "instance": instance, "template": template,
-        "session": json.loads(ref.metadata_json)["identity"]["session"],
+    specification = {
         "original_bind_identity": identities[-1], "campaign_identity": CAMPAIGN,
         "implementation_compatibility": {"original": "1" * 64, "recovery": "2" * 64,
                                          "scope": "forward-identical-memory-only"},
-        "n_batches": len(draw()), "entry_shape": list(ref.shape), "entry_dtype": ref.dtype},
-        spool_directory=spool, output=capsule, frontier=1)
+        "n_batches": len(draw()), "entry_shape": list(ref.shape), "entry_dtype": ref.dtype}
+    selection, _pub, _result = recovery_publication(tmp_path / "publication", first,
+        specification, selected_publications(monkeypatch))
+    recovery_mod.build_forward_recovery(selection=selection, specification=specification,
+        output=capsule, frontier=1)
     bound = _bound(capsule)
     resumed, _ = capture(tmp_path / "r10", "2" * 64, bound=bound)
     baseline, _ = capture(tmp_path / "baseline", "2" * 64)

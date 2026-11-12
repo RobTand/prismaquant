@@ -1,0 +1,351 @@
+{
+  "exitstatus": 0,
+  "phase_seconds": {
+    "setup": 0.025163611000010633,
+    "call": 19.775691026999993,
+    "teardown": 0.01431562799997721
+  },
+  "total_phase_seconds": 19.81517026599998,
+  "slowest_tests": [
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_fills_188331767_headroom_with_718_priced_upgrades",
+      "phases": {
+        "setup": 0.0027092650000071217,
+        "call": 15.753851014999995,
+        "teardown": 0.0006989889999999832
+      },
+      "seconds": 15.757259269000002
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_cli_routed_unit_rates_entrypoint",
+      "phases": {
+        "setup": 0.0009731500000071946,
+        "call": 3.9440224349999937,
+        "teardown": 0.0014338220000098545
+      },
+      "seconds": 3.9464294070000108
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_routed_unit_rate_final_footprint_overflow_refuses_before_emission",
+      "phases": {
+        "setup": 0.0018293849999935219,
+        "call": 0.03945770199999288,
+        "teardown": 0.001148813999989784
+      },
+      "seconds": 0.042435900999976184
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_selected_census_assignment_checks_the_per_unit_stamp",
+      "phases": {
+        "setup": 0.0008365149999889354,
+        "call": 0.01995675200001301,
+        "teardown": 0.00044341599999597747
+      },
+      "seconds": 0.021236682999997925
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_mixed_allocation_block_emits_per_unit_rungs_and_exact_receipts",
+      "phases": {
+        "setup": 0.0008991390000119281,
+        "call": 0.004155655000005254,
+        "teardown": 0.00039018500000054246
+      },
+      "seconds": 0.0054449790000177245
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_packaged_capability_reader_requires_v57_and_the_exact_block",
+      "phases": {
+        "setup": 0.002121603000006189,
+        "call": 0.002475664000002098,
+        "teardown": 0.00043362099999910697
+      },
+      "seconds": 0.005030888000007394
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_export_lane_mixed_selection_agrees_with_its_per_unit_stamp",
+      "phases": {
+        "setup": 0.0017438870000034967,
+        "call": 0.0016884839999988799,
+        "teardown": 0.0005172059999978273
+      },
+      "seconds": 0.003949577000000204
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_parses_each_format_once_per_selection",
+      "phases": {
+        "setup": 0.0010799400000109927,
+        "call": 0.0004885029999996959,
+        "teardown": 0.0012172859999992625
+      },
+      "seconds": 0.002785729000009951
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_mixed_nvfp4_stack_refuses_by_name",
+      "phases": {
+        "setup": 0.0009908669999987296,
+        "call": 0.0006959739999956582,
+        "teardown": 0.000741192000006663
+      },
+      "seconds": 0.002428033000001051
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_record_does_not_claim_whole_artifact_compliance",
+      "phases": {
+        "setup": 0.0011183479999914425,
+        "call": 0.00040968499999394226,
+        "teardown": 0.0007836059999988265
+      },
+      "seconds": 0.0023116389999842113
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_uniform_allocation_block_preserves_stack_uniform_metadata",
+      "phases": {
+        "setup": 0.000862453999999957,
+        "call": 0.0009156239999867921,
+        "teardown": 0.0004919480000040721
+      },
+      "seconds": 0.0022700259999908212
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_recomputes_marginals_after_every_single_upgrade",
+      "phases": {
+        "setup": 0.0011183180000102766,
+        "call": 0.00037721600000395483,
+        "teardown": 0.0007312070000011772
+      },
+      "seconds": 0.0022267410000154086
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_plan_from_assignment_threads_the_carried_request_baseline",
+      "phases": {
+        "setup": 0.0008852679999904467,
+        "call": 0.0009486729999963472,
+        "teardown": 0.0003728289999997969
+      },
+      "seconds": 0.002206769999986591
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_refuses_rows_without_exact_price_or_wire_bytes",
+      "phases": {
+        "setup": 0.0005786479999869698,
+        "call": 0.001033801999994921,
+        "teardown": 0.0003781369999984463
+      },
+      "seconds": 0.001990586999980337
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_mixed_allocation_block_without_the_installed_capability_refuses",
+      "phases": {
+        "setup": 0.0008398000000084949,
+        "call": 0.0006700760000057926,
+        "teardown": 0.0003671810000014375
+      },
+      "seconds": 0.001877057000015725
+    }
+  ],
+  "samples": 2223,
+  "top_leaf": [
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_expert_projection.py:757:select_priced_unit_upgrades",
+      675
+    ],
+    [
+      "<frozen abc>:121:__subclasscheck__",
+      288
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_expert_projection.py:718:_priced_row",
+      266
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:1183:get_data",
+      187
+    ],
+    [
+      "/usr/lib/python3.12/typing.py:1194:__instancecheck__",
+      144
+    ],
+    [
+      "/usr/lib/python3.12/typing.py:1465:__subclasscheck__",
+      134
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:140:_path_stat",
+      106
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/transformers/utils/import_utils.py:2958:create_import_structure_from_path",
+      81
+    ],
+    [
+      "/usr/lib/python3.12/pathlib.py:837:stat",
+      42
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:195:_write_atomic",
+      21
+    ],
+    [
+      "<frozen posixpath>:437:_joinrealpath",
+      18
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/filelock/_api.py:2215:_audit_fork_safety",
+      17
+    ],
+    [
+      "<frozen importlib._bootstrap>:480:_call_with_frames_removed",
+      14
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:1644:_fill_cache",
+      13
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/assertion/rewrite.py:343:_rewrite_test",
+      12
+    ],
+    [
+      "/usr/lib/python3.12/pathlib.py:1024:read_text",
+      9
+    ],
+    [
+      "/usr/lib/python3.12/pathlib.py:1007:open",
+      9
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/capture.py:589:snap",
+      9
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/tessera/alphabet.py:294:tuple_grid",
+      8
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/assertion/rewrite.py:318:_write_pyc",
+      8
+    ]
+  ],
+  "top_inclusive": [
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_execution.py:89:_multicall",
+      1607
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_manager.py:174:_hookexec",
+      1605
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_caller.py:181:__call__",
+      1601
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:160:pytest_pyfunc_call",
+      1558
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:250:<lambda>",
+      1548
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:1705:runtest",
+      1547
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:173:pytest_runtest_call",
+      1544
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_per_unit_rates.py:130:test_allocator_fills_188331767_headroom_with_718_priced_upgrades",
+      1522
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_expert_projection.py:757:select_priced_unit_upgrades",
+      1508
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:340:from_call",
+      1458
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:236:call_and_report",
+      1199
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:123:runtestprotocol",
+      1059
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:115:pytest_runtest_protocol",
+      694
+    ],
+    [
+      "<frozen importlib._bootstrap>:1304:_find_and_load_unlocked",
+      597
+    ],
+    [
+      "<frozen importlib._bootstrap>:1349:_find_and_load",
+      593
+    ],
+    [
+      "<frozen importlib._bootstrap>:911:_load_unlocked",
+      579
+    ],
+    [
+      "/usr/lib/python3.12/typing.py:1194:__instancecheck__",
+      566
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:989:exec_module",
+      565
+    ],
+    [
+      "/tmp/drv/timing_probe.py:20:load",
+      562
+    ],
+    [
+      "<frozen importlib._bootstrap>:480:_call_with_frames_removed",
+      562
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_expert_projection.py:718:_priced_row",
+      501
+    ],
+    [
+      "/usr/lib/python3.12/typing.py:1465:__subclasscheck__",
+      422
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/conftest.py:95:exec_module",
+      413
+    ],
+    [
+      "<frozen abc>:121:__subclasscheck__",
+      288
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:1062:get_code",
+      243
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:1183:get_data",
+      187
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:140:_path_stat",
+      106
+    ],
+    [
+      "<frozen importlib._bootstrap>:1240:_find_spec",
+      101
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:1491:_get_spec",
+      100
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:1520:find_spec",
+      100
+    ]
+  ]
+}

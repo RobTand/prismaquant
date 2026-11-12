@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""The PrismaBuild submission inputs for a Stage B preparation (PQ #1070).
+"""The native launch inputs for a Stage B preparation (PQ #1070).
 
 Writes, for one run of ``tools/prepare_extended_joint_quanta.py`` (``prepare``)
 or of ``tools/regenerate_joint_quanta.py`` alone (``regenerate``):
 
 * ``read-manifest.json.gz``: the data manifest of what the run reads, for
-  ``pbrun --data-manifest``;
+  the explicit staged-input launch;
 * ``template.json``: the write-only produced-output template over the
-  metadata root, for ``pbrun --produced-output-template``;
-* ``submission.json``: both digests, the read totals and the ``pbrun``
+  metadata root, bound by native argv;
+* ``submission.json``: both digests, the read totals and the native launch
   options that attach them.
 
 It submits nothing. It reads the control documents its arguments bind, each
 selected safetensors shard's header, and every declared file that has no
 bound digest, which it hashes: every entry the tools add declares its
 SHA-256 (PQ #1092). ``strict_read_flags`` in ``submission.json`` are the
-flags the tool's command line carries, so the action reads its inputs off
+flags the tool's command line carries, so the launch reads its inputs off
 the stage and refuses rather than reading the pool.
 
 The read set, by source:
@@ -192,7 +192,7 @@ def write_submission(args, entries, annotations, quanta, indexes) -> dict:
                               "entry_point": args.tool},
         annotations=annotations, mount_prefix=args.mount_prefix)
     template = build_preparation_template(
-        metadata_root=root, tier=args.tier,
+        metadata_root=root,
         payload_max_bytes=preparation_payload_ceiling(quanta, indexes=indexes))
     out.mkdir(parents=True, exist_ok=True)
     manifest_bytes = seal_manifest_bytes(manifest)
@@ -218,11 +218,9 @@ def write_submission(args, entries, annotations, quanta, indexes) -> dict:
         "strict_read_flags": ["--data-manifest-sha256",
                               hashlib.sha256(manifest_bytes).hexdigest(),
                               "--allowed-tiers", "ram,ssd"],
-        # --residency stage also gives the action PRISMABUILD_RESIDENCY_MAP,
-        # which the produced-output binding needs for its queue root.
-        "pbrun_options": ["--data-manifest", str(manifest_path),
-                          "--produced-output-template", str(template_path),
-                          "--residency", "stage", "--residency-ram", "auto"],
+        "native_argv": ["--produced-declaration", str(template_path),
+                        "--produced-declaration-sha256", hashlib.sha256(template_bytes).hexdigest()],
+        "staged_input_required": True,
     }
     (out / "submission.json").write_bytes(
         (json.dumps(submission, sort_keys=True, indent=1) + "\n").encode())
@@ -235,8 +233,6 @@ def _common(parser):
     parser.add_argument("--adjoint-receipt-sha256", default=None)
     parser.add_argument("--adjoint-band", type=Path, action="append", default=[])
     parser.add_argument("--adjoint-band-sha256", action="append", default=[])
-    parser.add_argument("--tier", required=True,
-                        help="the stage tier the template permits (a fleet fact)")
     parser.add_argument("--out", type=Path, required=True,
                         help="directory for the manifest, template and submission.json")
     parser.add_argument("--mount-prefix", default="/mnt/shared")

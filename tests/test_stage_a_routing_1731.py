@@ -14,25 +14,7 @@ import pytest
 import prismaquant.joint_cost_stage_a as stage_a
 from prismaquant.digests import bytes_sha256hex, indent2_json_file_bytes
 from prismaquant.stage_a_chain_split import PREP_RECEIPT_SCHEMA
-
-
-def _spies(monkeypatch):
-    calls = {"dumps": [], "hash": []}
-    real_dumps = getattr(stage_a, "indent2_json_file_bytes", None)
-    real_hash = getattr(stage_a, "bytes_sha256hex", None)
-
-    def stand_in_dumps(value):
-        calls["dumps"].append(value)
-        return real_dumps(value) if real_dumps is not None else None
-
-    def stand_in_hash(value):
-        calls["hash"].append(value)
-        return real_hash(value) if real_hash is not None else None
-
-    monkeypatch.setattr(stage_a, "indent2_json_file_bytes", stand_in_dumps,
-                        raising=False)
-    monkeypatch.setattr(stage_a, "bytes_sha256hex", stand_in_hash, raising=False)
-    return calls
+from tests.delegation_recording import record_unary_calls
 
 
 def _override():
@@ -49,7 +31,10 @@ def _override():
 
 
 def test_stage_a_hashes_route_to_owners(monkeypatch, tmp_path):
-    calls = _spies(monkeypatch)
+    calls = {
+        "dumps": record_unary_calls(monkeypatch, stage_a, "indent2_json_file_bytes"),
+        "hash": record_unary_calls(monkeypatch, stage_a, "bytes_sha256hex"),
+    }
     override_path = tmp_path / "override.json"
     override_path.write_bytes(json.dumps(_override()).encode())
     loaded = stage_a.load_prefetch_override(override_path)

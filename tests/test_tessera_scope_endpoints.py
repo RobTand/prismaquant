@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from prismaquant import tessera_calibration_forward as calibration_forward
-from conftest import (
+from lane_table_fixtures import (
     down_convert_lane_table, lane_cells_on_one_image,
     project_lane_cells_onto_structures)
 
@@ -251,6 +251,7 @@ def _v5_contract(monkeypatch, *, with_experts=True):
     parsed = contract._parse(payload, commit="fixture", sha="fixture", path="fixture")
     monkeypatch.setattr(menu, "tessera_runtime_contract", lambda: parsed)
     monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "attested")
+    return payload
 
 
 @pytest.mark.parametrize("token", [False, True])

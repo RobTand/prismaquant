@@ -10,6 +10,7 @@ import pytest
 
 from prismaquant import digests
 from prismaquant import production_weight_cache as cache
+from source_framing_recording import record_source_frames
 
 
 def _legacy(entries):
@@ -45,23 +46,11 @@ def _fixture(tmp_path, payload):
 
 
 def _spy(monkeypatch):
-    batches = []
-
     class RecordingProfile:
-        def __init__(self):
-            self.owner = digests.LengthFramedSourceSha256()
-            self.rows = []
-            batches.append(self.rows)
-
         def update(self, name, raw):
-            self.rows.append((name, raw))
-            self.owner.update(name, raw)
+            self._record(name, raw)
 
-        def hexdigest(self):
-            return self.owner.hexdigest()
-
-    monkeypatch.setattr(cache, "LengthFramedSourceSha256", RecordingProfile, raising=False)
-    return batches
+    return record_source_frames(cache, monkeypatch, RecordingProfile)
 
 
 @pytest.mark.parametrize("default_root", (False, True))

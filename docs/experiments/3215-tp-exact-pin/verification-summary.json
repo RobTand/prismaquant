@@ -1,0 +1,70 @@
+{
+  "invocation": "0df60c50-a361-440b-ae9b-a43abbf090c1",
+  "commit": "5bd2e0e0d5668a546cc8b4da7a043d25a3d185ad",
+  "terminal": "COMPLETE_INVOCATION_STATUS",
+  "verdict": "OK",
+  "junit": [
+    {
+      "artifact": "equivalence-5bd2e0e0d5668a546cc8b4da7a043d25a3d185ad.xml.gz",
+      "suites": [
+        {
+          "tests": "16",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "time": "53.844"
+        }
+      ],
+      "skips": [],
+      "failures": []
+    },
+    {
+      "artifact": "equivalence-69eaea55a201355ab02f4cad646efcf739acd914.xml.gz",
+      "suites": [
+        {
+          "tests": "14",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "time": "186.189"
+        }
+      ],
+      "skips": [],
+      "failures": []
+    },
+    {
+      "artifact": "junit.xml.gz",
+      "suites": [
+        {
+          "tests": "16",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "time": "59.645"
+        }
+      ],
+      "skips": [],
+      "failures": []
+    },
+    {
+      "artifact": "related.xml.gz",
+      "suites": [
+        {
+          "tests": "88",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "time": "25.373"
+        }
+      ],
+      "skips": [],
+      "failures": []
+    }
+  ],
+  "equivalence": {
+    "original_nodes": 14,
+    "assertion_operands": 65,
+    "evaluations": 5187,
+    "unchanged": true
+  }
+}

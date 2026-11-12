@@ -253,6 +253,31 @@ class GuardReadBudget:
     ``floor_bytes`` is what the phase already reserved for this stream at its
     guard check (the spill's own read buffers): the stream may always hold
     that much, read ahead or taken, whatever the reading says.
+
+    Growth reserve (PQ #2602, child of #1347). The consumer's memory grows
+    window by window beside the read-ahead; a reading taken now does not
+    see the growth of the window it is about to work, so read-ahead
+    admitted against all of it is reclaimed (and read again) when that
+    growth lands. The stream this budget budgets binds itself to it
+    (``bind_growth_source``, called by ``ReadStream``), and the budget
+    subtracts ``growth_source.window_growth_bytes()`` from the live reading:
+
+        reserve  = min(ceil(evicted_bytes / max(1, groups taken)),
+                       peak_held_bytes)       (0 when nothing was evicted,
+                                               or no group is left to take)
+        headroom = max(live - yield_unread - reserve, floor - held)
+
+    ``evicted_bytes`` is the measured consumer growth: an eviction occurs
+    only when the guard's headroom fell below the read-ahead held, i.e. the
+    consumer grew past what the read-ahead was admitted against. Dividing by
+    the groups taken gives the mean growth per window; the ``peak_held_bytes``
+    cap keeps a reread-inflated total from reserving more than the stream
+    ever held. Admission then keeps ``held + unreleased + inflight + reserve``
+    within the live reading (``ReadStream._fits`` charges the held and
+    unreleased bytes through ``live``, since the reading holds them). A
+    demanded group is still read whatever the reading says, and the floor
+    still holds. Unbound, or with nothing evicted, the reserve is zero and
+    the headroom is exactly the one before.
     """
 
     def __init__(self, guard, *, buffer_bytes, yield_to=None, floor_bytes=0):
@@ -262,6 +287,17 @@ class GuardReadBudget:
         self.buffer_bytes = int(buffer_bytes)
         self.yield_to = yield_to
         self.floor_bytes = floor_bytes
+        self.growth_source = None
+
+    def bind_growth_source(self, stream) -> None:
+        """Take the per-window growth from ``stream`` (its measured counters)."""
+        self.growth_source = stream
+
+    def growth_reserve_bytes(self) -> int:
+        """The per-window growth reserve; zero with no bound source."""
+        if self.growth_source is None:
+            return 0
+        return max(0, int(self.growth_source.window_growth_bytes()))
 
     def headroom_bytes(self, held_bytes: int) -> int:
         live = self.guard.headroom_bytes()
@@ -269,6 +305,7 @@ class GuardReadBudget:
             group = self.yield_to.next_group()
             if group is not None:
                 live -= self.yield_to.unread_bytes(group)
+        live -= self.growth_reserve_bytes()
         return max(live, self.floor_bytes - held_bytes)
 
 

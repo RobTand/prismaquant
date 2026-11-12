@@ -14,7 +14,7 @@ alone:
   declare ``seeds: 0`` while the row read 9.4-19 GB of wire at 41 MB/s
   (row-0065, 2026-09-12);
 * the campaign argv is byte-identical with and without the manifest.  The
-  manifest is a ``pbrun`` input; the campaign's own checkpoint identity is the
+  manifest is a submitter input; the campaign's own checkpoint identity is the
   argv, and a manifest that perturbed it would re-key work already committed.
 
 Nothing here touches the shared mount: the campaign, its captures, its shard
@@ -22,6 +22,7 @@ and its seed wire directory are all built under ``tmp_path``.
 """
 
 from prismaquant.campaign_data_manifests import ReadsetRefused
+from prismaquant import data_manifest_contract
 import json
 import struct
 import sys
@@ -96,7 +97,7 @@ def _workspace(tmp_path):
 
 
 def _row(units, seed_dir, *, extra=()):
-    """The pbcampaign row ``plan`` writes, in the shape ``submit`` reads."""
+    """The campaign row ``plan`` writes, in the shape ``submit`` reads."""
 
     return {
         "argv": ["python3", "-u", "-m", "prismaquant.tessera_campaign",
@@ -219,7 +220,7 @@ def test_two_submissions_of_one_campaign_write_identical_manifest_bytes(
 ):
     """The manifest is sealed into the action key, so it must not drift.
 
-    ``pbrun`` ingests the manifest as a content-addressed input.  A hostname
+    The submitter ingests the manifest as a content-addressed input.  A hostname
     or a clock reading in ``produced_by`` would give the same row a new action
     key on every submit, and a finished row would stop being a cache hit --
     the opposite of what re-running ``submit`` is for.
@@ -272,7 +273,7 @@ def test_every_submitted_row_carries_a_manifest(
 
     # ``monkeypatch`` restores the real helper; deleting the attribute instead
     # would leave the module without it for every later test in the process.
-    monkeypatch.setattr(dispatch, "_pbcampaign", _record)
+    monkeypatch.setattr(dispatch, "_flux_campaign", _record)
     # ``submit`` runs two independent gates: the demand check this campaign's
     # rows were planned under (#522) and the read-set gate under test here.
     # This fixture is a plan written by hand, with no spec to re-derive a
@@ -365,7 +366,7 @@ def test_the_producer_restates_the_limits_prismabuild_enforces(
 
     # The real ceilings are far above any GLM row, so the refusal is exercised
     # by lowering them rather than by building a million entries.
-    monkeypatch.setattr(glm_data_manifests, "MAX_ENTRIES", 1)
+    monkeypatch.setattr(data_manifest_contract, "MAX_ENTRIES", 1)
     with pytest.raises(ReadsetRefused, match="entries exceed 1"):
         glm_data_manifests.check_manifest(manifest)
     with pytest.raises(ReadsetRefused, match="over the"):

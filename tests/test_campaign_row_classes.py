@@ -17,6 +17,7 @@ Three properties, in the order they matter.
 """
 from __future__ import annotations
 
+from container_admission import ADMISSION, CIDFILE, with_admission
 import json
 from pathlib import Path
 import sys
@@ -70,7 +71,7 @@ def base_spec(**extra) -> dict:
 
 
 def build(spec, **kwargs) -> dict:
-    return campaign_rows.prismabuild_row(spec, ["--model", "/models/example"], mem_gb=34,
+    return campaign_rows.campaign_row(spec, ["--model", "/models/example"], mem_gb=34,
                          timeout_s=None, **kwargs)
 
 
@@ -88,7 +89,6 @@ def test_default_class_row_is_unchanged_for_a_spec_with_no_classes():
         "env": {"OMP_NUM_THREADS": "1"},
         "tags": ["gb10"],
         "retry_safe": True,
-        "progress_phases": ["startup=3600", "pricing=900", "finalize=1800"],
     }
 
 
@@ -293,7 +293,7 @@ def test_a_weights_only_class_may_not_run_the_campaign_module():
 def test_a_weights_only_row_may_not_carry_a_hessian_aware_flag():
     for flag in campaign_rows.HESSIAN_AWARE_FLAGS:
         try:
-            campaign_rows.prismabuild_row(rocm_spec(), ["--model", "/models/example",
+            campaign_rows.campaign_row(rocm_spec(), ["--model", "/models/example",
                                         flag, "/some/path"],
                           mem_gb=4, timeout_s=None,
                           module="prismaquant.example_encode",
@@ -308,7 +308,7 @@ def test_a_weights_only_row_may_not_carry_an_attached_hessian_aware_value():
     """``--flag=value`` is the same flag as ``--flag value``."""
     for flag in campaign_rows.HESSIAN_AWARE_FLAGS:
         try:
-            campaign_rows.prismabuild_row(rocm_spec(), ["--model", "/models/example",
+            campaign_rows.campaign_row(rocm_spec(), ["--model", "/models/example",
                                         f"{flag}=/some/path"],
                           mem_gb=4, timeout_s=None,
                           module="prismaquant.example_encode",
@@ -321,46 +321,33 @@ def test_a_weights_only_row_may_not_carry_an_attached_hessian_aware_value():
 
 def test_the_campaign_s_own_rows_are_unaffected_by_the_weights_only_gate():
     """The gate is a property of the class, not of the flag list."""
-    row = campaign_rows.prismabuild_row(base_spec(), ["--model", "/models/example",
+    row = campaign_rows.campaign_row(base_spec(), ["--model", "/models/example",
                                       "--calibration-census", "/c.json"],
                         mem_gb=34, timeout_s=None)
     assert "--calibration-census" in row["argv"]
 
 
 # --------------------------------------------------------------------------
-# The container launcher emits the ROCm flags only for a ROCm class
+# Native admission controls GPU device attachment.
 # --------------------------------------------------------------------------
 
-def docker_argv(container: dict) -> list[str]:
-    return container_tool.docker_command(
+def podman_argv(container: dict, *, admission=ADMISSION) -> list[str]:
+    return container_tool.podman_command(
         {"container": container, "env": {}}, ["python3", "-c", "pass"],
-        cwd="/home/rob/example", uid=1000, gid=1000,
-        image_id="sha256:" + "0" * 64, environ={})
+        cwd="/home/rob/example", admission=admission, cidfile=CIDFILE,
+        image_id="sha256:" + "0" * 64, environ={"CUDA_VISIBLE_DEVICES": "0"})
 
 
-def test_an_undeclared_gpu_runtime_still_emits_gpus_all():
-    argv = docker_argv({"image": "prismaquant-example:pinned"})
-    assert argv[:5] == ["docker", "run", "--rm", "--gpus", "all"]
-    assert "/dev/dxg" not in argv
-
-
-def test_the_rocm_runtime_emits_the_wsl_device_and_library_mount():
-    argv = docker_argv({"image": "prismaquant-rocm:pinned",
-                        "gpu_runtime": "rocm-wsl"})
-    assert argv[:5] == ["docker", "run", "--rm", "--device", "/dev/dxg"]
-    assert ("type=bind,src=/usr/lib/wsl/lib,dst=/usr/lib/wsl/lib,readonly"
-            in argv)
-    assert "--gpus" not in argv
-
-
-def test_a_cpu_only_launch_attaches_nothing_under_either_runtime():
+def test_a_cpu_admission_attaches_nothing_under_either_declared_runtime():
     for runtime in ("nvidia", "rocm-wsl"):
-        argv = container_tool.docker_command(
-            {"container": {"image": "example:pinned", "gpu_runtime": runtime},
-             "env": {}}, ["python3", "-c", "pass"], cwd="/home/rob/example",
-            uid=1000, gid=1000, image_id="sha256:" + "0" * 64,
-            with_gpu=False, environ={})
+        argv = podman_argv({"image": "example:pinned", "gpu_runtime": runtime})
         assert "--gpus" not in argv and "/dev/dxg" not in argv
+        assert "--device" not in argv and "nvidia.com/gpu=all" not in argv
+
+
+def test_a_gpu_admission_attaches_the_cdi_device():
+    argv = podman_argv({"image": "example:pinned"}, admission=with_admission(gpus=1))
+    assert argv[argv.index("--device") + 1] == "nvidia.com/gpu=0"
 
 
 def test_an_unknown_gpu_runtime_is_refused():
@@ -450,7 +437,7 @@ def test_attested_train_layers_validate_in_certified_mode(python, monkeypatch):
 @pytest.mark.parametrize("dev_env", [None, "0"])
 @pytest.mark.parametrize("history, message", [
     (None, "retired_interpreters mapping"),
-    ({SDK3_PYTHON: {}}, "names no PrismaBuild action key"),
+    ({SDK3_PYTHON: {}}, "names no recorded producer job identity"),
     ({SDK4_TRAIN_PYTHON: {"attested_by": "0" * 64}}, "both active and retired"),
 ])
 def test_invalid_retired_inventory_is_refused(

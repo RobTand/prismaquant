@@ -57,7 +57,7 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
     cancel = threading.Event()
     primary = None
     profiler = None
-    profile_path = os.environ.get('PRISMABUILD_PROFILE_TORCH_OUT')
+    profile_path = os.environ.get('PRISMAQUANT_ORIGINAL_TORCH_TRACE')
     device = torch.device('cuda:0')
     try:
         # Keep a control showing that the unmodified production gate refuses.
@@ -289,7 +289,7 @@ def test_actual_double_fence_failure_survives_abandoned_owner(material, monkeypa
     control = dict(fail=True, failed_drains=0, completed_drains=0, pending_copy=False,
                    native_refs=[], outputs=[], source_dtype=None)
     profiler = None
-    profile_path = os.environ.get('PRISMABUILD_PROFILE_TORCH_OUT')
+    profile_path = os.environ.get('PRISMAQUANT_ORIGINAL_TORCH_TRACE')
     monkeypatch.setenv('PRISMAQUANT_RELEASE_SOURCE_PAGES', pages)
 
     class Event:

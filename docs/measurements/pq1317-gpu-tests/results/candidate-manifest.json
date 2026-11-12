@@ -1,0 +1,29 @@
+{
+ "schema": "pq1317.candidate-manifest.v3",
+ "binds": "All accepted results bind to this one candidate.",
+ "candidate": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+ "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+ "image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+ "harness_head": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7",
+ "files": {
+  "candidate.json": "0ee08986969b7f897dc647d8e96c456c1bc6c552528232c89f4c403ea8335a67",
+  "roster.json": "0f2607af14e20b383666891fcbb0922664a8a40a8219792bc5bbfa14a8628889",
+  "corrections.json": "370df2fae9c7e641607eca0dc384386fa08afac31dc6586b2640bfa45c5844ca",
+  "results/summary.json": "f59ca4302bdb69205de027bcb2cc0f2df32f2890b9aa08abcf518806dae08392",
+  "results/moe.json": "1bcc17f5af85b9ce156380a3467d36e0ea80f21b809ffde6a4e3a2ebf6e44932",
+  "results/dense.json": "3b4dd4b14e2c958ceb53a41d541e72a35405a0e976bccab2c98a88c4b6f8dad1",
+  "results/pb-receipts.json": "491b9252acaf32bcbc3b780448e567f9bfa88d73b47a4bb72a904c7952de5a06",
+  "results/log-digests.json": "5a4c29106c9edf8e1d4690f2352ad278e62b84aa5a0bc0b39e3f40d270a7cb3e",
+  "results/requalification.json": "197c73fbcc7211e15b7739b195d9534f5c775427f6cf532c771b407b90940293",
+  "results/harness-bindings.json": "7b3a8860dc9df9f14e1ca12b8e6dcae8cc05f79991be57f1e01416d3199d1319"
+ },
+ "result_files": [
+  "results/moe.json",
+  "results/dense.json",
+  "results/summary.json",
+  "results/pb-receipts.json"
+ ],
+ "requalify_rule": "After any change to the candidate commit, the image, or the harness, requalify. Any change under src/tessera/, csrc/, the five roster test files or the test modules they import is a change to measured code: rerun both suites. For any other change, write a dependency analysis that names each retained node and why the change cannot reach it.",
+ "historical_harness_note": "harness_head identifies historical run2; retained native-v2 measurements and current CPU validation resolve distinct package-local bindings. Replaying retained records does not execute changed measured code.",
+ "qualification_record": "results/requalification.json"
+}

@@ -79,3 +79,19 @@ def test_claude_does_not_overstate_pipeline_enforcement():
     assert "structurally enforced\n   (`pipeline.py` `APPROVED_RESOURCE_OWNERS`)" not in text
     assert "declarative spec + owner validation, not executor" in text
     assert "runtime enforcement lives in the stage code" in text
+
+
+def test_current_execution_defers_temporary_limits_to_fleet_caps():
+    current = _read("docs/ARCHITECTURE.md").split("<!-- flux-current-start -->", 1)[1].split(
+        "<!-- flux-current-end -->", 1)[0]
+    assert "/mnt/shared/flux-migration/CAPS.md" in current
+    assert "verification window permits" not in current
+
+
+def test_current_execution_provenance_uses_date_and_sources_without_a_landing_sha():
+    current = _read("docs/ARCHITECTURE.md").split("<!-- flux-current-start -->", 1)[1].split(
+        "<!-- flux-current-end -->", 1)[0]
+    stamp = next(line for line in current.splitlines() if line.startswith("As of:"))
+    assert re.search(r"As of: \d{4}-\d{2}-\d{2}", stamp)
+    assert not re.search(r"\b[0-9a-f]{7,40}\b", stamp)
+    assert "Source: `prismaquant/flux_jobs.py`" in current

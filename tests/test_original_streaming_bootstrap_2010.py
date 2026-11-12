@@ -16,8 +16,8 @@ from safetensors.torch import save_file
 from prismaquant import layer_streaming, streaming_model, tessera_calibration_cache as cc
 from prismaquant.residency_map import bind_residency_manifest
 from test_capture_original_material import _bound, _owner, _sha, material  # noqa: F401
-from test_stage_b_prep_staged_reads_1092 import _stage_manifest
-from test_strict_reader_tier_enforcement import MANIFEST, _forget_state  # noqa: F401
+from native_original_fixtures import _stage_manifest
+from native_original_fixtures import _forget_state  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 
@@ -47,7 +47,6 @@ def _rebind(m, monkeypatch):
     stage = m['tmp'] / f"model-stage-{m['rebinds']}"
     stage.mkdir()
     m['staged'] = _stage_manifest(stage, monkeypatch, m['readset'])
-    bind_residency_manifest(MANIFEST)
 
 
 @pytest.fixture
@@ -81,7 +80,7 @@ def original_model(material, monkeypatch):  # noqa: F811
 def _context(m, owner, path):
     return streaming_model._build_streaming_context(str(path), device=torch.device('cpu'),
         dtype=torch.float32, offload_folder=str(m['tmp'] / ('owned-offload' if owner else 'legacy-offload')),
-        source_authentication=owner, cache_headroom_gb=0, max_cache_slots=2,
+        source_authentication=owner, layers_per_shard=1, cache_headroom_gb=0, max_cache_slots=2,
         prefetch_workers=1, prefetch_min_available_gb=0, attn_implementation='eager')
 
 
@@ -145,7 +144,7 @@ def test_original_gpu_routes_refuse_before_any_material_or_cuda_load(original_mo
         with pytest.raises(RuntimeError, match='GPU loads/transfers are not qualified'):
             if operation == 'context':
                 streaming_model._build_streaming_context(str(m['root']), device=torch.device('cuda'),
-                    dtype=torch.float32, offload_folder='unused', source_authentication=owner)
+                    dtype=torch.float32, offload_folder='unused', layers_per_shard=1, source_authentication=owner)
             elif operation == 'layer':
                 layer_streaming._read_layer_to_device('model.layers.', {}, {}, torch.float32,
                                                       torch.device('cuda'), source_authentication=owner)
@@ -343,7 +342,7 @@ def test_original_entry_refuses_nonexact_positive_counts_before_bootstrap(materi
         options[field] = value
         with pytest.raises(RuntimeError, match=f'original CPU source: {field} must be an integer'):
             streaming_model._build_streaming_context(str(m['root']), device=torch.device('cpu'),
-                dtype=torch.float32, offload_folder='unused', source_authentication=owner, **options)
+                dtype=torch.float32, offload_folder='unused', layers_per_shard=1, source_authentication=owner, **options)
         assert m['checks'] == before and owner.material_live_bytes == 0
 
 
@@ -353,7 +352,7 @@ def test_legacy_entry_keeps_auto_and_integer_subclass_semantics(original_model, 
     m = original_model
     context = streaming_model._build_streaming_context(str(Path(m['paths']['config.json']).parent),
         device=torch.device('cpu'), dtype=torch.float32, offload_folder=str(m['tmp'] / 'legacy-counts'),
-        cache_headroom_gb=0, max_cache_slots=slots, prefetch_workers=workers,
+        cache_headroom_gb=0, layers_per_shard=1, max_cache_slots=slots, prefetch_workers=workers,
         prefetch_min_available_gb=0, attn_implementation='eager')
     assert context.prefetch_workers == expected_workers
     context.shutdown()

@@ -478,7 +478,7 @@ def main(argv=None):
     parser.add_argument("--workspace-receipt",
                         help="a stage_b_workspace_profile receipt whose measured per-batch "
                              "workspace replaces the declared one")
-    parser.add_argument("--workspace-action-key", help="the PrismaBuild action that wrote the receipt")
+    parser.add_argument("--workspace-action-key", help="the recorded producer job that wrote the receipt")
     parser.add_argument("--chain", help="a JSON file holding the policy's chain block (PQ #1163): "
                                         "the chain regime and each chain layer shape's owner")
     parser.add_argument("--cotangent-host-plane-bytes", type=int,

@@ -242,7 +242,7 @@ class _Cache:
 
 
 def _finish(tmp_path, monkeypatch, *, publisher, qname="model.layers.0.q",
-            barrier=None, blob=b"wire-bytes"):
+            barrier=None, blob=b"wire-bytes", writer_entered=None, writer_threads=None):
     """Measure a cell with controlled encoding, optionally behind a save barrier."""
     import torch
 
@@ -255,6 +255,10 @@ def _finish(tmp_path, monkeypatch, *, publisher, qname="model.layers.0.q",
         real_save = torch.save
 
         def held(obj, path, *args, **kwargs):
+            if writer_threads is not None:
+                writer_threads.append(threading.current_thread())
+            if writer_entered is not None:
+                writer_entered.set()
             assert barrier.wait(WAIT), "save barrier never released"
             return real_save(obj, path, *args, **kwargs)
 
@@ -279,18 +283,27 @@ def _finish(tmp_path, monkeypatch, *, publisher, qname="model.layers.0.q",
 def test_a_blocked_writer_blocks_the_encode_thread_when_publication_is_synchronous(
         tmp_path, monkeypatch):
     """The baseline this branch exists to change, stated as a test."""
+    import importlib
+
+    # Cold imports are fixture setup, before the writer's ordering deadline.
+    for module in ("torch", "prismaquant.production_weight_cache", "prismaquant.tessera_render"):
+        importlib.import_module(module)
     barrier = threading.Event()
+    writer_entered = threading.Event()
+    writer_threads = []
     returned = threading.Event()
 
     def run():
-        _finish(tmp_path, monkeypatch, publisher=None, barrier=barrier)
+        _finish(tmp_path, monkeypatch, publisher=None, barrier=barrier,
+                writer_entered=writer_entered, writer_threads=writer_threads)
         returned.set()
 
     worker = threading.Thread(target=run)
     worker.start()
     try:
-        assert not returned.wait(0.5), (
-            "the synchronous path returned while its writer was blocked")
+        assert writer_entered.wait(WAIT), "the writer never reached its save barrier"
+        assert writer_threads == [worker], (
+            "the synchronous writer must run on the encode worker")
         barrier.set()
         assert returned.wait(WAIT)
     finally:

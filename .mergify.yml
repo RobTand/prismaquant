@@ -1,48 +1,111 @@
-# Mergify merge queue for PrismaQuant. Tracking: #3140 (Paperclip PRI-1056).
+# Mergify merge queue for PrismaQuant. Tracking: #3180.
 #
-# One serial slot, one pull request per check and no retries. With these
-# settings Mergify checks a queued pull request in place: it merges main into
-# the pull request branch, waits for the required checks on that integrated
-# head, then merges. No draft queue pull request is created, so the branch
-# naming rule keeps applying to the real pull request.
+# "gate" tests the full gate population on Mergify's temporary draft batch
+# pull request before the original pull requests merge into main.
 #
-# The queue and merge conditions are the branch protection required checks,
-# which Mergify injects. Review policy is unchanged. Nothing is queued
-# automatically: comment "@mergifyio queue" on a pull request to queue it.
-# A pull request labelled "release" goes to the release queue and is served
-# ahead of the default queue.
+# max_parallel_checks: 2 forces draft batch PRs. In-place checks could rewrite
+# the original branch and invalidate the head TL3 approved. Serial mode keeps
+# merge order while two batches run checks concurrently. Default batches grow
+# from one PR to seven; release batches contain one PR and are served first.
+# A failed batch is split to isolate the failing PR. Mergify never retries a
+# failed check automatically. Never merge outside the queue.
 #
-# pb-tests is posted from a PrismaBuild run, so a pull request that Mergify
-# updates needs pb-tests again on the new head before the timeout. #3140
-# replaces it with a fleet-run check.
+# Add "queue" to queue and remove it to dequeue. After a failure, comment
+# "@mergifyio queue"; toggling the label does not reset a dequeued PR.
+# TL3 tests and reviews each change, posts its "TL3
+# approval" check on the reviewed head, then adds "tl3-queue". TL3 follows
+# Mergify's queue check on the PR head. The batch's full "gate" decides every
+# merge. The issue-link check stays:
+# TL3's branch names and "Refs #<issue>." bodies pass it. TL3 finds its rule's
+# check by name, so keep "Queue TL3-approved PRs".
+# TL3's App needs an explicit command allowance because installation does not
+# grant a human collaborator's write permission.
+# Classic branch protection requires a pull request but no status checks.
+# Mergify injects classic required checks into both queue and merge
+# conditions, and merge conditions are judged on the batch draft, whose
+# mergify/merge-queue/ branch and body cannot pass the issue rule. So the
+# issue rule lives here instead: both queue paths require "linked issue"
+# on the original pull request, and the batch draft is judged
+# by "gate" alone. Don't add required status checks to classic protection.
+# (branch_protection_injection_mode: none would avoid injection but needs a
+# merge_bot_account, which this repository does not use.)
+commands_restrictions:
+  queue:
+    conditions:
+      - or:
+          - sender-permission>=write
+          - sender=tl3-robtand[bot]
+  requeue:
+    conditions:
+      - or:
+          - sender-permission>=write
+          - sender=tl3-robtand[bot]
+
 merge_queue:
   mode: serial
-  max_parallel_checks: 1
+  max_parallel_checks: 2
   reset_on_external_merge: always
   status_comments: outcomes
   queue_controls_comment: false
+  queued_label: queued
+  dequeued_label: dequeued
 
 queue_rules:
   - name: release
     queue_conditions:
       - base = main
+      - label = queue
       - label = release
+      - -draft
+      - check-success = linked issue
+    merge_conditions:
+      - check-success = gate
     merge_method: merge
-    update_method: merge
     batch_size: 1
     max_checks_retries: 0
-    checks_timeout: 2 hours
+    checks_timeout: 90 minutes
   - name: default
     queue_conditions:
       - base = main
+      - -draft
+      - or:
+          - and:
+              - label = queue
+              - check-success = linked issue
+          - and:
+              - label = tl3-queue
+              - check-success = @tl3-robtand/TL3 approval
+              - check-success = linked issue
+    merge_conditions:
+      - check-success = gate
     merge_method: merge
-    update_method: merge
-    batch_size: 1
+    batch_size:
+      min: 1
+      max: 7
+    batch_max_wait_time: 10 minutes
     max_checks_retries: 0
-    checks_timeout: 2 hours
+    checks_timeout: 90 minutes
 
 priority_rules:
   - name: release changes first
     conditions:
       - label = release
     priority: high
+
+pull_request_rules:
+  - name: queue pull requests labelled "queue"
+    conditions:
+      - base = main
+      - label = queue
+      - -draft
+    actions:
+      queue:
+  - name: Queue TL3-approved PRs
+    conditions:
+      - base = main
+      - label = tl3-queue
+      - -draft
+      - check-success = @tl3-robtand/TL3 approval
+    actions:
+      queue:
+        name: default

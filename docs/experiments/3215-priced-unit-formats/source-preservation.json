@@ -1,0 +1,7 @@
+{
+  "base": "9c8beebde2266c78ea5910bc83b30e90cb669d74",
+  "path": "tests/test_tessera_per_unit_rates.py",
+  "original_module_statements": 65,
+  "original_assertions": 114,
+  "original_source_preserved": true
+}

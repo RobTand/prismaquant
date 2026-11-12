@@ -1,0 +1,105 @@
+{
+  "invocation": "4e27bb2a-d6a2-435c-8242-9b1ac0db7f66",
+  "commit": "17b3332d1ca5a91d9b59734baecb66d493f603b7",
+  "terminal": "COMPLETE_INVOCATION_STATUS",
+  "verdict": "OK",
+  "junit": [
+    {
+      "artifact": "equivalence-17b3332d1ca5a91d9b59734baecb66d493f603b7.xml.gz",
+      "suites": [
+        {
+          "tests": "26",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "time": "20.713"
+        }
+      ],
+      "skips": [],
+      "failures": []
+    },
+    {
+      "artifact": "equivalence-613cf2f97458049a23a035ba0a1f6c882b56f9a3.xml.gz",
+      "suites": [
+        {
+          "tests": "25",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "time": "110.027"
+        }
+      ],
+      "skips": [],
+      "failures": []
+    },
+    {
+      "artifact": "main-budget-junit.xml.gz",
+      "suites": [
+        {
+          "tests": "1",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "time": "20.097"
+        }
+      ],
+      "skips": [],
+      "failures": []
+    },
+    {
+      "artifact": "related.xml.gz",
+      "suites": [
+        {
+          "tests": "83",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "4",
+          "time": "13.005"
+        }
+      ],
+      "skips": [
+        {
+          "test": "test_projection_request_uses_real_public_producer_and_keeps_request[env]",
+          "message": "missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10",
+          "reason": "/home/buildbuddy/workspace/repo-root/tests/projection_producer_fixture.py:54: missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10"
+        },
+        {
+          "test": "test_projection_request_uses_real_public_producer_and_keeps_request[explicit]",
+          "message": "missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10",
+          "reason": "/home/buildbuddy/workspace/repo-root/tests/projection_producer_fixture.py:54: missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10"
+        },
+        {
+          "test": "test_projection_request_passes_the_default_digest_cache",
+          "message": "missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10",
+          "reason": "/home/buildbuddy/workspace/repo-root/tests/projection_producer_fixture.py:54: missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10"
+        },
+        {
+          "test": "test_projection_request_reuses_recorded_digests_until_bytes_change",
+          "message": "missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10",
+          "reason": "/home/buildbuddy/workspace/repo-root/tests/projection_producer_fixture.py:54: missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10"
+        }
+      ],
+      "failures": []
+    },
+    {
+      "artifact": "stack-budget-junit.xml.gz",
+      "suites": [
+        {
+          "tests": "1",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "time": "20.149"
+        }
+      ],
+      "skips": [],
+      "failures": []
+    }
+  ],
+  "equivalence": {
+    "original_nodes": 25,
+    "assertion_operands": 228,
+    "evaluations": 45324,
+    "unchanged": true
+  }
+}

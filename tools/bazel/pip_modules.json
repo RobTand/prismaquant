@@ -1,0 +1,251 @@
+{
+ "PIL": [
+  "pillow"
+ ],
+ "_distutils_hack": [
+  "setuptools"
+ ],
+ "_multiprocess": [
+  "multiprocess"
+ ],
+ "_pytest": [
+  "pytest"
+ ],
+ "_yaml": [
+  "pyyaml"
+ ],
+ "accelerate": [
+  "accelerate"
+ ],
+ "aiohappyeyeballs": [
+  "aiohappyeyeballs"
+ ],
+ "aiohttp": [
+  "aiohttp"
+ ],
+ "aiosignal": [
+  "aiosignal"
+ ],
+ "annotated_doc": [
+  "annotated-doc"
+ ],
+ "annotated_types": [
+  "annotated-types"
+ ],
+ "anyio": [
+  "anyio"
+ ],
+ "attr": [
+  "attrs"
+ ],
+ "attrs": [
+  "attrs"
+ ],
+ "certifi": [
+  "certifi"
+ ],
+ "charset_normalizer": [
+  "charset-normalizer"
+ ],
+ "click": [
+  "click"
+ ],
+ "compressed_tensors": [
+  "compressed-tensors"
+ ],
+ "coverage": [
+  "coverage"
+ ],
+ "datasets": [
+  "datasets"
+ ],
+ "dateutil": [
+  "python-dateutil"
+ ],
+ "dill": [
+  "dill"
+ ],
+ "execnet": [
+  "execnet"
+ ],
+ "filelock": [
+  "filelock"
+ ],
+ "frozenlist": [
+  "frozenlist"
+ ],
+ "fsspec": [
+  "fsspec"
+ ],
+ "functorch": [
+  "torch"
+ ],
+ "gguf": [
+  "gguf"
+ ],
+ "h11": [
+  "h11"
+ ],
+ "hf_xet": [
+  "hf-xet"
+ ],
+ "httpcore": [
+  "httpcore"
+ ],
+ "httpx": [
+  "httpx"
+ ],
+ "huggingface_hub": [
+  "huggingface-hub"
+ ],
+ "idna": [
+  "idna"
+ ],
+ "iniconfig": [
+  "iniconfig"
+ ],
+ "isympy": [
+  "sympy"
+ ],
+ "jinja2": [
+  "jinja2"
+ ],
+ "loguru": [
+  "loguru"
+ ],
+ "markdown_it": [
+  "markdown-it-py"
+ ],
+ "markupsafe": [
+  "markupsafe"
+ ],
+ "mdurl": [
+  "mdurl"
+ ],
+ "mpmath": [
+  "mpmath"
+ ],
+ "multidict": [
+  "multidict"
+ ],
+ "multiprocess": [
+  "multiprocess"
+ ],
+ "networkx": [
+  "networkx"
+ ],
+ "numpy": [
+  "numpy"
+ ],
+ "packaging": [
+  "packaging"
+ ],
+ "pandas": [
+  "pandas"
+ ],
+ "pkg_resources": [
+  "setuptools"
+ ],
+ "pluggy": [
+  "pluggy"
+ ],
+ "propcache": [
+  "propcache"
+ ],
+ "psutil": [
+  "psutil"
+ ],
+ "py": [
+  "pytest"
+ ],
+ "pyarrow": [
+  "pyarrow"
+ ],
+ "pydantic": [
+  "pydantic"
+ ],
+ "pydantic_core": [
+  "pydantic-core"
+ ],
+ "pygments": [
+  "pygments"
+ ],
+ "pytest": [
+  "pytest"
+ ],
+ "pytest_cov": [
+  "pytest-cov"
+ ],
+ "pytest_timeout": [
+  "pytest-timeout"
+ ],
+ "regex": [
+  "regex"
+ ],
+ "requests": [
+  "requests"
+ ],
+ "rich": [
+  "rich"
+ ],
+ "safetensors": [
+  "safetensors"
+ ],
+ "setuptools": [
+  "setuptools"
+ ],
+ "share": [
+  "sympy"
+ ],
+ "shellingham": [
+  "shellingham"
+ ],
+ "sympy": [
+  "sympy"
+ ],
+ "tessera": [
+  "tessera-quant"
+ ],
+ "tokenizers": [
+  "tokenizers"
+ ],
+ "torch": [
+  "torch"
+ ],
+ "torchgen": [
+  "torch"
+ ],
+ "tqdm": [
+  "tqdm"
+ ],
+ "transformers": [
+  "transformers"
+ ],
+ "typer": [
+  "typer"
+ ],
+ "typing_extensions": [
+  "typing-extensions"
+ ],
+ "typing_inspection": [
+  "typing-inspection"
+ ],
+ "tzdata": [
+  "tzdata"
+ ],
+ "urllib3": [
+  "urllib3"
+ ],
+ "xdist": [
+  "pytest-xdist"
+ ],
+ "xxhash": [
+  "xxhash"
+ ],
+ "yaml": [
+  "pyyaml"
+ ],
+ "yarl": [
+  "yarl"
+ ]
+}

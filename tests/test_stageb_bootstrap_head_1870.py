@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 import pytest
+from staged_native_fixtures import native_staged_state  # noqa: F401
 
 from prismaquant import joint_layer_quanta as jl
 from prismaquant.layer_streaming import streaming_source_plan

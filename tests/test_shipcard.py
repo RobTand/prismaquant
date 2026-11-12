@@ -14,6 +14,8 @@ from functools import lru_cache
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
+
 if not (pathlib.Path(__file__).resolve().parents[1] / "tools").is_dir():
     pytest.skip("requires a repo checkout (tools/ scripts)",
                 allow_module_level=True)
@@ -50,6 +52,7 @@ from prismaquant.validate_quantized_model import (
     DEFAULT_MIN_GEN_LEN,
     DEFAULT_MIN_MTP_ACCEPT_P0,
 )
+from graph_lane_fixtures import synthetic_graph_lane
 
 
 def _artifact(
@@ -103,6 +106,13 @@ def _fill_all(path, model_sha, *, spec=False, passed=True):
         if slot == "ship_gate":
             fill_slot(path, slot, _ship_gate_record(
                 model_sha, passed=passed, source=str(path.parent)))
+            continue
+        if slot == "native_export.graph":
+            from tests.graph_receipt_fixtures import graph_fixture
+
+            record, _ = graph_fixture(path.parent, model_sha=model_sha)
+            record["passed"] = passed
+            fill_slot(path, slot, record)
             continue
         if slot.startswith("native_export."):
             # A passing smoke stamps what it ran and what it generated; the
@@ -423,6 +433,11 @@ def test_shipcard_fixed_reservation_survives_every_slot_fill(tmp_path):
             # never as an extra metrics key.
             record = _ship_gate_record(
                 model_sha, source=str(model_dir), detail="x" * 4096)
+        elif slot == "native_export.graph":
+            from tests.graph_receipt_fixtures import graph_fixture
+
+            record, _ = graph_fixture(model_dir)
+            record["detail"] = "x" * 4096
         elif slot.startswith("native_export."):
             arm = slot.split(".")[1]
             record = make_record(

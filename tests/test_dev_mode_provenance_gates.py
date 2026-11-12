@@ -6,9 +6,7 @@ mode, which is also this suite's default fixture:
 * certified mode refuses the incomplete provenance fixtures below;
 * development mode accepts and records a ``[DEV-MODE]`` warning and a
   top-level ``dev_uncertified`` stamp in results.json, so a dev result can
-  never masquerade as a certified one. Progress records carry the stamp only
-  when ``PRISMAQUANT_DEV_PROGRESS_STAMP=1`` opts in (PR #828): the default
-  per-unit commit is the certified six-field record and pays no hash.
+  never masquerade as a certified one.
 
 CPU-only; no external checkpoint is touched.
 """
@@ -22,6 +20,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from cpu_staged_fixtures import empty_native_staged_inputs, native_staged_state
 import torch
 
 from prismaquant import aura_provenance
@@ -366,7 +365,7 @@ def test_submit_joint_digest_arguments_are_records_under_dev_mode(
     out = capsys.readouterr().out
     assert "DEV-MODE" in out
     line = next(line for line in out.splitlines() if line.startswith("[dry-run] "))
-    submitted = shlex.split(line[len("[dry-run] "):])
+    submitted = json.loads(line[len("[dry-run] "):])["argv"]
     actual = hashlib.sha256(Path(fixture["plan"]).read_bytes()).hexdigest()
     inner = submitted[submitted.index("prismaquant.tessera_joint_aura"):]
     assert inner[inner.index("--plan-sha256") + 1] == actual  # the record is the ACTUAL digest
@@ -383,7 +382,7 @@ def test_submit_joint_run_resume_needs_no_receipt_under_dev_mode(
     assert dispatch.main(argv) == 0
     out = capsys.readouterr().out
     line = next(line for line in out.splitlines() if line.startswith("[dry-run] "))
-    submitted = shlex.split(line[len("[dry-run] "):])
+    submitted = json.loads(line[len("[dry-run] "):])["argv"]
     inner = submitted[submitted.index("prismaquant.tessera_joint_aura"):]
     assert "--resume" in inner
     assert "--source-transition" not in inner
@@ -396,7 +395,8 @@ def _launch_container(monkeypatch, launcher_args):
     monkeypatch.setattr(launcher, "checkout_commit", lambda cwd: None)
     monkeypatch.setattr(launcher, "gpu_attachment", lambda *args, **kwargs: (False, "CPU test"))
     executed = []
-    monkeypatch.setattr(launcher.os, "execvp", lambda binary, argv: executed.append(argv))
+    from container_admission import stub_launch
+    stub_launch(monkeypatch, launcher, executed)
     launcher.main(launcher_args)
     docker_env = dict(item.split("=", 1) for index, item in enumerate(executed[0])
                       if index and executed[0][index - 1] == "--env")
@@ -407,7 +407,7 @@ def _submitted_launcher_argv(capsys):
     import shlex
     out = capsys.readouterr().out
     line = next(line for line in out.splitlines() if line.startswith("[dry-run] "))
-    submitted = shlex.split(line[len("[dry-run] "):])
+    submitted = json.loads(line[len("[dry-run] "):])["argv"]
     return submitted[submitted.index("tools.tessera_campaign_container") + 1:]
 
 
@@ -427,6 +427,16 @@ def test_dev_mode_env_reaches_the_container_and_the_spec_file_stays_sealed(
 
     monkeypatch.setenv(DEV_ENV, "1")
     assert dispatch.main(argv) == 0
+    ambient = _submitted_launcher_argv(capsys)
+    assert json.loads(ambient[ambient.index("--spec") + 1])["env"][DEV_ENV] == "0"
+    # Native submissions take scientific settings from an explicit spec.
+    dev_spec = spec.with_name("explicit-dev-spec.json")
+    declared = json.loads(original)
+    declared["env"] = {**declared.get("env", {}), DEV_ENV: "1"}
+    dev_spec.write_text(json.dumps(declared))
+    dev_argv = list(argv)
+    dev_argv[dev_argv.index("--spec") + 1] = str(dev_spec)
+    assert dispatch.main(dev_argv) == 0
     dev = _submitted_launcher_argv(capsys)
     assert spec.read_text() == original  # the sealed spec file is never rewritten
     spec_json = json.loads(dev[dev.index("--spec") + 1])
@@ -479,12 +489,14 @@ def _refusing_prepare(tmp_path, monkeypatch):
     return json.loads((tmp_path / "prepare/results.json").read_text())
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_results_json_has_no_dev_keys_without_the_flag(tmp_path, monkeypatch):
     result = _refusing_prepare(tmp_path, monkeypatch)
     assert dev_mode.DEV_UNCERTIFIED_KEY not in result
     assert dev_mode.DEV_MODE_KEY not in result
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_results_json_carries_the_top_level_dev_stamp(tmp_path, monkeypatch):
     monkeypatch.setenv(DEV_ENV, "1")
     result = _refusing_prepare(tmp_path, monkeypatch)
@@ -495,36 +507,4 @@ def test_results_json_carries_the_top_level_dev_stamp(tmp_path, monkeypatch):
     assert len(stamp["producer_source_sha256"]) == 64
     assert stamp["producer_source_sha256"] == _production_cache_source_sha256(
         ROOT / "prismaquant")
-    assert "timestamp" in stamp
-
-
-def _progress_record(tmp_path, monkeypatch):
-    progress = tmp_path / "progress.json"
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(progress))
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "token-fixture")
-    assert bridge._pb_commit(3, "head", unit="layers.0.mlp") is True
-    return json.loads(progress.read_text())
-
-
-def test_progress_records_have_no_dev_keys_without_the_flag(tmp_path, monkeypatch):
-    record = _progress_record(tmp_path, monkeypatch)
-    # Byte-identical certified shape: exactly the six fields the worker reads.
-    assert set(record) == {"schema", "token", "phase", "units_completed", "unit",
-                           "reported_unix"}
-
-
-def test_progress_records_carry_the_dev_stamp_only_when_opted_in(tmp_path, monkeypatch):
-    monkeypatch.setenv(DEV_ENV, "1")
-    # Default: Rob's campaign directive -- no sealing ceremony on progress
-    # lines; the certified six-field shape stands even in dev mode.
-    record = _progress_record(tmp_path, monkeypatch)
-    assert set(record) == {"schema", "token", "phase", "units_completed", "unit",
-                           "reported_unix"}
-    # Opt-in: the stamp rides along for whoever wants per-line provenance.
-    monkeypatch.setenv("PRISMAQUANT_DEV_PROGRESS_STAMP", "1")
-    record = _progress_record(tmp_path, monkeypatch)
-    assert record[dev_mode.DEV_UNCERTIFIED_KEY] is True
-    stamp = record[dev_mode.DEV_MODE_KEY]
-    assert stamp[DEV_ENV] == "1"
-    assert len(stamp["producer_source_sha256"]) == 64
     assert "timestamp" in stamp

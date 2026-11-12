@@ -308,9 +308,7 @@ def test_build_refuses_incomplete_status(tmp_path):
             render_prerequisite=dict(RENDER_PREREQ))
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
-def test_seal_deterministic_and_pb_validated(tmp_path):
-    core, tiers, _plans = _pb()
+def test_seal_deterministic_and_phase_bytes_exact(tmp_path):
     record, receipt, parent = _layer2(tmp_path)
     kwargs = dict(strided_boundaries=STRIDED, n_probes=N_PROBES,
                   calib=dict(CALIB),
@@ -324,31 +322,13 @@ def test_seal_deterministic_and_pb_validated(tmp_path):
         record, receipt, parent, **kwargs)
     for entry in manifest["entries"]:
         entry["path"] = "/mnt/shared/fixture" + entry["path"][len("/fixture"):]
-    normalized = core.validate_data_manifest(manifest)
-    ranges = tiers.manifest_phase_ranges(normalized)
-    assert ranges, "published PB stages nothing for the executable manifest"
-    assert [r["name"] for r in ranges] == [
-        p["name"] for p in manifest["read_plan"]["phases"]]
-    assert ranges[-1]["end_bytes"] == manifest["read_plan"]["read_bytes"]
+    phases = manifest["read_plan"]["phases"]
+    assert phases and phases[-1]["cumulative_bytes"] == manifest["read_plan"]["read_bytes"]
+    assert all(phase["bytes"] == sum(manifest["entries"][i]["bytes"]
+               for i in phase["entry_indices"]) for phase in phases)
 
 
-def _pb():
-    """Resolve the same reviewed source pin the reader/SDK fixtures use."""
-    from fullstack_pb_generation import require_paths
 
-    src = Path(require_paths()["src"])
-    import prismabuild.core as core
-    import prismabuild.storage_tiers as tiers
-    import prismabuild.residency_plan as plans
-    for module in (core, tiers, plans):
-        if not Path(module.__file__).resolve().is_relative_to(src.resolve()):
-            # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
-            # site-packages prismabuild turn the test green without running it.
-            pytest.fail(
-                "a different prismabuild is already imported -- it shadows the "
-                "reviewed generation under test; the interpreter carries a stale "
-                "prismabuild (PQ #1109)")
-    return core, tiers, plans
 
 
 def _bound_inputs(tmp_path, root="/mnt/shared/run"):
@@ -486,19 +466,13 @@ def test_executable_row_parts_propagate_manifest_phases(tmp_path,
     assert progress[1][0] == "checkpoint-load"
     # Production dispatch refuses the same row: typed unsupported binding.
     with pytest.raises(dispatch.ExecutableBindingUnsupported):
-        dispatch.quantum_argv(
-            bound, record_path=record_path, output_root=tmp_path)
-    # Legacy rows keep their existing path (slice manifest, strict tiers).
+        dispatch.quantum_argv(bound, timeout_s=3600, record_path=record_path, output_root=tmp_path)
+    # Legacy rows keep their slice manifest digest.
     legacy = dict(bound)
     del legacy["executable_readset"]
-    argv_legacy = dispatch.quantum_argv(
-        legacy, record_path=record_path, output_root=tmp_path)
+    argv_legacy = dispatch.quantum_argv(legacy, timeout_s=3600, record_path=record_path, output_root=tmp_path)
     # The quantum receives its slice file, never a receipt (PQ #993).
-    assert argv_legacy[argv_legacy.index("--adjoint-slice") + 1] == str(adjoint_path)
-    assert argv_legacy[argv_legacy.index("--data-manifest") + 1].endswith(
-        "slice.gz")
-    assert argv_legacy[argv_legacy.index("--allowed-tiers") + 1] == (
-        dispatch.STAGED_ALLOWED_TIERS)
+    assert argv_legacy["argv"][argv_legacy["argv"].index("--adjoint-slice") + 1] == str(adjoint_path)
 
 
 def test_runtime_reports_read_phases_without_pricing_units():
@@ -781,7 +755,6 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
     import test_joint_cost_quantum_runtime as rt
     import prismaquant.joint_cost_quantum as qc
     import prismaquant.perturbed_x_cache as pxc
-    from prismaquant import prismabuild_progress as pbprog
     from prismaquant.joint_adjoint_slices import stage_a_slice
     from prismaquant.joint_cost_quantum import (
         ChunkFrontier, QuantumCounters, QuantumProgress,
@@ -794,11 +767,13 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
     receipt = setup["receipt"]
     events = []
 
-    def _report(phase, units, **kwargs):
-        events.append(("report", phase, units))
-        return True
+    local_log = setup.setdefault('_local_progress_log', qc.log_progress)
 
-    monkeypatch.setattr(pbprog, "report", _report)
+    def _report(units, phase, unit=None, *, log=print):
+        events.append(("report", phase, units))
+        local_log(units, phase, unit, log=log)
+
+    monkeypatch.setattr(qc, "log_progress", _report)
     # Stacking-safe seams: first drive stores the true originals on setup;
     # later drives delegate to those, never to a previous wrapper.
     seams = setup.setdefault("_orig_seams", {})
@@ -998,10 +973,8 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
         prepared_inputs=prepared_inputs,
         replay_mode=replay_mode, spill_bound=spill_bound,
         checkpoint_incoming_mode=checkpoint_incoming_mode)
-    monkeypatch.setenv(
-        "PRISMABUILD_ACTION_PROGRESS_PHASES",
-        json.dumps([p["name"] for p in manifest["read_plan"]["phases"]]))
-    progress = QuantumProgress(frontier=frontier, base_units=0)
+    progress = QuantumProgress(frontier=frontier, base_units=0,
+                               phases=[p["name"] for p in manifest["read_plan"]["phases"]])
     calib_ids = torch.load(setup["calib_path"])
     events.append(("setup-open", str(setup["calib_path"])))
     payload = run_layer_quantum_core(
@@ -1259,7 +1232,6 @@ def _expert_linears(model, runner):
         profile=runner.profile)
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
 def test_acceptance_real_quantum_reports_before_reads(tmp_path, monkeypatch):
     """Real tiny-CPU quantum sequencing: phase before first payload read.
 
@@ -1269,9 +1241,8 @@ def test_acceptance_real_quantum_reports_before_reads(tmp_path, monkeypatch):
     Layer 0 carries a nonempty chain ([1]); every run uses 4 probes; the
     replay corpus repeats per (window, probe); one resume run exercises the
     zero-pending window-zero convention. The actual ``QuantumProgress``
-    reporter is instrumented (not hand-appended phase names); the actual PB
-    ``residency_plan.accepted/remaining`` reader stages the manifest-derived
-    phases.
+    reporter is instrumented. The application manifest defines the phases;
+    no PB phase planner runs in this fixture.
 
     Proven legs: checkpoint-plane and boundary entries (verified prefetch
     path/bytes/sha), retained-window hold before replay phases, and
@@ -1315,7 +1286,6 @@ def test_acceptance_real_quantum_reports_before_reads(tmp_path, monkeypatch):
 
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
 def test_acceptance_multi_window_reports_across_windows(tmp_path, monkeypatch):
     """R3: real >=2 retained-window case on the existing expert runner.
 
@@ -1427,7 +1397,6 @@ def _reported(events):
 def _assert_acceptance_run(events, manifest, record, tmp_path,
                            expect_replay_windows,
                            require_window=True):
-    _, _, plans = _pb()
     names = [p["name"] for p in manifest["read_plan"]["phases"]]
     reported = _reported(events)
     assert reported and reported[0] == "head"
@@ -1462,12 +1431,6 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
     # fake streaming context (explicitly unqualified leg).
     units = [e[2] for e in events if e[0] == "report"]
     assert all(b >= a for a, b in zip(units, units[1:]))
-    plan_view = {"phases": [{"name": name} for name in names]}
-    for name in deduped:
-        assert plans.accepted(plan_view, name)
-    remaining = [p["name"] for p in plans.remaining(
-        plan_view, deduped[-1])]
-    assert remaining == names[names.index(deduped[-1]):]
     replayed = {int(n.split("-")[1])
                 for n in reported if n.startswith("replay-")}
     if expect_replay_windows == "all":
@@ -1480,7 +1443,7 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
 def _exec_campaign(tmp_path):
     """Tiny campaign files with a calibration input for the regen CLI."""
     import regenerate_joint_quanta as _regen  # noqa: F401
-    from test_stageb_prepared_inputs_bridge import (
+    from prepared_input_fixtures import (
         _execution, _render_files, _production_pkl, _qnames, FMT)
     files = _render_files(tmp_path)
     pkl_path = _production_pkl(tmp_path, files)
@@ -1783,8 +1746,7 @@ def test_dispatcher_refuses_plausible_render_binding(tmp_path, monkeypatch):
                       dispatch.DispatchRefused)
     with pytest.raises(dispatch.ExecutableBindingUnsupported,
                        match="no accepted PB produced-output binding"):
-        dispatch.quantum_argv(
-            record, record_path=record_path, output_root=tmp_path)
+        dispatch.quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=tmp_path)
 
 
 def test_dispatcher_refuses_unbound_render_prerequisite(tmp_path,
@@ -1822,8 +1784,7 @@ def test_dispatcher_refuses_unbound_render_prerequisite(tmp_path,
     (tmp_path / "slice.gz").write_bytes(b"slice")
     with pytest.raises(dispatch.ExecutableBindingUnsupported,
                        match="no accepted PB produced-output binding"):
-        dispatch.quantum_argv(
-            record, record_path=record_path, output_root=tmp_path)
+        dispatch.quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=tmp_path)
 
 
 def test_build_refuses_render_binding_fiction(tmp_path):

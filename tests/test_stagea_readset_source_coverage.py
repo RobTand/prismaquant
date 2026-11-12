@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+import readset_oracles
+
 pytestmark = pytest.mark.own_process
 
 from prismaquant.joint_layer_quanta import (
@@ -29,7 +31,6 @@ from prismaquant.joint_layer_quanta import (
 )
 from prismaquant.layer_streaming import streaming_source_plan
 
-PUBLISHED_PB_SRC = Path("/mnt/shared/prismabuild-fleet/repo/src")
 #: Checkpoint names. The fixture has no config, so the loader's profile is the
 #: text-only default, which names these layers ``model.layers.N`` live.
 PREFIX = "model.language_model.layers."
@@ -226,24 +227,7 @@ def test_a_layer_the_reader_does_not_name_refuses(campaign):
         _build(campaign, spans)
 
 
-def test_prismabuild_accepts_the_completed_manifest(campaign):
-    if not (PUBLISHED_PB_SRC / "prismabuild" / "core.py").is_file():
-        pytest.skip(f"published PrismaBuild not visible at {PUBLISHED_PB_SRC}")
-    if str(PUBLISHED_PB_SRC) not in sys.path:
-        sys.path.insert(0, str(PUBLISHED_PB_SRC))
-    import prismabuild.data_manifest as data_manifest
-    import prismabuild.manifest_layout as manifest_layout
-    for module in (data_manifest, manifest_layout):
-        if not Path(module.__file__).resolve().is_relative_to(PUBLISHED_PB_SRC.resolve()):
-            # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
-            # site-packages prismabuild turn the test green without running it.
-            pytest.fail(
-                "a different prismabuild is already imported -- it shadows the "
-                "published generation under test; the interpreter carries a stale "
-                "prismabuild (PQ #1109)")
-    manifest = _build(campaign, _spans(campaign))
-    data_manifest.validate_data_manifest(manifest)
-    # The completion's index runs are not contiguous; PrismaBuild's read-order
-    # expansion has to accept that, or the seal refuses the whole manifest.
-    assert len(manifest_layout.manifest_phase_ranges(manifest)) == \
-        len(manifest["read_plan"]["phases"])
+def test_completed_manifest_phase_ranges_cover_noncontiguous_index_runs(campaign):
+    manifest = readset_oracles.validate_plan(_build(campaign, _spans(campaign)))
+    # The completion's index runs are not contiguous; the phase ranges must still cover every phase.
+    assert len(readset_oracles.phase_ranges(manifest)) == len(manifest["read_plan"]["phases"])

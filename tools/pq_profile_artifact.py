@@ -1,11 +1,52 @@
 """Validate workload-attributed samples and atomically publish their bytes."""
+import importlib.util
 import json
 import math
 from pathlib import Path
 import re
+import sys
+from types import ModuleType
 from typing import TypeGuard
 
-from tools.pq_profile_digest import bytes_sha256hex, file_sha256hex
+
+_SOURCE_ROOT = Path(__file__).resolve().parents[1]
+_PROFILE_OWNERS = {
+    'pq_profile_shared_digest_owner': 'digests.py',
+    'pq_profile_shared_sampler_owner': 'io_spans.py',
+    'pq_profile_shared_file_identity_owner': 'file_identity.py',
+}
+
+
+def load_profile_source(owner_name: str, path: Path) -> ModuleType:
+    """Load only the profiler's three stdlib owners from this snapshot."""
+    expected = _PROFILE_OWNERS[owner_name]
+    path = Path(path)
+    if (path.name != expected or path.parent.name != 'prismaquant'
+            or path.parent.parent != _SOURCE_ROOT):
+        raise KeyError(str(path))
+    if owner_name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(owner_name, path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError('profile source owner unavailable: ' + str(path))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[owner_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(owner_name, None)
+            raise
+    return sys.modules[owner_name]
+
+
+def profile_digest_owner():
+    path = Path(__file__).resolve().parents[1] / 'prismaquant/digests.py'
+    return load_profile_source('pq_profile_shared_digest_owner', path)
+
+
+bytes_sha256hex = profile_digest_owner().bytes_sha256hex
+file_sha256hex = profile_digest_owner().file_sha256hex
+canonical_json_sha256 = profile_digest_owner().canonical_json_sha256
+canonical_json_bytes = profile_digest_owner().canonical_json_bytes
 
 
 _STATUS_SCHEMA = 'prismaquant.profile_workload_status.v1'
@@ -152,3 +193,43 @@ def validate_netdata_window(data, *, after, before):
         raise RuntimeError('required Netdata dimensions have no measured samples')
 
 
+
+
+PROFILE_LOCAL_ROOT = Path('/home/rob/tmp/claude-campaign-20260926/tmp/row-startup/profiles')
+
+
+def profile_row_parts(command):
+    """Locate the existing row boundary without changing command operands."""
+    boundary = 0
+    if 'tools.tessera_campaign_container' in command:
+        module = command.index('tools.tessera_campaign_container')
+        boundary = command.index('--', module) + 1
+    inner = command[boundary:]
+    if not inner or not Path(inner[0]).name.startswith('python'):
+        raise ValueError('profiling requires the original Python row argv')
+    return boundary, inner
+
+
+def profiled_row_command(command, *, destination, profiler_executable):
+    """Keep container ownership and original argv; profile its same-UID child."""
+    boundary, inner = profile_row_parts(command)
+    return [*command[:boundary], inner[0], '-u', '-m', 'tools.pq_profile_child',
+            '--profiler-executable', profiler_executable, '--out', str(destination),
+            '--', *inner]
+
+
+def profiled_workload_parts(command, *, destination, profiler_executable):
+    """Accept only the exact existing canonical child wrapper; keep full argv."""
+    boundary, inner = profile_row_parts(command)
+    if len(inner) < 10 or inner[8] != '--':
+        raise RuntimeError('namespace profile requires the canonical child wrapper')
+    original = [*command[:boundary], *inner[9:]]
+    if command != profiled_row_command(original, destination=destination,
+                                       profiler_executable=profiler_executable):
+        raise RuntimeError('namespace profile wrapper differs from its declaration')
+    return boundary + 9
+
+
+def profile_local_destination(request_key):
+    """Same existing host-local policy; namespace owns one deterministic child."""
+    return PROFILE_LOCAL_ROOT / request_key

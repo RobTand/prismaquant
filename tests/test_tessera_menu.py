@@ -1558,7 +1558,7 @@ def _synthetic_contract(monkeypatch, *, reader=(256, 2048), attested=(1024,)):
     census that attests one rung of it -- and the three modes are asked to
     disagree in the one direction that proves each read its own field.
     """
-    from tests.conftest import down_convert_lane_table, set_cell_census
+    from lane_table_fixtures import down_convert_lane_table, set_cell_census
 
     payload = json.loads(trc.installed_runtime_snapshot().raw)
     payload = down_convert_lane_table(payload, "tessera.lane-eligibility.v4")

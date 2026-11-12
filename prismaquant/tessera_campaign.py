@@ -3717,10 +3717,8 @@ def run_streamed_calibration(request: CensusRequest | CaptureRequest, runner, pr
         if writer is not None:
             writer.write(acts=acts, hessians=hessians, counts=rows, maxima=amax)
         if quantum is not None:
-            # A no-op unless the row declared the progress contract; the
-            # layer's units are journalled, so it is durable work.
-            from .prismabuild_progress import report
-            report("capture", layer - quantum.start + 1, unit="layers")
+            from .joint_run_progress import log_progress
+            log_progress(layer - quantum.start + 1, "capture", unit="layers")
         flushed = time.perf_counter()
         record = dict(layer=layer, units=len(names), capture_policy=capture_policy,
             completed_source_released=completed_source_released, collect_seconds=collected-before,
@@ -5060,7 +5058,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
     checkpoint_settings = MappingProxyType(checkpoint_settings)
 
     from .cost_stage_checkpoint import prepare_journal, write_unit
-    from .prismabuild_progress import report as report_progress
+    from .joint_run_progress import log_progress
 
     # The source/H template is deliberately built BEFORE the resume gate: it
     # is the producer computation that supplies that gate's exact records.
@@ -5749,7 +5747,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                 for name, state in states:
                     write_unit(stream_journal, stage=STREAM_JOURNAL_STAGE, qname=name,
                                identity_sha256=stream_identity_sha256, state=state)
-                report_progress("pricing", committed)
+                log_progress(committed, "pricing", unit="anchors")
 
             ledger.submit_checkpoint(write_stream)
             return
@@ -5768,7 +5766,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
             # PrismaBuild the row is working rather than merely running, and
             # it must not be able to say so on behalf of work that has not
             # landed (PB #480).
-            report_progress("pricing", committed)
+            log_progress(committed, "pricing", unit="anchors")
 
         ledger.submit_checkpoint(write)
 
@@ -6166,7 +6164,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
         # allowance follows the furthest phase entered and never an earlier
         # name.  What such a record does change is the phase the observation
         # displays, so a late drain can read "pricing" while finalize governs.
-        report_progress("finalize", committed_anchors())
+        log_progress(committed_anchors(), "finalize", unit="anchors")
         publication_stats = None
         if publisher is not None:
             # The last barrier, and where a writer failure nothing else looked at

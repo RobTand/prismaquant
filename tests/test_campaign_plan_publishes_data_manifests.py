@@ -1,12 +1,12 @@
 """Every row ``plan`` publishes already names the bytes the fleet warms it from.
 
-A pbcampaign row without ``data_manifest`` is invisible to PrismaBuild's
+A campaign row without ``data_manifest`` is invisible to the execution system's
 prewarm loop and starts against cold spindles: 306.9 MB/s cold against
 3298.7 MB/s warm for the same row (2026-09-11). Until this was fixed only
 ``submit`` attached the manifest, and only to the whole ``manifest.json``.
 Every partial release -- ``manifest.remaining-130.json``, the
 ``remaining-19-*`` sets, the e2m1 gate and rest sets -- was a filtered copy of
-``manifest.json`` handed to ``pbcampaign.py`` directly. None of those rows
+``manifest.json`` handed to the submitter directly. None of those rows
 carried a manifest, and nothing said so.
 
 So the manifest is attached where the rows are born. A subset copied from what
@@ -14,7 +14,7 @@ So the manifest is attached where the rows are born. A subset copied from what
 same paths, and ``check --manifest`` refuses a row that would still reach the
 fleet cold. The manifest is sealed into the action key, so its bytes may not
 depend on anything the plan's environment decides: a plan runs as a
-PrismaBuild action, where ``HEAD`` is pbrun's snapshot commit rather than the
+sealed action, where ``HEAD`` is the snapshot commit rather than the
 submitter's, and inside a container, where git refuses a checkout it calls
 dubious.
 
@@ -92,13 +92,12 @@ def _pre_fix_rows(tmp_path):
             "env": {},
             "tags": ["gb10"],
             "retry_safe": True,
-            "progress_phases": ["startup=3600", "pricing=900", "finalize=1800"],
             "timeout_s": 300,
         })
     return rows
 
 
-def test_every_planned_row_names_a_data_manifest_prismabuild_accepts(planned):
+def test_every_planned_row_names_a_data_manifest_the_submitter_accepts(planned):
     _, workspace = planned
     rows = json.loads((workspace / "manifest.json").read_text())
     assert [_row_id(row) for row in rows] == [
@@ -129,9 +128,9 @@ def test_argv_and_demand_are_byte_identical_to_the_pre_fix_plan(planned, shared_
 
 
 def test_the_manifest_bytes_do_not_depend_on_what_git_says(shared_mount, monkeypatch):
-    """A plan in a container, or under pbrun, must publish the same bytes.
+    """A plan in a container, or under a sealed submission, must publish the same bytes.
 
-    Inside a PrismaBuild action ``HEAD`` is pbrun's snapshot commit, and inside
+    Inside a sealed action ``HEAD`` is the snapshot commit, and inside
     a container git exits 128 on a checkout owned by another uid. Either one
     moving a byte of the manifest moves the action key of every row, so the
     row a host-side ``submit`` re-derives would not be the row the plan
@@ -204,7 +203,7 @@ def test_check_refuses_a_subset_that_would_reach_the_fleet_cold(planned):
 def test_submit_re_derives_the_planned_bytes_and_refuses_drift(planned, monkeypatch):
     _, workspace = planned
     calls = []
-    monkeypatch.setattr(dispatch, "_pbcampaign",
+    monkeypatch.setattr(dispatch, "_flux_campaign",
                         lambda manifest, *, wait_s, receipts=None:
                         calls.append(manifest) or 0)
     before = _published(workspace)

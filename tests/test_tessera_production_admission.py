@@ -107,7 +107,7 @@ def test_scoped_population_refuses_native_status_without_its_residency_selector(
 
 
 def test_valid_legacy_native_status_conflict_refuses_with_named_cells(monkeypatch):
-    from tests.conftest import down_convert_lane_table
+    from lane_table_fixtures import down_convert_lane_table
 
     payload = json.loads(installed_runtime_snapshot().raw)
     reference = next(cell for cell in payload["lane_eligibility"]["cells"]

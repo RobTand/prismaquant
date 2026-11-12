@@ -14,6 +14,7 @@ import pytest
 
 from prismaquant import joint_adjoint_slices as slices
 from prismaquant.digests import bytes_sha256hex, indent2_json_file_bytes
+from tests.delegation_recording import record_unary_calls
 
 
 def _record():
@@ -25,25 +26,15 @@ def _record():
             "cotangent_sha256": "0" * 64}
 
 
-def _spy(monkeypatch, name):
-    calls = []
-    real = getattr(slices, name, None)
-    def stand_in(value):
-        calls.append(value)
-        return real(value) if real is not None else None
-    monkeypatch.setattr(slices, name, stand_in, raising=False)
-    return calls
-
-
 def test_manifest_bytes_routes_to_indent2_owner(monkeypatch):
-    calls = _spy(monkeypatch, "indent2_json_file_bytes")
+    calls = record_unary_calls(monkeypatch, slices, "indent2_json_file_bytes")
     out = slices.checkpoint_manifest_bytes(_record())
     assert len(calls) == 1
     assert out == indent2_json_file_bytes(_record())
 
 
 def test_hash_sites_route_to_bytes_owner(monkeypatch, tmp_path):
-    calls = _spy(monkeypatch, "bytes_sha256hex")
+    calls = record_unary_calls(monkeypatch, slices, "bytes_sha256hex")
     monkeypatch.setattr(slices, "validate_band_receipt", lambda band: 3)
     monkeypatch.setattr(slices, "verify_adjoint_slice", lambda *a, **k: None)
     monkeypatch.setattr(slices, "_checkpoint_own_directory",

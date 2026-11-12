@@ -843,3 +843,49 @@ def test_the_report_names_the_source_state_the_numbers_came_from():
     # It is printed with the pins, before the counts it qualifies.
     assert report.index("Tessera source state:") < report.index(
         "Legal rate domain:")
+
+
+def test_native_walk_captures_once_and_refreshes_on_the_next_walk(monkeypatch, tmp_path):
+    from prismaquant import tessera_runtime_contract as runtime
+
+    cells = domain.attested_cells()
+    witnesses = tuple(
+        next(cell for cell in cells
+             if (cell.family, cell.rate_q256, cell.structure) == triple)
+        for triple in ((E4, 896, "routed_moe"), (BF, 1024, "dense"))
+    )
+    monkeypatch.setattr(domain, "attested_cells", lambda payload=None: witnesses)
+    capture = runtime.installed_runtime_snapshot
+    reads = []
+
+    def counted():
+        reads.append(1)
+        return capture()
+
+    monkeypatch.setattr(runtime, "installed_runtime_snapshot", counted)
+    assert domain.native_qualification_set() == frozenset({
+        (E4, 896, "routed_moe"), (BF, 1024, "dense"),
+    })
+    assert len(reads) == 1
+
+    changed = json.loads(runtime.contract_path().read_bytes())
+    changed["contract_version"] += 1
+    path = tmp_path / "runtime_contract.json"
+    path.write_text(json.dumps(changed))
+    monkeypatch.setattr(runtime, "contract_path", lambda: path)
+    assert domain.native_qualification_set() == frozenset()
+    assert len(reads) == 2
+
+
+def test_native_walk_keeps_capture_failure_closed(monkeypatch):
+    from prismaquant import tessera_runtime_contract as runtime
+
+    witness = next(cell for cell in domain.attested_cells()
+                   if cell.family == E4 and cell.rate_q256 == 896)
+    monkeypatch.setattr(domain, "attested_cells", lambda payload=None: (witness,))
+
+    def unreadable():
+        raise OSError("contract unavailable")
+
+    monkeypatch.setattr(runtime, "installed_runtime_snapshot", unreadable)
+    assert domain.native_qualification_set() == frozenset()

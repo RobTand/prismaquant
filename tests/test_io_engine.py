@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import mmap
 import os
 import threading
 import time
@@ -31,7 +32,7 @@ SIZE = 4096
 
 @pytest.fixture(autouse=True)
 def _no_residency_map(monkeypatch):
-    monkeypatch.delenv("PRISMABUILD_RESIDENCY_MAP", raising=False)
+    monkeypatch.delenv("PRISMAQUANT_STAGED_MANIFEST", raising=False)
 
 
 def _decode(raw, receipt, staged):
@@ -70,6 +71,31 @@ def _quiet(stream, timeout=30.0):
             assert remaining > 0, "the stream never went quiet"
             stream._cond.wait(remaining)
         return stream._held_actual, stream.counters["entries_read"]
+
+
+def test_write_sealed_buffer_exposes_readonly_mapped_bytes():
+    payload = b"pq-write-sealed-view" + bytes(range(256))
+    buffer = io_engine.SealedBuffer(len(payload))
+    try:
+        buffer.fill_bytes(payload)
+        assert buffer.seal() == hashlib.sha256(payload).hexdigest()
+        buffer.require_sealed()
+        with buffer.readonly() as view:
+            assert isinstance(view, mmap.mmap)
+            with memoryview(view) as mapped:
+                assert mapped.readonly
+                assert mapped == payload
+                with pytest.raises(TypeError):
+                    mapped[0] = 0
+            assert view.read(2) == payload[:2]
+            view.seek(0)
+            assert view.tell() == 0
+            # The mapping owns its pages after the buffer drops its descriptor.
+            buffer.close()
+            assert view.read() == payload
+        assert view.closed
+    finally:
+        buffer.close()
 
 
 def test_groups_arrive_whole_in_order_verified_and_decoded(tmp_path):
@@ -646,6 +672,193 @@ def test_a_yielding_budget_leaves_the_other_streams_next_group_its_room(tmp_path
     with pytest.raises(ValueError, match="floor"):
         GuardReadBudget(guard, buffer_bytes=SIZE, floor_bytes=-1)
 
+
+# -- the growth reserve (PQ #2602, child of #1347) --------------------------
+#
+# The reserve a ``GuardReadBudget`` takes off the live reading, from the
+# stream it budgets (``ReadStream.window_growth_bytes``):
+#
+#     reserve = min(ceil(evicted_bytes / max(1, groups taken)), peak_held_bytes)
+#
+# and zero once no group is left to take. The tests below compute it from the
+# stream's counters and check the budget's headroom against it, so they hold
+# the derivation and not the implementation's names.
+
+
+def _group(n):
+    return ("chunk", n)
+
+
+class _StreamGuard:
+    """A stub capture guard whose reading includes what the stream holds.
+
+    ``headroom_bytes`` is ``total`` less the stream's read-ahead and the
+    group taken and not released (a reading of the process holds both), less
+    ``consumer`` bytes: the consumer's own memory.
+    """
+
+    def __init__(self, total, consumer=0):
+        self.total, self.consumer, self.stream = total, consumer, None
+
+    def charged(self):
+        with self.stream._cond:
+            return self.stream._held + self.stream._unreleased
+
+    def headroom_bytes(self):
+        if self.stream is None:
+            return self.total - self.consumer
+        return self.total - self.consumer - self.charged()
+
+
+def _open_growth_stream(guard, groups=4):
+    """A stream on a ``GuardReadBudget``, started once the guard knows it.
+
+    Built directly so no read starts before the guard can read the stream.
+    """
+    entries, _calls = _range_entries(groups=groups)
+    budget = GuardReadBudget(guard, buffer_bytes=1)
+    stream = io_engine.ReadStream(io_engine.ENGINE, entries, budget, None)
+    guard.stream = stream
+    with stream._cond:
+        stream._pump()
+    return stream, budget
+
+
+def _reserve(stream):
+    """The derivation, from the stream's counters alone."""
+    if stream._taken >= len(stream._groups):
+        return 0
+    windows = max(1, stream._taken)
+    evicted = stream.counters["evicted_bytes"]
+    return min(-(-evicted // windows), stream.counters["peak_held_bytes"])
+
+
+def test_guard_read_budget_growth_reserve_rises_with_measured_consumer_growth():
+    guard = _StreamGuard(total=10 * SIZE)
+    # Unbound, nothing measured: the guard's reading exactly, as before.
+    assert GuardReadBudget(guard, buffer_bytes=1).headroom_bytes(0) == 10 * SIZE
+    stream, budget = _open_growth_stream(guard)
+    with stream:
+        assert _quiet(stream) == (4 * SIZE, 4)
+        # No growth observed yet: no reserve.
+        assert budget.headroom_bytes(4 * SIZE) == 6 * SIZE
+        # The consumer grew past the read-ahead: one entry was evicted.
+        assert stream.reclaim(SIZE) == SIZE
+        assert stream.counters["evicted_bytes"] == SIZE
+        assert _reserve(stream) == SIZE
+        assert budget.headroom_bytes(3 * SIZE) == 7 * SIZE - SIZE
+        # More growth, more reserve: the headroom falls by the derived amount.
+        assert stream.reclaim(2 * SIZE) == 2 * SIZE
+        assert _reserve(stream) == 3 * SIZE
+        assert budget.headroom_bytes(SIZE) == 9 * SIZE - 3 * SIZE
+        # A window that evicted nothing more spreads the same growth wider.
+        stream.take(_group(0))
+        assert _reserve(stream) == 3 * SIZE
+        stream.take(_group(1))
+        assert _quiet(stream)
+        assert _reserve(stream) == -(-3 * SIZE // 2)
+        assert (budget.headroom_bytes(0)
+                == guard.headroom_bytes() - -(-3 * SIZE // 2))
+        stream.take(_group(2))
+        stream.take(_group(3))
+        # Every group taken: no next window to grow in.
+        assert _reserve(stream) == 0
+        assert budget.headroom_bytes(0) == guard.headroom_bytes()
+        stream.release()
+
+
+def test_guard_read_budget_growth_reserve_bounds_admitted_read_ahead_and_demanded_group_is_still_read():
+    total = 4 * SIZE
+    guard = _StreamGuard(total=total)
+    stream, budget = _open_growth_stream(guard)
+    with stream:
+        assert _quiet(stream) == (4 * SIZE, 4)
+        # The consumer's growth evicted groups 3, 2 and 1.
+        assert stream.reclaim(3 * SIZE) == 3 * SIZE
+        stream.take(_group(0))
+        held, read = _quiet(stream)
+        # The reserve is 3 * SIZE: with the taken group charged there is no
+        # room for read-ahead, and none is admitted.
+        assert (held, read) == (0, 4)
+        assert stream.counters["rereads"] == 0
+        assert guard.charged() + _reserve(stream) <= total
+        assert budget.headroom_bytes(guard.charged()) == 0
+        # The next group is demanded: it is read whatever the headroom says.
+        assert stream.demand(_group(1)) == (SIZE, SIZE)
+        delivered = stream.take(_group(1))
+        assert [item.value for item in delivered] == [bytes([1]) * SIZE]
+        assert stream._reads[1] == 2
+        # The mean growth per window fell to ceil(3 * SIZE / 2): group 2 fits
+        # beside it, group 3 does not.
+        held, read = _quiet(stream)
+        assert (held, read) == (SIZE, 6)
+        assert stream.counters["rereads"] == 2
+        assert _reserve(stream) == -(-3 * SIZE // 2)
+        assert guard.charged() + _reserve(stream) <= total
+        stream.release()
+
+
+def test_guard_read_budget_growth_reserve_follows_release_of_the_taken_group():
+    guard = _StreamGuard(total=6 * SIZE)
+    stream, budget = _open_growth_stream(guard)
+    with stream:
+        assert _quiet(stream) == (4 * SIZE, 4)
+        assert stream.reclaim(SIZE) == SIZE
+        assert budget.headroom_bytes(3 * SIZE) == 3 * SIZE - SIZE
+        taken = stream.take(_group(0))
+        held, read = _quiet(stream)
+        # The evicted group is read again beside the reserve; the taken
+        # group stays charged until it is released.
+        assert (held, read) == (3 * SIZE, 5)
+        assert stream._unreleased == SIZE
+        assert guard.charged() == 4 * SIZE
+        assert budget.headroom_bytes(4 * SIZE) == 2 * SIZE - SIZE
+        taken = None
+        stream.release()
+        # Released: its bytes stop being charged and the headroom rises by them.
+        assert stream._unreleased == 0
+        assert guard.charged() == 3 * SIZE
+        assert budget.headroom_bytes(3 * SIZE) == 3 * SIZE - SIZE
+        # The next window: the same growth over two windows, a smaller
+        # reserve, and the group taken charged again until its release.
+        stream.take(_group(1))
+        assert _quiet(stream)
+        assert _reserve(stream) == SIZE // 2
+        assert budget.headroom_bytes(0) == 3 * SIZE - SIZE // 2
+        stream.release()
+        assert budget.headroom_bytes(0) == 4 * SIZE - SIZE // 2
+
+
+def test_guard_read_budget_growth_reserve_shortfall_reclaims_non_demanded_read_ahead():
+    guard = _StreamGuard(total=8 * SIZE)
+    stream, budget = _open_growth_stream(guard)
+    with stream:
+        assert _quiet(stream) == (4 * SIZE, 4)
+        assert stream.demand(_group(0)) == (0, 0)
+        # The consumer grows 5 * SIZE: the reading is a SIZE short.
+        guard.consumer = 5 * SIZE
+        assert guard.headroom_bytes() == -SIZE
+        assert stream.reclaim(SIZE) == SIZE
+        assert stream.counters["evictions"] == 1
+        assert stream.counters["evicted_bytes"] == SIZE
+        assert guard.headroom_bytes() == 0
+        # It grows to 8 * SIZE: 3 * SIZE short, only two entries are not demanded's.
+        guard.consumer = 8 * SIZE
+        assert guard.headroom_bytes() == -3 * SIZE
+        assert stream.reclaim(3 * SIZE) == 2 * SIZE
+        assert stream.counters["evictions"] == 3
+        assert stream.counters["evicted_bytes"] == 3 * SIZE
+        assert stream.held_bytes() == SIZE
+        # The consumer drops its window: what it grew is now held back from
+        # the read-ahead the budget admits.
+        guard.consumer = 0
+        assert _reserve(stream) == 3 * SIZE
+        assert budget.headroom_bytes(SIZE) == 7 * SIZE - 3 * SIZE
+        # The demanded group was never dropped, so it is not read again.
+        delivered = stream.take(_group(0))
+        assert [item.value for item in delivered] == [bytes([0]) * SIZE]
+        assert stream._reads[0] == 1
+        stream.release()
 
 
 def test_the_device_headroom_is_every_limit_a_cuda_allocation_lands_in(

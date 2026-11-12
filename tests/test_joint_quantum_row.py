@@ -76,17 +76,17 @@ def _run_inputs():
 def test_run_input_pairs_keep_literal_consumer_argv_and_optional_band_order():
     band = row.QuantumBandArguments(row.QuantumFileBinding("/handoff.json", "h" * 64),
                                     True, '[{"phase":"handoff-load"}]')
-    assert _run_inputs().argv(allowed_tiers="ram,ssd", band=band) == [
+    assert _run_inputs().argv(band=band) == [
         "python3", "-m", "prismaquant.joint_cost_quantum",
         "--quantum", "/records/q.json", "--quantum-sha256", "q" * 64,
         "--plan", "/plan.json", "--plan-sha256", "p" * 64,
         "--prepared", "/prepared.json", "--prepared-sha256", "r" * 64,
         "--adjoint-slice", "/slice.json", "--adjoint-slice-sha256", "s" * 64,
-        "--data-manifest-sha256", "m" * 64, "--allowed-tiers", "ram,ssd",
+        "--data-manifest-sha256", "m" * 64,
         "--resume", "--output-root", "/output", "--adjoint-handoff", "/handoff.json",
         "--adjoint-handoff-sha256", "h" * 64, "--emit-adjoint-handoff",
         "--progress-grace-derivation", '[{"phase":"handoff-load"}]']
-    assert _run_inputs().argv(allowed_tiers="ram,ssd")[-3:] == ["--resume", "--output-root", "/output"]
+    assert _run_inputs().argv()[-3:] == ["--resume", "--output-root", "/output"]
 
 
 def test_manifest_annotation_remains_an_unbound_locator():
@@ -101,23 +101,78 @@ def test_row_demand_counts_the_existing_native_and_prefetch_workers(reader, sour
         {"limits": {"physical_bytes": int(7.5 * 1024**3), "gpu_bytes": 3 * 1024**3}},
         environment={"PRISMAQUANT_LAYER_READ_THREADS": str(reader)},
         source_prefetch={"prefetch_workers": source}, operator_prefetch={"prefetch_workers": operator})
-    assert (demand.memory_gib, demand.gpu_gib, demand.cpus) == ("7.5", "3", expected)
+    assert (demand.memory_gib, demand.cpus) == ("7.5", expected)
     default = row.QuantumRowDemand.from_policy(None,
         environment={"PRISMAQUANT_LAYER_READ_THREADS": "unused-invalid"})
-    assert (default.memory_gib, default.gpu_gib, default.cpus) == ("104", "80", 10)
+    assert (default.memory_gib, default.cpus) == ("104", 10)
 
 
-def test_pb_envelope_keeps_progress_options_environment_duplicates_and_separator():
-    envelope = row.QuantumPBEnvelope("/manifest.gz", [("head", 45), ("handoff-load", 91)],
-        row.QuantumRowDemand("7.5", "3", 4), ["gb10", "native-image"], -5,
+def test_native_row_preserves_exact_scientific_and_resource_intent(tmp_path):
+    import hashlib
+    import json
+    from prismaquant.stage_a_produced_output import build_boundary_template
+
+    filename = tmp_path / "template.json"
+    wire = (json.dumps(build_boundary_template(output_prefix=str(tmp_path / "outputs"),
+        artifact_max_bytes=1024, group_size=1, max_entry_tensor_bytes=32),
+        sort_keys=True, indent=2) + "\n").encode()
+    filename.write_bytes(wire)
+    intent = row.QuantumRow(row.QuantumRowDemand("7.5", 4), ["gb10", "native-image"], -5,
         ["python3", "launcher.py", "--spec", "{}", "--", "payload"],
-        [("SCRATCH", "a"), ("SCRATCH", "b")], "/template.json", "repo@sha256:image")
-    assert envelope.argv(python="/python", pbrun="/pbrun.py", container_image_flag="--container-image",
-                         dev_mode_assignment="PRISMAQUANT_DEV_MODE=1") == [
-        "/python", "/pbrun.py", "--tag", "gb10", "--tag", "native-image",
-        "--data-manifest", "/manifest.gz", "--residency", "stage", "--residency-ram", "auto",
-        "--progress-phase", "head=45", "--progress-phase", "handoff-load=91",
-        "--priority", "-5", "--demand", "gpu=1,mem_gb=7.5", "--gpu-memory-gb", "3", "--cpus", "4",
-        "--produced-output-template", "/template.json", "--container-image", "repo@sha256:image",
-        "--env", "SCRATCH=a", "--env", "SCRATCH=b", "--env", "PRISMAQUANT_DEV_MODE=1",
-        "--detach", "--", "python3", "launcher.py", "--spec", "{}", "--", "payload"]
+        3600, [("SCRATCH", "a")], str(filename)).row(checkout="/source")
+    assert intent == {
+        "argv": ["python3", "launcher.py", "--spec", "{}", "--", "payload",
+                 "--produced-declaration", str(filename),
+                 "--produced-declaration-sha256", hashlib.sha256(wire).hexdigest()], "cwd": "/source",
+        "demand": {"gpu": 1, "mem_gb": 7.5, "cpu": 4},
+        "tags": ["gb10", "native-image"], "priority": -5, "env": {"SCRATCH": "a"},
+        "retry_safe": True, "timeout_s": 3600}
+
+
+def test_unpublished_declaration_matches_actual_file_without_writes(tmp_path):
+    import hashlib
+    import json
+    from prismaquant.stage_a_produced_output import build_boundary_template, declaration_launch_arguments
+
+    filename = tmp_path / "not-published" / "template.json"
+    wire = (json.dumps(build_boundary_template(output_prefix=str(tmp_path / "outputs"),
+        artifact_max_bytes=1024, group_size=1, max_entry_tensor_bytes=32),
+        sort_keys=True, indent=2) + "\n").encode()
+    expected = ["--produced-declaration", str(filename),
+                "--produced-declaration-sha256", hashlib.sha256(wire).hexdigest()]
+    assert declaration_launch_arguments(filename, wire=wire) == expected
+    assert not list(tmp_path.iterdir())
+    filename.parent.mkdir()
+    filename.write_bytes(wire)
+    assert declaration_launch_arguments(filename) == expected
+
+
+@pytest.mark.parametrize("wire", [b'', b'{}', b'{"schema":1,"schema":2}', 'not-bytes'])
+def test_invalid_unpublished_declaration_refuses_without_writes(tmp_path, wire):
+    from prismaquant.stage_a_produced_output import BoundaryProducedBindingError, declaration_launch_arguments
+
+    with pytest.raises(BoundaryProducedBindingError):
+        declaration_launch_arguments(tmp_path / "not-published.json", wire=wire)
+    assert not list(tmp_path.iterdir())
+
+
+def test_oversized_unpublished_declaration_refuses_without_writes(tmp_path):
+    from prismaquant.stage_a_produced_output import (
+        BoundaryProducedBindingError, MAX_DOCUMENT_BYTES, declaration_launch_arguments)
+
+    with pytest.raises(BoundaryProducedBindingError, match="bounded declaration bytes"):
+        declaration_launch_arguments(tmp_path / "not-published.json",
+                                     wire=b'x' * (MAX_DOCUMENT_BYTES + 1))
+    assert not list(tmp_path.iterdir())
+
+
+def test_unpublished_declaration_without_path_refuses():
+    with pytest.raises(ValueError, match="explicit path"):
+        row.QuantumRow(row.QuantumRowDemand("1", 1), [], 0,
+                       ["true"], 3600, produced_declaration_wire=b'{}').row(checkout="/source")
+
+
+def test_conflicting_environment_intent_refuses():
+    with pytest.raises(ValueError, match="conflicting"):
+        row.QuantumRow(row.QuantumRowDemand("1", 1), [], 0, ["true"],
+                       3600, [("A", "a"), ("A", "b")]).row(checkout="/source")

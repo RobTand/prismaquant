@@ -745,12 +745,13 @@ def test_apply_global_prune_ratio_ignores_non_packed_entries():
         packed: [Candidate("NVFP4", 4.25, 1000, 0.01)],
         dense:  [Candidate("NVFP4", 4.25, 100, 0.001)],
     }
+    original_dense_candidate = candidates[dense][0]
     n = apply_global_prune_ratio(
         candidates, stats, sal, global_ratio=0.25, prune_alpha=1.0,
     )
     assert n == 1  # only packed
     # Dense untouched (same Candidate object identity).
-    assert candidates[dense][0] is candidates[dense][0]
+    assert candidates[dense][0] is original_dense_candidate
     assert len(candidates[dense]) == 1
     # Packed now has prune variants, no baseline.
     for c in candidates[packed]:

@@ -1,4 +1,5 @@
 """Metadata-only namespace admission; no model, Docker or historical inputs."""
+from container_admission import ADMISSION
 import copy
 import json
 import os
@@ -10,11 +11,11 @@ import pytest
 import tools.tessera_campaign_namespace as namespace
 from tools import dispatch_tessera_campaign as dispatch
 from tools import tessera_campaign_container as adapter
-from tools.pq_profile_digest import profile_digest_owner
+from tools.pq_profile_artifact import profile_digest_owner
 
 owner = profile_digest_owner()
 COMMIT = "b" * 40
-PROVENANCE = {"tessera_commit": "c" * 40, "prismabuild_commit": "d" * 40,
+PROVENANCE = {"tessera_commit": "c" * 40, "native_profile": ADMISSION["profile"], "native_runtime_sha256": "f" * 64,
               "container_content_sha256": "e" * 64}
 
 
@@ -54,7 +55,7 @@ def test_adapter_refuses_unbound_namespace_before_docker(monkeypatch):
     row = request()
     spec = json.loads(row["argv"][4])
     spec["namespace_binding"] = {"schema": "prismaquant.tessera_campaign_namespace.v1"}
-    monkeypatch.setattr(adapter, "inspect_or_load", lambda *args: pytest.fail("Docker reached"))
+    monkeypatch.setattr(adapter, "inspect_or_load", lambda *args: pytest.fail("container engine reached"))
     with pytest.raises(RuntimeError, match="namespace"):
         adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
 
@@ -223,7 +224,7 @@ def test_adapter_positive_and_source_refusal_before_docker(tmp_path, monkeypatch
     (tmp_path / "prismaquant" / "__init__.py").write_text("# synthetic checkout package\n")
     assert adapter.validate_namespace_launch(spec, row["argv"][6:], cwd=str(tmp_path), environ=row["env"]) == COMMIT
     monkeypatch.setattr(adapter, "checkout_commit", lambda cwd: "0" * 40)
-    monkeypatch.setattr(adapter, "inspect_or_load", lambda *args: pytest.fail("Docker reached"))
+    monkeypatch.setattr(adapter, "inspect_or_load", lambda *args: pytest.fail("container engine reached"))
     with pytest.raises(RuntimeError, match="source commit differs"):
         adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
 
@@ -343,7 +344,7 @@ def test_review_source_requires_known_guarded_checkout(tmp_path, monkeypatch, py
         adapter.validate_namespace_launch(spec, row["argv"][6:], cwd=str(tmp_path), environ=row["env"])
     for name, value in row["env"].items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setattr(adapter, "inspect_or_load", lambda *a: pytest.fail("Docker reached"))
+    monkeypatch.setattr(adapter, "inspect_or_load", lambda *a: pytest.fail("container engine reached"))
     with pytest.raises(RuntimeError, match="guarded|checkout|import"):
         adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
 
@@ -455,7 +456,7 @@ def import_shadow_launch_fixture(tmp_path, monkeypatch, shadow):
     monkeypatch.chdir(checkout)
     for name, value in row["env"].items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setattr(adapter, "inspect_or_load", lambda *a: pytest.fail("Docker reached past mounted import shadow"))
+    monkeypatch.setattr(adapter, "inspect_or_load", lambda *a: pytest.fail("container engine reached past mounted import shadow"))
     return row, spec, foreign
 
 
@@ -663,7 +664,7 @@ def test_mount_component_adapter_refuses_self_consistent_alias_before_docker(tmp
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(adapter, "checkout_commit", lambda cwd: COMMIT)
     monkeypatch.setattr(adapter.subprocess, "run", lambda *a, **k: type("Result", (), {"returncode": 0, "stdout": ""})())
-    monkeypatch.setattr(adapter, "inspect_or_load", lambda *a: pytest.fail("Docker reached"))
+    monkeypatch.setattr(adapter, "inspect_or_load", lambda *a: pytest.fail("container engine reached"))
     with pytest.raises(RuntimeError, match="namespace paths must be canonical"):
         adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
     assert {path: path.read_bytes() for path in before} == before
@@ -759,3 +760,9 @@ def test_publication_concurrent_identical_callers_preserve_no_clobber(tmp_path, 
             future.result(timeout=20)
     namespace.require_namespace_publication(rows[0])
     assert not list((tmp_path / "new").rglob("*.tmp*"))
+
+
+@pytest.fixture(autouse=True)
+def owned_native_admission(monkeypatch):
+    """Namespace metadata controls supply the admitting job explicitly."""
+    monkeypatch.setattr(adapter, "native_admission", lambda environ: ADMISSION)

@@ -303,11 +303,11 @@ def test_every_under_declared_row_is_named_at_once(monkeypatch, tmp_path):
 
 def test_submit_refuses_an_under_declared_manifest_before_submitting_it(
         monkeypatch, tmp_path):
-    """Nothing reaches pbcampaign that the row's own guard would decline."""
+    """Nothing reaches the submitter that the row's own guard would decline."""
     dispatch = _fixed_plan(monkeypatch)
     spec, census = _spec(tmp_path), _census(tmp_path)
     submitted = []
-    monkeypatch.setattr(dispatch, '_pbcampaign',
+    monkeypatch.setattr(dispatch, '_flux_campaign',
                         lambda *a, **k: submitted.append(a) or 0)
     # ``submit`` runs a second, independent gate: every row gets the data
     # manifest the fleet warms it from (#518). This fixture's model is a bare

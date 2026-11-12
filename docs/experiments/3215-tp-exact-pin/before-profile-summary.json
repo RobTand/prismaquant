@@ -1,0 +1,342 @@
+{
+  "exitstatus": 0,
+  "phase_seconds": {
+    "setup": 0.08544149699999082,
+    "call": 223.22428609300007,
+    "teardown": 0.016623223999985726
+  },
+  "total_phase_seconds": 223.32635081400005,
+  "slowest_tests": [
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_exact_pin_tp2_menu_drops_only_the_refused_cut",
+      "phases": {
+        "setup": 0.008305151000001842,
+        "call": 51.730438761000016,
+        "teardown": 0.0016172459999950206
+      },
+      "seconds": 51.74036115800001
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_tp2_menu_keeps_only_the_same_scoped_native_rungs",
+      "phases": {
+        "setup": 0.0020631360000038512,
+        "call": 49.55931444000001,
+        "teardown": 0.0013494149999928595
+      },
+      "seconds": 49.562726991000005
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[2-none]",
+      "phases": {
+        "setup": 0.008646342000020013,
+        "call": 34.71749300900001,
+        "teardown": 0.0017325599999935548
+      },
+      "seconds": 34.72787191100002
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[1-column]",
+      "phases": {
+        "setup": 0.008361976999992748,
+        "call": 34.24025419300003,
+        "teardown": 0.0016344329999924412
+      },
+      "seconds": 34.25025060300001
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_menu_expansion_reads_tp_facts_from_its_one_capture",
+      "phases": {
+        "setup": 0.008377989999985402,
+        "call": 17.465732349999996,
+        "teardown": 0.001620151000054193
+      },
+      "seconds": 17.475730491000036
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[False]",
+      "phases": {
+        "setup": 0.008564229999990403,
+        "call": 17.308701071,
+        "teardown": 0.0015788389999897845
+      },
+      "seconds": 17.31884413999998
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[True]",
+      "phases": {
+        "setup": 0.00827419399999485,
+        "call": 17.128542471999992,
+        "teardown": 0.0016149930000040058
+      },
+      "seconds": 17.13843165899999
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_exact_serving_pin_attests_only_the_published_tp_ceiling[TESSERA_BF16_K1]",
+      "phases": {
+        "setup": 0.001658307999989006,
+        "call": 1.0600642229999977,
+        "teardown": 0.0005156729999953313
+      },
+      "seconds": 1.062238203999982
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_exact_pin_publishes_the_refused_axis_to_direct_callers",
+      "phases": {
+        "setup": 0.013402909999996382,
+        "call": 0.0016933510000001206,
+        "teardown": 0.0012008619999903658
+      },
+      "seconds": 0.01629712299998687
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_unpinned_bytes_publish_no_loader_fact",
+      "phases": {
+        "setup": 0.0027252290000205903,
+        "call": 0.00607206000000815,
+        "teardown": 0.0012765760000092996
+      },
+      "seconds": 0.01007386500003804
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_tp_fallback_refuses_answer_equivalent_unpinned_bytes",
+      "phases": {
+        "setup": 0.00399622599999816,
+        "call": 0.003209666000003608,
+        "teardown": 0.0010280229999750645
+      },
+      "seconds": 0.008233914999976832
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_exact_serving_pin_attests_only_the_published_tp_ceiling[TESSERA_E2M1_K2]",
+      "phases": {
+        "setup": 0.005303917999995633,
+        "call": 0.0007976159999998345,
+        "teardown": 0.0003231949999928929
+      },
+      "seconds": 0.0064247289999883606
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_tp_fallback_remains_closed_world_for_an_unpublished_family",
+      "phases": {
+        "setup": 0.004089456000002656,
+        "call": 0.0013205820000052881,
+        "teardown": 0.0009307370000044557
+      },
+      "seconds": 0.0063407750000124
+    },
+    {
+      "node": "tests/test_tessera_tp_exact_pin.py::test_exact_serving_pin_attests_only_the_published_tp_ceiling[TESSERA_E4M3_K1]",
+      "phases": {
+        "setup": 0.0016724299999992809,
+        "call": 0.0006522989999950823,
+        "teardown": 0.00020052099999645634
+      },
+      "seconds": 0.0025252499999908196
+    }
+  ],
+  "samples": 21798,
+  "top_leaf": [
+    [
+      "/usr/lib/python3.12/copy.py:118:deepcopy",
+      7762
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/filelock/_api.py:2215:_audit_fork_safety",
+      5290
+    ],
+    [
+      "/usr/lib/python3.12/copy.py:200:_deepcopy_tuple",
+      2926
+    ],
+    [
+      "/usr/lib/python3.12/copy.py:172:_deepcopy_atomic",
+      1018
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/tessera/grammar.py:333:bresenham_rate_schedule",
+      507
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/lane_eligibility.py:1708:_launch_covers",
+      296
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/joint_catalog_extension.py:277:added_format_recipe",
+      256
+    ],
+    [
+      "/usr/lib/python3.12/copy.py:217:_deepcopy_dict",
+      232
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:1183:get_data",
+      202
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/lane_eligibility.py:3018:<genexpr>",
+      193
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/tessera/grammar.py:256:_check_rate",
+      160
+    ],
+    [
+      "/usr/lib/python3.12/copy.py:231:_keep_alive",
+      159
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/lane_eligibility.py:2231:native",
+      153
+    ],
+    [
+      "/usr/lib/python3.12/copy.py:247:_reconstruct",
+      134
+    ],
+    [
+      "<string>:2:__init__",
+      123
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/tessera/layout.py:222:<genexpr>",
+      120
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_footprint.py:528:<genexpr>",
+      86
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/transformers/utils/import_utils.py:2958:create_import_structure_from_path",
+      81
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:140:_path_stat",
+      77
+    ],
+    [
+      "/usr/lib/python3.12/fractions.py:186:__new__",
+      73
+    ]
+  ],
+  "top_inclusive": [
+    [
+      "/usr/lib/python3.12/copy.py:118:deepcopy",
+      17590
+    ],
+    [
+      "/usr/lib/python3.12/copy.py:247:_reconstruct",
+      17404
+    ],
+    [
+      "/usr/lib/python3.12/copy.py:217:_deepcopy_dict",
+      17387
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_render.py:186:snapshot_rung_admission",
+      17199
+    ],
+    [
+      "/usr/lib/python3.12/copy.py:200:_deepcopy_tuple",
+      17110
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_runtime_contract.py:2600:native_rung_verdict",
+      17050
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_menu.py:643:_route_admission",
+      11970
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_menu.py:1434:expand_tessera_menu",
+      7458
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/filelock/_api.py:2215:_audit_fork_safety",
+      5290
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:160:pytest_pyfunc_call",
+      4200
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_execution.py:89:_multicall",
+      4112
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_manager.py:174:_hookexec",
+      4014
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_caller.py:181:__call__",
+      3923
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:1705:runtest",
+      3418
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:173:pytest_runtest_call",
+      3222
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_tp_exact_pin.py:34:test_tp2_menu_keeps_only_the_same_scoped_native_rungs",
+      1690
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/lane_eligibility.py:3018:<genexpr>",
+      1402
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/lane_eligibility.py:3074:native_rung_verdict",
+      1394
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/lane_eligibility.py:3005:native_rung_cells",
+      1359
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/tessera_metadata_fixture.py:18:<lambda>",
+      1270
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:250:<lambda>",
+      1268
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_tp_exact_pin.py:157:test_exact_pin_refused_axis_is_not_asked_without_a_cut",
+      1137
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:269:call",
+      1115
+    ],
+    [
+      "/usr/lib/python3.12/copy.py:172:_deepcopy_atomic",
+      1018
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_footprint.py:672:tessera_exact_bits_for_shape",
+      966
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_menu.py:1173:_tp_legal",
+      926
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_footprint.py:644:_exact_bits_for_shape",
+      923
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_footprint.py:292:tessera_tensor_payload_breakdown",
+      921
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_serving_runtime_pin.py:1057:pinned_serving_source_sha256",
+      892
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_tp_exact_pin.py:141:test_exact_pin_tp2_menu_drops_only_the_refused_cut",
+      833
+    ]
+  ]
+}

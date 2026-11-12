@@ -1,0 +1,982 @@
+{
+ "harness_binding": "retained_native_v2",
+ "validation_binding": "current_validation",
+ "candidate": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+ "correction_coverage_per_round": {
+  "610": {
+   "candidate_nodes_passed": 9,
+   "elements": [
+    "610.A",
+    "610.B",
+    "610.C",
+    "610.D"
+   ],
+   "original_failures": 4
+  },
+  "611": {
+   "candidate_nodes_passed": 45,
+   "elements": [
+    "611.A",
+    "611.B",
+    "611.C",
+    "611.D",
+    "611.E",
+    "611.F"
+   ],
+   "original_failures": 39
+  }
+ },
+ "harness_sha256": {
+  "bf16_oracle.py": "1be525f6b086d0c13f2be5db4ae5cc9ad895d2456293d0795447c0f917517c33",
+  "container_entry.py": "84d9391b3343c76eddd17a4fff06256d4aea9ba0aea46d9890afc1457830576d",
+  "native_probe.py": "fc575923c64dda9e68672ba5074b385474d623d4eb86bd77ae4da644acccd273",
+  "probe_selftest.py": "1e4c3b41e10a8170f93d212a7ed56cc42a46f34dd66ef1477f6e11828b011931",
+  "run_suite.py": "b23907a7cd272bd246527969899864706a3b8dd0c082339ffcee8b3e1f411e60"
+ },
+ "inputs": {
+  "candidate.json": {
+   "bytes": 3314,
+   "sha256": "0ee08986969b7f897dc647d8e96c456c1bc6c552528232c89f4c403ea8335a67"
+  },
+  "corrections.json": {
+   "bytes": 30044,
+   "sha256": "370df2fae9c7e641607eca0dc384386fa08afac31dc6586b2640bfa45c5844ca"
+  },
+  "roster.json": {
+   "bytes": 62921,
+   "sha256": "0f2607af14e20b383666891fcbb0922664a8a40a8219792bc5bbfa14a8628889"
+  }
+ },
+ "limitations": [
+  "One run_tests operation contains four independent fresh-directory container launches, not four PB actions. No PB action IDs are asserted.",
+  "ImageX reference/RepoDigests and Docker configuration image ID are separately recorded from each inspect. Preflight config ID differs from its RepoDigest; equality is not a qualification requirement.",
+  "Source qualification uses verified suite-source bytes/measurement span and exact harness hashes. Sealed-launch closure metadata is retained, not assumed to be a clean checkout or the candidate source commit.",
+  "Dense native mappings used pathname readers after map_files EPERM; each successful opened file matches mapped inode/device. Libraries are not republished; built SHA-256 inventory and mapping provenance are retained.",
+  "MoE has no native shared libraries built or mapped in these launches; its native gate is true with empty inventories, not evidence of a native shared-library invocation.",
+  "CUDA allocation counts are floors. BF16 observations are retained numerical measurements; tensors are not republished for recomputation.",
+  "External raw JSONL is indexed by path, SHA-256 and byte count, not duplicated. Offline CPU tests cannot re-hash external library/source bytes."
+ ],
+ "operations": {
+  "preflights": {
+   "exit_status": 0,
+   "launches": 2,
+   "operation": "5267a884d103f822f34a4ff5022bdd80bc6006db6f937d89c417547e02ef01cf",
+   "stdout": {
+    "bytes": 11516,
+    "sha256": "4f07cdadce55ed3c47890b2976deef9f5e3b63cda1729cc1f0f880be7cbbcbb1"
+   }
+  },
+  "runs": {
+   "exit_status": 0,
+   "launches": 4,
+   "operation": "a577b8d9db2049265c77f9c211f8a7994b45374c25575163ddc6310664be1cb7",
+   "stdout": {
+    "bytes": 120372,
+    "sha256": "3cf9cfa2855e121f8589ba9ba8d5d28b9f10a502a8e2758ffa9b0090c6d95c6b"
+   }
+  }
+ },
+ "preflights": [
+  {
+   "artifact_root": "logs/native-v2/collect-dense.5393ejr1",
+   "artifacts": {
+    "collect.txt": {
+     "bytes": 6203,
+     "sha256": "40a5bd6d597c282edb25e5403db76e5f6863ecdd52cf1a5a9fccd0c2f96f34d6"
+    },
+    "container-report.json": {
+     "bytes": 2016,
+     "sha256": "908d4779e9ced320eb77fd6ad48778c93e0183d1d4b60b9d0d2125ad6d674629"
+    },
+    "run-manifest.json": {
+     "bytes": 5059,
+     "sha256": "c336bdc72320a6f2db8e22d7608a43e47894d9ee80c7857cdf2dd3f0a0c0e0af"
+    }
+   },
+   "cuda_available": false,
+   "device": null,
+   "external_raw_jsonl": [
+    {
+     "bytes": 121,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/collect-dense.5393ejr1/probe-collect/probe.main.jsonl",
+     "sha256": "3a356161c9c5b6c04c298aa72861bc61052f1fe1ade872c86e3b8995467e8136"
+    },
+    {
+     "bytes": 942,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/collect-dense.5393ejr1/probe-selftest/probe.gw0.jsonl",
+     "sha256": "02c7da9ae12c8bf535da2469a19abcf4f133d04297a0532ca88956ab9d8cc2e6"
+    },
+    {
+     "bytes": 1269,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/collect-dense.5393ejr1/probe-selftest/probe.gw1.jsonl",
+     "sha256": "535187d714aeebfd9014b58df9ae7769ac3c58ee0ad7d9a218c620f400eb44ef"
+    },
+    {
+     "bytes": 122,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/collect-dense.5393ejr1/probe-selftest/probe.main.jsonl",
+     "sha256": "93568886b6814b8b52ceee989899524837dff700e8d6070879e419530208df0d"
+    }
+   ],
+   "finished_unix": 1792797399.3756964,
+   "image": {
+    "architecture": "arm64",
+    "created": "2026-09-25T16:46:23.284603861-04:00",
+    "id": "sha256:9e6882df27dd5274bcb8fe048a0c435c531bbd794247cfc964556cf7d60fbc7d",
+    "reference": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+    "repo_digests": [
+     "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+    ]
+   },
+   "launch_snapshot": {
+    ".pbrun-closure.8d7fc3e87610624d.json": {
+     "cwd": ".",
+     "dirty_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "head": "1658f942ba430f98158540cd77eeb64c2cd5390b"
+    }
+   },
+   "mode": "collect",
+   "name": "collect-dense.5393ejr1",
+   "operation": "5267a884d103f822f34a4ff5022bdd80bc6006db6f937d89c417547e02ef01cf",
+   "roster_count": 65,
+   "source": {
+    "checkout": {
+     "head": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+     "tracked_files": 2005,
+     "tree": "3b304c6cab442c530cb864e532be2d147571c792",
+     "url": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/run-dense.9f8qda_6/tessera-source"
+    },
+    "verified_identity": {
+     "contract_matches_pin": true,
+     "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+     "suite_source": {
+      "excluded_metadata": [],
+      "files_verified": 2005,
+      "schema": "tessera.suite_source.v1",
+      "sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+      "snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+      "verification": "verified"
+     },
+     "verified_at_candidate": true
+    }
+   },
+   "started_unix": 1792797385.102592,
+   "suite": "dense"
+  },
+  {
+   "artifact_root": "logs/native-v2/collect-moe.x3u7l0i0",
+   "artifacts": {
+    "collect.txt": {
+     "bytes": 7394,
+     "sha256": "e4e2747837ce4fa87e584ecd89099c706922255d374a0839d821f8f63d29c09b"
+    },
+    "container-report.json": {
+     "bytes": 2056,
+     "sha256": "61792ac2591e0f66d0122cd8b36890900f32200ad814ebfa5f2479b5f221e37a"
+    },
+    "run-manifest.json": {
+     "bytes": 5023,
+     "sha256": "799d529cc8edb2d8d96dd43f695964612c1a14975969feccc1b1087de0f14a55"
+    }
+   },
+   "cuda_available": false,
+   "device": null,
+   "external_raw_jsonl": [
+    {
+     "bytes": 121,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/collect-moe.x3u7l0i0/probe-collect/probe.main.jsonl",
+     "sha256": "3a356161c9c5b6c04c298aa72861bc61052f1fe1ade872c86e3b8995467e8136"
+    },
+    {
+     "bytes": 939,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/collect-moe.x3u7l0i0/probe-selftest/probe.gw0.jsonl",
+     "sha256": "38402bf300abf1f4d9a0132591d2c81f5a8c421aec9a732ceae75870a819daff"
+    },
+    {
+     "bytes": 1264,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/collect-moe.x3u7l0i0/probe-selftest/probe.gw1.jsonl",
+     "sha256": "486b057d0b27a98a806b18db2e6cf6ad0e7226c903fa8fa98533e4f488c2a913"
+    },
+    {
+     "bytes": 122,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/collect-moe.x3u7l0i0/probe-selftest/probe.main.jsonl",
+     "sha256": "93568886b6814b8b52ceee989899524837dff700e8d6070879e419530208df0d"
+    }
+   ],
+   "finished_unix": 1792797410.5641892,
+   "image": {
+    "architecture": "arm64",
+    "created": "2026-09-25T16:46:23.284603861-04:00",
+    "id": "sha256:9e6882df27dd5274bcb8fe048a0c435c531bbd794247cfc964556cf7d60fbc7d",
+    "reference": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+    "repo_digests": [
+     "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+    ]
+   },
+   "launch_snapshot": {
+    ".pbrun-closure.8d7fc3e87610624d.json": {
+     "cwd": ".",
+     "dirty_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "head": "1658f942ba430f98158540cd77eeb64c2cd5390b"
+    }
+   },
+   "mode": "collect",
+   "name": "collect-moe.x3u7l0i0",
+   "operation": "5267a884d103f822f34a4ff5022bdd80bc6006db6f937d89c417547e02ef01cf",
+   "roster_count": 71,
+   "source": {
+    "checkout": {
+     "head": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+     "tracked_files": 2005,
+     "tree": "3b304c6cab442c530cb864e532be2d147571c792",
+     "url": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/run-dense.9f8qda_6/tessera-source"
+    },
+    "verified_identity": {
+     "contract_matches_pin": true,
+     "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+     "suite_source": {
+      "excluded_metadata": [],
+      "files_verified": 2005,
+      "schema": "tessera.suite_source.v1",
+      "sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+      "snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+      "verification": "verified"
+     },
+     "verified_at_candidate": true
+    }
+   },
+   "started_unix": 1792797399.437548,
+   "suite": "moe"
+  }
+ ],
+ "probe_tests_encoding": {
+  "inventory_key": "SHA-256 of UTF-8 json.dumps(inventory, sort_keys=True, separators=(comma, colon)); no newline",
+  "raw_reconstruction": "Replace native_libraries_mapped refs with sidecar inventories; UTF-8 json.dumps(records, sort_keys=True, indent=1) plus one LF. Validate raw_probe_tests SHA-256 and bytes; no fields are discarded.",
+  "reference_field": "$native_inventory",
+  "schema": "pq1317.native-inventories.v1",
+  "sidecar": "native-inventories.json"
+ },
+ "rounds": [
+  {
+   "finished_unix": 1792798146.2899213,
+   "round": 1,
+   "runs": [
+    {
+     "artifact_root": "logs/native-v2/run-moe.4yrogwtx",
+     "artifacts": {
+      "collect.txt": {
+       "bytes": 7305,
+       "sha256": "8b26bd46bb57bda9a9672ae4eb687dc33d439f761a7494a0216ccc920a8bfa63"
+      },
+      "container-report.json": {
+       "bytes": 2542,
+       "sha256": "b3b1ffd3e0b4a45a71881dd04e2294514caad874f9734495844a2264cc0860ec"
+      },
+      "expected-nodes.json": {
+       "bytes": 7363,
+       "sha256": "8b4b567ce0cf46061a3ab864e54d4cf454ee1ea2634f856ccac0f2b3206913d4"
+      },
+      "junit.xml": {
+       "bytes": 13510,
+       "sha256": "2f8ace41583a5c76ec2ea9b217a8de7256be04b69d437f768fd50dc63d8af317"
+      },
+      "native-inventories.json": {
+       "bytes": 128,
+       "sha256": "9591225c1466a06d04bec36b3087d7c99167d97528b964cd3b4ad459436324a2"
+      },
+      "native-so.sha256": {
+       "bytes": 0,
+       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "probe-sessions.json": {
+       "bytes": 419,
+       "sha256": "a57e8fd31088fcb502b2d26d01c6dc509db5ce2b786716809c06e8a997e5e9f1"
+      },
+      "probe-summary.json": {
+       "bytes": 269,
+       "sha256": "a12919ada11ce208a6eaed9480d5ca7b4a51af3d51dc36520aeb4dfe659cceb6"
+      },
+      "probe-tests.json": {
+       "bytes": 243829,
+       "sha256": "136643a2ccee58e44f2a35dbbdeb5016db15ae941d14937cb51041b019dfef1c"
+      },
+      "pytest.log": {
+       "bytes": 16373,
+       "sha256": "fa777277dfdb059d033ac9c89293b73440058b84608229f3496009ffa8f3bc53"
+      },
+      "run-manifest.json": {
+       "bytes": 5317,
+       "sha256": "5aeaefb845ae21d4bbe4bd01167047113b1f17d53ed7d1f2e4720192cb4ac6c3"
+      },
+      "surface.json": {
+       "bytes": 1275,
+       "sha256": "0d0507d034fb16666eacba7add18067272d776c1713fecd9c50e2de89523b273"
+      },
+      "triton-kernels.json": {
+       "bytes": 220,
+       "sha256": "79d2faec3070e3b894727e51daa1da09330c233119c5c1956790a1b4a9389508"
+      }
+     },
+     "bf16_oracle": {
+      "measurements": 0,
+      "nodes": 0
+     },
+     "cuda_allocating_nodes_floor": 38,
+     "cuda_available": true,
+     "device": {
+      "capability": [
+       12,
+       1
+      ],
+      "multi_processor_count": 48,
+      "name": "NVIDIA GB10",
+      "total_memory": 130594095104,
+      "uuid": "e76c7efc-c157-b1f4-1348-83e4eb5092f4"
+     },
+     "external_raw_jsonl": [
+      {
+       "bytes": 131734,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.4yrogwtx/probe/probe.gw0.jsonl",
+       "sha256": "a36fb6047ea15956cac8c818b935cf489063e942ad0d5eebf3d7133ea6dafeb6"
+      },
+      {
+       "bytes": 109471,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.4yrogwtx/probe/probe.gw1.jsonl",
+       "sha256": "b535d4b7e30f04639a73ddfe382435627cc914489176b98cb3988e4b3e3a2a2b"
+      },
+      {
+       "bytes": 123,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.4yrogwtx/probe/probe.main.jsonl",
+       "sha256": "769e1a74f65a0da02fc9880bd94b9bb350ec91ff27512900438a39ffca506cfa"
+      },
+      {
+       "bytes": 122,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.4yrogwtx/probe-collect/probe.main.jsonl",
+       "sha256": "6873264711dae8b145951a7b361ff7a6f130bfeb320d4dbd27065ee85ab3937f"
+      },
+      {
+       "bytes": 931,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.4yrogwtx/probe-selftest/probe.gw0.jsonl",
+       "sha256": "ec267ace11f8b95d3596f8ea93efd892e291deca6f6201d98fd8116c3b9300ca"
+      },
+      {
+       "bytes": 1257,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.4yrogwtx/probe-selftest/probe.gw1.jsonl",
+       "sha256": "a0115696d024d7782ec13829223646680e017626cf72b9a0fbaaf973a4a9e4ec"
+      },
+      {
+       "bytes": 122,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.4yrogwtx/probe-selftest/probe.main.jsonl",
+       "sha256": "a6b2494e0683377c506348b89877daf27a35ef7b515891cea3883bfdbc1d7891"
+      }
+     ],
+     "finished_unix": 1792798009.0180724,
+     "image": {
+      "architecture": "arm64",
+      "created": "2026-09-25T16:46:23.284603861-04:00",
+      "id": "sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+      "reference": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+      "repo_digests": [
+       "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+       "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+      ]
+     },
+     "launch_snapshot": {
+      ".pbrun-closure.18fc0d941b85b5ae.json": {
+       "cwd": ".",
+       "dirty_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+       "head": "baeeb4841bce2f1ddbe59bf767d29a09378f66f5"
+      }
+     },
+     "mode": "run",
+     "name": "run-moe.4yrogwtx",
+     "native": {
+      "built_libraries": 0,
+      "errors": [],
+      "evidence_qualified": true,
+      "identity_basis": "per-mapping backing-file device/inode and successful opened-file reader provenance",
+      "mapping_observations": 0,
+      "readers": [],
+      "tests_with_mappings": 0
+     },
+     "operation": "a577b8d9db2049265c77f9c211f8a7994b45374c25575163ddc6310664be1cb7",
+     "outcomes": {
+      "error": 0,
+      "failed": 0,
+      "passed": 71,
+      "skipped": 0
+     },
+     "raw_probe_tests": {
+      "bytes": 248991,
+      "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.4yrogwtx/probe-tests.json",
+      "sha256": "f736c43b23c70faf464cee01ba205968663ca79b96a19053b723130ab4a1d665"
+     },
+     "roster_count": 71,
+     "source": {
+      "checkout": {
+       "head": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+       "tracked_files": 2005,
+       "tree": "3b304c6cab442c530cb864e532be2d147571c792",
+       "url": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/run-dense.9f8qda_6/tessera-source"
+      },
+      "verified_identity": {
+       "contract_matches_pin": true,
+       "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+       "suite_source": {
+        "excluded_metadata": [],
+        "files_verified": 2005,
+        "schema": "tessera.suite_source.v1",
+        "sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+        "snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+        "verification": "verified"
+       },
+       "verified_at_candidate": true
+      }
+     },
+     "started_unix": 1792797955.4219651,
+     "suite": "moe"
+    },
+    {
+     "artifact_root": "logs/native-v2/run-dense.8iph6q0c",
+     "artifacts": {
+      "collect.txt": {
+       "bytes": 6114,
+       "sha256": "8cc932c5790beecd8bba1154e894f63ff0de22933cf0631b8214c2e276bea285"
+      },
+      "container-report.json": {
+       "bytes": 30093,
+       "sha256": "945c3ed09b8b9043469ba77d12351ab6b20af7f12b28785b9274877aba398bf0"
+      },
+      "expected-nodes.json": {
+       "bytes": 6148,
+       "sha256": "45217079f179eeddcb0267a10a6e8330a13b819749ffd1e1a3eda8042b76b93e"
+      },
+      "junit.xml": {
+       "bytes": 12788,
+       "sha256": "26050027cb9f75e77029b095406fc4e0224f7f4376bd23127b2e80aec8bbdef2"
+      },
+      "native-inventories.json": {
+       "bytes": 31198,
+       "sha256": "9e6561b74382edc49450b243f4241735a97e364d3be6074fa337376bfc3762f9"
+      },
+      "native-so.sha256": {
+       "bytes": 630,
+       "sha256": "a10b27d2254791441619a657836e3327b0261708d0176dbd3579bd8c1959e577"
+      },
+      "probe-sessions.json": {
+       "bytes": 26894,
+       "sha256": "eea9767cdaa143f6771d67d1f0791ddca93f3fe626179ab05c5f7271ff983aba"
+      },
+      "probe-summary.json": {
+       "bytes": 27139,
+       "sha256": "3960edec1e57929fb90a19407c161b749f24a1b988e8fc3f0f28f2cf430b306d"
+      },
+      "probe-tests.json": {
+       "bytes": 134881,
+       "sha256": "3bb8256832473b2941e6067aef7f6f2702041d17cf5ec8f384a8fc064843fec1"
+      },
+      "pytest.log": {
+       "bytes": 6439,
+       "sha256": "887bd9383c2e1ff72213badb6572a5b59761b7d385d65e20cd646910ea426454"
+      },
+      "run-manifest.json": {
+       "bytes": 6139,
+       "sha256": "e08122fb9dc92dda2acea4056d7696b781f775f5c69b20fd4d5eb7ca5dd9131b"
+      },
+      "surface.json": {
+       "bytes": 1275,
+       "sha256": "553652a620590980cce287a4a26939257bb56739d668e0a6132cc4699aec96e1"
+      },
+      "triton-kernels.json": {
+       "bytes": 225,
+       "sha256": "a37a3549a42f6985041b2e052abdd43c27cda018c3f582bb2f5173bc2fc5e188"
+      }
+     },
+     "bf16_oracle": {
+      "measurements": 23,
+      "nodes": 19
+     },
+     "cuda_allocating_nodes_floor": 46,
+     "cuda_available": true,
+     "device": {
+      "capability": [
+       12,
+       1
+      ],
+      "multi_processor_count": 48,
+      "name": "NVIDIA GB10",
+      "total_memory": 130594095104,
+      "uuid": "e76c7efc-c157-b1f4-1348-83e4eb5092f4"
+     },
+     "external_raw_jsonl": [
+      {
+       "bytes": 258697,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.8iph6q0c/probe/probe.gw0.jsonl",
+       "sha256": "67870d2660c2fa5c2a000d04b4f4000043a820513e60c8da43ff7e3e715c7d98"
+      },
+      {
+       "bytes": 268387,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.8iph6q0c/probe/probe.gw1.jsonl",
+       "sha256": "a5bc74a89ece790adfec9b923434b000e40d2d634263bd748bec762ab8c5d4e0"
+      },
+      {
+       "bytes": 123,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.8iph6q0c/probe/probe.main.jsonl",
+       "sha256": "769e1a74f65a0da02fc9880bd94b9bb350ec91ff27512900438a39ffca506cfa"
+      },
+      {
+       "bytes": 122,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.8iph6q0c/probe-collect/probe.main.jsonl",
+       "sha256": "6873264711dae8b145951a7b361ff7a6f130bfeb320d4dbd27065ee85ab3937f"
+      },
+      {
+       "bytes": 935,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.8iph6q0c/probe-selftest/probe.gw0.jsonl",
+       "sha256": "6538a05f7af8d30e7eb6e7af3bcb9082017dbd29e8cdf041db0e056e56a1eb90"
+      },
+      {
+       "bytes": 1261,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.8iph6q0c/probe-selftest/probe.gw1.jsonl",
+       "sha256": "afc09614e4803a729d1f7c6d4c78c697760f511e8327a84e349ef14a6b55090c"
+      },
+      {
+       "bytes": 122,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.8iph6q0c/probe-selftest/probe.main.jsonl",
+       "sha256": "a6b2494e0683377c506348b89877daf27a35ef7b515891cea3883bfdbc1d7891"
+      }
+     ],
+     "finished_unix": 1792798146.2899213,
+     "image": {
+      "architecture": "arm64",
+      "created": "2026-09-25T16:46:23.284603861-04:00",
+      "id": "sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+      "reference": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+      "repo_digests": [
+       "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+       "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+      ]
+     },
+     "launch_snapshot": {
+      ".pbrun-closure.18fc0d941b85b5ae.json": {
+       "cwd": ".",
+       "dirty_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+       "head": "baeeb4841bce2f1ddbe59bf767d29a09378f66f5"
+      }
+     },
+     "mode": "run",
+     "name": "run-dense.8iph6q0c",
+     "native": {
+      "built_libraries": 4,
+      "errors": [],
+      "evidence_qualified": true,
+      "identity_basis": "per-mapping backing-file device/inode and successful opened-file reader provenance",
+      "mapping_observations": 292,
+      "readers": [
+       "pathname"
+      ],
+      "tests_with_mappings": 49
+     },
+     "operation": "a577b8d9db2049265c77f9c211f8a7994b45374c25575163ddc6310664be1cb7",
+     "outcomes": {
+      "error": 0,
+      "failed": 0,
+      "passed": 65,
+      "skipped": 0
+     },
+     "raw_probe_tests": {
+      "bytes": 600482,
+      "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.8iph6q0c/probe-tests.json",
+      "sha256": "6543b278d528d0cc237f4442ec644b00a58b7d42075d19c2ece8ff7001f0a7c5"
+     },
+     "roster_count": 65,
+     "source": {
+      "checkout": {
+       "head": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+       "tracked_files": 2005,
+       "tree": "3b304c6cab442c530cb864e532be2d147571c792",
+       "url": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/run-dense.9f8qda_6/tessera-source"
+      },
+      "verified_identity": {
+       "contract_matches_pin": true,
+       "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+       "suite_source": {
+        "excluded_metadata": [],
+        "files_verified": 2005,
+        "schema": "tessera.suite_source.v1",
+        "sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+        "snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+        "verification": "verified"
+       },
+       "verified_at_candidate": true
+      }
+     },
+     "started_unix": 1792798009.1268075,
+     "suite": "dense"
+    }
+   ],
+   "started_unix": 1792797955.4219651,
+   "total_nodes": 136
+  },
+  {
+   "finished_unix": 1792798330.324255,
+   "round": 2,
+   "runs": [
+    {
+     "artifact_root": "logs/native-v2/run-moe.lze3_4vo",
+     "artifacts": {
+      "collect.txt": {
+       "bytes": 7305,
+       "sha256": "9b571058a16eef709e8a8c3c545bed18cc387174f2d90d3925a6827510fea88f"
+      },
+      "container-report.json": {
+       "bytes": 2541,
+       "sha256": "d758ca230c47f1877f13032abf3994024ddf047957eadc5ec25ce72f7303b4d0"
+      },
+      "expected-nodes.json": {
+       "bytes": 7363,
+       "sha256": "8b4b567ce0cf46061a3ab864e54d4cf454ee1ea2634f856ccac0f2b3206913d4"
+      },
+      "junit.xml": {
+       "bytes": 13510,
+       "sha256": "72bc625108cb132244caa5dc01e367abec4a36ac020c7bbdf42c2e4068f628ae"
+      },
+      "native-inventories.json": {
+       "bytes": 128,
+       "sha256": "9591225c1466a06d04bec36b3087d7c99167d97528b964cd3b4ad459436324a2"
+      },
+      "native-so.sha256": {
+       "bytes": 0,
+       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "probe-sessions.json": {
+       "bytes": 419,
+       "sha256": "a57e8fd31088fcb502b2d26d01c6dc509db5ce2b786716809c06e8a997e5e9f1"
+      },
+      "probe-summary.json": {
+       "bytes": 269,
+       "sha256": "4097e59a3c85d0c986af283d97c57539e7832b36b62cf13a44a33a2b823025f0"
+      },
+      "probe-tests.json": {
+       "bytes": 244187,
+       "sha256": "f94a6d769f70b1cbaf66a7290f07c718d1dc0ac0344e6ad086775cef52d798df"
+      },
+      "pytest.log": {
+       "bytes": 16373,
+       "sha256": "2fa1e1dc9c22505e886ed21a343312aa79db379a05a72f0dc1c2b154a4a66b01"
+      },
+      "run-manifest.json": {
+       "bytes": 5316,
+       "sha256": "82310c9388bbb77abfe36a1462bc501f2c02e15d851d8b683e8985dd222ad815"
+      },
+      "surface.json": {
+       "bytes": 1275,
+       "sha256": "0d0507d034fb16666eacba7add18067272d776c1713fecd9c50e2de89523b273"
+      },
+      "triton-kernels.json": {
+       "bytes": 220,
+       "sha256": "79d2faec3070e3b894727e51daa1da09330c233119c5c1956790a1b4a9389508"
+      }
+     },
+     "bf16_oracle": {
+      "measurements": 0,
+      "nodes": 0
+     },
+     "cuda_allocating_nodes_floor": 38,
+     "cuda_available": true,
+     "device": {
+      "capability": [
+       12,
+       1
+      ],
+      "multi_processor_count": 48,
+      "name": "NVIDIA GB10",
+      "total_memory": 130594095104,
+      "uuid": "e76c7efc-c157-b1f4-1348-83e4eb5092f4"
+     },
+     "external_raw_jsonl": [
+      {
+       "bytes": 132381,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.lze3_4vo/probe/probe.gw0.jsonl",
+       "sha256": "5f007d53c726c4c7652c8b06696be5ff8943c851ee8719218ee355eebd7f2c96"
+      },
+      {
+       "bytes": 109209,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.lze3_4vo/probe/probe.gw1.jsonl",
+       "sha256": "85233bc10df6ed0b853871d93250bb7a6cb7cc307ad25d2864595c83912f564d"
+      },
+      {
+       "bytes": 123,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.lze3_4vo/probe/probe.main.jsonl",
+       "sha256": "769e1a74f65a0da02fc9880bd94b9bb350ec91ff27512900438a39ffca506cfa"
+      },
+      {
+       "bytes": 122,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.lze3_4vo/probe-collect/probe.main.jsonl",
+       "sha256": "6873264711dae8b145951a7b361ff7a6f130bfeb320d4dbd27065ee85ab3937f"
+      },
+      {
+       "bytes": 931,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.lze3_4vo/probe-selftest/probe.gw0.jsonl",
+       "sha256": "49bc7a49ec7d94205c735354ecbbaa17fec18d289e55faefc7da33788f7d3090"
+      },
+      {
+       "bytes": 1257,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.lze3_4vo/probe-selftest/probe.gw1.jsonl",
+       "sha256": "4e17fdbc8c1609f0cf40c9a1ff6dbcbcd2a429847a7b8d35174654586387103a"
+      },
+      {
+       "bytes": 122,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.lze3_4vo/probe-selftest/probe.main.jsonl",
+       "sha256": "a6b2494e0683377c506348b89877daf27a35ef7b515891cea3883bfdbc1d7891"
+      }
+     ],
+     "finished_unix": 1792798193.4088104,
+     "image": {
+      "architecture": "arm64",
+      "created": "2026-09-25T16:46:23.284603861-04:00",
+      "id": "sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+      "reference": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+      "repo_digests": [
+       "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+       "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+      ]
+     },
+     "launch_snapshot": {
+      ".pbrun-closure.18fc0d941b85b5ae.json": {
+       "cwd": ".",
+       "dirty_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+       "head": "baeeb4841bce2f1ddbe59bf767d29a09378f66f5"
+      }
+     },
+     "mode": "run",
+     "name": "run-moe.lze3_4vo",
+     "native": {
+      "built_libraries": 0,
+      "errors": [],
+      "evidence_qualified": true,
+      "identity_basis": "per-mapping backing-file device/inode and successful opened-file reader provenance",
+      "mapping_observations": 0,
+      "readers": [],
+      "tests_with_mappings": 0
+     },
+     "operation": "a577b8d9db2049265c77f9c211f8a7994b45374c25575163ddc6310664be1cb7",
+     "outcomes": {
+      "error": 0,
+      "failed": 0,
+      "passed": 71,
+      "skipped": 0
+     },
+     "raw_probe_tests": {
+      "bytes": 249488,
+      "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-moe.lze3_4vo/probe-tests.json",
+      "sha256": "6af1a3e167da2371d281736084c80e787b30696ea588114d38184d33d90e7cd4"
+     },
+     "roster_count": 71,
+     "source": {
+      "checkout": {
+       "head": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+       "tracked_files": 2005,
+       "tree": "3b304c6cab442c530cb864e532be2d147571c792",
+       "url": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/run-dense.9f8qda_6/tessera-source"
+      },
+      "verified_identity": {
+       "contract_matches_pin": true,
+       "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+       "suite_source": {
+        "excluded_metadata": [],
+        "files_verified": 2005,
+        "schema": "tessera.suite_source.v1",
+        "sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+        "snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+        "verification": "verified"
+       },
+       "verified_at_candidate": true
+      }
+     },
+     "started_unix": 1792798146.412726,
+     "suite": "moe"
+    },
+    {
+     "artifact_root": "logs/native-v2/run-dense.qg186gcx",
+     "artifacts": {
+      "collect.txt": {
+       "bytes": 6114,
+       "sha256": "a72ebb9ca2df03dcd45ff7a81ed7ed9fb06e1f5121d4f1a62f9c159e958a54c0"
+      },
+      "container-report.json": {
+       "bytes": 30094,
+       "sha256": "bee18468bb4c21f23d45bbbf92bd2a2e41e1f15bfd1dcd621d47426e37787557"
+      },
+      "expected-nodes.json": {
+       "bytes": 6148,
+       "sha256": "45217079f179eeddcb0267a10a6e8330a13b819749ffd1e1a3eda8042b76b93e"
+      },
+      "junit.xml": {
+       "bytes": 12788,
+       "sha256": "72c2d34748b1b182d57f495221e66348e6347c4151fbd7d3cfee73c4dc10f124"
+      },
+      "native-inventories.json": {
+       "bytes": 31198,
+       "sha256": "6eb30fa595330bca256e204c7e5220ee41129b27624d6cc446c3cb871b2966da"
+      },
+      "native-so.sha256": {
+       "bytes": 630,
+       "sha256": "835c479bd37afa781d86e8566f1ea3f89372644ee9c07ada5f824397bcecc94d"
+      },
+      "probe-sessions.json": {
+       "bytes": 26894,
+       "sha256": "04bea82d752f8478f00b708de97600257b5d68b60dbe6d3f64807eb833646e3b"
+      },
+      "probe-summary.json": {
+       "bytes": 27139,
+       "sha256": "2fedeb5ed2b9a1e22238d1063e47be6d1333254e81891094e25021c69dd82014"
+      },
+      "probe-tests.json": {
+       "bytes": 141512,
+       "sha256": "6a366a70ae02203f250fe0704fda932267f8496791fa239e0f2266ea2be40cdc"
+      },
+      "pytest.log": {
+       "bytes": 6439,
+       "sha256": "8e8476df827f80535fe0882611dc7158ce9004b1b729e615c4f5b1d07e2c2354"
+      },
+      "run-manifest.json": {
+       "bytes": 6138,
+       "sha256": "b5dd3163383cc16385ed746f364f99084f253d0a9f51916a15c1022593cf314a"
+      },
+      "surface.json": {
+       "bytes": 1275,
+       "sha256": "553652a620590980cce287a4a26939257bb56739d668e0a6132cc4699aec96e1"
+      },
+      "triton-kernels.json": {
+       "bytes": 225,
+       "sha256": "a37a3549a42f6985041b2e052abdd43c27cda018c3f582bb2f5173bc2fc5e188"
+      }
+     },
+     "bf16_oracle": {
+      "measurements": 23,
+      "nodes": 19
+     },
+     "cuda_allocating_nodes_floor": 46,
+     "cuda_available": true,
+     "device": {
+      "capability": [
+       12,
+       1
+      ],
+      "multi_processor_count": 48,
+      "name": "NVIDIA GB10",
+      "total_memory": 130594095104,
+      "uuid": "e76c7efc-c157-b1f4-1348-83e4eb5092f4"
+     },
+     "external_raw_jsonl": [
+      {
+       "bytes": 258968,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/probe/probe.gw0.jsonl",
+       "sha256": "5d9ca32c998c576bf5b0bffd06529c830958bca77347b58717f296f289be5084"
+      },
+      {
+       "bytes": 274902,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/probe/probe.gw1.jsonl",
+       "sha256": "ebcd69c88986ed54292737bd28875ea1be47bfb6d9b7072d511bb5d21d864a06"
+      },
+      {
+       "bytes": 123,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/probe/probe.main.jsonl",
+       "sha256": "769e1a74f65a0da02fc9880bd94b9bb350ec91ff27512900438a39ffca506cfa"
+      },
+      {
+       "bytes": 122,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/probe-collect/probe.main.jsonl",
+       "sha256": "6873264711dae8b145951a7b361ff7a6f130bfeb320d4dbd27065ee85ab3937f"
+      },
+      {
+       "bytes": 935,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/probe-selftest/probe.gw0.jsonl",
+       "sha256": "8db29ac62ace0981679ad6514d836b168cfbb622a4aceb5be8079eb19f1718db"
+      },
+      {
+       "bytes": 1261,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/probe-selftest/probe.gw1.jsonl",
+       "sha256": "83b9d83ebf1ef0ea23d98f287edbc9839496547808695a9338de1097bf0bd0cd"
+      },
+      {
+       "bytes": 122,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/probe-selftest/probe.main.jsonl",
+       "sha256": "a6b2494e0683377c506348b89877daf27a35ef7b515891cea3883bfdbc1d7891"
+      }
+     ],
+     "finished_unix": 1792798330.324255,
+     "image": {
+      "architecture": "arm64",
+      "created": "2026-09-25T16:46:23.284603861-04:00",
+      "id": "sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+      "reference": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+      "repo_digests": [
+       "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+       "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+      ]
+     },
+     "launch_snapshot": {
+      ".pbrun-closure.18fc0d941b85b5ae.json": {
+       "cwd": ".",
+       "dirty_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+       "head": "baeeb4841bce2f1ddbe59bf767d29a09378f66f5"
+      }
+     },
+     "mode": "run",
+     "name": "run-dense.qg186gcx",
+     "native": {
+      "built_libraries": 4,
+      "errors": [],
+      "evidence_qualified": true,
+      "identity_basis": "per-mapping backing-file device/inode and successful opened-file reader provenance",
+      "mapping_observations": 292,
+      "readers": [
+       "pathname"
+      ],
+      "tests_with_mappings": 49
+     },
+     "operation": "a577b8d9db2049265c77f9c211f8a7994b45374c25575163ddc6310664be1cb7",
+     "outcomes": {
+      "error": 0,
+      "failed": 0,
+      "passed": 65,
+      "skipped": 0
+     },
+     "raw_probe_tests": {
+      "bytes": 607792,
+      "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/probe-tests.json",
+      "sha256": "407128bc441bb6653f925a40661de5520fdcc376e8426f87e372f34ee3bebe4a"
+     },
+     "roster_count": 65,
+     "source": {
+      "checkout": {
+       "head": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+       "tracked_files": 2005,
+       "tree": "3b304c6cab442c530cb864e532be2d147571c792",
+       "url": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/run-dense.9f8qda_6/tessera-source"
+      },
+      "verified_identity": {
+       "contract_matches_pin": true,
+       "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+       "suite_source": {
+        "excluded_metadata": [],
+        "files_verified": 2005,
+        "schema": "tessera.suite_source.v1",
+        "sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+        "snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+        "verification": "verified"
+       },
+       "verified_at_candidate": true
+      }
+     },
+     "started_unix": 1792798193.4974463,
+     "suite": "dense"
+    }
+   ],
+   "started_unix": 1792798146.412726,
+   "total_nodes": 136
+  }
+ ],
+ "schema": "pq1317.native-requalification.v1",
+ "scope": "Fresh native-identity-v2 launches only; historical qualification and harness are not rewritten."
+}

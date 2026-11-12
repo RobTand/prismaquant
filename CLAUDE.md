@@ -31,7 +31,7 @@ The intellectual move is to split quantization into two orthogonal axes:
   per-tensor toolkit, and it runs *under* whatever format is chosen.
 - **Global question (PrismaQuant's contribution):** *how many bits should each
   Linear get, and in which hardware format?* — a per-Linear allocation of a
-  total bit budget across `{BF16, FP8, NVFP4, MXFP8, FP8_SOURCE}`.
+  total bit budget across `{BF16, FP8, NVFP4, FP8_SOURCE}`.
 
 A heterogeneous per-Linear assignment extracts quality that no single-format
 method structurally can. The headline proof: against RedHatAI's uniform

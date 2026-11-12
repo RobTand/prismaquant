@@ -283,12 +283,13 @@ def test_the_reference_descriptor_takes_sealed_receipts_and_keeps_its_bytes(hand
 
 
 def test_a_resume_with_the_same_identity_does_not_walk_it(tmp_path, monkeypatch):
-    from prismaquant import production_weight_cache as pwc
+    from prismaquant import cost_stage_checkpoint
     from prismaquant.cost_stage_checkpoint import prepare_journal
     identity = {"source": "one", "units": {
         f"u{index}": {"weight": {"sha256": "a" * 64}} for index in range(50)}}
     prepare_journal(tmp_path, stage="s", resume=False, identity=identity, qnames=["u0"])
-    monkeypatch.setattr(pwc, "first_identity_difference",
+    # ``prepare_journal`` reads the walk from its own module.
+    monkeypatch.setattr(cost_stage_checkpoint, "first_identity_difference",
                         lambda *a, **k: pytest.fail("walked an identical identity"))
     prepare_journal(tmp_path, stage="s", resume=True, identity=identity, qnames=["u0"])
     monkeypatch.undo()

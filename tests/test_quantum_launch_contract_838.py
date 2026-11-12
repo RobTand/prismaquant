@@ -166,7 +166,7 @@ def _publish_layer_000(tmp_path: Path, out: dict) -> tuple[dict, Path, Path]:
 
 
 def _payload(argv: list[str]) -> list[str]:
-    tail = argv[argv.index("--") + 1:]
+    tail = argv["argv"]
     inner = tail[tail.index("--", tail.index("--spec")) + 1:]
     assert inner[:3] == ["python3", "-m", "prismaquant.joint_cost_quantum"]
     return inner
@@ -191,8 +191,7 @@ def test_dispatcher_payload_carries_every_consumer_binding(tmp_path, portable_sp
     requires -- plan, prepared and adjoint paths+digests alongside the
     quantum, slice-manifest and output-root bindings."""
     campaign, record, record_path, receipt_path = _bound_row(tmp_path, portable_spec)
-    inner = _payload(dispatch.quantum_argv(
-        record, record_path=record_path, output_root=campaign["root"]))
+    inner = _payload(dispatch.quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=campaign["root"]))
     assert inner[inner.index("--plan") + 1] == str(campaign["plan_path"])
     assert inner[inner.index("--plan-sha256") + 1] == campaign["plan_sha"]
     assert inner[inner.index("--prepared") + 1] == str(campaign["prepared_path"])
@@ -209,8 +208,7 @@ def test_quantum_sha256_binds_record_wire_bytes(tmp_path, portable_spec):
     """Defect 2: the consumer checks raw record file bytes first. The CLI
     must bind that wire digest; the canonical body check inside stays."""
     campaign, record, record_path, receipt_path = _bound_row(tmp_path, portable_spec)
-    inner = _payload(dispatch.quantum_argv(
-        record, record_path=record_path, output_root=campaign["root"]))
+    inner = _payload(dispatch.quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=campaign["root"]))
     assert inner[inner.index("--quantum-sha256") + 1] == _sha(record_path)
     assert _sha(record_path) != record["identity_sha256"]
 
@@ -291,8 +289,7 @@ def test_consumer_parser_and_verify_drive_the_dispatched_row(tmp_path, portable_
     the GPU body is stubbed, after every binding passes."""
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     campaign, record, record_path, receipt_path = _bound_row(tmp_path, portable_spec)
-    inner = _payload(dispatch.quantum_argv(
-        record, record_path=record_path, output_root=campaign["root"]))
+    inner = _payload(dispatch.quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=campaign["root"]))
     args = quantum.build_parser().parse_args(inner[3:])
     assert args.data_manifest_sha256 == record["read_set"]["manifest_sha256"]
     found, loaded, _record_bytes = quantum.verify_quantum_identity(

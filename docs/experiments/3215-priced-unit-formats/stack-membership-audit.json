@@ -1,0 +1,37 @@
+{
+  "original_cases": 25,
+  "original_source_assertions": 114,
+  "all_original_assertions_evaluated": true,
+  "all_original_cases_passed": true,
+  "membership_containers": 12,
+  "changed_unasserted_container_values": [
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_cli_routed_unit_rates_entrypoint",
+      "expression": "Compare(left=Attribute(value=Name(id='tep', ctx=Load()), attr='UNIT_RUNGS_KEY', ctx=Load()), ops=[NotIn()], comparators=[Name(id='meta', ctx=Load())])",
+      "operand": 1,
+      "changed_unasserted_fields": [
+        "solve_diagnostics.16.0.solver_seconds",
+        "solve_diagnostics.6.0.solver_seconds"
+      ]
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_cli_routed_unit_rates_entrypoint",
+      "expression": "Compare(left=Attribute(value=Name(id='tep', ctx=Load()), attr='UNIT_RUNGS_KEY', ctx=Load()), ops=[NotIn()], comparators=[Name(id='plain', ctx=Load())])",
+      "operand": 1,
+      "changed_unasserted_fields": [
+        "solve_diagnostics.16.0.solver_seconds",
+        "solve_diagnostics.6.0.solver_seconds"
+      ]
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_cli_routed_unit_rates_entrypoint",
+      "expression": "Compare(left=Constant(value='tessera_routed_unit_rates'), ops=[NotIn()], comparators=[Name(id='plain', ctx=Load())])",
+      "operand": 1,
+      "changed_unasserted_fields": [
+        "solve_diagnostics.16.0.solver_seconds",
+        "solve_diagnostics.6.0.solver_seconds"
+      ]
+    }
+  ],
+  "only_unasserted_solver_seconds_differ": true
+}

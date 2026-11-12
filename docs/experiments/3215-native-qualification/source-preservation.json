@@ -1,0 +1,7 @@
+{
+  "base": "f1335b0333749c1f400934b9e0f6ac06a99cf706",
+  "path": "tests/test_tessera_legal_domain.py",
+  "original_module_statements": 65,
+  "original_assertions": 133,
+  "original_source_preserved": true
+}

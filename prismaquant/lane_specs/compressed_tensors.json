@@ -72,9 +72,9 @@
     },
     {
       "id": "load_generate.graph",
-      "runner": "prismaquant.validate_native_export --shipcard --no-enforce-eager",
+      "runner": "prismaquant.validate_native_export --shipcard --no-enforce-eager --graph-receipt <receipt.json> --compilation-config <json>",
       "shipcard_slot": "native_export.graph",
-      "description": "Same, with CUDA-graph capture on (a format may load eager and fail capture)."
+      "description": "Graph load/generate smoke with explicit receipt and observed serve scope. Release verification additionally requires the original equality producer record through release_receipts; this later smoke cannot create that linkage."
     },
     {
       "id": "route.sweep",

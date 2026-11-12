@@ -25,15 +25,18 @@ import sys
 from types import SimpleNamespace
 from pathlib import Path
 
-from test_shape_runtime_prices import checker_sdk_fixture  # noqa: F401
+from test_shape_runtime_prices import checker_native_fixture  # noqa: F401
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
 
 from prismaquant import prefill_frontier, shipcard, tessera_export_lane
 from prismaquant.layer_config import (
     LAYER_CONFIG_META_KEY, load_assignment, prefill_frontier_replay_claim,
 )
 from prismaquant.measured_runtime_prices import identity_sha256
+from graph_lane_fixtures import synthetic_graph_lane
 
 SLOW, MID, FAST = "TESSERA_BF16_K1_R1024", "TESSERA_E4M3_K1_R1024", "TESSERA_E2M1_K2_R896"
 #: predicted Δloss per rung (the second number feeds only the measured-table
@@ -46,7 +49,7 @@ M = 2048
 
 
 def _fixture(tmp_path, monkeypatch, *, units=None):
-    from conftest import down_convert_lane_table
+    from lane_table_fixtures import down_convert_lane_table
     from test_allocator_measured_runtime_cli import _main_fixture
     from test_allocator_tessera_priced_inputs import SCALE, _campaign_outputs, _stamp_rows
     from test_tessera_scope_endpoints import DENSE, IMAGE, _cli_scope

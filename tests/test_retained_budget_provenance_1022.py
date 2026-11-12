@@ -28,7 +28,9 @@ for _entry in (ROOT, ROOT / "tools", ROOT / "tests"):
         sys.path.insert(0, str(_entry))
 
 from test_joint_stageb_resources import resource_fixture  # noqa: E402,F401
-from test_strict_reader_tier_enforcement import _forget_state  # noqa: E402,F401
+from staged_native_fixtures import native_staged_state  # noqa: E402,F401
+
+pytestmark = pytest.mark.usefixtures("native_staged_state")
 
 
 # -- prepare_extended_joint_quanta ------------------------------------------

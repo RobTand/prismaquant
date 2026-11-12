@@ -6,7 +6,7 @@ records an accepted screen, a refused held-out population and two passing
 small PPL screens. The policy implementation is recorded in
 `docs/results/pq87_paired_policy_2026-09-04.md`.
 
-The committed `experiments/pq87_validation_manifest.json` selects Qwen3-0.6B:
+The committed `archive/pq_experiments_2026-11-09/experiments/pq87_validation_manifest.json` selects Qwen3-0.6B:
 shared BF16 source from the #113 input freeze and the existing native NVFP4
 reference under `tessera-runs/bf16/refs`. Read-only PrismaBuild inventory
 `74cbc51063720a960483cd2be87cedea20bf39d197500d1f9b1eb298bb51aaf8`
@@ -98,8 +98,8 @@ refuses without touching the existing container. Exact-owned-container
 cleanup is recorded even after timeout or refusal, and the coordinator checks
 actual worker completion before releasing the GPU to another task.
 The proposed enclosing command is `timeout --signal=TERM --kill-after=90s
-2400s python -P experiments/pq87_paired_validation.py --manifest
-experiments/pq87_validation_manifest.json --out <fresh-absolute-output>` inside
+2400s python -P archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation.py --manifest
+archive/pq_experiments_2026-11-09/experiments/pq87_validation_manifest.json --out <fresh-absolute-output>` inside
 a deployed-pool action with `--timeout-s 2550`. GNU timeout is required: the
 outer TERM/KILL bound covers synchronous source hashing/copying too, while
 the internal deadline bounds requests and subprocesses. This is a proposed

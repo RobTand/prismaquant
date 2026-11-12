@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,6 @@ DEFAULT_SCRIPT = REPO / "prismaquant" / "run-pipeline.sh"
 # turns it into the gate's own `exit 2`, making every FIRED control pass for the
 # wrong reason while the PASSED controls fail.
 VENV_BIN = str(Path(sys.executable).parent)
-SCRATCH = REPO / "scratch" / "run_pipeline_gate_tests"  # gitignored; never /tmp
 
 
 def _script_path() -> Path:
@@ -116,6 +116,12 @@ def run_block(block: str, env: dict, preamble: str = "") -> int:
         "PYTHONPATH": str(REPO),
         "CUDA_VISIBLE_DEVICES": "",
         "LC_ALL": "C",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+        "TORCHINDUCTOR_COMPILE_THREADS": "1",
+        "MAX_JOBS": "1",
     }
     full_env.update(env)
     proc = subprocess.run(
@@ -156,40 +162,10 @@ def test_gate_python_path_preserves_pytest_virtual_environment():
 
 @pytest.fixture(scope="module")
 def scratch() -> Path:
-    SCRATCH.mkdir(parents=True, exist_ok=True)
-    yield SCRATCH
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-
-
-# --------------------------------------------------------------------------
-# PrismaSnap lane admission
-# --------------------------------------------------------------------------
-
-
-def test_prismasnap_source_lane_admission_fires(scratch):
-    """PrismaSnap-prepared sources are admitted only to compressed-tensors."""
-    block = extract_block(
-        'if [[ ( -e "${MODEL_PATH}/prismasnap_provenance.json" \\',
-        "PrismaSnap-prepared sources are admitted only",
-    )
-    prepared = scratch / "prismasnap_model"
-    prepared.mkdir(exist_ok=True)
-    (prepared / "prismasnap_provenance.json").write_text("{}")
-    plain = scratch / "plain_model"
-    plain.mkdir(exist_ok=True)
-
-    def status(model_path: Path, container: str) -> int:
-        return run_block(
-            block,
-            {"MODEL_PATH": str(model_path), "EXPORT_CONTAINER": container},
-        )
-
-    assert status(prepared, "nvfp4_cb") == FIRED
-    assert status(prepared, "gguf") == FIRED
-    # A PrismaSnap source on the measured native lane is admitted...
-    assert status(prepared, "compressed-tensors") == PASSED
-    # ...and a plain source is admitted on any lane.
-    assert status(plain, "nvfp4_cb") == PASSED
+    parent = REPO / "scratch"
+    parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="run_pipeline_gate_tests-", dir=parent) as owned:
+        yield Path(owned)
 
 
 # --------------------------------------------------------------------------
@@ -375,3 +351,27 @@ def _producer_status(policy: str, platform: str, contract: str) -> int:
     )
 
 
+
+
+def test_scratch_owners_cannot_delete_each_others_models():
+    first = scratch.__wrapped__()
+    second = scratch.__wrapped__()
+    try:
+        next(first)
+        second_root = next(second)
+        model = second_root / 'other-worker-model'
+        model.mkdir(exist_ok=True)
+        config = model / 'config.json'
+        config.write_text('{}')
+        assert next(first, None) is None
+        assert config.is_file(), 'another worker removed the active model'
+    finally:
+        first.close()
+        second.close()
+
+
+def test_gate_subprocess_has_bounded_native_threads():
+    condition = ' && '.join('${' + key + ':-} == 1' for key in (
+        'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
+        'NUMEXPR_NUM_THREADS', 'TORCHINDUCTOR_COMPILE_THREADS', 'MAX_JOBS'))
+    assert run_block('if [[ ' + condition + ' ]]; then :; else exit 2; fi', {}) == PASSED

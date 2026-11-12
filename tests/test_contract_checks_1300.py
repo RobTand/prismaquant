@@ -28,13 +28,9 @@ from prismaquant import (
     joint_stageb_resources,
     measured_runtime_prices,
     native_runtime_cohort,
-    prismasnap_checkpoint,
-    prismasnap_moe_checkpoint,
-    prismasnap_validation,
     quality_prefill_contract,
     quality_prefill_coverage,
     quality_prefill_knee,
-    quality_prefill_pb_adapter,
     quality_prefill_screen,
     runtime_provenance,
     schemas,
@@ -72,15 +68,12 @@ BYTE_DOCUMENTS = tuple(text.encode("utf-8") for text in DOCUMENTS) + (b"\xff\xfe
 
 TEXT_LOADERS = {
     "quality_prefill_contract": lambda text: quality_prefill_contract.decode_strict_json(text, where="manifest"),
-    "quality_prefill_pb_adapter": lambda text: quality_prefill_pb_adapter.load_strict_json(text, where="adapter"),
     "runtime_provenance": lambda text: runtime_provenance._strict_json(text, "/p/m.json", "manifest"),
     "tessera_campaign": campaign_table.parse_family_restriction,
 }
 
 BYTE_LOADERS = {
     "joint_cost_read_schedule": joint_cost_read_schedule._decode_unique,
-    "prismasnap_validation": lambda data: prismasnap_validation._json_from_bytes(data, where="evidence"),
-    "quality_prefill_pb_adapter": lambda data: quality_prefill_pb_adapter.load_strict_json(data, where="adapter"),
     "runtime_provenance": lambda data: runtime_provenance._strict_json(data, "/p/m.json", "manifest"),
 }
 
@@ -88,7 +81,6 @@ FILE_LOADERS = {
     "artifact_collection": artifact_collection.load_record,
     "artifact_collection_legacy": lambda path: artifact_collection_legacy._load_json_source(path, logical_schema="s.v1"),
     "measured_runtime_prices": measured_runtime_prices._json,
-    "prismasnap_checkpoint": lambda path: prismasnap_checkpoint._load_json(path, where="checkpoint"),
 }
 
 
@@ -140,17 +132,11 @@ _ALL_SIX = {name: name for name in (
     "_fail", "_exact_mapping", "_string", "_integer", "_sha256", "_absolute_posix_path")}
 
 # module -> (module, its exception, {old helper: the name the module binds it to}).
-# The PB adapter moved only these two; its own _integer and _sha256 differ.
 CONTRACT_MODULES = {
     "quality_prefill_contract": (
         quality_prefill_contract,
         quality_prefill_contract.QualityPrefillContractError,
         _ALL_SIX,
-    ),
-    "quality_prefill_pb_adapter": (
-        quality_prefill_pb_adapter,
-        quality_prefill_pb_adapter.QualityPrefillAdapterError,
-        {"_fail": "_fail", "_exact_mapping": "_exact_mapping"},
     ),
 }
 
@@ -275,8 +261,20 @@ def test_legacy_collection_checks_refuse_as_before(value, expected):
     GOLDEN.call(lambda: artifact_collection_legacy._fail("legacy", "text"))
 
 
-@pytest.mark.parametrize("value", ({"a": 1, "b": 2}, {"a": 1}, {"a": 1, "c": 3}, {}))
-def test_moe_checkpoint_exact_keys_refuse_as_before(value):
-    assert prismasnap_moe_checkpoint._require_exact_keys is prismasnap_checkpoint._require_exact_keys
-    GOLDEN.call(lambda: prismasnap_moe_checkpoint._require_exact_keys(
-        value, _KEYS, where="PrismaSnap MoE plan"))
+def test_runfiles_path_golden_keeps_plus_component():
+    from prismaquant.contract_checks import Contract
+    path = '/execroot/_main/bazel-out/k8-fastbuild/bin/pkg.runfiles/rules_python++python+pq/site.py'
+    assert Contract().absolute_posix_path(path, where='source') == path
+
+
+@pytest.mark.parametrize('path', [
+    '/runfiles/rules_python++python+pq/../source.py',
+    '/runfiles/./source.py', '/runfiles//source.py', '/runfiles/pkg/',
+    '/runfiles/pkg%2fsource.py', '/runfiles/pkg:source.py',
+    '/runfiles/pkg source.py', '/runfiles/pkg\\source.py',
+])
+def test_runfiles_path_golden_still_refuses_odd_components(path):
+    from prismaquant.contract_checks import Contract
+    with pytest.raises(ValueError) as refused:
+        Contract().absolute_posix_path(path, where='source')
+    assert str(refused.value) == 'source must be normalized and traversal-free'

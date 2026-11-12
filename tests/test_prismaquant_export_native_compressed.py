@@ -2628,75 +2628,41 @@ class TestProductionCacheExportPath(unittest.TestCase):
             m._PRODUCTION_WEIGHT_CACHE = saved_cache
 
     def test_mxfp8_scale_sweep_cache_defers_to_export_recompute(self):
-        import prismaquant.export_native_compressed as m
-        from prismaquant.production_weight_cache import ProductionWeightCache
-
-        W = torch.randn(8, 32) * 0.1
-        cache = ProductionWeightCache(
-            weights={("model.layers.0.self_attn.q_proj", "MXFP8_E4M3"): W},
-            levers=NativeRenderLevers.resolve({"scale_sweep": True}).record(),
+        self._assert_cache_defers_to_export_recompute(
+            "MXFP8_E4M3", {"scale_sweep": True}
         )
-        saved_cache = m._PRODUCTION_WEIGHT_CACHE
-        saved_acts = _test_exporter._CACHED_ACTIVATIONS
-        try:
-            m._PRODUCTION_WEIGHT_CACHE = cache
-            _test_exporter._CACHED_ACTIVATIONS = object()
-            out = m._pack_production_cached_2d(
-                "model.layers.0.self_attn.q_proj",
-                "MXFP8_E4M3",
-                device=torch.device("cpu"),
-            )
-            self.assertIsNone(out)
-        finally:
-            m._PRODUCTION_WEIGHT_CACHE = saved_cache
-            _test_exporter._CACHED_ACTIVATIONS = saved_acts
 
     def test_fp8_scale_sweep_cache_defers_to_export_recompute(self):
-        import prismaquant.export_native_compressed as m
-        from prismaquant.production_weight_cache import ProductionWeightCache
-
-        W = torch.randn(8, 32) * 0.1
-        cache = ProductionWeightCache(
-            weights={("model.layers.0.self_attn.q_proj", "FP8_E4M3"): W},
-            levers=NativeRenderLevers.resolve({"scale_sweep": True}).record(),
+        self._assert_cache_defers_to_export_recompute(
+            "FP8_E4M3", {"scale_sweep": True}
         )
-        saved_cache = m._PRODUCTION_WEIGHT_CACHE
-        saved_acts = _test_exporter._CACHED_ACTIVATIONS
-        try:
-            m._PRODUCTION_WEIGHT_CACHE = cache
-            _test_exporter._CACHED_ACTIVATIONS = object()
-            out = m._pack_production_cached_2d(
-                "model.layers.0.self_attn.q_proj",
-                "FP8_E4M3",
-                device=torch.device("cpu"),
-            )
-            self.assertIsNone(out)
-        finally:
-            m._PRODUCTION_WEIGHT_CACHE = saved_cache
-            _test_exporter._CACHED_ACTIVATIONS = saved_acts
 
     def test_fp8_gptq_cache_defers_to_export_recompute(self):
-        import prismaquant.export_native_compressed as m
+        self._assert_cache_defers_to_export_recompute("FP8_E4M3", {"gptq": True})
+
+    def _assert_cache_defers_to_export_recompute(self, format_name, levers):
+        import prismaquant.export_native_compressed as exporter
         from prismaquant.production_weight_cache import ProductionWeightCache
 
-        W = torch.randn(8, 32) * 0.1
+        weight = torch.randn(8, 32) * 0.1
+        layer_name = "model.layers.0.self_attn.q_proj"
         cache = ProductionWeightCache(
-            weights={("model.layers.0.self_attn.q_proj", "FP8_E4M3"): W},
-            levers=NativeRenderLevers.resolve({"gptq": True}).record(),
+            weights={(layer_name, format_name): weight},
+            levers=NativeRenderLevers.resolve(levers).record(),
         )
-        saved_cache = m._PRODUCTION_WEIGHT_CACHE
+        saved_cache = exporter._PRODUCTION_WEIGHT_CACHE
         saved_acts = _test_exporter._CACHED_ACTIVATIONS
         try:
-            m._PRODUCTION_WEIGHT_CACHE = cache
+            exporter._PRODUCTION_WEIGHT_CACHE = cache
             _test_exporter._CACHED_ACTIVATIONS = object()
-            out = m._pack_production_cached_2d(
-                "model.layers.0.self_attn.q_proj",
-                "FP8_E4M3",
+            out = exporter._pack_production_cached_2d(
+                layer_name,
+                format_name,
                 device=torch.device("cpu"),
             )
             self.assertIsNone(out)
         finally:
-            m._PRODUCTION_WEIGHT_CACHE = saved_cache
+            exporter._PRODUCTION_WEIGHT_CACHE = saved_cache
             _test_exporter._CACHED_ACTIVATIONS = saved_acts
 
     def test_mxfp8_e4m3_gptq_cache_defers_to_export_recompute(self):

@@ -235,7 +235,7 @@ def test_a_record_on_a_v8_table_is_not_read():
     The installed table IS v9 now, so the v8 table is down-converted first --
     a test about an older grammar owns its fixture.
     """
-    from conftest import down_convert_lane_table
+    from lane_table_fixtures import down_convert_lane_table
 
     payload = down_convert_lane_table(
         _installed(), lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V8)
