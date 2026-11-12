@@ -1889,6 +1889,13 @@ def main(argv: list[str] | None = None) -> int:
                          f"(same record as {WALK_GATE_OVERRIDE_ENV}). Never "
                          "valid against claim failures.")
     args = ap.parse_args(argv)
+    if args.execution == "fake":
+        # Compiled kernel packages cannot run on FakeTensors: fla's Triton and
+        # causal_conv1d's CUDA kernels read their data pointers and abort with
+        # an illegal memory access (#3401). Report them absent before any
+        # modeling module binds them, so transformers uses its torch reference.
+        import transformers.utils.import_utils as hf_imports
+        hf_imports.is_causal_conv1d_available = hf_imports.is_flash_linear_attention_available = lambda: False
 
     from prismaquant.model_profiles.registry import (
         detect_profile_with_warning,
