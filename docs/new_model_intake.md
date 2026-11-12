@@ -13,8 +13,7 @@ Use one of these source inputs:
 - An explicit model repository identifier and its full forty-character commit.
 
 The local source can use an index or a single `model.safetensors` file.
-The indexed path uses the existing PrismaSnap checkpoint grammar.
-The physical check uses the existing export-structure validator.
+The indexed path and physical check use the existing export-structure validator.
 These owners refuse symlinked files and inconsistent index or header data.
 The tool does not add an artifact cache.
 Remote acquisition uses Hugging Face `snapshot_download` with an explicit `local_dir`.

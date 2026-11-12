@@ -29,12 +29,13 @@ REPO = Path(__file__).resolve().parents[1]
 TOKEN_SCOPE = "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256"
 # Canonical JSON identity after the token route, native migration, and sealed
 # buffer digest consolidation. Retained byte-contract goldens stay fixed.
-TOKEN_ONLY_BASELINE_SHA256 = "2662654100cf87703aa743a859684263f60163540efc7674ed14e7cb4bbce3da"
+TOKEN_ONLY_BASELINE_SHA256 = "8483d5c64f9ae7c3a70d7ae13b21784fb02657a88318b56f476829704daaa37b"
 # Supplied main 6d8288ad had 277 primitive scopes. The migration removed
 # retired PB tooling in 8c336f2e3, 728a6e8fd, a4cf01ccc, adaf3d9f6,
 # 989eaa5fc and cb07374d5. 3ffa08ae7 consolidated SealedBuffer.seal;
-# 0c56ce19c removed its allowance. No other scope may disappear.
-MAIN_SCOPES_SHA256 = "839cb5c55d0171ea3d77e7c386a03678acda1f1dc443116603183569a0321609"
+# 0c56ce19c removed its allowance. PrismaSnap removal drops seven scopes
+# from the supplied-main list, including the retired cluster campaign main.
+MAIN_SCOPES_SHA256 = "9332ce6d6c71c59b2de71118614ec5c97d23bb27d9f060fb7c8aebdd770d0d70"
 MIGRATION_REMOVED_SCOPES = {
     "hashlib:prismaquant/io_engine.py::SealedBuffer.seal",
     "hashlib:prismaquant/joint_forward_resume.py::_read",
@@ -151,11 +152,11 @@ def test_token_route_removes_only_enumerated_main_baseline_scopes():
     main_sites = json.loads((REPO / 'tests/fixtures/digest_main_scopes_2638.json').read_text())
     canonical_main = json.dumps(main_sites, separators=(',', ':')).encode()
     assert hashlib.sha256(canonical_main).hexdigest() == MAIN_SCOPES_SHA256
-    assert len(main_sites) == len(set(main_sites)) == 277
+    assert len(main_sites) == len(set(main_sites)) == 270
     removals = {TOKEN_SCOPE, *MIGRATION_REMOVED_SCOPES}
     assert removals <= set(main_sites)
     assert set(baseline['primitive_digest_sites']) == set(main_sites) - removals
-    assert len(baseline['primitive_digest_sites']) == 260
+    assert len(baseline['primitive_digest_sites']) == 253
     canonical = json.dumps(baseline, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(canonical).hexdigest() == TOKEN_ONLY_BASELINE_SHA256, (
         "regenerate the reviewed native baseline after classifying source removals; "

@@ -77,13 +77,9 @@ INPUTS = {
 SITES = [
     "prismaquant.artifact_collection._sha256",
     "prismaquant.prepriced_cost._require_sha256",
-    "prismaquant.prismasnap_checkpoint._require_sha256",
-    "prismaquant.prismasnap_validation._require_sha256",
 ]
 PATTERN_SITES = [
     "prismaquant.artifact_collection._SHA256",
-    "prismaquant.prismasnap_checkpoint._SHA256",
-    "prismaquant.prismasnap_validation._SHA256",
 ]
 
 
