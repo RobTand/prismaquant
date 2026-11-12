@@ -1,14 +1,16 @@
 """Exercise the production body composition against end-to-end autograd."""
 from __future__ import annotations
 
+import hashlib
 import pickle
+import struct
 
 import numpy as np
 import pytest
 import torch
 from transformers import Qwen3Config, Qwen3ForCausalLM
 
-from prismaquant import incremental_probe as probe
+from prismaquant import incremental_probe as probe, probe_statistics
 from prismaquant.sensitivity_probe import FisherAccumulator
 from prismaquant.streaming_model import _build_streaming_context
 
@@ -119,3 +121,80 @@ def test_ordinary_mtp_retains_its_declared_legacy_marginal_payload(monkeypatch, 
         assert not ({"fisher_row", "fisher_col", "g_sq_sum", "act_sq_sum", "act_absmax"} & row.keys())
     finally:
         collector.remove_hooks()
+
+
+def _scalar_priority(row: int) -> int:
+    """Independent reference: hashlib key and integer fmix32, no torch."""
+    def mix(x):
+        x ^= x >> 16
+        x = (x * 0x85EBCA6B) & 0xFFFFFFFF
+        x ^= x >> 13
+        x = (x * 0xC2B2AE35) & 0xFFFFFFFF
+        return x ^ (x >> 16)
+    digest = hashlib.blake2b(probe_statistics.ACT_ROW_SELECTION.encode(),
+                             digest_size=8).digest()
+    k0, k1 = struct.unpack("<II", digest)
+    return mix(mix(row ^ k0) ^ k1)
+
+
+def test_slice_selection_merged_by_top_k_equals_the_monolithic_selection():
+    rows = torch.arange(1000)
+    flat = torch.randn(1000, 4, generator=torch.Generator().manual_seed(5))
+    expected = sorted(sorted(range(1000), key=_scalar_priority)[:37])
+    whole_x, whole_rows = {}, {}
+    probe_statistics.keep_act_rows(whole_x, whole_rows, "q", flat, rows, 37)
+    assert whole_rows["q"][0].tolist() == expected
+    assert torch.equal(whole_x["q"][0], flat[expected])
+    merged_x, merged_rows = {}, {}
+    for part in (slice(600, 1000), slice(0, 250), slice(250, 600)):
+        part_x, part_rows = {}, {}
+        probe_statistics.keep_act_rows(part_x, part_rows, "q", flat[part], rows[part], 37)
+        probe_statistics.keep_act_rows(merged_x, merged_rows, "q",
+                                       part_x["q"][0], part_rows["q"][0], 37)
+    assert merged_rows["q"][0].tolist() == expected
+    assert torch.equal(merged_x["q"][0], whole_x["q"][0])
+
+
+def test_act_cache_is_byte_identical_under_different_global_rng_states(
+        tmp_path, monkeypatch):
+    monkeypatch.setenv("PRISMAQUANT_ACT_CACHE_WORKERS", "1")
+    monkeypatch.setenv("PRISMAQUANT_LAYER_READ_THREADS", "1")
+    torch.manual_seed(0)
+    config = Qwen3Config(vocab_size=32, hidden_size=16, intermediate_size=32,
+                        num_hidden_layers=2, num_attention_heads=2,
+                        num_key_value_heads=2, head_dim=8, tie_word_embeddings=False)
+    config._attn_implementation = "eager"
+    checkpoint = tmp_path / "model"
+    Qwen3ForCausalLM(config).save_pretrained(checkpoint)
+    # 2 x 160 tokens: lm_head sees 318 rows, more than its 256-row limit.
+    ids = torch.randint(1, 32, (2, 160), generator=torch.Generator().manual_seed(3))
+    acts = []
+    for seed in (1, 2):
+        torch.manual_seed(seed)
+        act = tmp_path / f"act{seed}"
+        context = _build_streaming_context(str(checkpoint), device=torch.device("cpu"),
+            dtype=torch.float32, offload_folder=str(tmp_path / f"offload{seed}"),
+            layers_per_shard=1, max_cache_slots=2, prefetch_workers=1,
+            prefetch_min_available_gb=0, cache_headroom_gb=0, attn_implementation="eager")
+        try:
+            precomputed = probe._compute_global_precompute(context, calib=ids,
+                importance_weighting=True, prefetch_lookahead=1,
+                minimax_fast_moe=False, minimax_fast_moe_chunk_size=32,
+                resident_include_union=".*", resident_exclude="(?!)",
+                activation_cache_dir=str(act))
+            probe._run_body_streaming_shard(context, calib=ids, linear_include=".*",
+                linear_exclude="(?!)", importance_weighting=True,
+                activation_cache_dir=str(act), h_detail_dir=None,
+                output_path=str(tmp_path / f"probe{seed}.pkl"),
+                dataset_name="explicit-tokens", dtype_name="fp32", seqlen=ids.size(1),
+                model_path=str(checkpoint), prefetch_lookahead=1, minimax_fast_moe=False,
+                activation_rows_limit=37, precomputed=precomputed)
+        finally:
+            context.shutdown()
+        acts.append({p.name: p.read_bytes() for p in sorted(act.glob("*.pt"))})
+    assert len(acts[0]) == 15 and acts[0] == acts[1]
+    head = torch.load(tmp_path / "act1" / "lm_head.pt", weights_only=False)
+    rows = head["row_indices"]
+    assert head["row_selection"] == probe_statistics.ACT_ROW_SELECTION
+    assert rows.numel() == 256 and torch.equal(rows, rows.unique())
+    assert not bool((rows % 160 == 159).any())

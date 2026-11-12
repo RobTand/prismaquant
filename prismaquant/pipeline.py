@@ -339,14 +339,17 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
     # --- probe / cost ------------------------------------------------------
     # The Fisher trace is a function of (model, calibration corpus, window
     # count/length, modality). NOT of FORMATS: the probe is format-blind.
+    # ACT_ROW_SELECTION names the rule that picks the act/ rows the probe
+    # writes and base-cost reads, so a WORK_DIR with random act/ refuses.
     "probe": _key_pairs(
         "MODEL_PATH", "DATASET", "NSAMPLES", "SEQLEN", "CALIBRATION_MODALITY",
+        "ACT_ROW_SELECTION",
     ),
     # Per-(Linear, format) baseline error. Adds FORMATS; drops modality
     # (the cost stage reads the probe's activation cache, whose modality the
     # probe guard already pins).
     "base-cost": _key_pairs(
-        "MODEL_PATH", "DATASET", "NSAMPLES", "SEQLEN",
+        "MODEL_PATH", "DATASET", "NSAMPLES", "SEQLEN", "ACT_ROW_SELECTION",
         "FORMATS<-COST_FORMATS", *_HEAD_SETTINGS,
         *_CB_SERIALIZATION_SETTINGS,
     ),

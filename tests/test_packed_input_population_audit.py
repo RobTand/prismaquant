@@ -31,9 +31,13 @@ def test_fisher_cache_keeps_rows_from_both_forwards(tmp_path, row_limit):
         collector.finalize(tracker=None, global_tokens=12)
     finally:
         collector.remove_hooks()
-    saved = torch.load(tmp_path / "layers__0__experts.pt", weights_only=True)["inputs"]
-    expected = torch.cat((first, second))[:row_limit].to(torch.bfloat16)
-    torch.testing.assert_close(saved, expected, rtol=0, atol=0)
+    saved = torch.load(tmp_path / "layers__0__experts.pt", weights_only=True)
+    rows = saved["row_indices"]
+    # Both calls number their rows in one stream (0..11), then keep row_limit.
+    assert rows.numel() == row_limit and torch.equal(rows, rows.unique())
+    assert 0 <= int(rows.min()) and int(rows.max()) < 12
+    expected = torch.cat((first, second))[rows].to(torch.bfloat16)
+    torch.testing.assert_close(saved["inputs"], expected, rtol=0, atol=0)
     for param in ("gate_up_proj", "down_proj"):
         assert collector.stats[f"layers.0.experts.{param}"]["n_tokens_seen"] == 12
 
