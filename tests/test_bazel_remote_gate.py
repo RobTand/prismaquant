@@ -264,11 +264,10 @@ def test_fallback_admits_six_shards_before_waiting_and_keeps_the_timeout_cap():
 
 
 @pytest.mark.parametrize('concurrency,mode,selection', [
-    (0, 'pr', 'fallback'), (7, 'pr', 'fallback'),
-    (2, 'pr', 'impacted'), (2, 'pr', 'irrelevant'), (2, 'main', 'fallback'),
-    (6, 'pr', 'impacted'), (6, 'main', 'fallback'),
+    (0, 'pr', 'fallback'), (7, 'pr', 'fallback'), (7, 'pr', 'impacted'),
+    (2, 'main', 'fallback'), (6, 'main', 'fallback'),
 ])
-def test_concurrency_above_one_is_bounded_and_exclusive_to_pr_fallback(
+def test_concurrency_above_one_is_bounded_and_exclusive_to_pr_gates(
         concurrency, mode, selection):
     client = BoundedFallbackClient()
     with pytest.raises(remote.RemoteError, match='concurrency|fallback'):
@@ -333,8 +332,7 @@ def controller_manifest(mode='pr', selection='fallback'):
     labels = [f'//tests:test_{index}' for index in range(6)]
     architectures = {}
     for architecture in ('amd64', 'arm64') if mode == 'main' else ('amd64',):
-        count = (6 if mode == 'pr' and selection == 'fallback'
-                 else 4 if architecture == 'arm64' else 2)
+        count = 6 if mode == 'pr' else 4 if architecture == 'arm64' else 2
         population = [] if selection == 'irrelevant' else labels
         architectures[architecture] = {'population': population, 'tests': population,
             'shards': [population[index::count] for index in range(count)] if population else []}
@@ -389,9 +387,9 @@ class ManifestClient:
 
 
 @pytest.mark.parametrize('mode,selection,maximum', [
-    ('pr', 'fallback', 6), ('pr', 'impacted', 1), ('main', 'fallback', 1),
+    ('pr', 'fallback', 6), ('pr', 'impacted', 6), ('main', 'fallback', 1),
 ])
-def test_manifest_controller_runs_exact_partitions_with_only_fallback_overlap(mode, selection, maximum):
+def test_manifest_controller_runs_exact_partitions_with_only_pr_overlap(mode, selection, maximum):
     document = controller_manifest(mode, selection)
     raw = json.dumps(document).encode()
     client = ManifestClient(document)

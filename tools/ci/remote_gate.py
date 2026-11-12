@@ -71,15 +71,13 @@ def shard_request(args, architecture, index, manifest_uri, manifest_sha256,
 
 
 def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic):
-    """Only PR fallback may admit up to six runs; drain each batch without retries."""
+    """Only a PR gate may admit up to six runs; drain each batch without retries."""
     if type(concurrency) is not int or not 1 <= concurrency <= 6:
         raise RemoteError('shard concurrency must be between one and six')
     planned = [(request, json.loads(request['env']['PQ_BAZEL_SHARD']))
                for request in requests]
-    if concurrency > 1 and (not planned or any(
-            expected['mode'] != 'pr' or expected.get('selection') != 'fallback'
-            for _, expected in planned)):
-        raise RemoteError('concurrency above one is allowed only for PR fallback')
+    if concurrency > 1 and (not planned or any(expected['mode'] != 'pr' for _, expected in planned)):
+        raise RemoteError('concurrency above one is allowed only for a PR gate')
     results = []
     for start in range(0, len(planned), concurrency):
         pending, error = [], None
@@ -148,8 +146,7 @@ def run_manifest(client, args, manifest_uri, raw_manifest, *,
 
     manifest_sha256 = bytes_sha256hex(raw_manifest)
     results = {}
-    concurrency = (fallback_concurrency if args.mode == 'pr'
-                   and document['selection'] == 'fallback' else 1)
+    concurrency = fallback_concurrency if args.mode == 'pr' else 1
     for architecture in architectures:
         row = document['architectures'][architecture]
         if not row['population']:
