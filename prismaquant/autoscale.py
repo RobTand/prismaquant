@@ -1204,9 +1204,12 @@ def pick_layers_per_shard(
 
     # Full-graph checkpointed activations: autograd retains activations
     # at ~sqrt(n_layers) boundaries across ALL layers, not just tracked
-    # ones — this is fixed memory that any shard incurs. Plus HF /
-    # tokenizer / Python overhead floor.
-    full_graph_act = nsamples * seqlen * hidden * dtype_bytes * full_graph_act_mult
+    # ones — this is fixed memory that any shard incurs. The probe's phase 1
+    # also holds one boundary activation per layer in host RAM. Both are
+    # hc_mult residual streams wide. Plus HF / tokenizer / Python overhead floor.
+    hc_mult = max(1, int((cfg.get("text_config") or cfg).get("hc_mult", 1)))
+    full_graph_act = (nsamples * seqlen * hidden * hc_mult * dtype_bytes
+                      * (full_graph_act_mult + n_layers + 1))
     overhead = int(fixed_overhead_gb * 1024 ** 3)
 
     shard_budget = avail - safety - cache_reserve - full_graph_act - overhead

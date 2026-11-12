@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -184,6 +185,27 @@ def prefetch_files_to_page_cache(
             flush=True,
         )
     return stats
+
+
+def read_ahead_layer_files(weight_shard, layers_prefix, layers, seen, submit, *, files=8):
+    """Read the source files of ``layers``, in order, about ``files`` files
+    ahead, into the page cache through ``submit`` (the caller's pool), one read per file.
+    ``seen`` holds the files already started. ``mode="auto"`` skips a file
+    when memory is short. One buffered stream reads 2.6-2.9 GB/s; 8 files in
+    parallel 11.1-11.7 GB/s."""
+    by_layer: dict[str, set] = {}
+    for key, path in weight_shard.items():
+        if key.startswith(layers_prefix):
+            by_layer.setdefault(key[len(layers_prefix):].split(".", 1)[0], set()).add(path)
+    window: list = []
+    for layer in layers:
+        window += sorted(by_layer.get(str(layer), set()).difference(window))
+        if len(window) >= files:
+            break
+    for path in window:
+        if path not in seen:
+            seen.add(path)
+            submit(partial(prefetch_files_to_page_cache, mode="auto", progress=False), [path])
 
 
 def prefetch_safetensors_checkpoint(

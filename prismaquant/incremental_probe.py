@@ -2604,7 +2604,7 @@ def _validate_precompute_cache_payload(
         or not activations
         or any(
             not isinstance(value, torch.Tensor)
-            or value.ndim != 3
+            or value.ndim not in (3, 4)
             or not torch.is_floating_point(value)
             or tuple(value.shape[:2]) != tuple(ids.shape)
             or not bool(torch.isfinite(value).all().item())
@@ -2666,7 +2666,7 @@ def _load_precompute_cache(path: Path, expected_meta: dict[str, Any],
     if not path.exists():
         return None
     try:
-        data = torch.load(str(path), map_location="cpu", weights_only=False)
+        data = torch.load(str(path), map_location="cpu", mmap=True, weights_only=False)
     except Exception as e:
         print(f"[incremental/global] cache load failed ({e}); recomputing",
               flush=True)
@@ -4868,6 +4868,10 @@ def main():
         )
         _save_precompute_cache(
             precompute_cache_path, precomputed, precompute_meta)
+        # Phase 3 pages each layer's boundary activation from this file, not host RAM (#3424).
+        precomputed.activations_cpu[:] = torch.load(
+            str(precompute_cache_path), map_location="cpu", mmap=True, weights_only=False,
+        )["activations_cpu"]
         print(f"[incremental/global] wrote precompute cache to "
               f"{precompute_cache_path}", flush=True)
         return precomputed
