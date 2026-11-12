@@ -879,9 +879,8 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
     assert {name: placed[name] for name in _alloc_units()} == {
         name: ALLOC_FMT for name in _alloc_units()}
     assert plain["tessera_expert_stack_formats"] == {ALLOC_STACK: ALLOC_FMT}
-    from test_allocator_output_pin_1304 import _without_wall_time
     def stable(value, root):
-        return _without_wall_time(json.loads(json.dumps(value).replace(str(root), "<TMP>")))
+        return json.loads(json.dumps(value).replace(str(root), "<TMP>"))
     expected = {k: v for k, v in json.loads((noop / "layer.json").read_text())["__prismaquant__"].items()
                 if k != "tessera_routed_unit_rates"}
     assert stable(plain, off) == stable(expected, noop)

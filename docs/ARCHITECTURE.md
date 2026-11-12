@@ -28693,13 +28693,12 @@ pre-existing
 call site** in this tree, so it fires on nothing, Tessera or otherwise. Stated
 here rather than quietly relied on.
 
-**DP wall time is stamped, not re-timed by hand.** `allocator.py` accumulates
-`solve_with_promotion` wall time across the tightening retries a target needs
-and writes `solver_seconds` / `solver_calls` per target into
-`layer_config.json` `__prismaquant__.solve_diagnostics` (and into
-`selection.json` on the byte-budget path). `_solve_diagnostics` was previously
-read only by the infeasibility message, so what a solve cost was invisible to
-everything downstream.
+**Solver work is recorded, wall time is not.** `allocator.py` writes
+`solver_calls` per solved target into `layer_config.json`
+`__prismaquant__.solve_diagnostics` (and into `selection.json` on the
+byte-budget path). No wall time: `run-pipeline.sh` digests `layer_config.json`
+to key the production-cache stages, so the file must be a function of its
+inputs (PQ #3404).
 
 **`pipeline.py` needs no entry for the token.** The declarative contract names
 `FORMATS` only as a *cache-key ingredient* (`"FORMATS<-COST_FORMATS"` and
