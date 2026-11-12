@@ -150,7 +150,7 @@ def test_runtime_requires_authenticated_context(tmp_path, monkeypatch, case):
     manifest = _manifest(setup)
     bound = _bound(setup, manifest)
     monkeypatch.setenv("PRISMAQUANT_STAGED_MANIFEST", "context-double")
-    monkeypatch.setattr(staged_tier_policy, "active_policy", lambda: frozenset(("ram", "ssd")))
+    monkeypatch.setattr(staged_tier_policy, "active_policy", lambda: frozenset(("ssd",)))
     monkeypatch.setattr(staged_lease, "load_sealed_manifest", lambda digest: manifest)
     if case == "inactive":
         monkeypatch.setattr(staged_tier_policy, "active_policy", lambda: None)

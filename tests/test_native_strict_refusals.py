@@ -17,31 +17,16 @@ from test_native_strict_app_consumers import _checkpoint
 pytestmark = pytest.mark.usefixtures('native_staged_state')
 
 
-@pytest.mark.parametrize('tiers', ['ram', 'ssd'])
-def test_native_undeclared_input_never_uses_existing_canonical_payload(tmp_path, monkeypatch, tiers):
+def test_native_undeclared_input_never_uses_existing_canonical_payload(tmp_path, monkeypatch):
     source = tmp_path / 'canonical'
     source.write_bytes(b'existing-but-undeclared')
     other = tmp_path / 'declared'
     other.write_bytes(b'only-admitted-input')
     resolver = bind(monkeypatch, publish_inputs(tmp_path, [other]))
     opened = _forbid_source(monkeypatch, source)
-    with staged_tier_policy_test_context(tiers):
+    with staged_tier_policy_test_context('ssd'):
         with pytest.raises(TierPolicyRefused):
             read_staged_whole_file(source, sha(b'existing-but-undeclared'), label='undeclared')
-    assert opened == [] and resolver._windows == 0
-    assert resolver.report()['bytes_from_pool'] == resolver.report()['bytes_from_stage'] == 0
-
-
-def test_ram_only_scope_cannot_adopt_native_ssd_material(tmp_path, monkeypatch):
-    source = tmp_path / 'wire'
-    raw = b'known-declared-ssd-wire'
-    source.write_bytes(raw)
-    resolver = bind(monkeypatch, publish_inputs(tmp_path, [source]))
-    opened = _forbid_source(monkeypatch, source)
-    with staged_tier_policy_test_context('ram'):
-        with pytest.raises(TierPolicyRefused, match='ssd-not-allowed'):
-            _read_verified_wire_blob({'wire': str(source),
-                'record': {'blob_bytes': len(raw), 'blob_sha256': sha(raw)}})
     assert opened == [] and resolver._windows == 0
     assert resolver.report()['bytes_from_pool'] == resolver.report()['bytes_from_stage'] == 0
 
@@ -126,23 +111,14 @@ def test_forked_shard_cannot_use_payload_but_keeps_known_header_metadata(tmp_pat
         assert resolver._windows == 0
 
 
-@pytest.mark.parametrize('bound', [False, True])
-def test_explicit_offline_unstaged_read_preserves_known_bytes_and_pool_accounting(tmp_path, monkeypatch, bound):
+def test_explicit_offline_unstaged_read_preserves_known_bytes(tmp_path):
     payload = b'explicit-offline-known-input'
     source = tmp_path / 'offline'
     source.write_bytes(payload)
-    resolver = None
-    if bound:
-        declared = tmp_path / 'declared'
-        declared.write_bytes(b'a-different-input')
-        resolver = bind(monkeypatch, publish_inputs(tmp_path, [declared]))
     assert active_policy() is None
     value, observed = io_engine.load_file(source, len(payload), binding=None,
         decode=lambda raw, receipt, staged: (bytes(raw), None))
     assert value == payload and observed[0]['sha256'] == sha(payload)
-    if resolver is not None:
-        assert resolver.report()['bytes_from_pool'] == len(payload)
-        assert resolver.report()['bytes_from_stage'] == 0 and resolver._windows == 0
 
 
 def test_immutable_reader_has_no_configured_wait():

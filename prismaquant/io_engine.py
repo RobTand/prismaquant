@@ -87,7 +87,7 @@ writes to its counters (Stage B: ``counters.json``'s ``io_engine`` block).
 from __future__ import annotations
 
 from concurrent.futures import CancelledError, ThreadPoolExecutor
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
 import math
@@ -139,15 +139,12 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
     ``raw`` is ``bytes``, or with ``sealed`` a :class:`SealedBuffer` the
     caller closes.
 
-    ``path`` is always the declared file. A staged read opens another copy,
-    and every fence that belongs to the declared object still runs on the
-    declared object: the caller's stat signature (``declared_signature``), the
-    receipt's path, and the signature the receipt's lifetime fence re-checks
-    on every later borrow. The staged copy gets its own open/read fences plus
-    the digest the map published, and a failure of any of those raises
-    ``StagedReadRefused``; :func:`load_file` then reads the declared path
-    instead, unless the allowed-tier policy is active, in which case it
-    refuses.
+    ``path`` is always the declared file. A staged read opens the resolver's
+    immutable object, and every fence that belongs to the declared object
+    still runs on the declared object: the caller's stat signature
+    (``declared_signature``) and the receipt's path. The staged object gets
+    its own open/read fences plus the digest the manifest published, and a
+    failure of any of those raises; :func:`load_file` then refuses.
 
     Native staged entries use an owned descriptor window: ``lease`` from
     :func:`pin_group`, as ``(lease window, key, staged entry)``, when supplied,
@@ -160,9 +157,7 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
     reading the bytes, without the hash, so a caller can measure its
     per-stream rate.
     """
-    from .residency_map import residency_resolver
-    from .staged_tier_policy import policy_is_active
-    if staged is not None and '_resolver' in staged:
+    if staged is not None:
         from .staged_whole_file import read_staged_entry
         if declared_signature is not None:
             before = path.lstat()
@@ -194,107 +189,23 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
     if declared_signature is not None and signature != declared_signature:
         raise RuntimeError('PWC window file changed before its content read')
     started = time.monotonic()
-    source, source_before = path, before
-    serving_tier = "pool"
-    pinned_fd: int | None = None
     buffer = None
     try:
-        # Acquire, allocate and read under one lifetime. The read owns a
-        # per-entry lease, or just its descriptor under a caller-owned pin.
-        with ExitStack() as read_scope:
-            if staged is not None:
-                # PrismaBuild recomposes the map after every egress, so a
-                # staged copy can be released before this open.
-                strict = policy_is_active()
-                if not strict:
-                    source = Path(staged["stage_path"])
-                    try:
-                        source_before = source.lstat()
-                    except OSError as error:
-                        raise StagedReadRefused(
-                            f'staged copy is unreadable: {error.strerror}') from None
-                    if not stat.S_ISREG(source_before.st_mode):
-                        raise StagedReadRefused('staged copy is not a regular file')
-                    if source_before.st_size != before.st_size:
-                        raise StagedReadRefused('staged copy size differs from the declared file')
-                    serving_tier = "stage"
-                else:
-                    from .staged_lease import LeaseRefused, acquire_entry_window
-                    recorder = residency_resolver()
-                    if recorder is None:
-                        raise StagedReadRefused("readset-not-staged")
-                    if lease is not None:
-                        window, key, _pinned_entry = lease
-                    else:
-                        window, key = acquire_entry_window(recorder, path, staged)
-                    try:
-                        if lease is None:
-                            read_scope.enter_context(window)
-                        pinned_fd, serving = window.open(key)
-                        if lease is not None:
-                            read_scope.callback(window.close_fd, pinned_fd)
-                    except LeaseRefused as refusal:
-                        recorder.record_fallback(path, str(refusal))
-                        raise
-                    serving_tier = window.serving_tier or "stage"
-                    recorder.record_serving_tier(
-                        path, serving_tier,
-                        pin_id=str(serving.get("pin_id") or ""),
-                        range_ref=str(serving.get("range_ref") or ""))
-                recorder = residency_resolver()
-                if recorder is not None and pinned_fd is None:
-                    recorder.record_serving_tier(path, serving_tier)
-            source_signature = _stat_signature(source_before)
-
-            def changed(message):
-                return (StagedReadRefused(f'staged copy {message}') if staged is not None
-                        else RuntimeError(f"PWC file {message}"))
-
-            buffer = SealedBuffer(source_before.st_size) if sealed else None
-            if pinned_fd is None:
-                try:
-                    with source.open("rb") as handle:
-                        if _stat_signature(os.fstat(handle.fileno())) != source_signature:
-                            raise changed("changed before its content read")
-                        if buffer is None:
-                            raw = handle.read(source_before.st_size + 1)
-                            exact = len(raw) == source_before.st_size
-                        else:
-                            exact = buffer.fill(handle.fileno())
-                        if (not exact
-                                or _stat_signature(os.fstat(handle.fileno())) != source_signature
-                                or _stat_signature(source.lstat()) != source_signature):
-                            raise changed("changed during its content read")
-                except OSError as error:
-                    if staged is None:
-                        raise
-                    raise StagedReadRefused(
-                        f'staged copy is unreadable: {error.strerror}') from None
+        buffer = SealedBuffer(before.st_size) if sealed else None
+        with path.open("rb") as handle:
+            if _stat_signature(os.fstat(handle.fileno())) != signature:
+                raise RuntimeError("PWC file changed before its content read")
+            if buffer is None:
+                raw = handle.read(before.st_size + 1)
+                exact = len(raw) == before.st_size
             else:
-                first = os.fstat(pinned_fd)
-                if first.st_size != source_before.st_size:
-                    raise changed("changed before its content read")
-                if buffer is None:
-                    parts = []
-                    remaining = source_before.st_size + 1
-                    offset = 0
-                    while remaining > 0:
-                        block = os.pread(pinned_fd, min(remaining, 8 << 20), offset)
-                        if not block:
-                            break
-                        parts.append(block)
-                        offset += len(block)
-                        remaining -= len(block)
-                    raw = b"".join(parts)
-                    exact = len(raw) == source_before.st_size
-                else:
-                    exact = buffer.fill(pinned_fd)
-                if not exact or _stat_signature(os.fstat(pinned_fd)) != _stat_signature(first):
-                    raise changed("changed during its content read")
+                exact = buffer.fill(handle.fileno())
+            if (not exact
+                    or _stat_signature(os.fstat(handle.fileno())) != signature
+                    or _stat_signature(path.lstat()) != signature):
+                raise RuntimeError("PWC file changed during its content read")
         if timing is not None:
             timing["read_s"] = time.monotonic() - started
-        if staged is not None and _stat_signature(path.lstat()) != signature:
-            raise StagedReadRefused('declared file changed during the staged read')
         # The serialized buffer is private to this read and released after its
         # decoder returns. No whole-cache byte store. A sealed buffer is hashed
         # on the pass that sealed it: the bytes a decoder maps are the bytes
@@ -304,16 +215,6 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
         else:
             digest, raw = buffer.seal(), buffer
         receipt = {"path": str(path), "bytes": len(raw), "sha256": digest}
-        if staged is not None:
-            # Serving-tier provenance (ID-07) rides the staged receipt;
-            # the pool receipt keeps its pinned shape.
-            receipt["serving_tier"] = serving_tier
-        if staged is not None and receipt["sha256"] != staged["sha256"]:
-            # The read is already digested, so the staged bytes are held to the
-            # digest the map published for them. This is the check that makes
-            # the redirect safe rather than trusted, and on a prepare -- where
-            # the caller has no expected digest yet -- it is the only one.
-            raise StagedReadRefused('staged bytes differ from the map digest')
     except BaseException:
         if buffer is not None:
             buffer.close()
@@ -328,18 +229,14 @@ def load_file(path: Path, limit: int, *, binding, decode, declared_signature=Non
     Returns ``(value, (receipt, signature, detail))`` where ``decode(raw,
     receipt, staged)`` returned ``(value, detail)``. The decoder runs on the
     bytes :func:`read_file` just hashed; for a staged copy it raises
-    ``StagedReadRefused`` on a fence of its own, which falls back like a read
+    ``StagedReadRefused`` on a fence of its own, which refuses like a read
     fence does. With ``sealed`` the decoder gets a :class:`SealedBuffer`,
     closed here once it returns or raises: a value that maps it keeps its
     pages, and nothing else does.
 
-    The redirect lives here because this is the one place a shard's bytes are
-    opened with a digest fused to the read: whatever copy is read, the same
-    SHA-256 fence decides whether it is admitted, so a wrong or stale staged
-    copy is refused exactly as a wrong pool copy would be. The declared path is
-    the fallback and the accounting says so. Without
-    ``PRISMAQUANT_STAGED_MANIFEST`` no resolver exists and the bytes are the
-    pool's.
+    Without ``PRISMAQUANT_STAGED_MANIFEST`` no resolver exists and the bytes
+    are the pool's. A resolver exists only under the active allowed-tier
+    policy, and that policy refuses every read the manifest does not serve.
 
     Under the active allowed-tier policy the read requires ``binding``, the
     caller's expected digest: without it a staged copy would be admitted on
@@ -367,24 +264,16 @@ def load_file(path: Path, limit: int, *, binding, decode, declared_signature=Non
         try:
             raw, receipt, signature = read_file(
                 path, limit, declared_signature=declared_signature, staged=staged,
-                lease=lease if strict else None, timing=timing, sealed=sealed)
+                lease=lease, timing=timing, sealed=sealed)
             try:
                 value, detail = decode(raw, receipt, True)
             finally:
                 _close_sealed(raw)
         except StagedReadRefused as refusal:
-            if resolver is not None:
-                resolver.record_fallback(path, str(refusal))
-            if policy_is_active():
-                raise refuse_pool_bulk_read(str(path), str(refusal))
-        else:
-            if resolver is not None and '_resolver' not in staged:
-                if receipt.get("serving_tier") == "ram":
-                    resolver.record_ram_read(path, receipt["bytes"])
-                else:
-                    resolver.record_stage_read(path, receipt["bytes"])
-            return value, (receipt, signature, detail)
-    if policy_is_active():
+            resolver.record_fallback(path, str(refusal))
+            raise refuse_pool_bulk_read(str(path), str(refusal))
+        return value, (receipt, signature, detail)
+    if strict:
         raise refuse_pool_bulk_read(
             str(path), "readset-not-staged" if resolver is None
             else "staged-not-serving")
@@ -395,8 +284,6 @@ def load_file(path: Path, limit: int, *, binding, decode, declared_signature=Non
         value, detail = decode(raw, receipt, False)
     finally:
         _close_sealed(raw)
-    if resolver is not None:
-        resolver.record_pool_read(path, receipt["bytes"])
     return value, (receipt, signature, detail)
 
 

@@ -302,7 +302,7 @@ def main(argv=None):
     parser.add_argument("--static-authority", required=True)
     parser.add_argument("--static-authority-sha256", required=True)
     parser.add_argument("--data-manifest-sha256", required=True)
-    parser.add_argument("--allowed-tiers", choices=("ram", "ssd", "ram,ssd"), required=True)
+    parser.add_argument("--allowed-tiers", choices=("ssd",), required=True)
     args = parser.parse_args(argv)
     bind_staged_reads(manifest_sha256=args.data_manifest_sha256,
                       allowed_tiers=args.allowed_tiers)

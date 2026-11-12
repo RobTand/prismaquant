@@ -12,14 +12,10 @@ implementation first (red), then the fix (green):
    read) and legacy semantics for the latter (generic refusal after a
    payload attempt). Either way the assertions are identical.
 2. A cancelled wait raises CancelledError promptly; it never resolves as
-   UNCOVERED and never falls through to payload reading. The owning
+   a coverage miss and never falls through to payload reading. The owning
    future therefore holds CancelledError, and teardown drains without
    masking the primary capture failure.
-3. A declared-but-unlanded span raises a typed wait-expiry error; an
-   undeclared span and a refused covering entry keep the existing generic
-   refusal. Unknown, integrity, and cancellation never become the typed
-   cause (predicate narrowing itself is the next tranche).
-4. Handoffs use poll-entry/resolver events, not sleeps; timing margins
+3. Handoffs use poll-entry/resolver events, not sleeps; timing margins
    are stated as generous bounds against a 30 s production-shaped bound,
    not as determinism claims.
 """
@@ -198,64 +194,3 @@ def test_shutdown_does_not_mask_primary_capture_failure(monkeypatch):
         finally:
             ctx.shutdown()
     landed.set()
-
-
-def test_declared_unlanded_span_raises_typed_expiry():
-    """UNCOVERED at the read seam is a typed transient cause."""
-    from prismaquant import staged_tier_policy as policy
-    from prismaquant.residency_map import RANGE_UNCOVERED
-    from prismaquant.residency_shard_reader import StagedShardReader
-
-    cls = getattr(policy, "StagedRangeNotLanded", None)
-    assert cls is not None, "no typed wait-expiry cause produced"
-
-    class _Stub:
-        def staged_range(self, *args, **kwargs):
-            return None
-
-        def staged_range_outcome(self, *args, **kwargs):
-            return None, RANGE_UNCOVERED
-
-    reader = object.__new__(StagedShardReader)
-    reader._bound = []
-    reader._strict = True
-    reader._resolver = _Stub()
-    reader._declared = "declared"
-    reader._declared_size = 64
-    with pytest.raises(cls) as info:
-        reader._range_for(0, 8)
-    assert info.value.start == 0 and info.value.end == 8
-
-
-def test_undeclared_and_refused_spans_keep_generic_refusal():
-    """Neither unknown nor integrity evidence becomes the typed cause."""
-    from prismaquant import staged_tier_policy as policy
-    from prismaquant.residency_map import RANGE_REFUSED, RANGE_UNDECLARED
-    from prismaquant.residency_shard_reader import StagedShardReader
-    from prismaquant.staged_tier_policy import TierPolicyRefused
-
-    typed = getattr(policy, "StagedRangeNotLanded", None)
-
-    class _Stub:
-        def __init__(self, outcome):
-            self._outcome = outcome
-
-        def staged_range(self, *args, **kwargs):
-            return None
-
-        def staged_range_outcome(self, *args, **kwargs):
-            return None, self._outcome
-
-    for outcome in (RANGE_UNDECLARED, RANGE_REFUSED):
-        reader = object.__new__(StagedShardReader)
-        reader._bound = []
-        reader._strict = True
-        reader._resolver = _Stub(outcome)
-        reader._declared = "declared"
-        reader._declared_size = 64
-        with pytest.raises(TierPolicyRefused) as info:
-            reader._range_for(0, 8)
-        assert type(info.value) is TierPolicyRefused, (
-            f"{outcome} must keep the generic refusal, got {type(info.value)}")
-        if typed is not None:
-            assert not isinstance(info.value, typed)

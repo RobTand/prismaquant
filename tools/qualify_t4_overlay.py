@@ -24,12 +24,11 @@ def read_cell(cell):
  assert catalog_stat_fence(wire.stat())==cell['wire_stat'];assert catalog_stat_fence(render.stat())==cell['render_stat'];origin=_resolve_render_origin(render,wire=wire,record=cell['record'],name=cell['qname'],fmt=cell['format'],shape=cell['source_weight']['shape'],reader=None);assert origin==cell['render_origin'];assert RENDER_COMPARISON_BY_ORIGIN[origin]==cell['render_comparison']
  if policy_is_active():
   from prismaquant.residency_shard_reader import await_staged_spans
-  from prismaquant.staged_lease import stage_cover_is_published
   from prismaquant.residency_map import RANGE_HIT
   resolver=residency_resolver()
   if resolver is None:raise refuse_pool_bulk_read(str(wire),'readset-not-staged')
   wanted=[(cell[k],0,cell[k+'_stat']['bytes'],cell[k+'_stat']['bytes']) for k in ('wire','render')]
-  verdict=await_staged_spans(resolver,wanted,published=stage_cover_is_published)
+  verdict=await_staged_spans(resolver,wanted)
   if verdict!=RANGE_HIT:raise refuse_pool_bulk_read(str(wire),'qualification-readiness-'+verdict)
  wire_start=time.monotonic();blob,_wire_digest=_read_verified_wire_blob(cell);verify_cached_unit(blob,cell['record'],cell['record']['identity']);assert catalog_stat_fence(wire.stat())==cell['wire_stat']
  wire_seconds=time.monotonic()-wire_start;render_start=time.monotonic();resolver=residency_resolver();staged=None if resolver is None else resolver.staged_read(render)
@@ -40,11 +39,7 @@ def read_cell(cell):
  assert isinstance(raw,SealedBuffer)
  with closing(raw):
   tensor,_guard=ProductionWeightCache._decode_file_tensor(ProductionWeightCache.__new__(ProductionWeightCache),None,raw,receipt,staged is not None)
- observed=(receipt,);file_sha=receipt['sha256']
- if resolver is not None:
-  if staged is None:resolver.record_pool_read(render,observed[0]['bytes'])
-  elif observed[0].get('serving_tier')=='ram':resolver.record_ram_read(render,observed[0]['bytes'])
-  else:resolver.record_stage_read(render,observed[0]['bytes'])
+ file_sha=receipt['sha256']
  assert tensor.dtype==torch.bfloat16 and list(tensor.shape)==cell['source_weight']['shape']
  assert bool(torch.isfinite(tensor).all());identity=_cb_cache_tensor_identity(tensor)
  render_seconds=time.monotonic()-render_start
@@ -61,10 +56,8 @@ def main():
   activate_staged_tier_policy(args.allowed_tiers)
  assert bool(args.pb_task_batch)!=bool(args.pilot_batch);batch=json.loads(Path(args.pb_task_batch or args.pilot_batch).read_text());assert batch['schema']==('prismabuild.task_batch.v1' if args.pb_task_batch else 'prismaquant.t4_qualification_pilot.v1');results=[]
  if args.allowed_tiers and any(t['payload'].get('reads') for t in batch['tasks']):
-  from prismaquant.staged_lease import resolve_sealed_readset, load_sealed_readset
-  from prismaquant.residency_map import bind_residency_manifest
-  _cas_root,manifest_digest,_manifest_bytes=resolve_sealed_readset();readset=load_sealed_readset(manifest_digest);bind_residency_manifest(manifest_digest)
-  print(json.dumps({'sealed_readset_sha256':manifest_digest,'declared_files':len(readset)}),flush=True)
+  from prismaquant.staged_lease import ReadsetUnbound
+  raise ReadsetUnbound('unit4 legacy claim/CAS launch authority is unqualified; use explicit staged manifest')
  def read_task(task):
   cell=task['payload']['cell'];out=Path(task['payload']['output'])
   if out.exists():

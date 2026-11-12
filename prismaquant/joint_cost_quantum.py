@@ -1564,10 +1564,7 @@ def await_retained_window_read(window_index: int, *, record: Mapping,
     import time as _time
 
     from .residency_map import RANGE_HIT, residency_resolver
-    from .residency_shard_reader import (
-        await_staged_spans,
-    )
-    from .staged_lease import stage_cover_is_published
+    from .residency_shard_reader import await_staged_spans
 
     window_index = int(window_index)
     block = record.get("executable_readset")
@@ -1590,10 +1587,7 @@ def await_retained_window_read(window_index: int, *, record: Mapping,
     # One cover lookup proves the whole window (PQ #1210), as it does for the
     # exact-cache and adjoint reads (PQ #997); a batch that cannot say which
     # entry is missing falls back to one lookup per entry.
-    verdict = await_staged_spans(
-        resolver, wanted,
-        published=stage_cover_is_published,
-        cancel=cancel)
+    verdict = await_staged_spans(resolver, wanted, cancel=cancel)
     print(f"[residency] retained render window {window_index:02d}: "
           f"{verdict} for {len(wanted)} staged entr"
           f"{'y' if len(wanted) == 1 else 'ies'}", flush=True)

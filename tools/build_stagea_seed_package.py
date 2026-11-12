@@ -2,7 +2,7 @@
 
 A seed (``prismaquant.stage_a_chain_seed``, PQ #1016) continues a source
 run's sealed checkpoint ``b`` down to ``through`` in a scratch output root.
-Under the campaign's ``ram,ssd`` tier policy every bulk byte it reads must be
+Under the campaign's ``ssd`` tier policy every bulk byte it reads must be
 staged, so its action is submitted with a data manifest that declares them
 (PQ #1043). This builder derives that manifest from the source run's own
 submitted manifest, the way ``build_stagea_forward_recovery_package`` derives

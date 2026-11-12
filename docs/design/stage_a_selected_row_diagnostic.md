@@ -119,7 +119,7 @@ The explicit CPU metadata command is:
 python -m prismaquant.stage_a_selected_row_diagnostic --prepare-original-session \
   --base-plan PATH --base-plan-sha256 SHA \
   --static-authority PATH --static-authority-sha256 SHA \
-  --data-manifest-sha256 SHA --allowed-tiers ram,ssd
+  --data-manifest-sha256 SHA --allowed-tiers ssd
 ```
 
 Run it only as a root-approved published PB CPU action. It authenticates the

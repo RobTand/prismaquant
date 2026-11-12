@@ -1,18 +1,8 @@
-"""A speculative availability timeout must not poison the demand read.
-
-Handover r2: a speculative prefetch looks 4 layers ahead with a 300 s
-staged-range bound; when it runs the bound out, its future holds the
-timeout, and the compute thread fails at once when it later needs that
-layer even though the bytes have since landed (it will not need the
-layer for ~10 minutes at ~2.7 min/layer).
+"""A failed speculative prefetch does not retry on demand.
 
 Production-shaped: drive StreamingContext scheduling over a stub layer
-reader. The first read (speculation) fails with availability
-(readset-not-staged: the mover has not landed yet); the second read
-(demand, after landing) succeeds. Demand must retry availability once
-through the existing prefetch machinery with the bounded declared wait,
-preserve integrity failures at once, never read the pool, never swallow,
-never retry unboundedly.
+reader. Integrity and unknown failures fail at once on demand: no retry,
+no pool read, no swallow.
 """
 from __future__ import annotations
 
@@ -62,37 +52,6 @@ def _make_ctx(monkeypatch, reader):
     ctx.max_cache_slots = ctx.layer_cache.max_entries
     ctx.prefetch_pool = ThreadPoolExecutor(max_workers=2)
     return ctx
-
-
-def test_speculative_availability_timeout_does_not_poison_demand(monkeypatch):
-    """Speculation times out, bytes land, demand retries once and serves."""
-    reads: list[int] = []
-
-    def reader(prefix, *args, **kwargs):
-        from prismaquant.staged_tier_policy import StagedRangeNotLanded
-        L = int(prefix.rstrip(".").rsplit(".", 1)[-1])
-        reads.append(L)
-        if len(reads) == 1:
-            # Speculative prefetch: the declared range has not landed yet.
-            raise StagedRangeNotLanded(prefix, 0, 1)
-        return _tensors(L)
-
-    ctx = _make_ctx(monkeypatch, reader)
-    try:
-        fut = ctx.schedule_prefetch(3)
-        assert fut is not None
-        # Speculation runs out its wait: the future holds availability.
-        with pytest.raises(Exception):
-            fut.result()
-        # Bytes land. Demand must retry once through the prefetch
-        # machinery and serve, not poison with the stale timeout.
-        tensors, src = ctx.ensure_loaded(3)
-        assert torch.equal(tensors["model.layers.3.weight"][0], torch.tensor(3.0))
-        assert src in ("wait", "cold")
-        # Exactly one bounded retry: speculation + demand, never unbounded.
-        assert reads == [3, 3], f"expected one retry, got {reads}"
-    finally:
-        ctx.shutdown()
 
 
 def test_speculative_integrity_failure_is_preserved(monkeypatch):
@@ -146,29 +105,6 @@ def test_unknown_error_with_availability_words_is_not_retried(monkeypatch):
         ctx.shutdown()
 
 
-def test_second_availability_failure_propagates_after_single_retry(monkeypatch):
-    """Exactly one bounded retry: a still-unlanded range refuses loudly."""
-    from prismaquant.staged_tier_policy import StagedRangeNotLanded
-    reads: list[int] = []
-
-    def reader(prefix, *args, **kwargs):
-        L = int(prefix.rstrip(".").rsplit(".", 1)[-1])
-        reads.append(L)
-        raise StagedRangeNotLanded(prefix, 0, 1)
-
-    ctx = _make_ctx(monkeypatch, reader)
-    try:
-        fut = ctx.schedule_prefetch(3)
-        assert fut is not None
-        with pytest.raises(Exception):
-            fut.result()
-        with pytest.raises(StagedRangeNotLanded):
-            ctx.ensure_loaded(3)
-        assert reads == [3, 3], f"expected exactly one retry, got {reads}"
-    finally:
-        ctx.shutdown()
-
-
 def test_successful_prefetch_served_with_single_read(monkeypatch):
     """Already-queued success delivery is untouched by retry logic."""
     reads: list[int] = []
@@ -187,39 +123,6 @@ def test_successful_prefetch_served_with_single_read(monkeypatch):
         assert torch.equal(tensors["model.layers.3.weight"][0], torch.tensor(3.0))
         assert src in ("hot", "wait")
         assert reads == [3], f"success must cost one read, got {reads}"
-    finally:
-        ctx.shutdown()
-
-
-def test_cancelled_context_performs_no_demand_read(monkeypatch):
-    """A shut-down context reads, installs, and retries nothing on demand."""
-    reads: list[int] = []
-
-    def reader(prefix, *args, **kwargs):
-        L = int(prefix.rstrip(".").rsplit(".", 1)[-1])
-        reads.append(L)
-        return _tensors(L)
-
-    ctx = _make_ctx(monkeypatch, reader)
-    ctx._staged_wait_cancel = threading.Event()
-    try:
-        # Poison the future first: cancellation must still win over retry.
-        from prismaquant.staged_tier_policy import StagedRangeNotLanded
-
-        def poison(prefix, *args, **kwargs):
-            reads.append(3)
-            raise StagedRangeNotLanded(prefix, 0, 1)
-
-        monkeypatch.setattr(streaming_model, "_read_layer_to_device", poison)
-        fut = ctx.schedule_prefetch(3)
-        assert fut is not None
-        with pytest.raises(Exception):
-            fut.result()
-        monkeypatch.setattr(streaming_model, "_read_layer_to_device", reader)
-        ctx._staged_wait_cancel.set()
-        with pytest.raises(CancelledError):
-            ctx.ensure_loaded(3)
-        assert reads == [3], f"cancelled demand must add no read, got {reads}"
     finally:
         ctx.shutdown()
 

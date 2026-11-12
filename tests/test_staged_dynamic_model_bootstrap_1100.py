@@ -75,7 +75,7 @@ def test_active_native_model_route_retains_stock_meta_geometry(auto_map):
     if auto_map is not None:
         config.auto_map = auto_map
     baseline = streaming_model.build_streaming_skeleton(config, multimodal=False)
-    with staged_tier_policy_test_context("ram,ssd"):
+    with staged_tier_policy_test_context("ssd"):
         actual = streaming_model.build_streaming_skeleton(config, multimodal=False)
     assert type(actual) is type(baseline)
     assert {name: (tuple(value.shape), value.dtype, value.device.type)
@@ -91,7 +91,7 @@ def test_active_explicit_stock_architecture_does_not_use_dynamic_map():
         num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=2,
         vocab_size=32, architectures=["LlamaForCausalLM"])
     config.auto_map = {"AutoModelForCausalLM": "unused.RemoteModel"}
-    with staged_tier_policy_test_context("ram,ssd"):
+    with staged_tier_policy_test_context("ssd"):
         actual = streaming_model.build_streaming_skeleton(config, multimodal=True)
     assert type(actual) is LlamaForCausalLM
     assert all(value.device.type == "meta" for value in actual.parameters())

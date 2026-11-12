@@ -1308,7 +1308,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.device == "cuda":
         if args.data_manifest is None:
             raise TrialRefused("CUDA encode requires a declared PB data manifest")
-        activate_staged_tier_policy("ram,ssd")
+        activate_staged_tier_policy("ssd")
     if args.threads < 1:
         raise TrialRefused("--threads must be positive")
     if args.device == "cuda" and (args.preflight or args.mode == "score"):

@@ -91,7 +91,7 @@ def test_fresh_multiformat_request_has_pair_ids_outputs_and_format_residencies(c
     assert request['roster']['schema'] == 'prismabuild.logical_task_roster.v1'
     assert request['common'] == {
         'argv': ['/pinned/python', 'tools/qualify_t4_overlay.py', '--pb-task-batch',
-                 '{pb.task_batch}', '--allowed-tiers', 'ram,ssd'],
+                 '{pb.task_batch}', '--allowed-tiers', 'ssd'],
         'cwd': '/qualifier', 'demand': {'cpu': 3, 'mem_gb': 4, 'gpu': 1},
         'gpu_memory_gb': 2, 'tags': ['gb10'], 'timeout_s': 600, 'data_manifest': None,
         'env': {'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1', 'OPENBLAS_NUM_THREADS': '1',

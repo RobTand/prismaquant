@@ -715,27 +715,6 @@ def _prefetch_delivery_enabled() -> bool:
 
 
 # ---------------------------------------------------------------------------
-def _is_prefetch_availability(exc: BaseException) -> bool:
-    """Whether an admitted load may retry its failed speculation (PQ #911).
-
-    Only the proven transient cause retries: a declared staged range that
-    remains unlanded (``StagedRangeNotLanded``). The type is the proof;
-    message wording is never consulted, so an unknown failure whose text
-    happens to contain availability words is refused, not retried, and
-    ``CancelledError`` never retries. Undeclared spans, failed covering
-    entries, wrong-size/non-regular/permission/corrupt payloads and
-    integrity refusals keep their generic errors: nothing about them says
-    the bytes are on their way. ``LeaseRefused`` can propagate from the
-    strict reader's LeaseWindow, including availability refusals such as
-    retiring. Those are not this declared-but-unlanded cause and do not
-    match. No pool/HDD read, no swallow, exactly one retry by the caller.
-    """
-    if isinstance(exc, CancelledError):
-        return False
-    from .staged_tier_policy import StagedRangeNotLanded
-    return isinstance(exc, StagedRangeNotLanded)
-
-
 class InstalledBlock:
     """One installed block's lifetime, borrowed when the runner pins it."""
 
@@ -1185,7 +1164,7 @@ class StreamingContext:
         with self._inflight_lock:
             fut = self._inflight.get(L)
         if fut is not None:
-            delivered = self._await_prefetch(L, fut, retry_availability=True)
+            delivered = self._prefetch_result(L, fut)
             self._claim_inflight(L)
             cached = self.layer_cache.get(L)
             if cached is not None:
@@ -1391,64 +1370,20 @@ class StreamingContext:
             self._source_wait_sink = None
 
     def _prefetch_result(self, layer, future):
-        """Take one delivery result; retry ownership stays in ``_await_prefetch``."""
+        """Take one delivery result."""
         from .io_spans import observed_future_result
         return observed_future_result(
             future, sink=getattr(self, '_source_wait_sink', None),
             kind='source-prefetch', info={'layer': int(layer)}, clock=time.time,
             observer='source wait observer')
 
-    def _await_prefetch(self, layer, future, *, retry_availability):
-        """Await delivery, retaining its owner even when speculation is replaced.
-
-        The compute thread owns this transition. One retry belongs to the
-        delivery future, shared by loader settlement and later demand; a
-        failed replacement cannot earn another attempt at either boundary.
-        Scheduling still enforces the ordinary source-load memory gates.
-        This reports no progress and grants no new phase/watchdog allowance.
-        """
-        try:
-            return self._prefetch_result(layer, future)
-        except Exception as exc:
-            if (not retry_availability or not _is_prefetch_availability(exc)
-                    or getattr(future, '_pq_availability_retried', False)):
-                raise
-            cancel = getattr(self, '_staged_wait_cancel', None)
-            if cancel is not None and cancel.is_set():
-                raise CancelledError(
-                    f'streamed layer {layer} demand cancelled; not retrying its prefetch')
-            with self._inflight_lock:
-                if self._inflight.get(layer) is not future:
-                    raise RuntimeError('prefetch retry lost its delivery owner') from exc
-                future._pq_availability_retried = True
-                del self._inflight[layer]
-            # The visitor can still hold the original Future. Its failure
-            # traceback can retain a partially read layer, so release
-            # completed loader-frame locals before allocating the retry.
-            # Traceback locations and the exception itself remain intact;
-            # executing frames (including this one) are left alone.
-            import traceback
-            traceback.clear_frames(exc.__traceback__)
-            replacement = self.schedule_prefetch(layer)
-            if replacement is None:
-                # Keep the failed owner and its spent retry budget. A
-                # refused admission must not enable repeated retry calls.
-                with self._inflight_lock:
-                    self._inflight.setdefault(layer, future)
-                raise
-            replacement._pq_availability_retried = True
-            return self._prefetch_result(layer, replacement)
-
-    def settle_prefetched_layers(self, layer_indices, *, retry_availability=False):
+    def settle_prefetched_layers(self, layer_indices):
         """Await an already scheduled window without claiming its owners.
 
         Capture may exclude loader temporaries only after every remaining
-        prefetch is complete. The default only observes. An already admitted
-        source-loading phase may explicitly retry a typed availability
-        failure once through the existing prefetch machinery. Missing,
-        refused, unknown/integrity or unexpected loads still fail closed.
-        Neither mode cold-reads, installs, claims a delivery future or spends
-        an LRU pin. A successful replacement remains owned for later install.
+        prefetch is complete. This only observes. Missing, refused,
+        unknown/integrity or unexpected loads fail closed. It never
+        cold-reads, installs, claims a delivery future or spends an LRU pin.
         """
         indices = tuple(layer_indices)
         if (len(set(indices)) != len(indices) or any(
@@ -1462,8 +1397,7 @@ class StreamingContext:
         for index in indices:
             future = futures.get(index)
             if future is not None:
-                if not self._await_prefetch(
-                        index, future, retry_availability=retry_availability):
+                if not self._prefetch_result(index, future):
                     raise RuntimeError(f'capture successor {index} prefetch was refused')
                 settled.append(dict(layer=index, owner='prefetch_future'))
             elif self.layer_cache.peek(index):

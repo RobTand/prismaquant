@@ -89,7 +89,7 @@ class StagedReader:
             if found is not None:
                 items.append(found)
                 keys.append(other)
-        lease, keys = self.lease.acquire_entries_window(self.resolver, items, tier='ssd')
+        lease, keys = self.lease.acquire_entries_window(self.resolver, items)
         lease.__enter__()
         window = {"lease": lease, "entries": dict(zip(keys, (e for _, e in items))), "active": 0}
         self.windows.setdefault(phase, []).append(window)

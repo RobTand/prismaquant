@@ -93,7 +93,7 @@ def load_staged_inputs(manifest_sha256):
     """Use the existing PB lease reader once for the diagnostic's source inputs."""
     model_path = Path("/mnt/shared/models/qwen3-small-alloc-lead/Qwen3-0.6B")
     input_path = Path("/mnt/shared/tessera-measurements/alloc-lead-asd/inputs_qwen3.safetensors")
-    activate_staged_tier_policy("ram,ssd")
+    activate_staged_tier_policy("ssd")
     bind_residency_manifest(manifest_sha256)
     manifest_path = Path(__file__).with_name("recipes") / "pair-inputs.json"
     manifest_raw = manifest_path.read_bytes()

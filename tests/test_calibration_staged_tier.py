@@ -218,21 +218,6 @@ def test_strict_calibration_never_falls_back_from_a_changed_declared_object(tmp_
 
 # -- refusals: forbidden tier, corruption, wrong pin -----------------------------
 
-def test_strict_calibration_ram_only_refuses_before_payload(tmp_path, monkeypatch):
-    from prismaquant.calibration_data import load_calibration_input
-
-    path, sha, _ids = _artifact(tmp_path)
-    _staged, resolver = _stage_calibration(tmp_path, monkeypatch, path)
-    from prismaquant import staged_tier_policy
-    staged_tier_policy.deactivate_staged_tier_policy_for_tests()
-    activate_staged_tier_policy('ram')
-    opened_os, opened_io, safe_opens = _guard_pool(monkeypatch, path)
-    with pytest.raises(TierPolicyRefused, match="ssd-not-allowed"):
-        load_calibration_input(path, expected_sha256=sha, n_samples=4, seqlen=8)
-    assert opened_os == [] and opened_io == [] and safe_opens == []
-    assert resolver.report()['bytes_from_pool'] == 0
-
-
 def test_strict_calibration_corrupt_stage_fails_clear(tmp_path, monkeypatch):
     from prismaquant.calibration_data import load_calibration_input
 

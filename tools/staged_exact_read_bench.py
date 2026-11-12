@@ -164,7 +164,6 @@ def _all_records(slice_doc: dict, space: str) -> list[dict]:
 def child_paths(args, slice_doc) -> dict:
     """Check immutable coverage and list the staged copies."""
     from prismaquant.residency_shard_reader import await_staged_spans
-    from prismaquant.staged_lease import stage_cover_is_published
     resolver = _bind(args.manifest_sha256, args.allowed_tiers)
     rows = _all_records(slice_doc, args.space)
     wanted = []
@@ -173,30 +172,16 @@ def child_paths(args, slice_doc) -> dict:
             os.lstat(row["path"]).st_size
         wanted.append((row["path"], 0, size, size))
     started = time.monotonic()
-    verdict = await_staged_spans(resolver, wanted,
-                                 published=stage_cover_is_published)
+    verdict = await_staged_spans(resolver, wanted)
     waited = time.monotonic() - started
-    # The ram leg promotes each landed stage range afterwards; wait for it
-    # too, so the first arm does not read a tier the later arms do not.
-    ram_deadline = time.monotonic() + args.ram_wait_s
-    while True:
-        copies, ram = [], 0
-        for row in rows:
-            staged = resolver.staged_read(Path(row["path"]))
-            if staged is None:
-                continue
-            copies.append({"declared": row["path"],
-                           "stage_path": staged.get("stage_path"),
-                           "ram_path": staged.get("ram_path"),
+    copies = []
+    for row in rows:
+        staged = resolver.staged_read(Path(row["path"]))
+        if staged is not None:
+            copies.append({"declared": row["path"], "stage_path": staged["stage_path"],
                            "bytes": staged["bytes"]})
-            ram += staged.get("ram_path") is not None
-        if ram == len(copies) or time.monotonic() >= ram_deadline:
-            break
-        time.sleep(10.0)
     return {"verdict": verdict, "land_wait_s": round(waited, 3),
-            "ram_wait_s": round(time.monotonic() - started - waited, 3),
-            "files": len(rows), "staged": len(copies), "ram_offered": ram,
-            "copies": copies}
+            "files": len(rows), "staged": len(copies), "copies": copies}
 
 
 def child_ceiling(args, _slice_doc) -> dict:
@@ -212,10 +197,9 @@ def child_ceiling(args, _slice_doc) -> dict:
     import mmap
     copies = json.loads(Path(args.copies).read_text())
     results = []
-    for tier in ("ram", "stage"):
-        paths = [c["ram_path"] if tier == "ram" else c["stage_path"] for c in copies
-                 if (c["ram_path"] if tier == "ram" else c["stage_path"])
-                 and c["bytes"] > (1 << 20)][args.ceiling_skip:args.ceiling_skip + args.ceiling_files]
+    for tier in ("stage",):
+        paths = [c["stage_path"] for c in copies
+                 if c["bytes"] > (1 << 20)][args.ceiling_skip:args.ceiling_skip + args.ceiling_files]
         if not paths:
             continue
         for mode in args.ceiling_modes:
@@ -983,7 +967,7 @@ def driver_main(args) -> int:
         report["paths"] = paths
         if paths["verdict"] != "hit":
             print(f"warning: landing verdict {paths['verdict']}", flush=True)
-        staged_files = [p for c in copies for p in (c["stage_path"], c["ram_path"]) if p]
+        staged_files = [c["stage_path"] for c in copies]
     if args.ceiling_threads:
         report["ceiling"] = run_child(
             args, "ceiling", tree=own_tree, sdk_root=None, out=out, label="ceiling",
@@ -1027,9 +1011,8 @@ def main(argv=None) -> int:
                         help="the adjoint space the checkpoint lives under")
     parser.add_argument("--manifest-sha256", required=True,
                         help="the data manifest this action was submitted with")
-    parser.add_argument("--allowed-tiers", default="ram,ssd")
+    parser.add_argument("--allowed-tiers", default="ssd")
     parser.add_argument("--land-wait-s", type=float, default=3600.0)
-    parser.add_argument("--ram-wait-s", type=float, default=1800.0)
     parser.add_argument("--sink", choices=("scratch", "discard"), default="scratch")
     parser.add_argument("--scratch-root", default=None)
     parser.add_argument("--scratch-max-bytes", type=int, default=64 << 30)
@@ -1084,7 +1067,6 @@ def main(argv=None) -> int:
         "--slice", args.slice, "--slice-sha256", args.slice_sha256,
         "--space", args.space, "--manifest-sha256", args.manifest_sha256,
         "--allowed-tiers", args.allowed_tiers, "--land-wait-s", str(args.land_wait_s),
-        "--ram-wait-s", str(args.ram_wait_s),
         "--sink", args.sink, "--scratch-max-bytes", str(args.scratch_max_bytes),
         "--sink-ceiling-bytes", str(args.sink_ceiling_bytes),
         "--stage-a-boundary", args.stage_a_boundary,

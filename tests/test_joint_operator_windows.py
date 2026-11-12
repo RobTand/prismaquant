@@ -264,7 +264,7 @@ def test_operator_reverse_owns_exact_lookahead_when_cache_has_extra_slots(monkey
     def schedule(layer):
         if state['reverse']:
             futures.add(layer)
-    def settle(indices, *, retry_availability=False):
+    def settle(indices):
         expected = set(indices)
         if futures != expected:
             raise RuntimeError(f'unexpected source owners: {futures} != {expected}')
