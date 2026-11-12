@@ -2,7 +2,6 @@
 import argparse
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import pstats
@@ -21,7 +20,7 @@ def sha(path):
 
 
 def audit_outputs(output, inv, root):
-    """Compare artifact values, retaining but excluding measured solver times."""
+    """Compare artifact values byte for byte."""
     results = [json.loads((output / arm / 'result.json').read_text())
                for arm in ('before', 'after')]
     assert all(r['returncode'] == 0 and not r['netdata_errors'] for r in results)
@@ -34,30 +33,17 @@ def audit_outputs(output, inv, root):
     files = sorted(path.relative_to(before) for path in before.rglob('*') if path.is_file())
     assert files == sorted(path.relative_to(after) for path in after.rglob('*') if path.is_file())
     differences = []
-    timing_keys = []
     for rel in files:
         a = (before / rel).read_text().replace(str(before), '<FRONTIER>')
         b = (after / rel).read_text().replace(str(after), '<FRONTIER>')
-        if str(rel) == 'terminal-bf16-control.json':
-            a, b = json.loads(a), json.loads(b)
-            left = a['__prismaquant__']['solve_diagnostics']
-            right = b['__prismaquant__']['solve_diagnostics']
-            assert left.keys() == right.keys()
-            for target in left:
-                for side in (left, right):
-                    seconds = side[target].pop('solver_seconds')
-                    assert type(seconds) is float and math.isfinite(seconds) and seconds >= 0
-                timing_keys.append(target)
         if a != b:
             differences.append(str(rel))
     assert sha(root / 'joint-allocation-cost.pkl') == inv['input_sha256']
     report = {'arms': results, 'output_files': len(files), 'differences': differences,
-              'excluded_solver_seconds_targets': sorted(timing_keys),
               'artifacts': {str(p.relative_to(output)): sha(p) for p in output.rglob('*')
                             if p.is_file() and p.name != 'comparison-audited.json'}}
     (output / 'comparison-audited.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({'output_files': len(files), 'differences': differences,
-                      'excluded_solver_seconds': len(timing_keys),
                       'audit_sha256': sha(output / 'comparison-audited.json')}), flush=True)
     assert not differences
 

@@ -2,7 +2,7 @@
 
 Stock allocation clears the optional Tessera development pin. Tessera allocation
 uses the test-owned v5 contract and clears the requested override too. Layer
-hashes retain every field except solver wall time and the historical Tessera
+hashes retain every field except the historical Tessera
 contract-version/reviewed-digest normalization. Explicit accounting, assignment
 and installed-pin checks accompany the complete file digests.
 """
@@ -18,60 +18,48 @@ import sys
 import pytest
 
 STOCK_DIGESTS = {
-    "layer_config.json": "02dd31cb8d41f36146994f41d63b3699e33dfca7140fd67900d88ff0692ed469",
+    "layer_config.json": "ffd88f90f039f69e559be73ce9e302ce5406d4f48f8b7998db2a1156918a9942",
     "format_applicability.json": (
-        "d9c224a47508eceafdb39f3f1bbdf1b4c4ee9c37c9b228dff836c063c2743cba"
+        "08076992b5150799091dc3a2c6cf63ad580c3c31e53e6c6e12cda1b715b848f8"
     ),
     "pareto.csv": (
         "0805fbc4dbffb240025dc5bfb8a4e97ddb241eda8e3c80818f07cdec425cfb32"
     ),
     "pareto.knees.json": (
-        "26a0603fe7a943444451b31617140b65294cabdaf377f981bb262c5f7eea5d17"
+        "2bc195e1fb1a76e2311faf91b35d1e700b8fc96306345f248896af4a46457dba"
     ),
     "pareto_seeds/allocator_target_4p6000_achieved_4p5020_c3f5ef1e4ab4.json": (
-        "3c9ba881cb0ada42cd400c070d6dc495a29da985f283e79e07ed3dfdd3c19e01"
+        "1cbec100e954d8ff94f065bc45a6808a41c65eb6da77e1f3a64d02c16172fa42"
     ),
     "pareto_seeds/allocator_target_5p5000_achieved_5p2783_81f5decbbbb0.json": (
-        "cf93255cb16eb8efe540d5b2fb97257b53e2b3f5ab50434ec970d4b8e77eb2f2"
+        "fce87d165fe2660bbf03ada8414e3201b7ae12663be12fc232f6e7374832f7ad"
     ),
     "pareto_seeds/allocator_target_6p0000_achieved_5p7959_6ef0bae1963d.json": (
-        "21e0fe09065f2056aead72a4c6c4d3441e00349488dfdfc39e92ea579df3c1d5"
+        "2196c306af84cc710084b358b553dab190450985cb1c15cb07716b671c010810"
     ),
     "pareto_seeds/allocator_target_8p0000_achieved_7p8662_9e13e69f37a9.json": (
-        "53d1d5af6d11318048fe0056e8c54656476146f18a3a6a160d104350a814631b"
+        "a7fc3b502cdccbfec7c7adeeed890954dc032e8a2103ecdca75873e9da21b0b7"
     ),
     "pareto_seeds/manifest.json": (
-        "6c1d347bab305682a27c3527198dd5cf726d27b3d1a8f1aa6a7545b4cccf0d66"
+        "7e80038d29a02961ddf43d27ab92268ef5506ac9b9c944308cfdb56c6aa7abcd"
     ),
 }
 TESSERA_DIGESTS = {
-    "layer.json": "57b8f9b3498d25ca3fd67b541c86ff731bca9fb265d8878bd9ac8fd803c35ec9",
+    "layer.json": "86645b65e35c088897347b4ca0f3454202d3b2194313b89485da8c41eb696275",
     "format_applicability.json": (
-        "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
+        "0e3d1f837879b2e9880c3dfbcfea38b7568f5a9a7c2e6bd898ec317fdd4dcfe2"
     ),
     "pareto.csv": (
         "e172f4262b5a094db870ed0a904d516d0b030926ee89431fe8472e8a5465583d"
     ),
     "pareto.knees.json": (
-        "925991a1a2afcd461ccb3aa026a2135d1487506520f88e78c3bab8c64dedc114"
+        "3735ae8eb6ecf8837e168542460da5eb085119614eac16568f57df72acc3edff"
     ),
 }
 
 
-def _without_wall_time(value):
-    # The solver timer is not deterministic. Keep each other value.
-    if isinstance(value, dict):
-        return {
-            key: None if key == "solver_seconds" else _without_wall_time(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_without_wall_time(item) for item in value]
-    return value
-
-
 def _canonical_tessera_layer(text):
-    payload = _without_wall_time(json.loads(text))
+    payload = json.loads(text)
     identity = payload["__prismaquant__"]["tessera_dev_pin"]
     for field in ("contract_version", "reviewed_contract_sha256"):
         del identity[field]
@@ -88,8 +76,6 @@ def _digests(root):
         text = path.read_bytes().replace(str(root).encode(), b"<TMP>")
         if rel == "layer.json":
             text = _canonical_tessera_layer(text)
-        elif rel.endswith(".json"):
-            text = json.dumps(_without_wall_time(json.loads(text))).encode()
         out[rel] = hashlib.sha256(text).hexdigest()
     return out
 
@@ -107,7 +93,6 @@ def _assert_accounting(metadata, *, params, bits, target):
     assert metadata["global_optimality_claimed"] is False
     for diagnostic in metadata["solve_diagnostics"].values():
         assert diagnostic["solver_calls"] == 1
-        assert math.isfinite(diagnostic["solver_seconds"]) and diagnostic["solver_seconds"] >= 0
 
 
 def _assert_pareto_point(root, *, target, bits_per_param, loss):
