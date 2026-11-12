@@ -927,6 +927,7 @@ def _expected_probe_shard_meta(args, *,
         "shard_idx": shard_idx,
         "router_coverage_version": _ROUTER_COVERAGE_VERSION,
         "packed_input_capture": "module_once.v1",
+        "act_row_selection": probe_statistics.ACT_ROW_SELECTION,
         # Not a grouping axis: it decides whether the shard's stats
         # carry per-channel marginals at all. Reusing a flag-off shard
         # in a flag-on run would silently ship marginal-less entries.
@@ -1709,6 +1710,7 @@ def _compute_precompute_key(model_path: str, dataset_name: str,
         "resident_include_union": resident_include_union,
         "router_coverage_version": _ROUTER_COVERAGE_VERSION,
         "emit_marginals": bool(emit_marginals),
+        "act_row_selection": probe_statistics.ACT_ROW_SELECTION,
     }
 
 
@@ -2026,9 +2028,9 @@ def _compute_global_precompute(
     resident_handles: list = []
     resident_act_snaps: dict[str, list[torch.Tensor]] = defaultdict(list)
     resident_act_row_indices: dict[str, list[torch.Tensor]] = defaultdict(list)
-    resident_act_rows: dict[str, int] = defaultdict(int)
-    resident_act_token_offsets: dict[str, int] = defaultdict(int)
     resident_input_rows_limit = 256
+    # Token position of the lm_head window that phase 2 runs now.
+    resident_window_start = [0]
     _resident_cache_dir = (
         Path(activation_cache_dir)
         if activation_cache_dir
@@ -2041,22 +2043,20 @@ def _compute_global_precompute(
         def hook(module, inp, out):
             x = inp[0] if isinstance(inp, tuple) else inp
             resident_saved_inputs[name] = x.detach()
-            if _resident_cache_dir is not None:
-                need = resident_input_rows_limit - resident_act_rows[name]
+            # The no-grad CE-mean pass sees the same rows again; skip it.
+            if _resident_cache_dir is not None and torch.is_grad_enabled():
+                # x is [N, window, ...]; row = (n * seqlen + t) * k + c.
                 flat = x.detach().reshape(-1, x.size(-1))
-                base = int(resident_act_token_offsets[name])
-                resident_act_token_offsets[name] += int(flat.size(0))
-                if need > 0:
-                    if flat.size(0) > need:
-                        idx = torch.randperm(flat.size(0), device=flat.device)[:need]
-                        flat = flat.index_select(0, idx)
-                    else:
-                        idx = torch.arange(flat.size(0), device=flat.device)
-                    resident_act_snaps[name].append(flat.to("cpu"))
-                    resident_act_row_indices[name].append(
-                        (idx.detach().to("cpu", dtype=torch.long) + base)
-                    )
-                    resident_act_rows[name] += flat.size(0)
+                k = flat.size(0) // (x.size(0) * x.size(1))
+                tok = (torch.arange(x.size(0), device=x.device)[:, None]
+                       * tokens_in_sample
+                       + resident_window_start[0]
+                       + torch.arange(x.size(1), device=x.device)[None, :])
+                rows = (tok.reshape(-1, 1) * k
+                        + torch.arange(k, device=x.device)).reshape(-1)
+                probe_statistics.keep_act_rows(
+                    resident_act_snaps, resident_act_row_indices, name, flat,
+                    rows, resident_input_rows_limit, to_cpu=True)
         return hook
 
     def _make_resident_bwd(name: str, mod_ref: nn.Linear):
@@ -2236,6 +2236,7 @@ def _compute_global_precompute(
         cut = end - 1 - start if end >= T else end - start
         if cut <= 0:
             continue
+        resident_window_start[0] = start
         preds = _scored_lm_head_logits(
             model.lm_head, norm_out_d,
             start=start, scored_tokens=cut,
@@ -2874,9 +2875,17 @@ def _run_body_streaming_shard(
     # Linears; resident snaps were populated during Phase-2 hooks above).
     activation_snaps: dict[str, list[torch.Tensor]] = defaultdict(list)
     activation_row_indices: dict[str, list[torch.Tensor]] = defaultdict(list)
-    activation_rows: dict[str, int] = defaultdict(int)
     activation_token_offsets: dict[str, int] = defaultdict(int)
     input_rows_limit = max(1, int(activation_rows_limit))
+
+    def _keep_act_snapshot(snaps, indices, name, x):
+        """Number each row of the call globally, then keep the keyed top-K."""
+        flat = x.detach().reshape(-1, x.size(-1))
+        base = activation_token_offsets[name]
+        activation_token_offsets[name] += int(flat.size(0))
+        rows = torch.arange(base, base + flat.size(0), device=flat.device)
+        probe_statistics.keep_act_rows(
+            snaps, indices, name, flat, rows, input_rows_limit)
     cache_dir = Path(activation_cache_dir) if activation_cache_dir else None
     if cache_dir is not None:
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -2906,11 +2915,8 @@ def _run_body_streaming_shard(
             snaps = snaps_by_name.pop(name)
             if not snaps:
                 continue
-            # If the snapshots are still on device (Fix C path), bring
-            # them to host once per Linear via a non-blocking copy
-            # before pickling. The fwd hook keeps them on device when
-            # _act_async is on so the main thread doesn't stall on
-            # device→host transfers between Linears in the same forward.
+            # Body snapshots are still on device (Fix C): one host copy
+            # per Linear here, never one per forward call.
             # #43: PRISMAQUANT_ACT_CACHE_FP32 keeps activations at FP32
             # for better Hessian numerical stability in the cost step.
             # 2× storage cost; recommended when disk is plentiful.
@@ -2929,7 +2935,8 @@ def _run_body_streaming_shard(
                     row_indices = torch.cat(index_parts, dim=0).to(
                         "cpu", dtype=torch.long
                     ).contiguous()
-            payload = {"inputs": X, "name": name}
+            payload = {"inputs": X, "name": name,
+                       "row_selection": probe_statistics.ACT_ROW_SELECTION}
             if row_indices is not None and row_indices.numel() == X.shape[0]:
                 payload["row_indices"] = row_indices
             fname = act_fname_sub.sub("__", name) + ".pt"
@@ -2952,7 +2959,7 @@ def _run_body_streaming_shard(
 
     collect_h_full = h_detail_dir is not None
     packed_act_snaps: dict[str, list[torch.Tensor]] = defaultdict(list)
-    packed_act_rows: dict[str, int] = defaultdict(int)
+    packed_act_row_indices: dict[str, list[torch.Tensor]] = defaultdict(list)
 
     # Phase-3 reverse sweep runs only when this shard has body-scoped
     # Linears. Pure resident-scoped shards (e.g. `^lm_head$`) skip it —
@@ -3253,33 +3260,11 @@ def _run_body_streaming_shard(
                     x = inp[0] if isinstance(inp, tuple) else inp
                     saved_inputs[name] = x.detach()
                     if cache_dir is not None:
-                        flat = x.detach().reshape(-1, x.size(-1))
-                        base = int(activation_token_offsets[name])
-                        activation_token_offsets[name] += int(flat.size(0))
-                        need = input_rows_limit - activation_rows[name]
-                        if need <= 0:
-                            return
-                        if flat.size(0) > need:
-                            idx = torch.randperm(flat.size(0), device=flat.device)[:need]
-                            flat = flat.index_select(0, idx)
-                        else:
-                            idx = torch.arange(flat.size(0), device=flat.device)
-                        # v22 Fix C: keep on device when async writes
-                        # are enabled. Each per-Linear .to("cpu") in
-                        # the inline path forces a device→host
-                        # synchronization, stalling the forward
-                        # pipeline. Deferring lets the layer's whole
-                        # forward run uninterrupted; the device→host
-                        # copy happens once per Linear at end-of-layer
-                        # in flush_activation_snapshots.
-                        if _act_async:
-                            activation_snaps[name].append(flat.detach())
-                        else:
-                            activation_snaps[name].append(flat.to("cpu"))
-                        activation_row_indices[name].append(
-                            (idx.detach().to("cpu", dtype=torch.long) + base)
-                        )
-                        activation_rows[name] += flat.size(0)
+                        # Rows stay on device: flush_activation_snapshots
+                        # copies them to host once per Linear at the end
+                        # of the layer (v22 Fix C), with no sync per call.
+                        _keep_act_snapshot(
+                            activation_snaps, activation_row_indices, name, x)
                 return hook
 
             # v21 #1: deferred Fisher sync. PRISMAQUANT_DEFERRED_FISHER_SYNC=1
@@ -3562,20 +3547,12 @@ def _run_body_streaming_shard(
                     if experts_mod is not None:
                         experts_full = f"{layer_prefix}{experts_qname_rel}"
 
-                        def _exp_fwd(_mod, inp, _out,
-                                     _q=experts_full, _rows=packed_act_rows,
-                                     _snaps=packed_act_snaps,
-                                     _lim=input_rows_limit):
+                        def _exp_fwd(_mod, inp, _out, _q=experts_full):
                             x = inp[0] if isinstance(inp, tuple) else inp
                             if isinstance(x, torch.Tensor):
-                                need = _lim - _rows[_q]
-                                if need > 0:
-                                    flat = x.detach().reshape(-1, x.size(-1))
-                                    if flat.size(0) > need:
-                                        idx = torch.randperm(flat.size(0), device=flat.device)[:need]
-                                        flat = flat.index_select(0, idx)
-                                    _snaps[_q].append(flat.to("cpu"))
-                                    _rows[_q] += flat.size(0)
+                                _keep_act_snapshot(
+                                    packed_act_snaps, packed_act_row_indices,
+                                    _q, x)
 
                         layer_packed_handles.append(
                             experts_mod.register_forward_hook(_exp_fwd))
@@ -3886,7 +3863,7 @@ def _run_body_streaming_shard(
                 activation_snaps,
                 activation_row_indices,
             )
-            flush_activation_snapshots(packed_act_snaps)
+            flush_activation_snapshots(packed_act_snaps, packed_act_row_indices)
 
             phase_pressure_trim_bytes += int(ctx.unload(L))
             # The `del` drops all per-layer refs; CPython ref counting
@@ -3973,26 +3950,8 @@ def _run_body_streaming_shard(
             activation_snaps,
             activation_row_indices,
         )
-        flush_activation_snapshots(packed_act_snaps)
-        cache_dtype = (
-            torch.float32
-            if os.environ.get("PRISMAQUANT_ACT_CACHE_FP32", "1") != "0"
-            else torch.bfloat16
-        )
-        for name, snaps in resident_act_snaps.items():
-            if not snaps:
-                continue
-            X = torch.cat(snaps, dim=0).to(cache_dtype).contiguous()
-            row_parts = resident_act_row_indices.get(name, [])
-            row_indices = (
-                torch.cat(row_parts, dim=0).to(torch.long).contiguous()
-                if row_parts else None
-            )
-            payload = {"inputs": X, "name": name}
-            if row_indices is not None and row_indices.numel() == X.shape[0]:
-                payload["row_indices"] = row_indices
-            fname = act_fname_sub.sub("__", name) + ".pt"
-            torch.save(payload, cache_dir / fname)
+        flush_activation_snapshots(packed_act_snaps, packed_act_row_indices)
+        flush_activation_snapshots(resident_act_snaps, resident_act_row_indices)
         # v22 Fix C: block until any async writes have completed so the
         # cost step sees a fully-flushed activation cache directory.
         drain_activation_writes()
