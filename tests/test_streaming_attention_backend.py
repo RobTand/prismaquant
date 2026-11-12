@@ -31,5 +31,5 @@ def test_streaming_skeleton_preserves_requested_or_default_backend(tmp_path, mon
     kwargs = {} if backend is None else {'attn_implementation': backend}
     with pytest.raises(BuiltSkeleton):
         streaming._build_streaming_context(str(source), device=torch.device('cpu'),
-            dtype=torch.bfloat16, offload_folder=str(tmp_path / 'offload'), **kwargs)
+            dtype=torch.bfloat16, offload_folder=str(tmp_path / 'offload'), layers_per_shard=1, **kwargs)
     assert observed['backend'] == (backend if backend is not None else expected)
