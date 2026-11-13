@@ -8606,6 +8606,11 @@ filegroup(
 )
 
 filegroup(
+    name = "files/tools/flux",
+    srcs = glob(["tools/flux/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
+)
+
+filegroup(
     name = "files/tools/g3job",
     srcs = glob(["tools/g3job/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
 )
