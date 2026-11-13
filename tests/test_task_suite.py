@@ -2,8 +2,6 @@
 import pytest
 from prismaquant.task_suite import validate_config, task_metrics
 
-pytestmark = pytest.mark.task_suite
-
 
 def config():
     return {"schema": "prismaquant.task_suite/1", "backend": {"name": "hf", "pretrained": "/model",

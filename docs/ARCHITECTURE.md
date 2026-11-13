@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-13. Flux CPU tests run with `tools/flux/run_tests.sh` in a venv built from the gate's hashed requirements.
+As of: 2026-11-13. Flux CPU tests run with `tools/flux/run_tests.sh` in a venv built from the gate's hashed requirements; the `task_suite` test skip is removed.
 The multimodal probe and the streaming visual-tower load (#3442) are removed; every visual Linear takes `VISUAL_FORMAT`.
 The probe selects act/ rows by a keyed rule, not a random draw (#3425).
 PrismaSnap and its SSH campaign runner are removed (#3382).
@@ -30039,13 +30039,7 @@ The shared HF capability guard refuses unsupported declared formats before prefl
 The HF backend does not load Tessera serving bytes and cannot prove native task quality.
 Serving-backed Tessera task support with its vLLM plugin remains a production prerequisite.
 
-The four task-suite test modules carry the `task_suite` marker.
-Ordinary integration reports explicit skips with the layered action and receipt, rather than silently omitting these tests.
-The required gate uses `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python` and selects `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
-The SDK5 reader pin (PQ #2152) makes the pbtest pin guard refuse the earlier layer `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python`, which holds PrismaBuild `dc4803da`.
-Its recorded action is `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`; receipt `0ed9d0134b60b0df181b15dd605b41e0ca5ce7e5e1fe0ef8d0ee14cb25440913` reports 76 passes and zero skips.
-The earlier layer recorded action `5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859` with the same counts before the repin.
-An ordinary skip does not replace that required gate. The gate must run all four modules and report zero skips.
+The four task-suite test modules run in the ordinary gate. They do not import `lm_eval`.
 
 Task inputs declare tokenizer, tasks, device, dtype, sample count, few-shot count and all four seeds.
 The receipt keeps task configurations, versions, model identity, samples, raw results and numerical metrics.
