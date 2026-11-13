@@ -13004,8 +13004,7 @@ map; the tower is materialized only for a caller that passed `multimodal=True`
 -- the same contract the streamed exporter already states ("the visual tower
 stays on meta", below). **No visual tensor is read from the checkpoint on a
 text-only call.** Explicit `multimodal=True` is unchanged in both shape and
-bytes, so the visual cost shard (`_run_visual_cost_shard`) keeps its resident
-tower. Gate:
+bytes. Gate:
 `tests/test_streaming_visual_materialization_scope.py`.
 
 Re-stamped (2026-09-20, `flash/calibration-staged-tier-reader-865`) for

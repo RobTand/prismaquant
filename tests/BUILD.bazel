@@ -91269,7 +91269,6 @@ pq_py_library(
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/allocator_cycle",
-        "//:prismaquant/incremental_measure_quant_cost",
         "@pq_pip//pytest",
         "@pq_pip//torch",
     ],

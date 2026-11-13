@@ -43,8 +43,7 @@ visual tower ... on meta" (`docs/ARCHITECTURE.md`, "Multimodal-forced export
 skeleton").
 
 What must NOT change, and is pinned here too: a caller that explicitly declares
-`multimodal=True` still gets a fully resident tower.  That is the visual cost
-shard's contract (`incremental_measure_quant_cost`).
+`multimodal=True` still gets a fully resident tower.
 
 Everything here is synthetic and CPU-only: a tiny real Qwen2-VL checkpoint (one
 text layer, hidden 32, one vision block) written to `tmp_path`.  Qwen2-VL is
@@ -239,8 +238,7 @@ def test_forced_multimodal_skeleton_still_builds_the_umbrella_skeleton(
 # --------------------------------------------------------------------------
 def test_explicit_multimodal_caller_still_materializes_the_tower(
         tmp_path, monkeypatch):
-    """`incremental_measure_quant_cost._run_visual_cost_shard` passes
-    `multimodal=True` and then requires `ctx.visual_module`."""
+    """An explicit `multimodal=True` caller gets `ctx.visual_module`."""
     path = _write_vl_ckpt(tmp_path, "vl_explicit")
     context, reads = _build(tmp_path, monkeypatch, path,
                             force_multimodal_skeleton=False, multimodal=True)

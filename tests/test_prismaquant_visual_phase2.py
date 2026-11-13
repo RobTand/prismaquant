@@ -2,8 +2,7 @@
 
   1. sensitivity_probe.stage_multimodal — preserves vision_config (vs
      stage_text_only which strips it).
-  2. incremental_measure_quant_cost._run_visual_cost_shard — empty / OOM
-     paths.
+  2. streaming_model._module_has_meta_tensors — sees meta buffers.
   3. allocator.apply_visual_format_override — the uniform visual format.
   4. export_native_compressed._apply_visual_recipe_quant passes the
      activations cached under a visual Linear's recipe name to
@@ -31,7 +30,6 @@ def _isolate_export_inputs():
 import prismaquant.native_render_codec as _native_render_codec
 
 import json
-import pickle
 import tempfile
 import unittest
 from pathlib import Path
@@ -142,8 +140,7 @@ class TestStageMultimodalPreservesVisionConfig(unittest.TestCase):
 
 
 class TestVisualCostShardBasic(unittest.TestCase):
-    """_run_visual_cost_shard handles empty / no-match / OOM paths
-    without raising, and emits a shard pickle the merger can consume."""
+    """The meta-tensor check a resident visual tower relies on."""
 
     def test_meta_visual_module_detection_includes_buffers(self):
         from prismaquant.streaming_model import _module_has_meta_tensors
@@ -158,104 +155,6 @@ class TestVisualCostShardBasic(unittest.TestCase):
         self.assertTrue(_module_has_meta_tensors(module))
         module.to_empty(device="cpu")
         self.assertFalse(_module_has_meta_tensors(module))
-
-    def test_empty_shard_when_no_matching_stats(self):
-        from prismaquant.incremental_measure_quant_cost import (
-            _run_visual_cost_shard,
-        )
-        from prismaquant import format_registry as fr
-
-        specs = [fr.get_format("BF16"), fr.get_format("NVFP4")]
-        with tempfile.TemporaryDirectory() as td:
-            td = Path(td)
-            out = td / "cost_shard.pkl"
-            act_cache = mock.Mock()
-            # New signature: returns `mm_ctx` (StreamingContext or None).
-            # For an empty probe_stats shard, the function short-circuits
-            # before building any context — so mm_ctx stays None. What
-            # we care about is that an empty pickle was emitted.
-            result = _run_visual_cost_shard(
-                model_path=str(td),
-                linear_include=r"^model\.visual\.",
-                probe_stats={},    # no visual stats => empty pickle
-                act_cache=act_cache,
-                specs=specs,
-                device="cpu",
-                dtype=torch.float32,
-                mode="unbatched",
-                chunk_size=1,
-                h_detail=None,
-                output_path=str(out),
-                model_name=str(td),
-                probe_path="probe.pkl",
-                mm_ctx=None,
-                mm_offload_folder=str(td / "offload"),
-            )
-            # Empty-shard short-circuit never builds a context.
-            self.assertIsNone(result)
-            self.assertTrue(out.exists())
-            with open(out, "rb") as f:
-                data = pickle.load(f)
-            self.assertEqual(data["costs"], {})
-            self.assertEqual(data["meta"]["shard_kind"], "visual")
-            # Formats should still be recorded for merge consistency.
-            self.assertEqual(data["formats"], ["BF16", "NVFP4"])
-
-    def test_visual_shard_writes_empty_pickle_on_load_oom(self):
-        """When the multimodal streaming context build raises CUDA OOM,
-        we fall back to an empty pickle instead of raising — 122B-scale
-        behavior."""
-        from prismaquant.incremental_measure_quant_cost import (
-            _run_visual_cost_shard,
-        )
-        from prismaquant import format_registry as fr
-
-        specs = [fr.get_format("BF16")]
-        with tempfile.TemporaryDirectory() as td:
-            td = Path(td)
-            # Minimum config so stage_multimodal doesn't bail.
-            (td / "config.json").write_text(
-                json.dumps({"model_type": "qwen36",
-                            "vision_config": {"depth": 2}})
-            )
-            out = td / "cost_shard.pkl"
-            act_cache = mock.Mock()
-            probe_stats = {
-                "model.visual.blocks.0.attn.qkv": {"n_params": 100},
-            }
-            # Patch the streaming-context builder to raise a plain
-            # RuntimeError with "out of memory" in the message — the
-            # guard should catch that as an OOM proxy and fall back
-            # gracefully with an empty pickle.
-            with mock.patch(
-                    "prismaquant.incremental_measure_quant_cost."
-                    "_build_streaming_context",
-                    side_effect=RuntimeError("CUDA out of memory")):
-                result = _run_visual_cost_shard(
-                    model_path=str(td),
-                    linear_include=r"^model\.visual\.",
-                    probe_stats=probe_stats,
-                    act_cache=act_cache,
-                    specs=specs,
-                    device="cpu",
-                    dtype=torch.float32,
-                    mode="unbatched",
-                    chunk_size=1,
-                    h_detail=None,
-                    output_path=str(out),
-                    model_name=str(td),
-                    probe_path="probe.pkl",
-                    mm_ctx=None,
-                    mm_offload_folder=str(td / "offload"),
-                )
-            # OOM path returns None (no context built) but writes an
-            # empty pickle so the merge layout stays consistent.
-            self.assertIsNone(result)
-            self.assertTrue(out.exists())
-            with open(out, "rb") as f:
-                data = pickle.load(f)
-            self.assertEqual(data["costs"], {})
-            self.assertEqual(data["meta"]["shard_kind"], "visual")
 
 
 class TestAllocatorVisualSensitivityModes(unittest.TestCase):
