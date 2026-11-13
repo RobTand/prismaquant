@@ -3,9 +3,9 @@
 # "gate" tests the full gate population on Mergify's temporary draft batch
 # pull request before the original pull requests merge into main.
 #
-# max_parallel_checks: 2 forces draft batch PRs. In-place checks could rewrite
-# the original branch and invalidate the head TL3 approved. Serial mode keeps
-# merge order while two batches run checks concurrently. Default batches grow
+# Every check runs on a draft batch PR. Mergify checks in place only when
+# merge_conditions are empty or equal to queue_conditions; "gate" is only in
+# merge_conditions. One batch checks at a time, in order. Default batches grow
 # from one PR to seven; release batches contain one PR and are served first.
 # A failed batch is split to isolate the failing PR. Mergify never retries a
 # failed check automatically. Never merge outside the queue.
@@ -43,7 +43,7 @@ commands_restrictions:
 
 merge_queue:
   mode: serial
-  max_parallel_checks: 2
+  max_parallel_checks: 1
   reset_on_external_merge: always
   status_comments: outcomes
   queue_controls_comment: false
