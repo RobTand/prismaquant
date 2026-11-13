@@ -194,9 +194,8 @@ def test_fifo_failure_preserves_real_prefix_and_partial_resume(campaign, monkeyp
 def test_final_write_failure_flushes_before_unload_or_return(campaign, monkeypatch):
     assert campaign.device.type == "cpu"
     _clear(campaign)
-    entered, release, replay_finished = (threading.Event() for _ in range(3))
-    seen = {"tail": None, "failed": False, "premature_unload": False,
-            "replay_while_held": False}
+    replay_finished = threading.Event()
+    seen = {"tail": None, "entered": False, "failed": False, "premature_unload": False}
     core = quantum.run_layer_quantum_core
     atomic = aura_checkpoint_journal.atomic_write_bytes
     observe = replay_module.observe_and_project_retained_windows
@@ -207,7 +206,7 @@ def test_final_write_failure_flushes_before_unload_or_return(campaign, monkeypat
         unload = context.unload
 
         def checked_unload(layer):
-            if layer == 1 and entered.is_set() and not seen["failed"]:
+            if layer == 1 and seen["entered"] and not seen["failed"]:
                 seen["premature_unload"] = True
             return unload(layer)
 
@@ -218,37 +217,26 @@ def test_final_write_failure_flushes_before_unload_or_return(campaign, monkeypat
 
     def fail_tail(path, body):
         if Path(path).suffix == ".pkl" and pickle.loads(body)["qname"] == seen["tail"]:
-            entered.set()
-            assert release.wait(30)
+            # Held until the replay returns: a replay that waited for this
+            # write would never return, so the test would not finish.
+            seen["entered"] = True
+            replay_finished.wait()
             seen["failed"] = True
             raise OSError("injected final unit durability failure")
         atomic(path, body)
 
     def finished(*args, **kwargs):
-        result = observe(*args, **kwargs)
-        replay_finished.set()
-        return result
-
-    def control():
         try:
-            if entered.wait(20):
-                seen["replay_while_held"] = replay_finished.wait(10)
+            return observe(*args, **kwargs)
         finally:
-            release.set()
+            replay_finished.set()
 
     monkeypatch.setattr(quantum, "run_layer_quantum_core", launch)
     monkeypatch.setattr(aura_checkpoint_journal, "atomic_write_bytes", fail_tail)
     monkeypatch.setattr(replay_module, "observe_and_project_retained_windows", finished)
-    controller = threading.Thread(target=control, name="checkpoint-tail-control")
-    controller.start()
-    try:
-        payload, state = _quantum(campaign, monkeypatch, layer=1)
-    finally:
-        release.set()
-        controller.join(30)
-    assert not controller.is_alive()
+    payload, state = _quantum(campaign, monkeypatch, layer=1)
     assert payload is None and hasattr(state, "error")
-    assert seen["failed"] and seen["replay_while_held"]
+    assert seen["failed"]
     assert not seen["premature_unload"]
     assert len(_envelopes(campaign)) == sum(len(w.original_full_target_names)
                                          for w in campaign.preflight[1]) - 1
