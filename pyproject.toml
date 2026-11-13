@@ -49,6 +49,8 @@ dependencies = [
     "requests>=2.31",
     # Stage B spill verifies each replay operand with xxh3_64 (PQ #1369).
     "xxhash>=3.7.0",
+    # torch cpp_extension.load runs the ninja executable at runtime (kernels/cuda_allocator_state.py).
+    "ninja>=1.11",
 ]
 
 [project.optional-dependencies]
