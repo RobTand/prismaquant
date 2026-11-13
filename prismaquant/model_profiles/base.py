@@ -302,7 +302,7 @@ class ModelProfile(ABC):
         """Return fused-module leaf names to their member leaf names.
 
         This is the structured form of ``fused_sibling_group`` for call sites
-        that need to resolve sidecar artifacts such as h-detail row weights.
+        that need the leaf names of each fused module.
         Prefer vLLM metadata when available, then the declarative
         model-structure spec.
         """

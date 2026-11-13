@@ -4375,21 +4375,6 @@ class TestActivationAwarePasses(unittest.TestCase):
         expected = torch.tensor([[1.0, -2.0, 10.0, -10.0]])
         self.assertTrue(torch.equal(out, expected))
 
-    def test_activation_matrix_applies_fisher_row_weights(self):
-        import torch
-
-        x = torch.ones(2, 2)
-        out = _native_render_codec.activation_matrix_for_gptq(
-            x,
-            2,
-            clip_quantile=0.0,
-            row_weights=torch.tensor([0.0, 2.0]),
-            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
-        )
-
-        self.assertTrue(torch.allclose(out[0], torch.zeros(2)))
-        self.assertTrue(torch.allclose(out[1], torch.full((2,), 2 ** 0.5)))
-
     def test_mxfp8_scale_sweep_is_no_worse_than_baseline(self):
         import os
         import torch

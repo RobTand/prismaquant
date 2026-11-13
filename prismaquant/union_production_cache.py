@@ -141,7 +141,6 @@ _MERGED_METADATA_KEYS = frozenset({
     "exact_union",
     "render_gates",
     "four_over_six",
-    "fisher_weighted_gptq",
     NVFP4_JOINT_GLOBAL_WITNESS_KEY,
     PACKED_ACTIVATION_HOOK_SCOPE_KEY,
 })
@@ -1272,34 +1271,6 @@ def _merge_render_gates(metadata: Sequence[Mapping[str, object]]) -> dict | None
     }
 
 
-def _merge_fisher_metadata(metadata: Sequence[Mapping[str, object]]) -> dict | None:
-    rows = [item.get("fisher_weighted_gptq") for item in metadata]
-    if all(row is None for row in rows):
-        return None
-    if any(not isinstance(row, Mapping) for row in rows):
-        raise ValueError("fisher_weighted_gptq must be present on every shard")
-    required = {"enabled", "h_detail_dir", "loaded", "misses"}
-    if any(set(row) != required for row in rows):
-        raise ValueError("fisher_weighted_gptq metadata is malformed")
-    for key in ("enabled", "h_detail_dir"):
-        for row in rows[1:]:
-            _assert_identity_equal(rows[0][key], row[key], where=f"fisher {key}")
-    for row in rows:
-        for key in ("loaded", "misses"):
-            if (
-                not isinstance(row[key], int)
-                or isinstance(row[key], bool)
-                or int(row[key]) < 0
-            ):
-                raise ValueError(f"fisher_weighted_gptq.{key} is malformed")
-    return {
-        "enabled": copy.deepcopy(rows[0]["enabled"]),
-        "h_detail_dir": copy.deepcopy(rows[0]["h_detail_dir"]),
-        "loaded": sum(int(row["loaded"]) for row in rows),
-        "misses": sum(int(row["misses"]) for row in rows),
-    }
-
-
 def _merge_cache_metadata(
     caches: Sequence[ProductionWeightCache],
     *,
@@ -1549,9 +1520,6 @@ def _merge_cache_metadata(
         reference["four_over_six"] = _merge_counter_buckets(
             four_over_six, where="four_over_six"
         )
-    fisher = _merge_fisher_metadata(metadata)
-    if fisher is not None:
-        reference["fisher_weighted_gptq"] = fisher
     reference["exact_union"] = {
         "schema": UNION_METADATA_SCHEMA,
         "campaign_identity_sha256": campaign["identity_sha256"],

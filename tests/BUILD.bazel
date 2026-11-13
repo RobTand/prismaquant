@@ -36971,24 +36971,6 @@ pq_py_test(
     path = "tests/test_fisher_row_weight_clip.py",
     library = ":test_fisher_row_weight_clip_lib",
     deps = [
-        "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
-        "//:pqtel/__init__",
-        "//:prismaquant/lane_shipcard",
-        "//:tools/build_streamed_full_kl_teacher",
-        "//:tools/dsv4_wikitext_inputs",
-        "//:tools/full_kl_teacher_payload",
-        "//:tools/g3job/g3_pq_policy/__init__",
-        "//:tools/gold_engine_options",
-        "//:tools/gold_measurement_fidelity",
-        "//:tools/measure_served_gold",
-        "//:tools/measure_vllm_full_kl",
-        "//:tools/measure_vllm_wikitext_ppl",
-        "//:tools/pq_profile_child",
-        "//:tools/prepare_dsv4_wikitext_inputs",
-        "//:tools/prismaquant_source_bootstrap",
-        "//:tools/spec_decode_guard",
-        "//:tools/tessera_campaign_container",
-        "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
     timeout = "moderate",
@@ -37001,7 +36983,6 @@ pq_py_library(
     ],
     deps = [
         "//:prismaquant/__init__",
-        "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/render_score",
         "@pq_pip//pytest",
         "@pq_pip//torch",
@@ -85821,6 +85802,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/pipeline",
+        "@pq_pip//pytest",
     ],
 )
 

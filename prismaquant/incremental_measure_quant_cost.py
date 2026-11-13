@@ -336,7 +336,6 @@ def _measure_production_render_dense(
                         qname=canonical_name,
                         activations=activations,
                         levers=levers,
-                        fisher_row_weights=None,
                         gate_trace=gate_trace,
                     )
                     gptq_steps = [

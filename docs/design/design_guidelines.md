@@ -234,8 +234,7 @@ research evidence until the ordinary promotion gates are satisfied.
 
 Local render mechanisms must use the shared scorer in
 `prismaquant/render_score.py` unless there is a documented exception. The
-default gate is Fisher-weighted output MSE when h-detail exists, otherwise
-activation output MSE on the same calibration rows. A candidate that regresses
+default gate is activation output MSE on the same calibration rows. A candidate that regresses
 the active score is skipped and the previous rendered baseline is kept.
 For mechanisms that function as initializers, such as FourOverSix before
 GPTQ/scale-sweep, the production cache may gate a candidate package so a

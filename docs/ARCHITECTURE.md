@@ -23899,7 +23899,7 @@ row keying/counts, source hashes and overlap precedence, then stamps
 The stamp travels into `selection.json` and the reserved layer-config metadata. A stamped table
 is refused without the allocator flag; an unstamped table cannot be blessed by the flag.
 
-### 3.5 Archived modes — the twelve `exit 2` gates
+### 3.5 Archived modes — the eleven `exit 2` gates
 
 | Trigger | Lines | Archive |
 |---|---|---|
@@ -23907,7 +23907,6 @@ is refused without the allocator flag; an unstamped table cannot be blessed by t
 | `COST_MODE=production-render-staged` \| `-tail` | `318-322` | `archive/production_render_staged_2026-07-30` |
 | `FISHER_WEIGHTED_GPTQ` truthy | `205-213` | `archive/fisher_2026-05-15` |
 | `FISHER_OUTPUT_MSE_ALLOCATOR` truthy | `205-213` | `archive/fisher_2026-05-15` |
-| `PRODUCTION_CACHE_LEVERS` ∋ `fisher_gptq` | `215-220` | `archive/fisher_2026-05-15` |
 | `HADAMARD_DUQUANT` truthy | `354-360` | `archive/hdq_2026-05-14` |
 | `PRODUCTION_CACHE_LEVERS` ∋ `hadamard_duquant` | `361-366` | same |
 | `MULTI_SHOT_PASSES` ∉ {unset, 1} | `367-373` | `archive/multi_shot_2026-05-19` |
@@ -23915,6 +23914,10 @@ is refused without the allocator flag; an unstamped table cannot be blessed by t
 | `PRODUCTION_CACHE_UNION` truthy (the archived surrogate-driven **smart-union candidate selector**, not the exact set union in §5.4) | `381-387` | `archive/union_cache_2026-07-30` |
 | `MSE_PROMOTION` truthy | `388-394` | `archive/mse_promotion_2026-07-30` |
 | `EXPORT_CONTAINER=nvfp4_cb` (the retired Gridbook codebook lane, 2026-09-02) | at the `EXPORT_CONTAINER` validity check | `archive/gridbook_lane_2026-09-02` |
+
+`fisher_gptq` in `PRODUCTION_CACHE_LEVERS` has no gate of its own since #3480: the lever and
+its h-detail readers are deleted, so `pipeline.py --write-default-production` refuses the name
+as an unknown render mechanism before any stage runs.
 
 Four of these landed with the 2026-07-30 re-vet (R17, R4, R18 ×2). Each error string carries
 **the measurement that killed the lever**, so the refusal teaches rather than merely blocks.
@@ -28291,7 +28294,7 @@ spelling order (`render_score.py:188-260`): each `RenderMechanismSpec` declares 
 `four_over_six` (40); then `joint_scale_opt` → `static_act_order` → `gptq` — both levers sit
 at phase 50 with `before=("gptq",)` and no relation to each other, and
 `resolve_render_mechanism_order` resolves that to `[joint_scale_opt, static_act_order, gptq]`
-(matching `pipeline.py`'s own stage list); `fisher_gptq` (50, archived); `scale_sweep` (60,
+(matching `pipeline.py`'s own stage list); `scale_sweep` (60,
 after gptq). The production lever set is §3.3.
 
 **Where the bytes come from: the PrismaBuild stage tier.** The store is still

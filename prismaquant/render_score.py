@@ -32,13 +32,11 @@ class RenderGateDecision:
 
 # Fisher row-weight clip: single source of truth (issue #159).
 #
-# The render scorer, the quant-cost probe, and the native exporter all weight
-# activation rows by per-token Fisher (gradient-squared) importance normalized
-# to mean 1, then cap the largest weight so one hot token cannot dominate the
-# local objective. The cap lives here, and only here: every other module
-# resolves it through resolve_fisher_row_weight_clip() and applies it through
-# normalize_clipped_fisher_row_weights(). A second copy of the
-# normalise-then-clip arithmetic anywhere else is a drift bug by definition.
+# The render scorer weights activation rows by per-row importance normalized
+# to mean 1, then caps the largest weight so one hot row cannot dominate the
+# local objective. The cap lives here, and only here: read it through
+# resolve_fisher_row_weight_clip(). A second copy of the normalise-then-clip
+# arithmetic anywhere else is a drift bug by definition.
 FISHER_ROW_WEIGHT_CLIP_DEFAULT = 64.0
 FISHER_ROW_WEIGHT_CLIP_ENV = "PRISMAQUANT_FISHER_OUTPUT_MSE_ROW_WEIGHT_CLIP"
 # Older spelling from the GPTQ-named era, kept as a fallback so existing
@@ -72,38 +70,6 @@ def resolve_fisher_row_weight_clip() -> float:
         ))
     except Exception:
         return float(FISHER_ROW_WEIGHT_CLIP_DEFAULT)
-
-
-def normalize_clipped_fisher_row_weights(
-    rw: torch.Tensor,
-    clip: float,
-    *,
-    require_positive_mean: bool,
-) -> torch.Tensor | None:
-    """Mean-1 normalize ``rw``, clamp it at ``clip``, renormalize to mean 1.
-
-    This is the one copy of the normalise-then-clip arithmetic shared by the
-    render scorer, the quant-cost probe, and the native exporter. ``rw`` is
-    the already-sliced 1-D float32 vector on its target device. When
-    ``require_positive_mean`` is set, a degenerate (all-zero or non-finite
-    mean) input returns None so the caller falls back to the unweighted
-    objective; otherwise the legacy scorer policy applies and the degenerate
-    input comes back as zeros.
-    """
-    rw = torch.nan_to_num(rw, nan=0.0, posinf=0.0, neginf=0.0)
-    rw = rw.clamp_min(0.0)
-    mean = rw.mean()
-    if require_positive_mean and (
-        not torch.isfinite(mean) or float(mean.item()) <= 0.0
-    ):
-        return None
-    rw = rw / mean.clamp_min(1e-12)
-    if clip > 0.0:
-        rw = rw.clamp_max(float(clip))
-        mean2 = rw.mean()
-        if torch.isfinite(mean2) and float(mean2.item()) > 0.0:
-            rw = rw / mean2.clamp_min(1e-12)
-    return rw
 
 
 def normalize_row_weights(
@@ -141,9 +107,15 @@ def normalize_row_weights(
             clip = float(default_clip)
     else:
         clip = resolve_fisher_row_weight_clip()
-    return normalize_clipped_fisher_row_weights(
-        rw, clip, require_positive_mean=False
-    )
+    rw = torch.nan_to_num(rw, nan=0.0, posinf=0.0, neginf=0.0)
+    rw = rw.clamp_min(0.0)
+    rw = rw / rw.mean().clamp_min(1e-12)
+    if clip > 0.0:
+        rw = rw.clamp_max(float(clip))
+        mean2 = rw.mean()
+        if torch.isfinite(mean2) and float(mean2.item()) > 0.0:
+            rw = rw / mean2.clamp_min(1e-12)
+    return rw
 
 
 def score_render_error(
@@ -442,15 +414,6 @@ def _register_builtins() -> None:
         description="Joint NVFP4 tensor/global scale search inside GPTQ.",
     ))
     register_render_mechanism(RenderMechanismSpec(
-        name="fisher_gptq",
-        operation="rounding_solver_modifier",
-        scope="linear",
-        phase=50,
-        gate_metric="fisher_output_mse",
-        before=("gptq",),
-        description="Fisher/output-weighted GPTQ objective.",
-    ))
-    register_render_mechanism(RenderMechanismSpec(
         name="weighted_vq",
         operation="imatrix_weighted_search",
         scope="linear",
@@ -469,7 +432,7 @@ def _register_builtins() -> None:
         scope="linear",
         phase=60,
         gate_metric="output_mse",
-        after=("gptq", "fisher_gptq"),
+        after=("gptq",),
         description="Closed-form NVFP4/MXFP8_E4M3 scale refinement.",
     ))
 

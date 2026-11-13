@@ -132,7 +132,7 @@ def test_streamed_dense_scores_price_the_consumed_candidate(tmp_path, dtype, ret
     assert _render_dense_layer(
         model, {"l1": model.l1}, render_formats_by_qname={"l1": ["FP8_E4M3"]},
         act_index=index, cache=cache, levers=levers, cache_dir_path=None,
-        profile=None, device=torch.device("cpu"), fisher_rows=None,
+        profile=None, device=torch.device("cpu"),
         render_score_records=records, col_weights=None, retain_rendered=retain,
         consume_render=None if retain else consume, max_act_rows=8, progress=False,
     ) == 1

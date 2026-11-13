@@ -452,7 +452,7 @@ def test_streaming_cli_requires_scope_specific_inputs_and_cache_dirs():
         recache_layer_config=None, cache_dir=None,
         activation_cache_dir=None, skip_qnames=None,
         expert_render_mode="batched", expert_token_budget=32768,
-        h_detail_dir=None, allow_incomplete=False,
+        allow_incomplete=False,
     )
     # A streamed format menu is refused: it served only the retired codebook
     # lane (archived 2026-09-25, #1304).
