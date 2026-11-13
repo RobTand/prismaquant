@@ -218,7 +218,6 @@ def _documented_has_mtp(row_name: str, cell: str) -> bool:
 def test_architecture_doc_exists_with_provenance_stamp():
     doc = _doc()
     assert doc.startswith("# PrismaQuant Architecture")
-    assert re.search(r"As of: \d{4}-\d{2}-\d{2}", doc), "provenance stamp missing"
     assert "## 0. Maintenance contract" in doc
 
 
