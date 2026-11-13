@@ -12055,7 +12055,6 @@
     "tests/test_packed_input_population_audit.py::test_fisher_cache_keeps_rows_from_both_forwards[12]": 0.0135,
     "tests/test_packed_input_population_audit.py::test_fisher_cache_keeps_rows_from_both_forwards[6]": 0.017,
     "tests/test_packed_input_population_audit.py::test_incremental_main_captures_one_input_per_module_call": 1.0645,
-    "tests/test_packed_input_population_audit.py::test_incremental_main_refuses_legacy_packed_capture": 1.6295000000000002,
     "tests/test_packed_probe_estimator_guard.py::test_dense_probe_unaffected": 0.007,
     "tests/test_packed_probe_estimator_guard.py::test_escape_env_accepts_stale": 0.008,
     "tests/test_packed_probe_estimator_guard.py::test_retired_codebook_rung_is_refused_by_explicit_cost_menu": 0.007,

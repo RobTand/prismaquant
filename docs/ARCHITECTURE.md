@@ -1,6 +1,7 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-13. Flux CPU tests run with `tools/flux/run_tests.sh` in a venv built from the gate's hashed requirements; the `task_suite` test skip is removed.
+As of: 2026-11-13, Refs #3447. The no-grad phase-1 forward writes the body act/ rows; phase 3 no longer does.
+Flux CPU tests run with `tools/flux/run_tests.sh` in a venv built from the gate's hashed requirements; the `task_suite` test skip is removed.
 The multimodal probe and the streaming visual-tower load (#3442) are removed; every visual Linear takes `VISUAL_FORMAT`.
 The probe selects act/ rows by a keyed rule, not a random draw (#3425).
 PrismaSnap and its SSH campaign runner are removed (#3382).
@@ -24426,7 +24427,7 @@ Text cells carry the v2 decoder binding. Sidecars carry checkpoint-and-dtype evi
 
 | Stage | Module | Produces |
 |---|---|---|
-| L1 Fisher probe | `incremental_probe.py` (`run-pipeline.sh:539-560`) | `artifacts/probe.pkl` (per-Linear `h_trace`, `n_params`, shapes; since 2026-08-14 also the five per-channel marginal vectors, default-ON — §3.3, §4.8) **and** `WORK_DIR/act`, the activation cache every later stage reads. The probe keeps the rows with the lowest keyed priority of their global row number (sample × seqlen + token; `probe_statistics.ACT_ROW_SELECTION`, fixed key, no RNG), so two runs write the same bytes and a top-K merge of calibration slices gives the same rows. Each act blob and the `probe`/`base-cost` settings key `ACT_ROW_SELECTION` record the rule (#3425) |
+| L1 Fisher probe | `incremental_probe.py` (`run-pipeline.sh:539-560`) | `artifacts/probe.pkl` (per-Linear `h_trace`, `n_params`, shapes; since 2026-08-14 also the five per-channel marginal vectors, default-ON — §3.3, §4.8) **and** `WORK_DIR/act`, the activation cache every later stage reads. The no-grad phase-1 forward writes the body and packed-expert rows (#3447); phase 2 keeps the `lm_head` rows. A MiniMax-style fast expert path is off in phase 1 while act/ is written, because it skips the per-expert Linears. The probe keeps the rows with the lowest keyed priority of their global row number (sample × seqlen + token; `probe_statistics.ACT_ROW_SELECTION`, fixed key, no RNG), so two runs write the same bytes and a top-K merge of calibration slices gives the same rows. Each act blob and the `probe`/`base-cost` settings key `ACT_ROW_SELECTION` record the rule (#3425) |
 | Base RTN cost | `incremental_measure_quant_cost.py` (`:606-661`) | per-`(Linear, format)` measured RTN error; under `aura` demoted to sidecar-backfill source (`:928-952`) |
 
 The probe is streamed shard-by-shard through `layer_streaming` — head resident, body paged,
