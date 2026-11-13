@@ -43,10 +43,8 @@ visual tower ... on meta" (`docs/ARCHITECTURE.md`, "Multimodal-forced export
 skeleton").
 
 What must NOT change, and is pinned here too: a caller that explicitly declares
-`multimodal=True` still gets a fully resident tower, and
-`visual_requires_grad=True` still flips grad on its Linears.  That is the visual
-Fisher probe's contract (`sensitivity_probe.run_multimodal_visual_probe_pass`)
-and the visual cost shard's (`incremental_measure_quant_cost`).
+`multimodal=True` still gets a fully resident tower.  That is the visual cost
+shard's contract (`incremental_measure_quant_cost`).
 
 Everything here is synthetic and CPU-only: a tiny real Qwen2-VL checkpoint (one
 text layer, hidden 32, one vision block) written to `tmp_path`.  Qwen2-VL is
@@ -265,27 +263,6 @@ def test_explicit_multimodal_still_materializes_under_a_forced_profile(
         assert _visual_reads(reads) == [VISUAL_PREFIX + "."]
         assert context.visual_module is not None
         assert not any(p.is_meta for p in context.visual_module.parameters())
-    finally:
-        context.shutdown()
-
-
-def test_visual_requires_grad_default_still_reaches_the_visual_linears(
-        tmp_path, monkeypatch):
-    """`sensitivity_probe.run_multimodal_visual_probe_pass` passes
-    `multimodal=True, visual_requires_grad=True` and needs grad on every
-    visual Linear so its Fisher backward hooks fire."""
-    path = _write_vl_ckpt(tmp_path, "vl_grad")
-    context, _reads = _build(tmp_path, monkeypatch, path,
-                             force_multimodal_skeleton=False,
-                             multimodal=True, visual_requires_grad=True)
-    try:
-        linears = [m for _n, m in context.visual_module.named_modules()
-                   if isinstance(m, torch.nn.Linear)]
-        assert linears, "fixture vision tower has no Linear to track"
-        assert all(p.requires_grad
-                   for m in linears for p in m.parameters(recurse=False))
-        # Body/head stay frozen — only the tower is tracked.
-        assert not context.base_model.embed_tokens.weight.requires_grad
     finally:
         context.shutdown()
 

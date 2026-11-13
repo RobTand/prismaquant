@@ -96,7 +96,7 @@ python3() {{
         "WORK_DIR": str(work), "MODEL_PATH": str(tmp_path / "model"),
         "COST_MODE": mode, "COST_PATH_OVERRIDE": str(override or ""),
         "CB_LADDER_INTERP": "0", "COST_CACHE_COL_WEIGHTS_REQUIRED": "0",
-        "SELECTION_MODE": "surrogate", "CALIBRATION_MODALITY": "text-only",
+        "SELECTION_MODE": "surrogate",
         "FORMATS": "TESSERA,BF16" if tessera else "BF16",
         "COST_FORMATS": "TESSERA,BF16" if tessera else "BF16",
         "TARGET_BITS": "16", "TARGET_PROFILE_DEFAULT": "research",

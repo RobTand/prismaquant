@@ -102,7 +102,6 @@ PY
         --prefetch-workers "${PREFETCH_WORKERS}" \
         --prefetch-min-available-gb "${PREFETCH_MIN_AVAILABLE_GB}" \
         --activation-rows-limit "${ACTIVATION_ROWS_LIMIT}" \
-        --calibration-modality text-only \
         --include-mtp \
         --no-include-visual \
         --include-lm-head \

@@ -11,7 +11,7 @@ from prismaquant import pipeline
 def _request():
     return pipeline.stage_settings_document({
         "MODEL_PATH": "source", "DATASET": "wikitext", "NSAMPLES": "1",
-        "SEQLEN": "8", "CALIBRATION_MODALITY": "text", "ACT_ROW_SELECTION": "rule",
+        "SEQLEN": "8", "ACT_ROW_SELECTION": "rule",
     })
 
 

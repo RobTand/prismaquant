@@ -206,9 +206,8 @@ def run_protocol(model: _ToyModel, ids, profile, *, cotangents: bool):
     CE grad at the tail; phase-3 sweeps in REVERSE, re-forwarding each layer in
     isolation from its captured input and chaining `x_in.grad` upward.
 
-    Mirrors `incremental_probe._run_shard_body`'s phase-3 (and
-    `sensitivity_probe.run_streaming_multimodal_visual_probe_pass`'s) call
-    sequence: graft -> forward -> produced_roots -> backward -> harvest.
+    Mirrors `incremental_probe._run_shard_body`'s phase-3 call sequence:
+    graft -> forward -> produced_roots -> backward -> harvest.
     """
     # ---- phase 1 ----
     pass_state = profile.new_forward_pass_state()
@@ -640,8 +639,8 @@ def test_flag_default_and_parsing(monkeypatch):
 
 
 def test_probe_sweeps_wire_the_accumulator_in_the_right_order():
-    """AST pin on the two shipped reverse sweeps: the accumulator is built ONCE
-    per sweep (not per layer — a per-layer instance would lose every consumer's
+    """AST pin on the shipped reverse sweep: the accumulator is built ONCE per
+    sweep (not per layer — a per-layer instance would lose every consumer's
     cotangent), the layer's pass state goes through `graft`, and the backward is
     the two-root form guarded by `produced_roots`."""
     import ast
@@ -649,48 +648,36 @@ def test_probe_sweeps_wire_the_accumulator_in_the_right_order():
     import textwrap
 
     from prismaquant import incremental_probe as ip
-    from prismaquant import sensitivity_probe as sp
 
-    for fn in (ip._run_body_streaming_shard,
-               sp.run_streaming_multimodal_visual_probe_pass):
-        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
-        news = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
-                and isinstance(n.func, ast.Name)
-                and n.func.id == "SharedStateCotangents"]
-        assert len(news) == 1, f"{fn.__name__}: one accumulator per sweep"
-        # ... and it is gated by the flag, not hard-wired on.
-        assert any(kw.arg == "enabled" for kw in news[0].keywords), \
-            f"{fn.__name__}: accumulator not gated by PRISMAQUANT_KV_COTANGENT"
-        loops = [n for n in ast.walk(tree) if isinstance(n, ast.For)
-                 and isinstance(n.target, ast.Name) and n.target.id == "L"
-                 and isinstance(n.iter, ast.Call)
-                 and isinstance(n.iter.func, ast.Name)
-                 and n.iter.func.id == "reversed"]
-        assert len(loops) == 1, f"{fn.__name__}: reverse sweep not found"
-        body = list(ast.walk(loops[0]))
-        assert news[0] not in body, f"{fn.__name__}: accumulator rebuilt per layer"
-        for attr in ("produced_roots", "harvest"):
-            assert any(isinstance(n, ast.Call)
-                       and isinstance(n.func, ast.Attribute)
-                       and n.func.attr == attr for n in body), \
-                f"{fn.__name__}: reverse sweep never calls .{attr}()"
-        # The layer's borrowed state must reach the accumulator: either grafted
-        # inline, or handed to the kwargs resolver that grafts it.
-        grafted = any(isinstance(n, ast.Call)
-                      and isinstance(n.func, ast.Attribute)
-                      and n.func.attr == "graft" for n in body)
-        forwarded = any(isinstance(n, ast.keyword) and n.arg == "cotangents"
-                        for n in body)
-        assert grafted or forwarded, (
-            f"{fn.__name__}: reverse sweep never grafts the borrowed state")
-        # The seeded backward must be the multi-root form; a plain
-        # `out.backward(g)` cannot carry the shared-state cotangent.
+    tree = ast.parse(textwrap.dedent(inspect.getsource(ip._run_body_streaming_shard)))
+    news = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "SharedStateCotangents"]
+    assert len(news) == 1, "one accumulator per sweep"
+    # ... and it is gated by the flag, not hard-wired on.
+    assert any(kw.arg == "enabled" for kw in news[0].keywords), \
+        "accumulator not gated by PRISMAQUANT_KV_COTANGENT"
+    loops = [n for n in ast.walk(tree) if isinstance(n, ast.For)
+             and isinstance(n.target, ast.Name) and n.target.id == "L"
+             and isinstance(n.iter, ast.Call)
+             and isinstance(n.iter.func, ast.Name)
+             and n.iter.func.id == "reversed"]
+    assert len(loops) == 1, "reverse sweep not found"
+    body = list(ast.walk(loops[0]))
+    assert news[0] not in body, "accumulator rebuilt per layer"
+    for attr in ("produced_roots", "harvest", "graft"):
         assert any(isinstance(n, ast.Call)
                    and isinstance(n.func, ast.Attribute)
-                   and n.func.attr == "backward"
-                   and isinstance(n.func.value, ast.Attribute)
-                   and n.func.value.attr == "autograd" for n in body), \
-            f"{fn.__name__}: no torch.autograd.backward multi-root path"
+                   and n.func.attr == attr for n in body), \
+            f"reverse sweep never calls .{attr}()"
+    # The seeded backward must be the multi-root form; a plain
+    # `out.backward(g)` cannot carry the shared-state cotangent.
+    assert any(isinstance(n, ast.Call)
+               and isinstance(n.func, ast.Attribute)
+               and n.func.attr == "backward"
+               and isinstance(n.func.value, ast.Attribute)
+               and n.func.value.attr == "autograd" for n in body), \
+        "no torch.autograd.backward multi-root path"
 
 
 def test_the_sweep_order_claim_holds_for_gemma4():

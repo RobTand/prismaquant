@@ -210,13 +210,9 @@ def renormalize_probe_fisher(stats: dict, meta: dict, *,
     PER-ROW STAMPS WIN. A row that already carries ``h_trace_norm_tokens``
     was written by a fixed finalize (the field was introduced with it) and
     is already divided by the global count of the pass that PRODUCED it —
-    which is not always this probe's meta count. `incremental_probe` merges
-    the multimodal visual pass (finalized at ``n_samples x max_text_len``,
-    e.g. 8x128) into the body probe, and `merge_probe_pickles` keeps the
-    FIRST shard's meta (the body's, e.g. 32x1024), so recomputing every row
-    from the meta count would rescale the visual rows by ~32x away from
-    what their writer computed — and would not be idempotent. Honouring the
-    row stamp keeps each row on its own writer's denominator and makes the
+    which is not always this probe's meta count, because
+    `merge_probe_pickles` keeps the FIRST shard's meta. Honouring the row
+    stamp keeps each row on its own writer's denominator and makes the
     recompute a true no-op for any probe written by the fixed finalize.
 
     Returns the probe-wide token count (the meta fallback used for
@@ -299,10 +295,9 @@ def h_detail_expected_norm_tokens(probe: dict | None) -> dict[str, int]:
     row -> expected map so `HDetailIndex` can refuse a mismatch.
 
     Row stamps win over the probe-wide ``meta.fisher_norm_tokens`` so a
-    MERGED probe validates per row: the multimodal visual pass is
-    finalized at its own (smaller) calibration size, and its blobs are
-    stamped to match, so comparing them against the body's count would
-    reject correct blobs. Rows with neither a stamp nor a usable meta
+    MERGED probe validates per row: a pass finalized at its own calibration
+    size stamps its blobs to match, so comparing them against the body's
+    count would reject correct blobs. Rows with neither a stamp nor a usable meta
     count get no expectation and are left unchecked (nothing to compare).
     """
     if not isinstance(probe, dict):

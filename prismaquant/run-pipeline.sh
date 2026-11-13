@@ -14,27 +14,11 @@
 #      thousands of legal rungs. See the TESSERA COST STAGE guard below.)
 #   TARGET_BITS=4.75 \
 #   VISUAL_FORMAT=BF16 \
-#   CALIBRATION_MODALITY=text-only \
 #   ./prismaquant/run-pipeline.sh
 #
 # VISUAL_FORMAT accepts any format registry name allowed by the target
-# serving profile and applies to visual-encoder Linears on multimodal models.
-# In text-only calibration mode it's the Phase 1 uniform override for every
-# visual Linear. In multimodal mode it's the fallback applied to un-probed
-# visual Linears the allocator's Fisher-driven DP didn't touch (plus the
-# graceful OOM fallback on 122B-scale VLMs that can't fit the whole model in
-# RAM for the multimodal pass).
-#
-# CALIBRATION_MODALITY (text-only | multimodal):
-#   - text-only (default): body-only streaming probe + cost. Visual
-#     shards emit empty pickles; allocator stamps all visual Linears
-#     with --visual-format uniformly.
-#   - multimodal: also runs a non-streaming second probe pass with
-#     image+text calibration (synthetic stub by default; set MM_DATASET
-#     to a HuggingFace dataset id to use real images). The allocator
-#     treats visual Linears as regular DP candidates when real Fisher
-#     stats are present. Requires ~full-model RAM; falls back to
-#     text-only behavior automatically on OOM.
+# serving profile. The probe is text-only, so the allocator stamps every
+# visual-encoder Linear of a multimodal model with VISUAL_FORMAT uniformly.
 #
 # Memory note: probe + cost peak around 90 GB on a 35B model under
 # BF16 calibration. The watchdog in incremental_measure_quant_cost
@@ -481,21 +465,10 @@ if not torch.cuda.is_available():
     print("[pipeline] ERROR: CUDA is not available; refusing CPU quantization", file=sys.stderr)
     raise SystemExit(2)
 PY
-# Visual encoder format: fallback for visual Linears. See header docstring
-# for the full text-only vs multimodal semantics. BF16 (default) is
-# passthrough; non-BF16 registry formats uniformly quantize
-# non-Fisher-allocated visual Linears via the existing RTN math at export time.
+# Visual encoder format for every visual Linear. BF16 (default) is
+# passthrough; non-BF16 registry formats uniformly quantize visual Linears
+# via the existing RTN math at export time.
 : "${VISUAL_FORMAT:=BF16}"
-# Calibration modality. `text-only` (default) is the streaming body probe
-# alone; `multimodal` adds a second non-streaming pass over the full
-# model with image+text calibration so visual Linears get real Fisher
-# stats. See header docstring.
-: "${CALIBRATION_MODALITY:=text-only}"
-# Multimodal dataset. `synthetic` is the offline stub that exercises the
-# code path without network. Set to an HF dataset id (e.g.
-# `HuggingFaceM4/COCO`) for real image calibration when
-# CALIBRATION_MODALITY=multimodal.
-: "${MM_DATASET:=synthetic}"
 : "${MTP_FORMAT:=BF16}"
 # Fixed output-head format. BF16 is byte-for-byte historical behavior.
 # FP8_E4M3 is the native compressed-tensors production rung validated by the
@@ -1069,7 +1042,6 @@ echo "  ACTIVATION_ROWS_LIMIT=$ACTIVATION_ROWS_LIMIT"
 echo "  VISUAL_FORMAT=$VISUAL_FORMAT"
 echo "  MTP_FORMAT=$MTP_FORMAT"
 echo "  EXPORT_SHARD_BYTES=$EXPORT_SHARD_BYTES ($((EXPORT_SHARD_BYTES / 1024 / 1024)) MiB per output shard)"
-echo "  CALIBRATION_MODALITY=$CALIBRATION_MODALITY  MM_DATASET=$MM_DATASET"
 echo "  PRODUCTION_CACHE=$PRODUCTION_CACHE PRODUCTION_RECACHE=$PRODUCTION_RECACHE"
 echo "  PRODUCTION_CACHE_FORMATS=$PRODUCTION_CACHE_FORMATS"
 echo "  PRODUCTION_CACHE_RENDER_SCOPE=$PRODUCTION_CACHE_RENDER_SCOPE"
@@ -1102,7 +1074,6 @@ PIPELINE_SPEC_ARGS=(
   --formats "$FORMATS"
   --target-bits "$TARGET_BITS"
   --target-profile "$TARGET_PROFILE_RESOLVED"
-  --calibration-modality "$CALIBRATION_MODALITY"
   --selection-mode "$SELECTION_MODE"
   --production-cache "$PRODUCTION_CACHE"
   --production-recache "$PRODUCTION_RECACHE"
@@ -1155,7 +1126,6 @@ STAGE_SETTINGS_ENV=(
   "FORMATS=$FORMATS"
   "COST_FORMATS=$COST_FORMATS"
   "TARGET_BITS=$TARGET_BITS"
-  "CALIBRATION_MODALITY=$CALIBRATION_MODALITY"
   "ALLOW_PINNED=$ALLOW_PINNED"
   "LM_HEAD_FORMAT=$LM_HEAD_FORMAT_CANONICAL"
   "LM_HEAD_RENDER_ACTIVE=$LM_HEAD_RENDER_ACTIVE"
@@ -1428,49 +1398,9 @@ if [[ ! -f "${PROBE_PATH}" ]]; then
     --prefetch-workers "$PREFETCH_WORKERS" \
     --prefetch-min-available-gb "$PREFETCH_MIN_AVAILABLE_GB" \
     --activation-rows-limit "$ACTIVATION_ROWS_LIMIT" \
-    --calibration-modality "$CALIBRATION_MODALITY" \
-    --mm-dataset "$MM_DATASET" \
-    --mm-nsamples 8 --mm-max-text-len 128 \
     2>&1 | tee "${WORK_DIR}/logs/probe.log"
 else
-  # Reuse guard: make sure the pre-existing probe.pkl matches the
-  # currently-requested calibration modality. Silently reusing a
-  # text-only probe under multimodal (or vice versa) would produce
-  # an assignment calibrated for the wrong activation distribution
-  # — visible later as bad PPL that's hard to root-cause. Fail loud
-  # and point the user at the file to delete.
-  probe_modality=$(python3 -c "
-import pickle, sys
-try:
-    with open(sys.argv[1], 'rb') as f:
-        blob = pickle.load(f)
-    meta = blob.get('meta', {}) if isinstance(blob, dict) else {}
-    m = meta.get('calibration_modality') or meta.get('modality') or 'text-only'
-    print(m)
-except Exception as e:
-    print(f'__error__:{e}', file=sys.stderr)
-    sys.exit(2)
-" "${PROBE_PATH}" 2>/dev/null || echo "__unknown__")
-  if [[ "${probe_modality}" == "__unknown__" ]]; then
-    echo "[pipeline] [1/4] probe.pkl exists but its calibration_modality"
-    echo "             could not be read. Aborting to avoid mixing probes."
-    echo "             Delete it explicitly to regenerate:"
-    echo "               rm ${PROBE_PATH}"
-    exit 2
-  fi
-  if [[ "${probe_modality}" != "${CALIBRATION_MODALITY}" ]]; then
-    echo "[pipeline] [1/4] ABORT: probe.pkl was calibrated for"
-    echo "             modality='${probe_modality}' but this run requests"
-    echo "             CALIBRATION_MODALITY='${CALIBRATION_MODALITY}'."
-    echo "             Reusing the probe would silently produce an"
-    echo "             assignment calibrated on the wrong activations."
-    echo ""
-    echo "             Delete the stale probe to regenerate:"
-    echo "               rm ${PROBE_PATH}"
-    echo "             Or unset CALIBRATION_MODALITY to match the probe."
-    exit 2
-  fi
-  echo "[pipeline] [1/4] probe.pkl exists (modality=${probe_modality}), skipping"
+  echo "[pipeline] [1/4] probe.pkl exists, skipping"
 fi
 
 # -----------------------------------------------------------------------
@@ -1781,16 +1711,6 @@ if [[ -n "$TARGET_DISK_GB" ]]; then
 else
   echo "[pipeline] [3/4] running allocator at target=${TARGET_BITS} bpp ..."
 fi
-# Choose visual-sensitivity mode from calibration modality:
-#   text-only → uniform (Phase 1 --visual-format path, as before)
-#   multimodal → fisher (Phase 2: DP places visual Linears from real
-#                        multimodal Fisher; --visual-format acts as a
-#                        fallback for un-probed visual Linears only)
-if [[ "$CALIBRATION_MODALITY" == "multimodal" ]]; then
-  VISUAL_SENSITIVITY=fisher
-else
-  VISUAL_SENSITIVITY=uniform
-fi
 ALLOCATOR_PARETO_ARGS=()
 if [[ "$SELECTION_MODE" == "validated-surrogate" ]]; then
   ALLOCATOR_PARETO_DIR="${WORK_DIR}/artifacts/pareto_assignments"
@@ -1860,7 +1780,6 @@ python3 -m prismaquant.allocator \
   "${ALLOCATOR_SERVE_ARGS[@]+"${ALLOCATOR_SERVE_ARGS[@]}"}" \
   --pareto-targets "$PARETO_TARGETS" \
   --visual-format "$VISUAL_FORMAT" \
-  --visual-sensitivity "$VISUAL_SENSITIVITY" \
   --lm-head-format "$LM_HEAD_FORMAT_CANONICAL" \
   --mtp-format "$MTP_FORMAT" \
   --layer-config "${WORK_DIR}/artifacts/layer_config.json" \

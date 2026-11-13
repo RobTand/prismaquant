@@ -1,20 +1,13 @@
-"""Tests for Phase 2 visual-encoder calibration.
-
-Phase 2 adds real activation + Fisher capture for visual Linears so
-they enter the allocator's DP as regular candidates and get the same
-GPTQ/scale-sweep/AR treatment at export. Covers:
+"""Tests for visual-encoder staging, cost shards and export. Covers:
 
   1. sensitivity_probe.stage_multimodal — preserves vision_config (vs
      stage_text_only which strips it).
-  2. sensitivity_probe.load_multimodal_calibration — synthetic-stub
-     path, assert shapes and contract.
-  3. incremental_probe CLI flag threading for the multimodal path.
-  4. incremental_measure_quant_cost._run_visual_cost_shard — measures
-     cost entries for a tiny visual-style nn.Module stub.
-  5. allocator --visual-sensitivity={fisher, uniform} mode selection.
-  6. export_native_compressed._apply_visual_recipe_quant passes the
-     activations the multimodal probe cached under a visual Linear's recipe
-     name to native_render_codec.quantize_2d.
+  2. incremental_measure_quant_cost._run_visual_cost_shard — empty / OOM
+     paths.
+  3. allocator.apply_visual_format_override — the uniform visual format.
+  4. export_native_compressed._apply_visual_recipe_quant passes the
+     activations cached under a visual Linear's recipe name to
+     native_render_codec.quantize_2d.
 """
 from __future__ import annotations
 
@@ -37,26 +30,17 @@ def _isolate_export_inputs():
 
 import prismaquant.native_render_codec as _native_render_codec
 
-import argparse
-import contextlib
-import io
 import json
 import pickle
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
-from types import SimpleNamespace
 
 import torch
 import torch.nn as nn
-from PIL import Image
 
 from prismaquant.sensitivity_probe import (
-    _streaming_visual_layer_kwargs,
-    _synthetic_multimodal_calibration_samples,
-    load_multimodal_calibration,
     stage_multimodal,
     stage_text_only,
 )
@@ -155,192 +139,6 @@ class TestStageMultimodalPreservesVisionConfig(unittest.TestCase):
 
             self.assertTrue(mm.is_relative_to(temp_parent))
             self.assertTrue(txt.is_relative_to(temp_parent))
-
-
-class TestSyntheticMultimodalCalibration(unittest.TestCase):
-    """load_multimodal_calibration synthetic path produces expected
-    shape triples without needing a real processor."""
-
-    def test_synthetic_returns_n_triples_with_pixel_and_ids(self):
-        samples = _synthetic_multimodal_calibration_samples(
-            processor=None, n_samples=4, max_text_len=16,
-        )
-        self.assertEqual(len(samples), 4)
-        for sample in samples:
-            self.assertIsInstance(sample, dict)
-            pixel_values = sample["pixel_values"]
-            input_ids = sample["input_ids"]
-            labels = sample["labels"]
-            self.assertEqual(pixel_values.dim(), 4)
-            self.assertEqual(pixel_values.shape[0], 1)   # batch
-            self.assertEqual(pixel_values.shape[1], 3)   # RGB
-            self.assertEqual(input_ids.dim(), 2)
-            self.assertEqual(input_ids.shape[0], 1)      # batch
-            self.assertLessEqual(input_ids.shape[1], 16)
-            self.assertEqual(labels.shape, input_ids.shape)
-
-    def test_load_multimodal_synthetic_flag_skips_dataset_load(self):
-        # dataset_name="synthetic" never touches the datasets library
-        # and always returns the offline stub — important for offline
-        # tests.
-        triples, composition = load_multimodal_calibration(
-            processor=None, dataset_name="synthetic",
-            n_samples=3, max_text_len=12,
-        )
-        self.assertEqual(len(triples), 3)
-        self.assertEqual(
-            composition,
-            {"dataset": "synthetic", "requested": 3,
-             "real_loaded": 0, "synthetic_loaded": 3},
-        )
-
-    def test_synthetic_captions_rotate(self):
-        # 12 samples with 8 built-in captions should wrap around cleanly.
-        triples = _synthetic_multimodal_calibration_samples(
-            processor=None, n_samples=12, max_text_len=16,
-        )
-        self.assertEqual(len(triples), 12)
-
-
-class TestCalibrationCompositionProvenance(unittest.TestCase):
-    """The real-vs-synthetic composition of multimodal calibration must be
-    counted, printed and stamped into probe provenance (#1921 visual
-    capture gate). Partial real `--mm-dataset` yields blend synthetic
-    stub rows; the counts and persisted stamp must expose that blend.
-    Whether blending should refuse outright stays the filed coordinator
-    decision; this gate only makes the composition unmissable."""
-
-    def test_synthetic_shortfall_records_rows_returned(self):
-        # The stub continues past rows whose processor calls fail, so the
-        # pure-synthetic path can return fewer rows than requested. The
-        # composition must record the rows actually returned, never the
-        # requested count.
-        class _FailingProcessor:
-            def apply_chat_template(self, *args, **kwargs):
-                raise NotImplementedError("no chat template")
-
-            def __call__(self, *args, **kwargs):
-                raise RuntimeError("processor failure")
-
-        triples, composition = load_multimodal_calibration(
-            _FailingProcessor(), dataset_name="synthetic",
-            n_samples=3, max_text_len=12,
-        )
-        self.assertEqual(triples, [])
-        self.assertEqual(
-            composition,
-            {"dataset": "synthetic", "requested": 3,
-             "real_loaded": 0, "synthetic_loaded": 0},
-        )
-
-    def test_partial_real_dataset_blend_is_counted_and_loud(self):
-        from prismaquant import sensitivity_probe as sp
-
-        class _FakeDataset:
-            def __init__(self, rows):
-                self._rows = rows
-
-            def __iter__(self):
-                return iter(self._rows)
-
-        img = Image.new("RGB", (4, 4))
-        enc = {
-            "pixel_values": torch.zeros(1, 3, 4, 4),
-            "input_ids": torch.tensor([[1, 2, 3]]),
-            "image_grid_thw": torch.tensor([[1, 1, 1]]),
-        }
-        proc = mock.Mock(return_value=enc)
-        # A real AutoProcessor without chat-template support raises from
-        # apply_chat_template; a bare Mock would return a Mock and the
-        # synthetic stub would then hand Mock tensors to
-        # _samples_from_encoding.
-        proc.apply_chat_template = mock.Mock(
-            side_effect=NotImplementedError("no chat template"))
-        stub = mock.Mock()
-        stub.load_dataset = mock.Mock(
-            return_value=_FakeDataset(
-                [{"image": img, "caption": "a real photo"}]))
-        buffer = io.StringIO()
-        with mock.patch.dict(sys.modules, {"datasets": stub}), \
-                contextlib.redirect_stdout(buffer):
-            triples, composition = sp.load_multimodal_calibration(
-                proc, "real-vision-dataset", n_samples=3, max_text_len=12)
-        self.assertEqual(len(triples), 3)
-        self.assertEqual(
-            composition,
-            {"dataset": "real-vision-dataset", "requested": 3,
-             "real_loaded": 1, "synthetic_loaded": 2},
-        )
-        self.assertIn("synthetic stub row(s) were blended",
-                      buffer.getvalue())
-
-    def test_fully_real_dataset_reports_zero_synthetic(self):
-        from prismaquant import sensitivity_probe as sp
-
-        class _FakeDataset:
-            def __init__(self, rows):
-                self._rows = rows
-
-            def __iter__(self):
-                return iter(self._rows)
-
-        img = Image.new("RGB", (4, 4))
-        enc = {
-            "pixel_values": torch.zeros(1, 3, 4, 4),
-            "input_ids": torch.tensor([[1, 2, 3]]),
-            "image_grid_thw": torch.tensor([[1, 1, 1]]),
-        }
-        proc = mock.Mock(return_value=enc)
-        proc.apply_chat_template = mock.Mock(
-            side_effect=NotImplementedError("no chat template"))
-        stub = mock.Mock()
-        stub.load_dataset = mock.Mock(
-            return_value=_FakeDataset(
-                [{"image": img, "caption": f"photo {i}"} for i in range(5)]))
-        buffer = io.StringIO()
-        with mock.patch.dict(sys.modules, {"datasets": stub}), \
-                contextlib.redirect_stdout(buffer):
-            triples, composition = sp.load_multimodal_calibration(
-                proc, "real-vision-dataset", n_samples=3, max_text_len=12)
-        self.assertEqual(len(triples), 3)
-        self.assertEqual(
-            composition,
-            {"dataset": "real-vision-dataset", "requested": 3,
-             "real_loaded": 3, "synthetic_loaded": 0},
-        )
-        self.assertNotIn("blended", buffer.getvalue())
-
-
-class TestMultimodalProbeFlagParsing(unittest.TestCase):
-    """The new CLI flags (--calibration-modality, --mm-dataset,
-    --mm-nsamples, --mm-max-text-len) must parse and thread through
-    to the main() function without breaking the text-only default."""
-
-    def test_flags_in_incremental_probe_argparser(self):
-        # Import the module's argparser the way main() does, but without
-        # triggering the heavy run.
-        from prismaquant import incremental_probe
-
-        src = inspect_source(incremental_probe.main)
-        # The flag surface we expose should be discoverable in main()'s
-        # source. We keep this as a light contract test so future
-        # refactors that rename one of the flags must also update the
-        # tests (and docs).
-        self.assertIn("--calibration-modality", src)
-        self.assertIn("--mm-dataset", src)
-        self.assertIn("--mm-nsamples", src)
-        self.assertIn("--mm-max-text-len", src)
-
-    def test_default_calibration_modality_is_text_only(self):
-        from prismaquant import incremental_probe
-        src = inspect_source(incremental_probe.main)
-        # Search for the default= in the argparse add_argument.
-        self.assertIn('default="text-only"', src)
-
-
-def inspect_source(fn) -> str:
-    import inspect
-    return inspect.getsource(fn)
 
 
 class TestVisualCostShardBasic(unittest.TestCase):
@@ -461,51 +259,21 @@ class TestVisualCostShardBasic(unittest.TestCase):
 
 
 class TestAllocatorVisualSensitivityModes(unittest.TestCase):
-    """Exercise visual-name scans and the uniform assignment helper."""
-
-    def test_visual_fisher_available_detects_both_probe_and_cost(self):
-        from prismaquant.allocator import _is_visual_linear
-        body = {"model.layers.0.self_attn.q_proj": 1,
-                "mtp.layers.0.mlp.gate_proj": 1}
-        visual = {"model.visual.blocks.0.attn.qkv": 1}
-
-        # Body-only: no visual in stats and no visual in costs.
-        self.assertFalse(any(_is_visual_linear(n) for n in body))
-        self.assertTrue(any(_is_visual_linear(n) for n in visual))
+    """Exercise the uniform visual assignment helper."""
 
     def test_uniform_mode_always_stamps_visual_format(self):
-        # When --visual-sensitivity=uniform, visual Linears are stamped
-        # with --visual-format regardless of whether probe had them.
-        # This is the Phase 1 path preserved.
+        # Visual Linears are stamped with --visual-format regardless of
+        # whether the probe had them.
         from prismaquant.allocator import (
             apply_visual_format_override,
         )
         assignment = {
             "model.layers.0.self_attn.q_proj": "NVFP4",
-            "model.visual.blocks.0.attn.qkv": "NVFP4",   # Fisher placed it
+            "model.visual.blocks.0.attn.qkv": "NVFP4",
         }
         out = apply_visual_format_override(assignment, "BF16")
         self.assertEqual(out["model.visual.blocks.0.attn.qkv"], "BF16")
         self.assertEqual(out["model.layers.0.self_attn.q_proj"], "NVFP4")
-
-    def test_fisher_mode_detection_via_visual_prefix_scan(self):
-        # This local scan checks presence only, not measured-row admission.
-        from prismaquant.allocator import _is_visual_linear
-
-        stats_with = {"model.visual.blocks.0.attn.qkv": {}}
-        stats_without = {"model.layers.0.self_attn.q_proj": {}}
-        costs_with = {"model.visual.blocks.0.attn.qkv": {"BF16": {}}}
-        costs_without = {"model.layers.0.self_attn.q_proj": {"BF16": {}}}
-
-        def available(stats, costs):
-            return (any(_is_visual_linear(n) for n in stats)
-                    and any(_is_visual_linear(n) for n in costs))
-
-        self.assertTrue(available(stats_with, costs_with))
-        self.assertFalse(available(stats_with, costs_without))
-        self.assertFalse(available(stats_without, costs_with))
-        self.assertFalse(available(stats_without, costs_without))
-
 
 class TestQuantize2DVisualActivationsRoundtrip(unittest.TestCase):
     """The exporter hands a visual Linear's cached activations to the codec.
@@ -573,294 +341,3 @@ class TestQuantize2DVisualActivationsRoundtrip(unittest.TestCase):
             gptq_enabled=True, cached_activations=acts, levers=levers)
         self.assertEqual(visual["weight_packed"].shape,
                          body["weight_packed"].shape)
-
-
-class TestStreamingMultimodalProfileState(unittest.TestCase):
-    def test_streaming_visual_kwargs_merge_profile_and_pass_state(self):
-        class Profile:
-            def __init__(self):
-                self.extra_input_ids = []
-                self.isolated_calls = []
-
-            def extra_layer_kwargs(self, *, input_ids=None):
-                self.extra_input_ids.append(input_ids)
-                return {"profile_input_ids": input_ids}
-
-            def isolated_layer_pass_state(self, captured, layer):
-                self.isolated_calls.append((captured, layer))
-                return {"shared_kv": captured["shared_kv"]}
-
-        profile = Profile()
-        input_ids = torch.tensor([[1, 2, 3]])
-        layer = object()
-
-        forward = _streaming_visual_layer_kwargs(
-            profile,
-            input_ids=input_ids,
-            pass_state={"live_state": "forward"},
-        )
-        self.assertIs(forward["profile_input_ids"], input_ids)
-        self.assertEqual(forward["live_state"], "forward")
-        self.assertEqual(profile.extra_input_ids, [input_ids])
-
-        replay = _streaming_visual_layer_kwargs(
-            profile,
-            input_ids=input_ids,
-            captured_pass_state={"shared_kv": "captured"},
-            layer=layer,
-        )
-        self.assertIs(replay["profile_input_ids"], input_ids)
-        self.assertEqual(replay["shared_kv"], "captured")
-        self.assertEqual(profile.isolated_calls, [({"shared_kv": "captured"},
-                                                   layer)])
-
-    def test_streaming_probe_threads_profile_pass_state(self):
-        from prismaquant import sensitivity_probe as sp
-
-        src = inspect_source(sp.run_streaming_multimodal_visual_probe_pass)
-        helper_src = inspect_source(sp._streaming_visual_layer_kwargs)
-        self.assertIn("new_forward_pass_state", src)
-        self.assertIn("capture_forward_pass_state", src)
-        self.assertIn("isolated_layer_pass_state", helper_src)
-        self.assertIn("_streaming_visual_layer_kwargs", src)
-
-
-class TestMultimodalProbePassIntegration(unittest.TestCase):
-    """Persist actual loader provenance through populated CPU probe passes."""
-
-    class Processor:
-        def __init__(self):
-            self.rows = 0
-
-        def apply_chat_template(self, *args, **kwargs):
-            raise NotImplementedError("no chat template")
-
-        def __call__(self, **kwargs):
-            self.rows += 1
-            return {
-                "pixel_values": torch.tensor(
-                    [[float(self.rows), 0.5]], requires_grad=True),
-                "input_ids": torch.tensor([[0, 1, 1]]),
-                "image_grid_thw": torch.tensor([[1, 1, 1]]),
-            }
-
-    class BodyLayer(nn.Module):
-        def forward(self, hidden_states, **kwargs):
-            return hidden_states * 1.5
-
-    class Model(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.visual = nn.Sequential(nn.Linear(2, 2, bias=False))
-            self.base = nn.Module()
-            self.base.embed_tokens = nn.Embedding(2, 2)
-            self.base.norm = nn.Identity()
-            self.base.layers = nn.ModuleList([
-                TestMultimodalProbePassIntegration.BodyLayer()])
-            self.lm_head = nn.Linear(2, 2, bias=False)
-            with torch.no_grad():
-                self.visual[0].weight.copy_(
-                    torch.tensor([[0.2, 0.1], [-0.1, 0.3]]))
-                self.base.embed_tokens.weight.zero_()
-                self.lm_head.weight.copy_(
-                    torch.tensor([[0.3, -0.2], [-0.1, 0.2]]))
-            self.attempted_rows = []
-
-        def get_image_features(self, pixel_values, **kwargs):
-            row = int(pixel_values[0, 0].detach())
-            self.attempted_rows.append(row)
-            if row == 2:
-                raise RuntimeError("deliberate synthetic-row forward failure")
-            return self.visual(pixel_values)
-
-        def get_placeholder_mask(self, input_ids, *, inputs_embeds,
-                                 image_features):
-            return (input_ids == 0).unsqueeze(-1).expand_as(inputs_embeds), None
-
-        def forward(self, input_ids, pixel_values, labels, **kwargs):
-            features = self.get_image_features(pixel_values)
-            embeds = self.base.embed_tokens(input_ids)
-            mask, _ = self.get_placeholder_mask(
-                input_ids, inputs_embeds=embeds, image_features=features)
-            hidden = embeds.masked_scatter(mask, features)
-            hidden = self.base.layers[0](hidden_states=hidden)
-            return SimpleNamespace(logits=self.lm_head(self.base.norm(hidden)))
-
-    def _probe_pickle(self, *, streaming, tracked=True):
-        from prismaquant import sensitivity_probe as sp
-
-        model = self.Model()
-        processor = self.Processor()
-        # Only external dataset/model loading is replaced. The actual loader
-        # accepts one real row and constructs two synthetic rows itself.
-        dataset = SimpleNamespace(load_dataset=lambda *args, **kwargs: iter([
-            {"image": Image.new("RGB", (4, 4)), "caption": "real photo"}]))
-        ctx = SimpleNamespace(
-            model=model, base_model=model.base, layers=model.base.layers,
-            num_layers=1, layers_prefix="base.layers.",
-            visual_module=model.visual, visual_prefix="visual.",
-            layer_cache={}, schedule_prefetch=lambda index: None,
-            install=lambda index: None, unload=lambda index: None,
-            shutdown=lambda: None,
-        )
-        with tempfile.TemporaryDirectory() as td, contextlib.ExitStack() as stack:
-            root = Path(td)
-            (root / "config.json").write_text(json.dumps({"model_type": "dummy"}))
-            out = root / "visual_probe.pkl"
-            stack.enter_context(mock.patch.dict(sys.modules, {"datasets": dataset}))
-            stack.enter_context(mock.patch(
-                "transformers.AutoProcessor.from_pretrained", return_value=processor))
-            if streaming:
-                stack.enter_context(mock.patch(
-                    "prismaquant.streaming_model._build_streaming_context",
-                    return_value=ctx))
-                probe = sp.run_streaming_multimodal_visual_probe_pass
-                extra = {"offload_folder": str(root / "offload")}
-            else:
-                stack.enter_context(mock.patch(
-                    "transformers.AutoConfig.from_pretrained",
-                    return_value=SimpleNamespace(architectures=[])))
-                stack.enter_context(mock.patch(
-                    "transformers.AutoModelForCausalLM.from_pretrained",
-                    return_value=model))
-                probe = sp.run_multimodal_visual_probe_pass
-                extra = {}
-            self.assertTrue(probe(
-                str(root), dataset_name="fixture-real-vision", n_samples=3,
-                max_text_len=3, requested_device="cpu", dtype=torch.float32,
-                linear_include=r"^visual\." if tracked else r"^absent\.",
-                linear_exclude=r"(?!x)x", activation_cache_dir=None,
-                output_path=str(out), **extra))
-            with out.open("rb") as stream:
-                payload = pickle.load(stream)
-        self.assertEqual(processor.rows, 3)
-        self.assertEqual(payload["meta"]["calibration_source"], {
-            "dataset": "fixture-real-vision", "requested": 3,
-            "real_loaded": 1, "synthetic_loaded": 2,
-        })
-        self.assertEqual(payload["meta"]["execution_device"], "cpu")
-        if tracked:
-            self.assertEqual(model.attempted_rows, [1, 2, 3])
-            stat = payload["stats"]["visual.0"]
-            self.assertEqual(stat["n_tokens_seen"], 2)
-            self.assertGreater(stat["h_trace"], 0)
-        else:
-            self.assertEqual(model.attempted_rows, [])
-            self.assertEqual(payload["stats"], {})
-        return payload
-
-    def test_nonstreaming_pickle_preserves_blend_after_failed_forward(self):
-        payload = self._probe_pickle(streaming=False)
-        # The non-streaming pass retains its existing loaded-row budget.
-        self.assertEqual(payload["meta"]["nsamples"], 3)
-        self.assertEqual(payload["meta"]["fisher_norm_tokens"], 9)
-
-    def test_streaming_pickle_keeps_loaded_composition_separate_from_successes(self):
-        payload = self._probe_pickle(streaming=True)
-        self.assertEqual(payload["meta"]["nsamples"], 2)
-        self.assertEqual(payload["meta"]["fisher_norm_tokens"], 6)
-
-    def test_streaming_no_match_pickle_preserves_actual_loader_composition(self):
-        payload = self._probe_pickle(streaming=True, tracked=False)
-        self.assertEqual(payload["meta"]["nsamples"], 3)
-        self.assertTrue(payload["meta"]["streaming"])
-
-    def test_zero_triples_returns_false(self):
-        from prismaquant import sensitivity_probe as sp
-
-        with tempfile.TemporaryDirectory() as td:
-            tdp = Path(td)
-            (tdp / "config.json").write_text(
-                json.dumps({"model_type": "dummy"})
-            )
-            out = tdp / "visual_probe.pkl"
-            # Patch AutoProcessor to succeed (returns a stub) but
-            # load_multimodal_calibration to return []. Then expect
-            # False return + no pickle written.
-            fake_proc = mock.Mock()
-            with mock.patch(
-                    "transformers.AutoProcessor.from_pretrained",
-                    return_value=fake_proc), \
-                 mock.patch.object(sp, "load_multimodal_calibration",
-                                   return_value=([], {
-                                       "dataset": "synthetic",
-                                       "requested": 2,
-                                       "real_loaded": 0,
-                                       "synthetic_loaded": 0,
-                                   })):
-                result = sp.run_multimodal_visual_probe_pass(
-                    str(tdp),
-                    dataset_name="synthetic",
-                    n_samples=2,
-                    max_text_len=8,
-                    requested_device="cpu",
-                    dtype=torch.float32,
-                    linear_include=r"^visual\.",
-                    linear_exclude=r"(?!x)x",
-                    activation_cache_dir=None,
-                    output_path=str(out),
-                )
-            self.assertFalse(result)
-            self.assertFalse(out.exists())
-
-    def test_processor_load_failure_returns_false(self):
-        from prismaquant import sensitivity_probe as sp
-
-        with tempfile.TemporaryDirectory() as td:
-            tdp = Path(td)
-            (tdp / "config.json").write_text(
-                json.dumps({"model_type": "dummy"})
-            )
-            out = tdp / "visual_probe.pkl"
-            # Both AutoProcessor.from_pretrained calls fail → graceful
-            # fallback returns False.
-            with mock.patch(
-                    "transformers.AutoProcessor.from_pretrained",
-                    side_effect=RuntimeError("no processor")):
-                result = sp.run_multimodal_visual_probe_pass(
-                    str(tdp),
-                    dataset_name="synthetic",
-                    n_samples=2,
-                    max_text_len=8,
-                    requested_device="cpu",
-                    dtype=torch.float32,
-                    linear_include=r"^visual\.",
-                    linear_exclude=r"(?!x)x",
-                    activation_cache_dir=None,
-                    output_path=str(out),
-                )
-            self.assertFalse(result)
-
-
-class TestPipelineCalibrationModalityEnv(unittest.TestCase):
-    """run-pipeline.sh must surface CALIBRATION_MODALITY / MM_DATASET
-    env defaults and route them through both the probe and allocator
-    commands."""
-
-    def test_pipeline_has_calibration_modality_default(self):
-        script = (
-            Path(__file__).resolve().parent.parent / "prismaquant" / "run-pipeline.sh"
-        ).read_text()
-        self.assertIn('CALIBRATION_MODALITY:=text-only', script)
-        self.assertIn('MM_DATASET:=synthetic', script)
-
-    def test_pipeline_threads_flags_to_probe(self):
-        script = (
-            Path(__file__).resolve().parent.parent / "prismaquant" / "run-pipeline.sh"
-        ).read_text()
-        self.assertIn("--calibration-modality", script)
-        self.assertIn("--mm-dataset", script)
-        self.assertIn("--mm-nsamples", script)
-
-    def test_pipeline_picks_visual_sensitivity_from_modality(self):
-        script = (
-            Path(__file__).resolve().parent.parent / "prismaquant" / "run-pipeline.sh"
-        ).read_text()
-        # When CALIBRATION_MODALITY=multimodal → VISUAL_SENSITIVITY=fisher
-        self.assertIn('VISUAL_SENSITIVITY=fisher', script)
-        self.assertIn('VISUAL_SENSITIVITY=uniform', script)
-        self.assertIn("--visual-sensitivity", script)
-
-
-if __name__ == "__main__":
-    unittest.main()

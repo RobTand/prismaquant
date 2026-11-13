@@ -9019,7 +9019,6 @@ pq_py_library(
         "@pq_pip//gguf",
         "@pq_pip//huggingface_hub",
         "@pq_pip//numpy",
-        "@pq_pip//pillow",
         "@pq_pip//safetensors",
         "@pq_pip//tessera_quant",
         "@pq_pip//torch",

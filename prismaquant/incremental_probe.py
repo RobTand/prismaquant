@@ -184,9 +184,6 @@ from prismaquant.sensitivity_probe import (
     kv_cotangent_path_enabled,
     per_token_ce,
     read_top_k,
-    run_multimodal_visual_probe_pass,
-    run_streaming_multimodal_visual_probe_pass,
-    stage_multimodal,
     stage_text_only,
 )
 from prismaquant.calibration_data import load_calibration
@@ -4461,34 +4458,6 @@ def main():
                     help="Maximum sampled activation rows to keep per Linear "
                          "for the cost stage. Lower values are useful for "
                          "debug runs on very wide MoE checkpoints.")
-    ap.add_argument("--calibration-modality",
-                    choices=["text-only", "multimodal"],
-                    default="text-only",
-                    help="'text-only' (default) runs only the streaming body "
-                         "Fisher probe; visual shards emit empty pickles and "
-                         "the allocator's --visual-format override takes over. "
-                         "'multimodal' also runs a second, non-streaming "
-                         "pass that loads the full multimodal model "
-                         "(vision_config preserved) and runs pixel_values + "
-                         "text through a supervised CE backward. Real "
-                         "per-visual-Linear Fisher + activation snapshots "
-                         "land in the probe pickle + activation cache, so "
-                         "the allocator treats visual Linears as regular DP "
-                         "candidates and the exporter's GPTQ/AR passes "
-                         "apply. Multimodal requires enough RAM for the full "
-                         "model; on 122B-scale models it falls back to the "
-                         "Phase 1 --visual-format override automatically on "
-                         "OOM / load failure.")
-    ap.add_argument("--mm-dataset", default="synthetic",
-                    help="Dataset source for multimodal calibration. Accepts "
-                         "a HuggingFace dataset id (e.g. `HuggingFaceM4/COCO`) "
-                         "or `synthetic` (default: offline stub that exercises "
-                         "the code path without network access).")
-    ap.add_argument("--mm-nsamples", type=int, default=8,
-                    help="Number of (image, caption) samples for the "
-                         "multimodal calibration pass.")
-    ap.add_argument("--mm-max-text-len", type=int, default=128,
-                    help="Max text tokens per multimodal calibration sample.")
     args = ap.parse_args()
     if args.global_calibration_tensor is not None:
         # Fires HERE, before the pairing checks and before any model read, so
@@ -4991,12 +4960,9 @@ def main():
                 # visual blocks are stripped by text-only staging, so the
                 # streaming body never installs them. Emit an empty pickle
                 # so the shard slot stays in the merged output with matching
-                # metadata. When --calibration-modality=multimodal the
-                # post-loop multimodal probe pass fills these in with real
-                # visual Linear Fisher + activation snapshots.
+                # metadata.
                 print(f"[incremental] skip shard {shard_idx} ({kind}): "
-                      f"streaming path text-only; multimodal second pass "
-                      f"will overlay visual stats if enabled", flush=True)
+                      f"streaming path text-only", flush=True)
                 Path(shard_path).parent.mkdir(parents=True, exist_ok=True)
                 with open(shard_path, "wb") as f:
                     pickle.dump({
@@ -5063,91 +5029,8 @@ def main():
         if ctx is not None and not use_persistent:
             ctx.shutdown()
 
-    # ---- Phase 2 multimodal visual probe (non-streaming second pass) ----
-    # Runs after the streaming body / MTP / lm_head shards complete. Loads
-    # the FULL multimodal model (vision_config preserved via stage_multimodal)
-    # and captures per-visual-Linear Fisher + activation snapshots under the
-    # same activation_cache_dir. The captured stats merge into the merged
-    # probe pickle below so the allocator sees visual Linears as regular
-    # DP candidates (if --visual-sensitivity=fisher).
-    visual_probe_path: Path | None = None
-    if args.calibration_modality == "multimodal":
-        dtype_map = {"bf16": torch.bfloat16, "fp16": torch.float16,
-                     "fp32": torch.float32}
-        mm_dtype = dtype_map[args.dtype]
-        visual_probe_path = work_dir / "shards" / "probe_visual_mm.pkl"
-        visual_include = r"^(?:model\.)?visual\."
-        # Try the streaming path FIRST — it works on both small and huge
-        # multimodal models (122B body streams; visual tower stays fully
-        # resident). Fall back to the monolithic whole-model
-        # `run_multimodal_visual_probe_pass` only if streaming fails
-        # (e.g. unsupported architecture, missing processor).
-        mm_offload = str(work_dir / "streaming_offload_mm")
-        ok = run_streaming_multimodal_visual_probe_pass(
-            args.model,
-            dataset_name=args.mm_dataset,
-            n_samples=args.mm_nsamples,
-            max_text_len=args.mm_max_text_len,
-            requested_device=args.device,
-            dtype=mm_dtype,
-            linear_include=visual_include,
-            linear_exclude=linear_exclude,
-            activation_cache_dir=args.activation_cache_dir,
-            output_path=str(visual_probe_path),
-            offload_folder=mm_offload,
-            h_detail_dir=args.h_detail_dir,
-        )
-        if not ok:
-            idx_path = Path(args.model) / "model.safetensors.index.json"
-            total_size = 0
-            if idx_path.exists():
-                try:
-                    with idx_path.open() as f:
-                        total_size = int(
-                            json.load(f).get("metadata", {}).get("total_size", 0)
-                        )
-                except Exception:
-                    total_size = 0
-            try:
-                avail_bytes = io_spans.mem_available_bytes()
-            except Exception:
-                avail_bytes = 0
-            # The fallback loads the full multimodal model. On 122B-scale
-            # checkpoints that is an OOM path, not a recovery path.
-            if total_size and avail_bytes and total_size > int(avail_bytes * 0.75):
-                print("[incremental] streaming multimodal probe failed; "
-                      "skipping monolithic whole-model fallback because "
-                      f"checkpoint total_size={total_size / (1024 ** 3):.1f} GiB "
-                      f"exceeds 75% of available RAM="
-                      f"{avail_bytes / (1024 ** 3):.1f} GiB", flush=True)
-            else:
-                print("[incremental] streaming multimodal probe failed; "
-                      "trying monolithic whole-model fallback (fits only when "
-                      "total model weights < RAM)", flush=True)
-                ok = run_multimodal_visual_probe_pass(
-                    args.model,
-                    dataset_name=args.mm_dataset,
-                    n_samples=args.mm_nsamples,
-                    max_text_len=args.mm_max_text_len,
-                    requested_device=args.device,
-                    dtype=mm_dtype,
-                    linear_include=visual_include,
-                    linear_exclude=linear_exclude,
-                    activation_cache_dir=args.activation_cache_dir,
-                    output_path=str(visual_probe_path),
-                    h_detail_dir=args.h_detail_dir,
-                )
-        if not ok:
-            print("[incremental] multimodal visual probe skipped / failed; "
-                  "allocator will need --visual-format for visual Linears",
-                  flush=True)
-            visual_probe_path = None
-
-    all_pickles = list(shard_paths)
-    if visual_probe_path is not None and visual_probe_path.exists():
-        all_pickles.append(visual_probe_path)
     _merged = merge_probe_pickles(
-        all_pickles, Path(args.output), write_output=False
+        list(shard_paths), Path(args.output), write_output=False
     )
     # Body-coverage gate: a merged probe missing whole layers poisons
     # every downstream stage silently (cost skips them, the allocator
@@ -5174,14 +5057,7 @@ def main():
                   f"probe that would silently drop them downstream.",
                   flush=True)
             raise SystemExit(2)
-    # Annotate the merged pickle with the calibration modality so
-    # run-pipeline.sh's reuse guard (and any downstream tooling) can
-    # reject a stale probe whose activations don't match the currently
-    # requested modality. Written under the top-level `meta` dict so a
-    # simple `pickle.load(...)['meta']['calibration_modality']` lookup
-    # works.
     _meta = dict(_merged.get("meta", {}))
-    _meta["calibration_modality"] = args.calibration_modality
     # Estimator provenance: packed-expert h_trace is the per-token
     # estimator since the 2026-07-02 M3 fix (pre-fix pickles carry the
     # sum-then-square 5-50x inflated values and are refused by
@@ -5193,8 +5069,7 @@ def main():
     output_payload = pickle.dumps(_merged, protocol=pickle.HIGHEST_PROTOCOL)
     from prismaquant.cost_stage_checkpoint import atomic_write_bytes
     atomic_write_bytes(Path(args.output), output_payload)
-    print(f"[incremental] wrote merged probe to {args.output} "
-          f"(calibration_modality={args.calibration_modality})", flush=True)
+    print(f"[incremental] wrote merged probe to {args.output}", flush=True)
 
 
 if __name__ == "__main__":

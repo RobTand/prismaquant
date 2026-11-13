@@ -1,6 +1,7 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-12, Refs #3425. The probe selects act/ rows by a keyed rule, not a random draw.
+As of: 2026-11-13. The multimodal probe is removed; every visual Linear takes `VISUAL_FORMAT`.
+The probe selects act/ rows by a keyed rule, not a random draw (#3425).
 PrismaSnap and its SSH campaign runner are removed (#3382).
 The classic pipeline starts from the source checkpoint. Tessera callers retain the existing no-clobber byte writer.
 
@@ -1830,13 +1831,6 @@ the live parameter or its profile recipe name. An empty list selects nothing;
 an absent list preserves the full scope. Activation hooks still cover every
 visible packed module, preserving the selected render's sampling stream.
 CPU scope and codec regressions do not establish served or performance results.
-
-As of: 2026-10-17, architecture audit continuation, RE-09. The streamed
-visual sensitivity probe counts a sample only after image features merge
-into text embeddings and the backward pass completes. A placeholder or merge
-failure uses the existing sample cleanup path. If no sample succeeds, the
-probe returns false so the caller can use its existing fallback. A synthetic
-zero-gradient connection no longer produces an accepted visual measurement.
 
 As of: 2026-10-17, architecture audit continuation, C-004. Artifact registration
 holds a stable sibling file lock while reloading the current registry, checking
@@ -4024,33 +4018,15 @@ qualification, and the parent measurement acceptance remains open.
 Re-stamped 2026-10-02 (Refs #1921, allocator visual namespace slice): the
 existing visual allocation predicate reads the detected profile's declared
 `visual_root_prefixes` and retains the existing source/recipe `model.` alias.
-Source-header census, measured-row partition, explicit uniform control,
-fixed-entry metadata and final bit attribution share that predicate. Gemma4's
-`model.vision_tower` and `model.embed_vision` therefore receive the same complete
-measured-population and exact-source-shape checks as the visual-root families.
-Missing measured rows or mismatched source shapes refuse before selection;
-complete measured rows keep independent legal choices. The explicit uniform
-control remains auxiliary. Callers without declared roots retain the historical
+Source-header census, the uniform control, fixed-entry metadata and final bit
+attribution share that predicate, so Gemma4's `model.vision_tower` and
+`model.embed_vision` are classified as visual. Callers without declared roots retain the historical
 visual namespace. Audio/body names and role tags such as `vis_*`/`merger_*`
 do not invent module roots. This changes CPU roster/accounting plumbing only;
 source-header rank/non-Linear exclusions and independent export/serving gates,
 formats, numerical methods, pins, caches and production defaults are unchanged.
 CPU fixture choices supply no multimodal quality, wire, runtime or performance
 qualification. The representative GPU/serving acceptance remains in #1921.
-
-Re-stamped 2026-10-06 (Refs #1921, #2244, persisted calibration provenance):
-both multimodal visual probe passes persist `meta.calibration_source` with
-`dataset`, `requested`, `real_loaded` and `synthetic_loaded`. These are rows
-actually loaded, not the real/synthetic composition of successful forwards.
-The streaming final write counts successes in `nsamples`; the non-streaming
-pass and streaming no-match exit retain the loaded-row budget there. Blend
-policy and Fisher normalization are unchanged.
-`TestMultimodalProbePassIntegration` in `tests/test_prismaquant_visual_phase2.py`
-reads all three emitted pickle paths using the actual loader, a partial real
-dataset, its synthetic fallback and a populated CPU model. A failed synthetic
-forward leaves the loaded composition intact; successful paths also require
-nonzero visual Fisher. This proves persistence, not a consumer refusal policy,
-real-checkpoint calibration, GPU arithmetic or served qualification.
 
 Re-stamped 2026-10-02 (Refs #1271, MTP source parameter binding): the shared
 MTP probe-identity admission compares each unit's exact positive integer
@@ -4482,25 +4458,11 @@ chain in a fresh no-site interpreter. No production package namespace is replace
 CPU tests and native same-UID profiling do not establish a GPU A/B result.
 See `docs/campaign_row_profiling.md` for the admitted dependency contract.
 
-Re-stamped 2026-10-01 (PQ #1936, Refs #1921): allocation first separates
-visual policy from orchestration. A complete measured visual Fisher/cost
-population retains its legal visual and merger candidates in the existing
-per-Linear DP, budget, loss and bit-attribution domain, instead of fixing
-it to `--visual-format` and later restamping it uniformly. Incomplete
-measured stats/cost/candidate coverage or incomplete/mismatched discovered
-source shapes refuse before selection. Explicit uniform mode and probes
-without visual costs retain the existing auxiliary source-precision control.
-Bit-attribution v2 retains its legacy `body_*` keys for this allocator budget
-domain; fixed visual/MTP entries remain outside it. Candidate legality, cost
-equations, serialized payload math, caches, formats, kernels, runtime pins,
-wires and independent serving/export gates are unchanged. In particular the
-current Tessera exporter still refuses unsupported non-body low-bit visual
-assignments: CPU candidate retention is NOT visual wire/export or plugin
-qualification. A8S vision remains source-native BF16, accepted as matching
-EXL3; #1921 is full-gamut PACT work and does not block A8S. CPU regression:
-`tests/test_visual_allocator_units_1936.py` drives real allocator main with
-synthetic contract/cost/source evidence, mixed tower/merger choices, coverage
-refusals, attribution and the uniform control; it is not a GPU measurement.
+Re-stamped 2026-11-13: the multimodal probe and the allocator's
+`--visual-sensitivity fisher` path (PQ #1936) are removed. Every visual Linear
+takes `--visual-format` (default BF16) outside the DP. `CALIBRATION_MODALITY`
+and its `probe` settings key are removed, so a `probe.pkl` whose manifest
+records that key refuses with exit 2 until it is deleted.
 
 Re-stamped 2026-10-09 (PQ #2518): the trusted-base `linked issue` metadata
 check keeps native same-repository closing references and explicit
@@ -13042,9 +13004,8 @@ map; the tower is materialized only for a caller that passed `multimodal=True`
 -- the same contract the streamed exporter already states ("the visual tower
 stays on meta", below). **No visual tensor is read from the checkpoint on a
 text-only call.** Explicit `multimodal=True` is unchanged in both shape and
-bytes, including `visual_requires_grad`, so the visual Fisher probe
-(`run_multimodal_visual_probe_pass`) and the visual cost shard
-(`_run_visual_cost_shard`) keep their resident towers. Gate:
+bytes, so the visual cost shard (`_run_visual_cost_shard`) keeps its resident
+tower. Gate:
 `tests/test_streaming_visual_materialization_scope.py`.
 
 Re-stamped (2026-09-20, `flash/calibration-staged-tier-reader-865`) for
@@ -23678,7 +23639,7 @@ which is what the rows touched since are keyed on.
 
 | # | Stage | Script | Artifact(s) | Reuse guard | Mode/lane gate |
 |---|---|---|---|---|---|
-| **1/4** | Sensitivity probe — per-Linear empirical Fisher `h_trace`, body + MTP in one pass; tied heads materialized and excluded, KV-sharing cotangents grafted (§7.5) | `prismaquant.incremental_probe` (`544-560`) | `artifacts/probe.pkl`; activations → `act/`; shards → `work/`; `logs/probe.log` | settings-hash `probe` (`703`); reuse also re-checks stored `calibration_modality` | — |
+| **1/4** | Sensitivity probe — per-Linear empirical Fisher `h_trace`, body + MTP in one pass; tied heads materialized and excluded, KV-sharing cotangents grafted (§7.5) | `prismaquant.incremental_probe` (`544-560`) | `artifacts/probe.pkl`; activations → `act/`; shards → `work/`; `logs/probe.log` | settings-hash `probe` (`703`) | — |
 | **1/4×N (retired; unavailable)** | Historical exact sample-axis probe map/reduce. Every worker processes the complete dense text qname census over one canonical contiguous sample partition. Stage 1 publishes raw shifted-token CE; a global scalar barrier closes the cover; stage 2 reruns phase 1 with that global mean, then the strict reducer finalizes raw Fisher/marginals once and publishes the deterministic dense-body activation union (§4.1) | `archive/sample_parallel_probe_2026-10-15/`; read-only contracts remain in `prismaquant.sample_parallel_artifacts` | immutable calibration/run contract and digest-bound sample cover; per-worker CE/probe/cache shards; global CE receipt; ordinary merged `probe.pkl` + `act/` | committed read-only source snapshot + host-verified immutable registry RepoDigest; source/config/header/content identity; exact sample cover replayed before GPU setup; duplicate-key-free trusted JSON; marginal-to-trace and independently replayed global top-R/fused-row checks; no-follow same-byte probe and committed-identity lazy activation consumption; no-clobber output | opt-in operator workflow; no `torch.distributed`, qname/layer partitioning, alternate cache, serving-runtime change, h-detail, visual, routed, or packed path |
 | **2/4** | Baseline per-(Linear,format) RTN cost. The measured menu is derived `COST_FORMATS`; `lm_head` is included only for a fixed non-BF16 or DP-unpinned head | `prismaquant.incremental_measure_quant_cost --[no-]include-lm-head` | `artifacts/cost.pkl` (`COST_MODE=local`) or `artifacts/cost_baseline.pkl`; `logs/cost.log` | settings-hash `base-cost`, including all three resolved head-policy axes and `COST_FORMATS` | — |
 | **2a-CB** | imatrix column-weight harvest | `harvest_cb_col_weights` — ONE shell function, four call sites (`[2/4] pre-cost`, `[2b/4] cost-cache`, `[2d-CB]`, `[4/4]`) → `export_gguf.build_imatrix_from_act_cache` + `moe_imatrix.synthesize_packed_expert_col_weights` | `artifacts/cb_col_weights.pkl` | settings-hash `cb-col-weights` | CB lane; called by whichever stage needs the vector first |
@@ -24220,7 +24181,7 @@ that stores rendered weights.
 **Over-keying is the risk the table is written against.** Declaring a key an artifact does not
 depend on forces a spurious rebuild, and some of these are 90 GB. The rule applied: key an
 artifact on the inputs that change its *bytes*, and key expensive artifacts conservatively (the
-probe is keyed on model/corpus/windows/modality and **not** on `FORMATS` — it is format-blind;
+probe is keyed on model/corpus/windows and **not** on `FORMATS` — it is format-blind;
 `cb_col_weights.pkl` is keyed generously because it rebuilds in minutes). Historical manifest
 key names (`NS`, `SL`, `SEED`) are preserved where they existed, so artifacts built before R5
 compare equal instead of rebuilding.
@@ -24501,8 +24462,7 @@ Text cells carry the v2 decoder binding. Sidecars carry checkpoint-and-dtype evi
 | Base RTN cost | `incremental_measure_quant_cost.py` (`:606-661`) | per-`(Linear, format)` measured RTN error; under `aura` demoted to sidecar-backfill source (`:928-952`) |
 
 The probe is streamed shard-by-shard through `layer_streaming` — head resident, body paged,
-MTP a built-in shard kind (`incremental_probe.py:2-17`); a modality guard aborts on
-probe/`CALIBRATION_MODALITY` mismatch (`:562-599`).
+MTP a built-in shard kind (`incremental_probe.py:2-17`).
 
 **Exact sample-axis probe map/reduce is retired and unavailable.** Its source census
 depended on the removed Gridbook lane, and the current CLI refuses its global
@@ -24665,8 +24625,8 @@ Typical inflation is ~`n_experts/top_k` (≈32× on a 256-expert top-8 model); t
 
 **Legacy probes hard-fail.** `renormalize_probe_fisher` (`allocator.py:1045-1142`, called
 `:1455`) recomputes every row from the stored raw accumulators. Per-row
-`h_trace_norm_tokens` stamps win over the meta count — a merged multimodal visual pass was
-finalized at its own token count, so honouring the stamp keeps the recompute idempotent. A row
+`h_trace_norm_tokens` stamps win over the meta count — a pass finalized at its own token
+count keeps it, so honouring the stamp keeps the recompute idempotent. A row
 that carries raw accumulators but has neither a stamp nor a usable meta count is a `SystemExit`
 naming the remedy (re-probe); `--allow-legacy-fisher-norm` (`:1190-1195`) downgrades it to a
 warning for reproducing historical allocations (`612fc38`). Re-solves of the shipped

@@ -883,7 +883,6 @@ def _run_visual_cost_shard(
                 offload_folder=mm_offload_folder, layers_per_shard=1,
                 log_prefix="[incremental-cost/visual]",
                 multimodal=True,
-                visual_requires_grad=False,
             )
         except (torch.cuda.OutOfMemoryError, RuntimeError, MemoryError) as e:
             msg = str(e).lower()

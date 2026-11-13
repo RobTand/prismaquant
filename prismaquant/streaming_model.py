@@ -782,8 +782,7 @@ class StreamingContext:
         self.offload_folder = offload_folder
         # Populated only when the CALLER passed
         # `_build_streaming_context(..., multimodal=True)`: full visual tower
-        # resident on `device`, requires_grad=True on Linear params so Fisher
-        # hooks fire in run_multimodal_visual_probe_pass. `self.multimodal`
+        # resident on `device`. `self.multimodal`
         # below is the *construction* axis and can be True with no tower, on a
         # family that has no text-only skeleton route.
         # Also exposes `visual_prefix` so cost / probe code can iterate
@@ -2038,7 +2037,6 @@ def _build_streaming_context(model_path: str, *,
                              prefetch_min_available_gb: float | str | None = None,
                              log_prefix: str = "[streaming]",
                              multimodal: bool = False,
-                             visual_requires_grad: bool = False,
                              attn_implementation: str | None = None,
                              source_authentication=None,
                              source_snapshot_only: bool = False,
@@ -2053,7 +2051,6 @@ def _build_streaming_context(model_path: str, *,
 
     ``multimodal`` declares visual inputs. It stages the full configuration,
     builds the declared architecture, and loads the visual tower onto device.
-    ``visual_requires_grad`` enables gradients on the visual Linears.
     Text-only callers load no visual tensors, including profiles that require
     a multimodal skeleton. Unresolved wrapper classes use the text-only resolver.
     ``layers_per_shard`` is the caller's resolved count for cache headroom.
@@ -2339,22 +2336,8 @@ def _build_streaming_context(model_path: str, *,
                         model, model_name, device, value=t, dtype=install_dtype)
                 # Some visual towers carry non-checkpoint buffers initialized by
                 # the module constructor. Keep them colocated with checkpoint
-                # tensors before the multimodal streaming probe calls visual
-                # helpers such as get_image_features.
+                # tensors.
                 visual_module.to(device=device)
-                if visual_requires_grad:
-                    # Enable grad on every Linear's weight + bias so backward
-                    # hooks fire on the reverse sweep. Embeddings and norms
-                    # stay frozen (no Fisher tracked for those).
-                    import torch.nn as nn
-                    n_grad = 0
-                    for n, m in visual_module.named_modules():
-                        if isinstance(m, nn.Linear):
-                            for p in m.parameters(recurse=False):
-                                p.requires_grad_(True)
-                                n_grad += 1
-                    print(f"{log_prefix} visual: enabled grad on "
-                          f"{n_grad} Linear params", flush=True)
         print(f"{log_prefix} model ready in {time.time()-t0:.1f}s", flush=True)
 
         print(f"{log_prefix} building install resolvers for {num_layers} layers ...",
