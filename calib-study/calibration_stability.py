@@ -756,7 +756,7 @@ def run(args: argparse.Namespace) -> dict:
         "cost_formats": list(data["cost"]["formats"]),
         "activation_rows_limit": int(data["probe"]["meta"]["activation_rows_limit"]),
         "activation_row_count_histogram": {str(k): v for k, v in sorted(Counter(base["activation_rows"]).items())},
-        "probe_recipe": {k: data["probe"]["meta"].get(k) for k in ("dataset", "nsamples", "seqlen", "calib_hash", "dtype", "top_k", "fisher_norm_tokens", "calibration_modality", "packed_fisher_estimator")},
+        "probe_recipe": {k: data["probe"]["meta"].get(k) for k in ("dataset", "nsamples", "seqlen", "calib_hash", "dtype", "top_k", "fisher_norm_tokens", "packed_fisher_estimator")},
         "full_decomposition": {
             "formula": "0.5 * probe.stats[qname].h_trace * cost[assigned_format].output_mse; source passthroughs contribute zero",
             "sum": baseline_sum,

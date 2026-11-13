@@ -1,14 +1,14 @@
 """Text-only skeleton construction for vision-language *wrapper* configs.
 
-Issue #12: a user running `CALIBRATION_MODALITY=text-only` on MiniMax-M3 hit
+Issue #12: a user running a text-only calibration on MiniMax-M3 hit
 
     ValueError: Unrecognized configuration class MiniMaxM3VLConfig for this
     kind of AutoModel: AutoModelForCausalLM. Model type should be one of
     ... MiniMaxM3VLTextConfig ...
 
 i.e. the *text* config is natively supported and only the VL wrapper that
-sits above it is not. `CALIBRATION_MODALITY` says what data to calibrate
-on; it must not decide whether a skeleton can be built at all.
+sits above it is not. The calibration data must not decide whether a
+skeleton can be built at all.
 
 Everything here is synthetic and CPU-only: configs are constructed from
 dicts and skeletons under `init_empty_weights()` (meta tensors), so no

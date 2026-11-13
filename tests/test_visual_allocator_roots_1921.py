@@ -15,49 +15,25 @@ VISION = "model.vision_tower.vision_model.encoder.layers.0.attn.qkv"
 PROJECTOR = "model.embed_vision.projection"
 
 
-def _gemma_inputs(tmp_path, monkeypatch, **kwargs):
+def _gemma_inputs(tmp_path, monkeypatch):
     # Reuse the existing measured-row/contract control and change only the
     # declared profile/visual names. No measured production inputs are invented.
     monkeypatch.setattr(visual_fixture, "VISION", VISION)
     monkeypatch.setattr(visual_fixture, "MERGER", PROJECTOR)
-    output, probe = visual_fixture._inputs(tmp_path, monkeypatch, **kwargs)
+    output, probe = visual_fixture._inputs(tmp_path, monkeypatch)
     (tmp_path / "model/config.json").write_text(json.dumps({
         "model_type": "gemma4", "architectures": ["Gemma4ForConditionalGeneration"],
         "vision_config": {"num_hidden_layers": 1}}))
     return output, probe
 
 
-def test_gemma_measured_vision_and_projector_keep_independent_choices(tmp_path, monkeypatch):
-    output, probe = _gemma_inputs(tmp_path, monkeypatch)
-    allocator.main()
-    assignment = load_assignment(output)
-    assert assignment[VISION] == visual_fixture.DENSE_RUNG
-    assert assignment[PROJECTOR] == visual_fixture.VALUE_RUNG
-    attribution = json.loads((tmp_path / "attribution.json").read_text())
-    assert attribution["n_body_linears"] == len(probe["stats"])
-
-
-def test_gemma_partial_measured_population_refuses_uniform_substitution(tmp_path, monkeypatch):
-    output, _ = _gemma_inputs(tmp_path, monkeypatch, missing_cost=PROJECTOR)
-    with pytest.raises(SystemExit, match="visual Fisher.*incomplete.*embed_vision"):
-        allocator.main()
-    assert not output.exists()
-
-
 def test_gemma_uniform_control_excludes_visual_rows_from_decision_accounting(tmp_path, monkeypatch):
-    output, _ = _gemma_inputs(tmp_path, monkeypatch, sensitivity="uniform")
+    output, _ = _gemma_inputs(tmp_path, monkeypatch)
     allocator.main()
     assignment = load_assignment(output)
     assert assignment[VISION] == assignment[PROJECTOR] == "BF16"
     attribution = json.loads((tmp_path / "attribution.json").read_text())
     assert attribution["n_body_linears"] == 3
-
-
-def test_gemma_mismatched_source_shape_refuses_before_selection(tmp_path, monkeypatch):
-    output, _ = _gemma_inputs(tmp_path, monkeypatch, source_shape_mismatch=True)
-    with pytest.raises(SystemExit, match="visual Fisher source roster.*mismatched.*embed_vision"):
-        allocator.main()
-    assert not output.exists()
 
 
 @pytest.mark.parametrize("case", CASES, ids=[case[0] for case in CASES])

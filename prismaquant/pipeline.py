@@ -340,16 +340,13 @@ _AURA_COST_SETTINGS = _key_pairs(
 STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
     # --- probe / cost ------------------------------------------------------
     # The Fisher trace is a function of (model, calibration corpus, window
-    # count/length, modality). NOT of FORMATS: the probe is format-blind.
+    # count/length). NOT of FORMATS: the probe is format-blind.
     # ACT_ROW_SELECTION names the rule that picks the act/ rows the probe
     # writes and base-cost reads, so a WORK_DIR with random act/ refuses.
     "probe": _key_pairs(
-        "MODEL_PATH", "DATASET", "NSAMPLES", "SEQLEN", "CALIBRATION_MODALITY",
-        "ACT_ROW_SELECTION",
+        "MODEL_PATH", "DATASET", "NSAMPLES", "SEQLEN", "ACT_ROW_SELECTION",
     ),
-    # Per-(Linear, format) baseline error. Adds FORMATS; drops modality
-    # (the cost stage reads the probe's activation cache, whose modality the
-    # probe guard already pins).
+    # Per-(Linear, format) baseline error. Adds FORMATS.
     "base-cost": _key_pairs(
         "MODEL_PATH", "DATASET", "NSAMPLES", "SEQLEN", "ACT_ROW_SELECTION",
         "FORMATS<-COST_FORMATS", *_HEAD_SETTINGS,
@@ -1442,7 +1439,6 @@ def production_pipeline_spec_from_config(
     formats: str | None = None,
     target_bits: float | None = None,
     target_profile: str | None = None,
-    calibration_modality: str | None = None,
     selection_mode: str | None = None,
     production_cache: str | bool | None = None,
     production_recache: str | bool | None = None,
@@ -1474,7 +1470,6 @@ def production_pipeline_spec_from_config(
         "formats": formats,
         "target_bits": target_bits,
         "target_profile": target_profile,
-        "calibration_modality": calibration_modality,
         "selection_mode": selection_mode,
         "production_cache": production_cache,
         "production_recache": production_recache,
@@ -1838,7 +1833,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--formats", default=None)
     ap.add_argument("--target-bits", type=float, default=None)
     ap.add_argument("--target-profile", default=None)
-    ap.add_argument("--calibration-modality", default=None)
     ap.add_argument("--selection-mode", default=None)
     ap.add_argument("--production-cache", default=None)
     ap.add_argument("--production-recache", default=None)
@@ -1984,7 +1978,6 @@ def main(argv: list[str] | None = None) -> int:
             formats=args.formats,
             target_bits=args.target_bits,
             target_profile=args.target_profile,
-            calibration_modality=args.calibration_modality,
             selection_mode=args.selection_mode,
             production_cache=args.production_cache,
             production_recache=args.production_recache,

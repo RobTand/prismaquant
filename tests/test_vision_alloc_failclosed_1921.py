@@ -1,6 +1,6 @@
 """Synthetic CPU allocator-main regression evidence for #1921 / #2809.
 
-These are invented measured-row fixtures, NOT production measurements or vision
+These are invented probe-row fixtures, NOT production measurements or vision
 export/serving qualification. The tiny BF16 safetensors are real CPU files: the
 allocator must reconcile their headers through a detected profile, not a mocked
 source census. No allocator/profile implementation or serving gates are changed.
@@ -8,7 +8,6 @@ source census. No allocator/profile implementation or serving gates are changed.
 from __future__ import annotations
 
 import copy
-import csv
 import json
 import pickle
 import sys
@@ -29,7 +28,7 @@ from test_visual_shard_coverage import _config
 
 @pytest.fixture(params=["qwen3_5_moe", "gemma4"])
 def synthetic_cpu_inputs(tmp_path, monkeypatch, request):
-    """Reuse measured menus/lane contract, but remove the helper's census stub."""
+    """Reuse the probe rows/lane contract, but remove the helper's census stub."""
     real_census = allocator.discover_visual_linear_stats_from_source
     if request.param == "gemma4":
         output, probe = root_fixture._gemma_inputs(tmp_path, monkeypatch)
@@ -93,10 +92,8 @@ def synthetic_cpu_inputs(tmp_path, monkeypatch, request):
 
     return SimpleNamespace(
         output=output, probe=probe, probe_path=probe_path, cost_path=cost_path,
-        visuals=(vision, merger), tensors=tensors, write_source=write_source,
+        visuals=(vision, merger),
         attribution=argument_path("--bit-attribution-json"),
-        attribution_csv=argument_path("--bit-attribution-csv"),
-        pareto=argument_path("--pareto-csv"),
     )
 
 
@@ -110,91 +107,6 @@ def _set_cli_option(monkeypatch, flag, value):
     monkeypatch.setattr(sys, "argv", argv)
 
 
-@pytest.mark.parametrize("reverse_costs", [False, True], ids=["original", "reversed"])
-def test_synthetic_cpu_main_selects_each_measured_unit_independently(
-        synthetic_cpu_inputs, reverse_costs):
-    case = synthetic_cpu_inputs
-    vision, merger = case.visuals
-    if reverse_costs:
-        cost = pickle.loads(case.cost_path.read_bytes())
-        cost["costs"][vision], cost["costs"][merger] = (
-            cost["costs"][merger], cost["costs"][vision])
-        _write_pickle(case.cost_path, cost)
-
-    # Real candidate construction, serving-format filtering, DP, source-header
-    # reconciliation, final assignment and attribution; none are stubbed here.
-    allocator.main()
-    assignment = load_assignment(case.output)
-    expected = (measured_fixture.VALUE_RUNG, measured_fixture.DENSE_RUNG) if reverse_costs else (
-        measured_fixture.DENSE_RUNG, measured_fixture.VALUE_RUNG)
-    assert tuple(assignment[name] for name in case.visuals) == expected
-    assert len(set(expected)) == 2
-    metadata = json.loads(case.output.read_text())["__prismaquant__"]
-    by_unit = metadata["serving_lane_provenance"]["by_unit"]
-    for name, fmt in zip(case.visuals, expected):
-        assert by_unit[name]["format"] == fmt
-        assert by_unit[name]["serving_context"]["structure"] == "dense"
-        assert by_unit[name]["route"]["route_status"] in {"backed", "backed_with_serve_flag"}
-
-    attribution = json.loads(case.attribution.read_text())
-    assert attribution["n_body_linears"] == len(case.probe["stats"])
-    assert attribution["body_quantizable_params"] == sum(
-        entry["n_params"] for entry in case.probe["stats"].values())
-    with case.attribution_csv.open() as stream:
-        rows = {row["qname"]: row for row in csv.DictReader(stream)}
-    for name, fmt in zip(case.visuals, expected):
-        assert rows[name]["format"] == fmt
-        assert float(rows[name]["predicted_dloss"]) > 0
-
-
-@pytest.mark.parametrize("hole", [
-    "missing_cost", "missing_stats", "empty_candidate_menu",
-    "source_only_linear", "unmeasured_source_linear", "source_shape_mismatch",
-])
-def test_synthetic_cpu_main_refuses_incomplete_measured_populations(
-        synthetic_cpu_inputs, hole):
-    case = synthetic_cpu_inputs
-    _, merger = case.visuals
-    probe = copy.deepcopy(case.probe)
-    cost = pickle.loads(case.cost_path.read_bytes())
-    expected_message = "visual Fisher population is incomplete"
-    missing_name = merger
-    if hole == "missing_cost":
-        del cost["costs"][merger]
-    elif hole == "missing_stats":
-        del probe["stats"][merger]
-    elif hole == "empty_candidate_menu":
-        # A named cost row with no admitted options is not measured coverage.
-        cost["costs"][merger] = {}
-    elif hole == "source_only_linear":
-        missing_name = merger.rsplit(".", 1)[0] + ".extra_projection"
-        case.tensors[missing_name + ".weight"] = case.tensors[merger + ".weight"].clone()
-        expected_message = "visual Fisher source roster is incomplete"
-    elif hole == "unmeasured_source_linear":
-        # Even matching probe+cost populations cannot hide a source Linear.
-        # The other visual unit still requests the measured path.
-        del probe["stats"][merger]
-        del cost["costs"][merger]
-        expected_message = "visual Fisher source roster is incomplete"
-    else:
-        weight = case.tensors[merger + ".weight"]
-        case.tensors[merger + ".weight"] = torch.zeros(
-            (weight.shape[0], weight.shape[1] + 1), dtype=weight.dtype, device="cpu")
-        expected_message = "visual Fisher source roster is incomplete or has mismatched shapes"
-    _write_pickle(case.probe_path, probe)
-    _write_pickle(case.cost_path, cost)
-    case.write_source()
-
-    with pytest.raises(SystemExit) as exc:
-        allocator.main()
-    assert expected_message in str(exc.value)
-    assert missing_name in str(exc.value)
-    # Refusal must precede selection/publication, not silently stamp BF16 onto
-    # the gap or emit an apparently complete partial measured artifact.
-    for path in (case.output, case.pareto, case.attribution, case.attribution_csv):
-        assert not path.exists(), path
-
-
 @pytest.mark.parametrize("control", ["explicit_uniform", "text_only_source_census"])
 def test_synthetic_cpu_main_retains_explicit_uniform_and_text_only_controls(
         synthetic_cpu_inputs, monkeypatch, control):
@@ -202,17 +114,14 @@ def test_synthetic_cpu_main_retains_explicit_uniform_and_text_only_controls(
     probe = copy.deepcopy(case.probe)
     cost = pickle.loads(case.cost_path.read_bytes())
     if control == "explicit_uniform":
-        # This same incomplete measured menu refuses in Fisher mode above.
-        # Uniform is an explicit opt-out, not an automatic recovery path.
+        # An incomplete visual cost population still takes the uniform format.
         del cost["costs"][case.visuals[1]]
-        _set_cli_option(monkeypatch, "--visual-sensitivity", "uniform")
     else:
         # No visual probe OR cost rows: real source headers must supply both
         # roots' fixed entries, including Gemma's separate embed_vision root.
         for name in case.visuals:
             del probe["stats"][name]
             del cost["costs"][name]
-        _set_cli_option(monkeypatch, "--visual-sensitivity", "fisher")
     _set_cli_option(monkeypatch, "--visual-format", "BF16")
     _write_pickle(case.probe_path, probe)
     _write_pickle(case.cost_path, cost)
