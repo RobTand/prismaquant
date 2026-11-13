@@ -35,7 +35,6 @@
   "reach:tests/test_exl3_grouped_down_replay_integration.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_exl3_replay_cli.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_file_hash_routing_1672.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
-  "reach:tests/test_fisher_normalization.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_fleet_data_selection.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_forward_manifest_identity_1171.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_function_pairs_1302.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",

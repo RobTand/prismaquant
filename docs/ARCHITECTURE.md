@@ -2546,10 +2546,6 @@ Re-stamped 2026-10-14: `measured_runtime_prices.device_placement_bytes` owns
 one-device resource composition for the exact frontier and assignment evaluator.
 Per-rank admission and shape-only withholding retain their separate contracts.
 
-Re-stamped 2026-10-14: sensitivity cards retain each Fisher row writer
-normalizer. The shared `probe_statistics.fisher_norm_tokens` rule gives a
-positive body or visual pass stamp precedence over the legacy probe count.
-
 Re-stamped 2026-10-14: staged pin release now uses the same topmost mount
 facts as staged reads and portable identity. An NFS mount above an equal-path
 autofs trigger supplies its existing major-timeout retry horizon.
@@ -32207,11 +32203,8 @@ shared by both probe backends):
   `_stats_indicates_packed_expert` read as a packed expert stack. TP note:
   identity/dispositions/byte totals are logical; a future rowwise shard cuts
   the plane's row axis and must not straddle a group boundary.
-- **Normalization.** Unchanged and global: rows stay raw token sums until
-  `finalize_fisher_stats` divides every row by the GLOBAL calibration token
-  count. Grouped operands are attention output projections — every group sees
-  every token — so the shared denominator is exact, not merely consistent;
-  `n_tokens_seen` counts tokens, not token-group pairs.
+- **Normalization.** Retired with the probe Fisher (#3448); `n_tokens_seen`
+  counts tokens, not token-group pairs.
 - **Dispatch.** Explicit declaration only: spec field
   `probe.grouped_module_class_names` (conformance-tested like every other
   spec field). A declared class whose instance lacks `n_groups` fails fast;

@@ -1,7 +1,6 @@
-"""Shared Fisher rows, marginal reduction, normalization and detail contracts."""
+"""Activation-row selection shared by the probe."""
 from __future__ import annotations
 
-import numpy as np
 import torch
 
 _U16_MASK = (1 << 16) - 1
@@ -61,83 +60,3 @@ def keep_act_rows(snaps: dict, indices: dict, name: str, flat: torch.Tensor,
     flat = flat.index_select(0, order)
     snaps[name] = [flat.to("cpu") if to_cpu else flat]
     indices[name] = [rows.to("cpu") if to_cpu else rows]
-
-
-FISHER_MARGINAL_KEYS = (
-    "fisher_row", "fisher_col", "g_sq_sum", "act_sq_sum", "act_absmax",
-)
-
-FISHER_MAX_KEYS = frozenset({"act_absmax"})
-
-PACKED_FISHER_MARGINAL_KEYS = (
-    "expert_g_sq_sum", "expert_act_sq_sum", "expert_act_absmax",
-    "expert_tokens")
-
-
-def merge_marginals(dst: dict, src) -> None:
-    """Fold per-channel marginals from `src` into `dst` in place.
-
-    Sums add elementwise; act_absmax merges by MAXIMUM. Used both for
-    the per-layer host flush and for the cross-shard partial-stats
-    merge, so the two cannot drift apart on the max-vs-sum rule.
-    """
-    for key in FISHER_MARGINAL_KEYS:
-        new = src.get(key)
-        if new is None:
-            continue
-        new = np.asarray(new, dtype=np.float32)
-        old = dst.get(key)
-        if old is None:
-            dst[key] = new.copy()
-        elif key in FISHER_MAX_KEYS:
-            dst[key] = np.maximum(old, new)
-        else:
-            dst[key] = old + new
-
-def finalize_fisher_stats(merged_stats: dict, global_tokens: int) -> None:
-    """Normalize raw Fisher accumulators into ``h_trace`` (etc.), in place.
-
-    Fisher normalization must share ONE denominator across every row: the
-    global calibration token count (nsamples x seqlen). Dense trunk Linears
-    accumulate exactly that many tokens in ``n_tokens_seen``, so their
-    values are unchanged by dividing by the global count. Per-expert
-    Linears, however, only see their ROUTED tokens; a per-row
-    ``h_trace_raw / n_tokens_seen`` inflates a rarely-routed expert's
-    Fisher by (global/routed) — exactly inverted importance weighting (the
-    least-used experts look the most sensitive). Tokens never routed to an
-    expert contribute zero gradient, so the empirical Fisher over the
-    calibration set divides by the GLOBAL count for every row.
-
-    HISTORY — this deliberately REVERSES a documented convention. Audit M4
-    removed an explicit ÷route_prob on the grounds that dividing by the
-    routed-token count was "the one implicit ÷token-fraction the MoE
-    convention prescribes", and both backends then shipped per-routed-token
-    as the single normalization (pinned by the original
-    tests/test_packed_expert_per_token_fisher.py). M4's *agreement* goal
-    stands — one division, both backends, route_prob as metadata only —
-    but per-routed-token was the wrong denominator for the mean-Δloss
-    objective the allocator optimizes: it is the same 1/p_e inflation M4
-    removed, merely implicit. CLAUDE.md §3 records the same reversal.
-
-    ``n_tokens_seen`` stays raw (routed count, metadata).
-    """
-    for s in merged_stats.values():
-        s["h_trace"] = s.get("h_trace_raw", 0.0) / global_tokens
-        s["h_w2_sum"] = s.get("h_w2_sum_raw", 0.0) / global_tokens
-        # Per-expert Fisher trace (only present on packed-3D stat entries;
-        # dense Linears have no per-expert dimension). Normalize by the
-        # same token count so it shares units with `h_trace`.
-        per = s.get("h_trace_per_expert_raw")
-        if per is not None:
-            s["h_trace_per_expert"] = [float(v) / global_tokens for v in per]
-        # Per-GROUP Fisher trace (grouped-BMM operands like DSv4's wo_a).
-        # Same rule, same denominator: the group axis is a contraction
-        # structure ON one logical tensor, and every group sees every
-        # calibration token (attention output projection — nothing is
-        # routed), so the global count is exact for it, not just
-        # consistent.
-        per_group = s.get("h_trace_per_group_raw")
-        if per_group is not None:
-            s["h_trace_per_group"] = [
-                float(v) / global_tokens for v in per_group]
-        s["h_trace_norm_tokens"] = global_tokens
