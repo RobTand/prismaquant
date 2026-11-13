@@ -110,6 +110,7 @@ jobs:
       id: tests
       run: |
         set -Eeuo pipefail
+        python tools/ci/bazel_generated.py
         python tools/ci/gate_run.py --plan hosted-private/plan.json --workers 4 --result hosted-private/result.json --junitxml hosted-private/junit.xml
         python - <<'HOSTED_VERDICT'
         import json, os
