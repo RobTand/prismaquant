@@ -2460,6 +2460,8 @@ def materialize_tensors_streaming(
         _unload,
     )
     from .sensitivity_probe import stage_multimodal, stage_text_only
+    from .streaming_model import read_ahead_source_files
+    read_ahead_seen: set = set()
     # Canonical rotary init (profile-driven multi-layer-type dispatch).
     from .streaming_model import (
         _init_rotary_inplace,
@@ -2770,6 +2772,7 @@ def materialize_tensors_streaming(
         # 128x128 block dequant inline, so `mod.weight` receives the
         # true dequanted weight rather than raw fp8 codes cast to bf16.
         load_t0 = time.time()
+        read_ahead_source_files(weight_shard, layers_prefix, range(L + 1, num_layers), read_ahead_seen)
         tensors = _read_layer_to_device(
             f"{layers_prefix}{L}.", weight_shard, weight_ckpt, dtype, device,
             fp8_scale_inv_map=fp8_scale_inv_map, pack_experts=expert_packer,
