@@ -14,7 +14,7 @@ CONFIGS = ROOT / "prismaquant" / "fla_configs" / "gb10"
 
 def test_every_entry_is_keyed_as_fla_strict_mode_looks_it_up():
     files = sorted(CONFIGS.glob("*.json"))
-    assert len(files) == 11
+    assert len(files) == 13
     for path in files:
         data = json.loads(path.read_text())
         assert data["kernel_name"] == path.stem
@@ -36,8 +36,19 @@ def test_identity_digest_follows_the_file_contents(tmp_path, monkeypatch):
     monkeypatch.setenv("FLA_CACHE_MODE", "strict")
     monkeypatch.setenv("FLA_CONFIG_DIR", str(copy))
     before = fla_config_identity()
-    assert before["mode"] == "strict" and before["files"] == 11 and len(before["sha256"]) == 64
+    assert before["mode"] == "strict" and before["files"] == 13 and len(before["sha256"]) == 64
     (copy / "l2norm_fwd_kernel.json").write_text("{}\n")
     assert fla_config_identity()["sha256"] != before["sha256"]
     monkeypatch.delenv("FLA_CONFIG_DIR")
-    assert fla_config_identity() == {"mode": "strict", "dir": None, "files": 0, "sha256": None}
+    assert fla_config_identity() == {"mode": "strict", "dir": None, "files": 0, "sha256": None,
+                                     "autotuned": []}
+
+
+def test_plain_autotuned_kernels_have_pins_and_need_strict_mode(monkeypatch):
+    from prismaquant import fla_config_pin
+    for name in fla_config_pin.PLAIN_AUTOTUNED:
+        keys = [e["autotune_key"][:2] for e in fla_config_pin._pinned_entries(CONFIGS, name)]
+        assert sorted(keys) == [[128, 1], [128, 24]]
+    monkeypatch.delenv("FLA_CACHE_MODE", raising=False)
+    monkeypatch.setenv("FLA_CONFIG_DIR", str(CONFIGS))
+    fla_config_pin.pin_fla_configs()  # no strict mode: imports nothing, changes nothing
