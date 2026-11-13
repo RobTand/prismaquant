@@ -1,6 +1,6 @@
 # Pending MTP/vision qualification evidence index (#2810 / #1921)
 
-**Status: all seven rows pending; no qualification is established by this index.**
+**Status: all six rows pending; no qualification is established by this index.**
 This PR submits, schedules and runs no GPU row and grants no policy/gap permit.
 It changes no implementation or architectural behavior and requires no architecture
 stamp edit. Filing, publication and closure transitions belong to TrustLadder.
@@ -146,39 +146,11 @@ unsupported cells. Speed/residency/cost conclusions require before/after in-proc
 profiles, aligned both-box Netdata and GB10 work-per-joule/power-envelope evidence.
 No improvement or parent acceptance is asserted here.
 
-## 4. complete real multimodal visual/merger Fisher/Hessian/activation capture
+## 4. exact-pin admitted per-shape Tessera rung quality/cost/byte/runtime panel
 
 ### Inputs
 
-Supply real multimodal calibration examples and processor outputs that exercise
-the complete required visual tower and merger population, including required
-source shapes. Retain activation captures, Fisher/Hessian statistics, sample counts
-and a coverage reconciliation against the discovered unit and source-shape roster.
-Synthetic fixtures or discovered names alone are insufficient.
-
-### Identities
-
-Bind immutable calibration media/text/order and processor configuration to source
-tensor digests, model/profile and capture-code revisions, capture settings and
-complete unit/shape roster digests. Bind activation and Fisher/Hessian output
-digests and applicable recipe/runtime/contract identities. Actual identities and
-coverage receipts remain pending.
-
-### Pass bar
-
-Require complete real multimodal activation/Fisher/Hessian coverage for every
-required visual/merger unit and source shape, with valid statistics under the
-owner's pending numerical protocol. Missing units, incomplete populations and
-mismatched shapes must refuse rather than receive uniform or invented statistics.
-Discovery/shard CPU proofs do not discharge this row, and complete capture alone
-does not admit low-bit export or serving. Capture cost/residency claims require the
-shared before/after profiler and aligned both-box telemetry evidence.
-
-## 5. exact-pin admitted per-shape Tessera rung quality/cost/byte/runtime panel
-
-### Inputs
-
-Use row 4's complete measured population, the proposed rung menu and actual
+Use the complete visual/merger source-shape roster, the proposed rung menu and actual
 producer outputs for each required visual/merger source shape. Supply per-cell
 quality, cost, serialized-byte and runtime measurements plus an explicit admission
 matrix; distinguish measured, refused and still-pending cells.
@@ -201,7 +173,7 @@ plugin gates. Require matched before/after profiles and both-box Netdata for cos
 speed or residency claims, with GB10 completed work per joule and its power envelope.
 Full-gamut PACT acceptance remains pending under #2812.
 
-## 6. selected original-wire cache/export/full-artifact witnesses
+## 5. selected original-wire cache/export/full-artifact witnesses
 
 ### Inputs
 
@@ -225,15 +197,15 @@ Prove complete selected-cache coverage and unchanged original-wire emission into
 the full artifact, with reconciled actual byte totals and no silent re-encoding,
 substitution or dropped units. Missing required population and unsupported non-body
 low-bit/shape assignments must still refuse under the applicable exporter gates.
-CPU cache/export fixtures and row 5 pricing are not emitted-byte equivalence or
+CPU cache/export fixtures and row 4 pricing are not emitted-byte equivalence or
 served admission. Tolerances and witnesses remain pending; any export speed,
 cost or residency claim needs the shared matched profiles and both-box telemetry.
 
-## 7. plugin recognition/TP/mixed-rung output and BF16/EXL3 serving A/B
+## 6. plugin recognition/TP/mixed-rung output and BF16/EXL3 serving A/B
 
 ### Inputs
 
-Supply row 6's actual-wire full artifact, exact plugin/runtime and contract, the
+Supply row 5's actual-wire full artifact, exact plugin/runtime and contract, the
 supported TP configurations, and mixed-rung visual/merger outputs. Retain loader
 recognition/routing diagnostics and generated outputs, then matched real multimodal
 BF16/EXL3 serving A/B requests and quality/performance observations.

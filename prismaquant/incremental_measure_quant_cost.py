@@ -808,176 +808,6 @@ def _write_empty_cost_shard(
 
 
 # ---------------------------------------------------------------------------
-# Visual cost shard runner — Phase 2 multimodal support.
-# Uses the shared multimodal streaming context (vision_config preserved):
-# visual weights are resident and body decoder layers remain on meta.
-# Shared measurement uses cached activations for live Linears matched by
-# the shard selector. Context-build OOM currently writes an empty shard;
-# that legacy uniform fallback is not a complete full-gamut measurement.
-# ---------------------------------------------------------------------------
-def _run_visual_cost_shard(
-    *,
-    model_path: str,
-    linear_include: str,
-    probe_stats: dict[str, dict],
-    act_cache: "ActivationIndex",
-    specs: list[fr.FormatSpec],
-    device: str,
-    dtype: torch.dtype,
-    mode: str,
-    chunk_size: int,
-    h_detail: "HDetailIndex | None",
-    output_path: str,
-    model_name: str,
-    probe_path: str,
-    mm_ctx: "StreamingContext | None" = None,
-    mm_offload_folder: str | None = None,
-    render_path: str = "registry",
-) -> "StreamingContext | None":
-    """Measure per-(visual-Linear, format) cost using an incremental
-    multimodal streaming context (visual tower fully resident; body
-    decoder layers on meta — they are never touched by the visual cost
-    measurement, which operates on activation cache + resident visual
-    Linear weights only).
-
-    Intersects `linear_include` with the probe stats and with live
-    visual Linears from the streaming context, runs the shared
-    measurement pipeline, writes the shard pickle.
-
-    If `mm_ctx` is provided, reuses it (built once and shared across
-    every visual shard in the run). Otherwise builds a multimodal
-    context on first call (needs `mm_offload_folder`). Returns the
-    (possibly newly-built) context for the caller to cache.
-
-    Returns None on failure (empty pickle written, allocator's
-    --visual-format override takes over).
-    """
-    inc = re.compile(linear_include)
-    shard_targets = {n for n in probe_stats if inc.search(n)}
-    if not shard_targets:
-        print(f"[incremental-cost/visual] shard has no matching visual "
-              f"tensors in probe stats (include={linear_include!r}); "
-              f"writing empty pickle", flush=True)
-        _write_empty_cost_shard(
-            output_path, shard_kind="visual", specs=specs,
-            model_name=model_name, probe_path=probe_path,
-        )
-        return mm_ctx
-
-    # Build the multimodal streaming context once on first visual shard,
-    # then reuse across subsequent visual shards. Visual tower is fully
-    # resident (2-3 GB even at 122B scale); body decoder layers live on
-    # meta and are never materialized by the visual cost path.
-    if mm_ctx is None:
-        if mm_offload_folder is None:
-            raise ValueError(
-                "_run_visual_cost_shard: mm_ctx=None requires mm_offload_folder")
-        print(f"[incremental-cost/visual] building multimodal streaming "
-              f"context for {len(shard_targets)} target tensors "
-              f"(shard={linear_include!r})", flush=True)
-        try:
-            mm_ctx = _build_streaming_context(
-                model_path,
-                device=torch.device(device),
-                dtype=dtype,
-                offload_folder=mm_offload_folder, layers_per_shard=1,
-                log_prefix="[incremental-cost/visual]",
-                multimodal=True,
-                visual_requires_grad=False,
-            )
-        except (torch.cuda.OutOfMemoryError, RuntimeError, MemoryError) as e:
-            msg = str(e).lower()
-            if ("out of memory" in msg or "oom" in msg
-                    or isinstance(e, (torch.cuda.OutOfMemoryError,
-                                      MemoryError))):
-                print(f"[incremental-cost/visual] multimodal streaming "
-                      f"context build OOM ({type(e).__name__}); writing "
-                      f"empty pickle. The allocator's --visual-format "
-                      f"override will assign a uniform format to visual "
-                      f"Linears.", flush=True)
-                _write_empty_cost_shard(
-                    output_path, shard_kind="visual", specs=specs,
-                    model_name=model_name, probe_path=probe_path,
-                )
-                return None
-            raise
-
-    if mm_ctx.visual_module is None:
-        print(f"[incremental-cost/visual] streaming context has no "
-              f"visual module; writing empty pickle", flush=True)
-        _write_empty_cost_shard(
-            output_path, shard_kind="visual", specs=specs,
-            model_name=model_name, probe_path=probe_path,
-        )
-        return mm_ctx
-
-    model = mm_ctx.model
-    from .model_profiles import DeadVendoredOverrideError, profile_from_model
-    try:
-        profile = profile_from_model(model)
-    except DeadVendoredOverrideError:
-        # Same as the body shard above (#202): a dead override prices the
-        # visual tower against upstream modelling code.
-        raise
-    except Exception:
-        profile = None
-    live_linears = {n for n, m in model.named_modules()
-                    if isinstance(m, nn.Linear)
-                    and getattr(m, "weight", None) is not None
-                    and not m.weight.is_meta}
-    target_names = shard_targets & live_linears
-    if not target_names:
-        print(f"[incremental-cost/visual] probe stats matched the include "
-              f"regex but no live visual Linears with the same name; "
-              f"writing empty pickle", flush=True)
-        _write_empty_cost_shard(
-            output_path, shard_kind="visual", specs=specs,
-            model_name=model_name, probe_path=probe_path,
-        )
-        return mm_ctx
-
-    results = _run_cost_measurement(
-        model,
-        act_cache=act_cache,
-        target_names=target_names,
-        specs=specs,
-        device=device,
-        dtype=dtype,
-        mode=mode,
-        chunk_size=chunk_size,
-        h_detail=h_detail,
-        log_prefix="[incremental-cost/visual]",
-        profile=profile,
-        render_path=render_path,
-    )
-    if device.startswith("cuda"):
-        torch.cuda.empty_cache()
-
-    out_path = Path(output_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "wb") as f:
-        pickle.dump({
-            "costs": results,
-            "formats": [s.name for s in specs],
-            "provenance": {
-                **_cost_mode_provenance(),
-            },
-            "meta": {
-                "model": model_name,
-                "probe": probe_path,
-                "n_linears": len(results),
-                "mode": ("batched" if mode == "auto" and device.startswith("cuda")
-                         else ("unbatched" if mode == "auto" else mode)),
-                "shard_kind": "visual",
-                "render_path": render_path,
-            },
-        }, f)
-    print(f"[incremental-cost/visual] wrote {out_path} "
-          f"({len(results)} entries)", flush=True)
-    return mm_ctx
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
@@ -1018,9 +848,9 @@ def main():
                     help="Measure cost for profile-declared MTP layers.")
     ap.add_argument("--no-include-mtp", action="store_false", dest="include_mtp")
     ap.add_argument("--include-visual", action="store_true", default=True,
-                    help="Measure cost for profile-declared visual encoder "
-                         "blocks. Text-only staging may still emit empty "
-                         "shard pickles for unsupported multimodal paths.")
+                    help="Schedule shards for profile-declared visual encoder "
+                         "blocks. The probe is text-only, so these shards "
+                         "are empty pickles.")
     ap.add_argument("--no-include-visual", action="store_false",
                     dest="include_visual")
     ap.add_argument("--include-lm-head", action="store_true", default=True,
@@ -1195,11 +1025,6 @@ def main():
     )
 
     ctx: StreamingContext | None = None
-    # Separate multimodal context for visual shards (visual tower
-    # resident). Built lazily on first visual shard; reused across all
-    # visual shards in this run.
-    mm_ctx: StreamingContext | None = None
-    mm_offload_folder = str(work_dir / "streaming_offload_mm")
 
     def _ensure_ready():
         nonlocal ctx
@@ -1277,39 +1102,11 @@ def main():
                     probe_path=args.probe,
                     render_path=args.render_path,
                 )
-            elif kind == "visual":
-                # Phase 2 multimodal path: if the probe's multimodal pass
-                # populated visual Linear stats + activations, measure
-                # them the same way body Linears are measured. Uses an
-                # incremental multimodal streaming context (visual tower
-                # resident; body on meta) so 122B-scale models don't
-                # blow memory. On context-build OOM or no visual tower
-                # in model, fall back to an empty pickle and let the
-                # allocator's --visual-format override take over.
-                mm_ctx = _run_visual_cost_shard(
-                    model_path=str(source_root),
-                    linear_include=linear_include,
-                    probe_stats=stats,
-                    act_cache=act_cache,
-                    specs=specs,
-                    device=args.device,
-                    dtype=dtype,
-                    mode=args.mode,
-                    chunk_size=args.chunk_size,
-                    h_detail=h_detail,
-                    output_path=str(shard_path),
-                    model_name=args.model,
-                    probe_path=args.probe,
-                    mm_ctx=mm_ctx,
-                    mm_offload_folder=mm_offload_folder,
-                    render_path=args.render_path,
-                )
             else:
-                # Other unclassified shard kinds — keep the empty-pickle
-                # fallback for safety.
-                print(f"[incremental-cost] unknown shard kind {kind!r} "
-                      f"(include={linear_include!r}); writing empty pickle",
-                      flush=True)
+                # Visual shards (the probe is text-only, so it has no visual
+                # rows) and other kinds: an empty pickle keeps the shard slot.
+                print(f"[incremental-cost] shard {shard_idx} ({kind}): no "
+                      f"measured rows; writing empty pickle", flush=True)
                 _write_empty_cost_shard(
                     str(shard_path), shard_kind=kind, specs=specs,
                     model_name=args.model, probe_path=args.probe,
@@ -1334,8 +1131,6 @@ def main():
     finally:
         if ctx is not None:
             ctx.shutdown()
-        if mm_ctx is not None:
-            mm_ctx.shutdown()
 
     merge_cost_pickles(shard_paths, Path(args.output))
     # Coverage gate: every body layer the probe measured must appear in

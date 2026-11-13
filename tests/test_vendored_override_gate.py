@@ -364,26 +364,6 @@ def test_incremental_body_cost_shard_does_not_swallow_the_refusal(
         )
 
 
-def test_incremental_visual_cost_shard_does_not_swallow_the_refusal(
-    tmp_path, monkeypatch
-):
-    """`_run_visual_cost_shard` answered `profile = None` and priced on."""
-    from prismaquant.incremental_measure_quant_cost import _run_visual_cost_shard
-
-    mm_ctx = SimpleNamespace(model=_qwen3_model(), visual_module=nn.Module())
-    monkeypatch.setitem(vendored.OVERRIDE_ERRORS, "qwen3", "synthetic failure")
-    with pytest.raises(DeadVendoredOverrideError):
-        _run_visual_cost_shard(
-            model_path=str(tmp_path / "ckpt"),
-            mm_ctx=mm_ctx,
-            # A non-empty stat the include regex matches, or the runner
-            # short-circuits to an empty shard before it ever detects.
-            **_dummy_shard_kwargs(
-                tmp_path, probe_stats={"visual.blocks.0.attn.qkv": {}}
-            ),
-        )
-
-
 def test_concat_merger_build_does_not_swallow_the_refusal(monkeypatch):
     """`layer_streaming._build_concat_merger` answered `None`.
 

@@ -77,9 +77,8 @@ class _StrictLayer(nn.Module):
 
 
 def _run_pass(profile, layers, hidden):
-    """Mimic the production loops (`incremental_probe._compute_global_precompute`
-    phase-1, `sensitivity_probe.run_streaming_multimodal_visual_probe_pass`):
-    build the shared state ONCE at the outermost scope of the pass, thread it
+    """Mimic the production loop (`incremental_probe._compute_global_precompute`
+    phase-1): build the shared state ONCE at the outermost scope of the pass, thread it
     into every layer call. Returns the pass state so tests can inspect it."""
     pass_state = profile.new_forward_pass_state()
     for layer in layers:
@@ -224,11 +223,8 @@ def test_pass_state_key_collision_fails_loud():
 
 
 def test_merge_rule_is_shared_by_every_loop():
-    """Both plumbing paths (`_call_layer(pass_state=...)` and the streaming
-    visual probe's local kwargs resolver) merge through one function, so the
-    per-pass semantics cannot drift between loops."""
-    from prismaquant.sensitivity_probe import _streaming_visual_layer_kwargs
-
+    """`_call_layer(pass_state=...)` merges through one function, so the
+    per-pass semantics are defined once."""
     shared: dict = {}
     extra = {"input_ids": "ids"}
 
@@ -239,18 +235,6 @@ def test_merge_rule_is_shared_by_every_loop():
     assert extra == {"input_ids": "ids"}  # caller's dict untouched
     assert merge_pass_state_kwargs(extra, None, context="L") is extra
     assert merge_pass_state_kwargs(extra, {}, context="L") is extra
-
-    class _Profile:
-        def extra_layer_kwargs(self, *, input_ids=None):
-            return {"shared_kv_states": "per-layer"}
-
-    try:
-        _streaming_visual_layer_kwargs(
-            _Profile(), input_ids=None, pass_state={"shared_kv_states": {}})
-    except RuntimeError as exc:
-        assert "collide" in str(exc)
-    else:  # pragma: no cover
-        raise AssertionError("visual probe merged colliding kwargs silently")
 
 
 # --- Gemma4: the declared key must match the real contract -----------------
@@ -422,28 +406,6 @@ def test_probe_phase1_builds_shared_state_outside_the_layer_loop():
                     and c.func.id == "_call_layer"
                     and any(kw.arg == "pass_state" for kw in c.keywords)]
         assert threaded, "phase-1 layer call does not thread pass_state"
-
-
-def test_streaming_visual_probe_builds_shared_state_per_sample():
-    """Per PASS also means per calibration sample: the hook is called inside
-    the sample loop, so sample N never sees sample N-1's K/V."""
-    import ast
-
-    from prismaquant import sensitivity_probe as sp
-
-    fn = _fn_ast(sp.run_streaming_multimodal_visual_probe_pass)
-    news = _calls(fn, "new_forward_pass_state")
-    assert len(news) == 1
-    sample_loops = [
-        n for n in ast.walk(fn)
-        if isinstance(n, ast.For) and isinstance(n.iter, ast.Call)
-        and isinstance(n.iter.func, ast.Name) and n.iter.func.id == "enumerate"
-    ]
-    assert sample_loops, "sample loop not found — did the loop shape change?"
-    assert any(news[0] in list(ast.walk(loop)) for loop in sample_loops), \
-        "shared state hoisted above the sample loop leaks K/V between samples"
-    for loop in _layer_loops(fn):
-        assert news[0] not in list(ast.walk(loop))
 
 
 def test_precompute_cache_without_shared_state_loads_as_none(tmp_path):

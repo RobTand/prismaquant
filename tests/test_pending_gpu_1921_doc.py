@@ -17,7 +17,6 @@ ROW_TITLES = (
     "current selected MTP whole-artifact/cache/wire/byte qualification",
     "MTP served-load/speculative correctness",
     "matched MTP BF16/EXL3 acceptance and speed/quality A/B",
-    "complete real multimodal visual/merger Fisher/Hessian/activation capture",
     "exact-pin admitted per-shape Tessera rung quality/cost/byte/runtime panel",
     "selected original-wire cache/export/full-artifact witnesses",
     "plugin recognition/TP/mixed-rung output and BF16/EXL3 serving A/B",
@@ -33,18 +32,18 @@ def _record():
     return RECORD.read_text(encoding="utf-8")
 
 
-def test_seven_handoff_rows_each_have_three_substantive_fields():
+def test_six_handoff_rows_each_have_three_substantive_fields():
     text = _record()
     # Numbered row headings use level two; their required fields use level
     # three. Other unnumbered shared-rule headings may surround the rows.
     rows = list(re.finditer(r"^## ([0-9]+)[.)] (.+?)\s*$", text, re.MULTILINE))
     assert [(int(row[1]), row[2]) for row in rows] == list(
         enumerate(ROW_TITLES, start=1)
-    ), "Preserve exactly seven numbered handoff row titles, in order"
+    ), "Preserve exactly six numbered handoff row titles, in order"
     for field in FIELDS:
         assert len(re.findall(
             rf"^### {re.escape(field)}\s*$", text, re.MULTILINE
-        )) == 7, f"Expected exactly seven {field!r} field headings"
+        )) == 6, f"Expected exactly six {field!r} field headings"
     for row in rows:
         # Stop at the next level-two heading, including unnumbered headings.
         body = re.split(r"^## ", text[row.end():], maxsplit=1, flags=re.MULTILINE)[0]

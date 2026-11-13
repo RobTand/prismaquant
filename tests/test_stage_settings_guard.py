@@ -102,8 +102,7 @@ def test_every_guarded_stage_id_in_the_shell_is_declared():
 
 
 def test_absent_artifact_records_then_matches(tmp_path):
-    doc = _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
-                    CALIBRATION_MODALITY="text-only")
+    doc = _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512")
     artifact = tmp_path / "probe.pkl"
     code, _ = pipeline.check_stage_settings(artifact, "probe", doc)
     assert code == 0
@@ -119,8 +118,7 @@ def test_absent_artifact_records_then_matches(tmp_path):
 
 
 def test_changed_setting_is_exit_2_naming_the_diff(tmp_path):
-    base = dict(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
-                CALIBRATION_MODALITY="text-only")
+    base = dict(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512")
     artifact = tmp_path / "probe.pkl"
     pipeline.check_stage_settings(artifact, "probe", _document(**base))
     artifact.write_bytes(b"x")
@@ -191,8 +189,7 @@ def test_missing_manifest_is_reused_unverified_and_never_stamped(tmp_path):
     """
     artifact = tmp_path / "probe.pkl"
     artifact.write_bytes(b"x")
-    request = _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8",
-                        SEQLEN="512", CALIBRATION_MODALITY="t")
+    request = _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512")
     code, messages = pipeline.check_stage_settings(artifact, "probe", request)
     assert code == 0
     assert "WARNING" in messages[0] and "no settings manifest" in messages[0]
@@ -218,8 +215,7 @@ def test_pre_guard_stage_entry_is_not_restamped_with_today_settings(tmp_path):
     measured under other probes/seed/dataset/menu was recorded as if this run
     had verified it -- and every later check read that as a match.
     """
-    base = dict(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
-                CALIBRATION_MODALITY="text-only")
+    base = dict(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512")
     artifact = tmp_path / "cost_aura.pkl"
     artifact.write_bytes(b"cost")
     # Written by an older or partial run that never recorded this stage.
@@ -244,8 +240,7 @@ def test_pre_guard_stage_entry_is_not_restamped_with_today_settings(tmp_path):
 
 def test_unverified_reuse_stays_unknown_across_retries_and_changed_requests(
         tmp_path):
-    request = dict(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
-                   CALIBRATION_MODALITY="text-only")
+    request = dict(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512")
     artifact = tmp_path / "cost.pkl"
     artifact.write_bytes(b"cost")
 
@@ -277,8 +272,7 @@ def test_unverified_reuse_stays_unknown_across_retries_and_changed_requests(
 def test_a_recorded_projection_still_refuses_a_mismatch(tmp_path):
     """The legacy allowance is not a bypass: once a projection IS on file, a
     different request refuses exactly as before."""
-    base = dict(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
-                CALIBRATION_MODALITY="text-only")
+    base = dict(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512")
     artifact = tmp_path / "probe.pkl"
     assert pipeline.check_stage_settings(artifact, "probe", _document(**base))[0] == 0
     artifact.write_bytes(b"x")
@@ -361,8 +355,7 @@ def test_the_admission_makes_a_projection_only_reader_refuse_rather_than_stamp(
     """
     artifact = tmp_path / "probe.pkl"
     artifact.write_bytes(b"x")
-    document = _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
-                         CALIBRATION_MODALITY="text-only")
+    document = _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512")
     pipeline.check_stage_settings(artifact, "probe", document)
     prev = json.loads(
         (tmp_path / "probe.pkl.settings.json").read_text())["stages"]["probe"]
@@ -380,13 +373,12 @@ def test_legacy_flat_manifest_still_guards_its_stage(tmp_path):
     artifact.write_bytes(b"x")
     (tmp_path / "probe.pkl.settings.json").write_text(json.dumps({
         "MODEL_PATH": "m", "DATASET": "d", "NSAMPLES": "8", "SEQLEN": "512",
-        "CALIBRATION_MODALITY": "text-only", "ACT_ROW_SELECTION": "rule",
+        "ACT_ROW_SELECTION": "rule",
     }))
-    same = _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
-                     CALIBRATION_MODALITY="text-only")
+    same = _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512")
     assert pipeline.check_stage_settings(artifact, "probe", same)[0] == 0
     drift = _document(MODEL_PATH="m", DATASET="OTHER", NSAMPLES="8",
-                      SEQLEN="512", CALIBRATION_MODALITY="text-only")
+                      SEQLEN="512")
     assert pipeline.check_stage_settings(artifact, "probe", drift)[0] == 2
 
 

@@ -157,7 +157,6 @@ def test_production_pipeline_spec_records_run_config():
         formats="NVFP4,BF16",
         target_bits=4.75,
         target_profile="vllm_packed_moe",
-        calibration_modality="text-only",
         selection_mode="surrogate",
         production_cache="1",
         production_recache="1",
