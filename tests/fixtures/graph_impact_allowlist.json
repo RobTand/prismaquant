@@ -1,5 +1,4 @@
 {
-  "reach:tests/test_aqua_campaign_submit.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_architecture_doc.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_aura_checkpoint_resume_identity.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_autoconfig_staged_1922.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",

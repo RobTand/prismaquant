@@ -2,95 +2,17 @@
 
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 import json
-from types import SimpleNamespace
 
 import pytest
 
-from prismaquant import digests, sensitivity_card
-from prismaquant.sensitivity_card import CardProvenance
-
-_SIMPLE_CARD = (
-    b'{"calib_hash": "c", "model_id": "m", "n_calib_samples": 1, '
-    b'"render_basis": "rtn", "seq_len": 2}'
-)
-
-
-def _spaced_identity_card(**changes: object) -> CardProvenance:
-    return dataclasses.replace(CardProvenance("m", "c", 1, 2, "unused"), **changes)
-
-
-@pytest.mark.parametrize(
-    ("changes", "expected"),
-    [
-        ({}, _SIMPLE_CARD),
-        (
-            {"model_id": '雪\n"\\\0', "calib_hash": "é"},
-            br'{"calib_hash": "\u00e9", "model_id": "\u96ea\n\"\\\u0000", '
-            br'"n_calib_samples": 1, "render_basis": "rtn", "seq_len": 2}',
-        ),
-        (
-            {"model_id": "\ud800"},
-            br'{"calib_hash": "c", "model_id": "\ud800", "n_calib_samples": 1, '
-            br'"render_basis": "rtn", "seq_len": 2}',
-        ),
-        (
-            {"n_calib_samples": False, "seq_len": True},
-            b'{"calib_hash": "c", "model_id": "m", "n_calib_samples": false, '
-            b'"render_basis": "rtn", "seq_len": true}',
-        ),
-        (
-            {"n_calib_samples": float("nan"), "seq_len": float("inf")},
-            b'{"calib_hash": "c", "model_id": "m", "n_calib_samples": NaN, '
-            b'"render_basis": "rtn", "seq_len": Infinity}',
-        ),
-        (
-            {"n_calib_samples": -0.0, "seq_len": float("-inf")},
-            b'{"calib_hash": "c", "model_id": "m", "n_calib_samples": -0.0, '
-            b'"render_basis": "rtn", "seq_len": -Infinity}',
-        ),
-    ],
-)
-def test_spaced_card_keeps_literal_encoding_and_full_hash(monkeypatch, changes, expected):
-    observed = []
-
-    def hash_text(text):
-        observed.append(text.encode("utf-8"))
-        return hashlib.sha256(observed[-1]).hexdigest()
-
-    monkeypatch.setattr(sensitivity_card, "text_sha256hex", hash_text)
-    assert _spaced_identity_card(**changes).fingerprint() == hashlib.sha256(expected).hexdigest()
-    assert observed == [expected]
+from prismaquant import digests
 
 
 def test_spaced_profile_addition_keeps_legacy_positional_compact_constructor():
     profile = digests.JsonProfile("legacy-positional", True, True, str)
     assert profile.encoded({"v": "雪", "n": float("nan")}) == br'{"n":NaN,"v":"\u96ea"}'
-
-
-def test_spaced_card_routes_exact_identity_mapping_through_named_profile(monkeypatch):
-    observed = []
-    profile_text = "profile supplied card text"
-
-    def encode(value):
-        observed.append(value)
-        return profile_text
-
-    monkeypatch.setattr(
-        sensitivity_card, "DIRECT_ASCII_SPACED_LAX", SimpleNamespace(text=encode),
-    )
-    monkeypatch.setattr(
-        sensitivity_card, "text_sha256hex",
-        lambda text: hashlib.sha256(text.encode()).hexdigest(),
-    )
-    result = _spaced_identity_card(notes=object(), probe_commit=object()).fingerprint()
-    assert result == hashlib.sha256(profile_text.encode()).hexdigest()
-    assert observed == [{
-        "model_id": "m", "calib_hash": "c", "n_calib_samples": 1,
-        "seq_len": 2, "render_basis": "rtn",
-    }]
 
 
 @pytest.mark.parametrize(

@@ -303,9 +303,8 @@ def test_the_interval_must_be_finite_and_positive():
 
 # -- submission and reporter phase agreement -------------------------------
 # The read-set builders' use of ``layer_phase_name`` is held where they are
-# built: tests/test_glm_joint_data_manifest_at_submit.py (run and export) and
-# tests/test_aqua_campaign_submit.py replace the function and require the
-# declared phases to follow it.
+# built: tests/test_glm_joint_data_manifest_at_submit.py (run and export)
+# replaces the function and requires the declared phases to follow it.
 
 
 def test_a_joint_run_submission_declares_the_manifest_s_own_phase_names():

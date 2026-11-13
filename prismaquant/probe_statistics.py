@@ -74,12 +74,6 @@ PACKED_FISHER_MARGINAL_KEYS = (
     "expert_tokens")
 
 
-def fisher_norm_tokens(row: dict, fallback: int) -> int:
-    """Use a writer's positive row stamp before the legacy probe count."""
-    stamp = int(row.get("h_trace_norm_tokens", 0) or 0)
-    return stamp if stamp > 0 else fallback
-
-
 def merge_marginals(dst: dict, src) -> None:
     """Fold per-channel marginals from `src` into `dst` in place.
 

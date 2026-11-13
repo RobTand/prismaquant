@@ -788,15 +788,6 @@ def drop_census_interpolated_within_loo(
     return out
 
 
-
-
-
-
-#: AQUA-AURA: the A-side Δloss of a (unit, format), written into the cost row by
-#: ``aqua_activation_cost``. Absent on every pre-AQUA cost artifact, which is
-#: why every read goes through ``cost_entry_act_dloss`` and defaults to 0.0.
-
-
 ACTIVATION_COST_UNMEASURED_REASON = "activation_cost_unmeasured"
 # A row with no predicted_dloss (for example an MTP baseline row) has no price.
 UNPRICED_COST_ROW_REASON = "no_predicted_dloss"
