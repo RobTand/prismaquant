@@ -16,7 +16,7 @@ import (``lane_table_fixtures``, ``graph_lane_fixtures``,
 What is here: the autouse fixtures -- profile detection is process-global
 (issue #197; see its docstring), and the suite runs in certified mode unless a
 test asks for dev mode (PQ #1147) -- and the session hooks: collection-skip
-exit status, the environment line, the ``fleet_data``/``task_suite`` opt-ins,
+exit status, the environment line, the ``fleet_data`` opt-in,
 ``own_process`` modules, and the golden-row check.
 """
 from __future__ import annotations
@@ -398,16 +398,6 @@ FLEET_DATA_ENV = "PQ_FLEET_DATA_TESTS"
 FLEET_DATA_SKIP_REASON = (
     f"{FLEET_DATA_MARK}: reads fleet data no native record declares "
     f"(PQ #1014); run with -m {FLEET_DATA_MARK} or {FLEET_DATA_ENV}=1")
-TASK_SUITE_MARK = "task_suite"
-TASK_SUITE_ENV = "PQ_TASK_SUITE_TESTS"
-#: The mark is interpolated, as in ``FLEET_DATA_SKIP_REASON``: a literal
-#: "-m task_suite" reads to the dependency graph as a launch of
-#: ``prismaquant/task_suite.py``, which this file does not run (#3215).
-TASK_SUITE_SKIP_REASON = (
-    f"{TASK_SUITE_MARK}: run the required layered gate with -m {TASK_SUITE_MARK} or "
-    f"{TASK_SUITE_ENV}=1; recorded 76 passed, 0 skipped; "
-    "action 20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6; "
-    "receipt 0ed9d0134b60b0df181b15dd605b41e0ca5ce7e5e1fe0ef8d0ee14cb25440913")
 
 
 class _ExplicitMarkerSelection:
@@ -434,8 +424,6 @@ class _ExplicitMarkerSelection:
 def pytest_configure(config):
     config.pluginmanager.register(_ExplicitMarkerSelection(
         FLEET_DATA_MARK, FLEET_DATA_ENV, FLEET_DATA_SKIP_REASON), "pq-fleet-data-selection")
-    config.pluginmanager.register(_ExplicitMarkerSelection(
-        TASK_SUITE_MARK, TASK_SUITE_ENV, TASK_SUITE_SKIP_REASON), "pq-task-suite-selection")
     config.addinivalue_line(
         "markers",
         f"{OWN_PROCESS_MARK}: the module needs a pytest process of its own. In "
