@@ -143,11 +143,11 @@ scheduling measurements. Longest tests are placed first on the least-loaded
 shard, with the measured median used for untimed tests. Build-only targets are
 distributed by count. Without matching timings, all targets are balanced by count.
 
-Mergify's existing `max_parallel_checks: 2` and per-PR workflow concurrency
+Mergify's `max_parallel_checks: 1` and per-PR workflow concurrency
 bound gate overlap. There is no shared GitHub job concurrency group, because
 GitHub cancels an older pending job when a newer one queues, causing Mergify
-to see a failed check and dequeue it. For Bazel, lock or workflow changes, two
-batch-draft fallback controllers with six shards each can submit twelve Remote
+to see a failed check and dequeue it. For Bazel, lock or workflow changes, one
+batch-draft fallback controller with six shards can submit six Remote
 Bazel runs per repo. Extra runs queue on the self-hosted executors
 rather than fail; this appears as longer shards, not errors. This exception does
 not permit concurrent agent or development runs.
