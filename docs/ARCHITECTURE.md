@@ -1,12 +1,5 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-13, Refs #3447. The no-grad phase-1 forward writes the body act/ rows; phase 3 no longer does.
-Flux CPU tests run with `tools/flux/run_tests.sh` in a venv built from the gate's hashed requirements; the `task_suite` test skip is removed.
-The multimodal probe and the streaming visual-tower load (#3442) are removed; every visual Linear takes `VISUAL_FORMAT`.
-The probe selects act/ rows by a keyed rule, not a random draw (#3425).
-PrismaSnap and its SSH campaign runner are removed (#3382).
-The classic pipeline starts from the source checkpoint. Tessera callers retain the existing no-clobber byte writer.
-
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
@@ -23285,8 +23278,7 @@ menu, a scale rule, or a render lever (§5); (3) an export codec, a `config_grou
 rule, or a serving invariant (§6); (4) a ship-gate threshold or what the pipeline runs versus
 echoes (§7); (5) the plugin contract — profile accessors, registry order, serving-profile
 schema, the pinned Tessera serving-runtime contract (§8); (6) a serving-lane default or a promoted/reverted kernel
-lever (§9). If topology changed, the affected mermaid diagram changes with it. The provenance
-block at the top must be re-stamped (date, commit, branch) on every substantive edit.
+lever (§9). If topology changed, the affected mermaid diagram changes with it.
 
 **Corollaries.** Handovers (`docs/handovers/`, gitignored) and dated results (`docs/results/`,
 `docs/lanes/*/`) are append-only history: they record what was true on a date and never

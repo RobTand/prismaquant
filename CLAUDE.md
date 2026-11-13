@@ -299,8 +299,8 @@ within 1–2%. The decision-unit *framing* from CLADO is kept
 13. **`docs/ARCHITECTURE.md` stays current — same commit, not later.** Any
     change to pipeline defaults, the stage graph, the format menu, the plugin
     contract, serving-lane defaults, or ship gates updates `docs/ARCHITECTURE.md`
-    (and its diagrams if topology changed) in the same commit, and re-stamps its
-    provenance block. Handovers and results docs are append-only history and
+    (and its diagrams if topology changed) in the same commit. Handovers and
+    results docs are append-only history and
     never substitute for this. `tests/test_docs_staleness.py` +
     `tests/test_architecture_doc.py` enforce the mechanical half; the
     judgment half is on you. **Currency is not truth:** a doc updated in
