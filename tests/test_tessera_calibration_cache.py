@@ -162,7 +162,16 @@ def test_torn_during_read_fences_refuse_in_both_modes(
         config['_name_or_path'] = str(root)
         cache, _identity = _build_cache(root, shards, config)
         monkeypatch.setattr(cs_identity, 'live_streaming_runner_config', lambda _source: config)
-        _torn_second_stat(monkeypatch, 'stat', root / 'config.json')
+        real, seen = cs_identity._streamed_identity_stat_fingerprint, []
+
+        def torn_second(path):  # tear the fence's own after-read fingerprint
+            fingerprint = real(path)
+            if path.name != 'config.json':
+                return fingerprint
+            seen.append(path)
+            return {**fingerprint, 'torn': True} if len(seen) > 1 else fingerprint
+
+        monkeypatch.setattr(cs_identity, '_streamed_identity_stat_fingerprint', torn_second)
         with pytest.raises(RuntimeError, match='source config changed while validating'):
             cs_identity.validate_cached_streamed_model_identity(str(root), cache)
 

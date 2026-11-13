@@ -432,33 +432,6 @@
         "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
         "legacy_line": 97
       }
-    },
-    {
-      "target": "tests/test_tessera_calibration_cache.py::test_torn_during_read_fences_refuse_in_both_modes[validate_cached-0]",
-      "issue": 3191,
-      "reason": "Failed: DID NOT RAISE RuntimeError",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 100
-      }
-    },
-    {
-      "target": "tests/test_tessera_calibration_cache.py::test_torn_during_read_fences_refuse_in_both_modes[validate_cached-1]",
-      "issue": 3191,
-      "reason": "Failed: DID NOT RAISE RuntimeError",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 101
-      }
-    },
-    {
-      "target": "tests/test_tessera_calibration_cache.py::test_torn_during_read_fences_refuse_in_both_modes[validate_cached-None]",
-      "issue": 3191,
-      "reason": "Failed: DID NOT RAISE RuntimeError",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 102
-      }
     }
   ]
 }
