@@ -42,9 +42,6 @@ about how much vision was read.  This is the same contract the streamed
 visual tower ... on meta" (`docs/ARCHITECTURE.md`, "Multimodal-forced export
 skeleton").
 
-What must NOT change, and is pinned here too: a caller that explicitly declares
-`multimodal=True` still gets a fully resident tower.
-
 Everything here is synthetic and CPU-only: a tiny real Qwen2-VL checkpoint (one
 text layer, hidden 32, one vision block) written to `tmp_path`.  Qwen2-VL is
 used because transformers builds it in exactly the v5 umbrella layout the
@@ -150,7 +147,7 @@ def _write_vl_ckpt(tmp_path, name: str) -> str:
 # --------------------------------------------------------------------------
 # Driver: build the real context, recording which prefixes were read
 # --------------------------------------------------------------------------
-def _build(tmp_path, monkeypatch, path, *, force_multimodal_skeleton, **kwargs):
+def _build(tmp_path, monkeypatch, path, *, force_multimodal_skeleton):
     from prismaquant import streaming_model as sm
     from prismaquant.model_profiles import detect_profile
 
@@ -181,7 +178,6 @@ def _build(tmp_path, monkeypatch, path, *, force_multimodal_skeleton, **kwargs):
         dtype=torch.bfloat16,
         offload_folder=str(tmp_path / "offload"), layers_per_shard=1,
         log_prefix="[test]",
-        **kwargs,
     )
     return context, reads
 
@@ -205,7 +201,6 @@ def test_forced_multimodal_skeleton_reads_no_visual_tensors(
             "the text-only caller read visual tensors: "
             f"{_visual_reads(reads)} — this is the campaign's "
             "readset-not-staged refusal, one layer down")
-        assert context.visual_module is None
     finally:
         context.shutdown()
 
@@ -229,38 +224,6 @@ def test_forced_multimodal_skeleton_still_builds_the_umbrella_skeleton(
         head = context.model.get_output_embeddings()
         assert head is not None and not head.weight.is_meta
         assert not context.base_model.embed_tokens.weight.is_meta
-    finally:
-        context.shutdown()
-
-
-# --------------------------------------------------------------------------
-# Guards: the genuine visual paths are untouched
-# --------------------------------------------------------------------------
-def test_explicit_multimodal_caller_still_materializes_the_tower(
-        tmp_path, monkeypatch):
-    """An explicit `multimodal=True` caller gets `ctx.visual_module`."""
-    path = _write_vl_ckpt(tmp_path, "vl_explicit")
-    context, reads = _build(tmp_path, monkeypatch, path,
-                            force_multimodal_skeleton=False, multimodal=True)
-    try:
-        assert _visual_reads(reads) == [VISUAL_PREFIX + "."]
-        assert context.visual_module is not None
-        assert context.visual_prefix == VISUAL_PREFIX
-        assert not any(p.is_meta for p in context.visual_module.parameters())
-    finally:
-        context.shutdown()
-
-
-def test_explicit_multimodal_still_materializes_under_a_forced_profile(
-        tmp_path, monkeypatch):
-    """The forced-skeleton flip must not suppress an explicit request either."""
-    path = _write_vl_ckpt(tmp_path, "vl_explicit_forced")
-    context, reads = _build(tmp_path, monkeypatch, path,
-                            force_multimodal_skeleton=True, multimodal=True)
-    try:
-        assert _visual_reads(reads) == [VISUAL_PREFIX + "."]
-        assert context.visual_module is not None
-        assert not any(p.is_meta for p in context.visual_module.parameters())
     finally:
         context.shutdown()
 

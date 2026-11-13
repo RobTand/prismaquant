@@ -1,6 +1,7 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-13. The multimodal probe is removed; every visual Linear takes `VISUAL_FORMAT`.
+As of: 2026-11-13. The multimodal probe and the streaming visual-tower load (#3442) are removed;
+every visual Linear takes `VISUAL_FORMAT`.
 The probe selects act/ rows by a keyed rule, not a random draw (#3425).
 PrismaSnap and its SSH campaign runner are removed (#3382).
 The classic pipeline starts from the source checkpoint. Tessera callers retain the existing no-clobber byte writer.
@@ -12998,13 +12999,11 @@ GLM-5.3-Flash-BF16/model-00120-of-00120.safetensors`; PB action
 `dae1474a406e`, 2026-09-20). The refusal was correct and the read was not:
 `StreamedCausalLM._prepare` consumes calibrated token IDs through
 `base_model.embed_tokens` alone, so nothing on that path can execute the tower.
-The two axes are now separate locals. The profile flip still selects
-`stage_multimodal`, the declared-arch skeleton class and the multimodal weight
-map; the tower is materialized only for a caller that passed `multimodal=True`
--- the same contract the streamed exporter already states ("the visual tower
-stays on meta", below). **No visual tensor is read from the checkpoint on a
-text-only call.** Explicit `multimodal=True` is unchanged in both shape and
-bytes. Gate:
+The profile flip still selects `stage_multimodal`, the declared-arch skeleton
+class and the multimodal weight map, and the tower stays on meta, as in the
+streamed exporter. **No visual tensor is read from the checkpoint.** The
+caller-declared `multimodal=True` tower load had no caller left and was removed
+on 2026-11-13 (#3442). Gate:
 `tests/test_streaming_visual_materialization_scope.py`.
 
 Re-stamped (2026-09-20, `flash/calibration-staged-tier-reader-865`) for
@@ -32036,13 +32035,12 @@ does and the forward-fidelity gate re-checks per checkpoint. transformers 5.16 s
 `Glm5NextForCausalLM`, so the streamed skeleton is built through the **multimodal** path;
 the profile declares this via `requires_multimodal_skeleton()` and
 `_build_streaming_context` flips itself, so probe/cost/validation call sites need no
-per-family threading (`multimodal=True` explicit still works). The path yields the `model.language_model` base
+per-family threading. The path yields the `model.language_model` base
 prefix and root `lm_head` the spec already describes. That flip is **construction
 only** (2026-09-20, PQ #872): it selects `stage_multimodal`, the declared-arch class and
 a multimodal weight map, and leaves `model.visual` on meta, exactly as the streamed
-exporter does. Materializing the tower remains the caller's declaration --
-`multimodal=True` -- because a text-only run's staged readset does not contain the
-vision shards, and reading them refuses fail-closed.
+exporter does. Nothing materializes the tower: a text-only run's staged readset
+does not contain the vision shards, and reading them refuses fail-closed.
 
 `_resolve` also **refuses to hand back a profile whose vendored-modelling override is known
 dead** (`_refuse_dead_vendored_override`, added by #19 / `29f3cff`). Its `except Exception:
