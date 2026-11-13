@@ -45,10 +45,8 @@ from prismaquant.measure_quant_cost import (
 )
 from prismaquant.production_weight_cache import (
     ProductionWeightCache,
-    _FisherRowWeightCache,
     _canonical_json_sha256,
     _canonical_rendered_weight_tensor,
-    _fused_sibling_leaf_mapping_from_profile,
     _formats_need_static_activation_max,
     _render_base_format,
     _render_score_record,
@@ -125,7 +123,6 @@ def _render_dense_layer(
     cache_dir_path: Path | None,
     profile,
     device: torch.device,
-    fisher_rows: _FisherRowWeightCache | None,
     render_score_records: dict[str, dict[str, object]],
     col_weights: Mapping[str, torch.Tensor] | None,
     retain_rendered: bool,
@@ -271,12 +268,6 @@ def _render_dense_layer(
             )
             export_scale = nvfp4_input_global_scale_from_max_abs(
                 float(max_abs), policy=stream_score_policy, levers=render_options)
-        row_weights = (
-            fisher_rows.get(qname)
-            if (fisher_rows is not None
-                and bool(levers.get("fisher_gptq", False)))
-            else None
-        )
         for fmt in pending_formats:
             render_fmt = _render_base_format(fmt)
             gate_trace: list[dict[str, object]] = []
@@ -287,7 +278,6 @@ def _render_dense_layer(
                 levers=levers,
                 joint_global_real=joint,
                 input_global_scale=export_scale,
-                fisher_row_weights=row_weights,
                 col_weights=(
                     None if col_weights is None else col_weights.get(qname)
                 ),
@@ -439,7 +429,6 @@ class StreamedProductionAnchorRenderer:
         model_identity: Mapping[str, object],
         cold_expert_provenance: Mapping[str, object] | None = None,
         max_act_rows: int = 512,
-        h_detail_dir: str | Path | None = None,
         producer_git_commit: str | None = None,
         producer_source_sha256: str | None = None,
         transient_consumer_identity: Mapping[str, object] | None = None,
@@ -568,12 +557,6 @@ class StreamedProductionAnchorRenderer:
         self.levers = _resolve_production_render_levers(levers)
         self.levers.setdefault("weighted_vq", True)
         self.mechanism_plan = _resolve_render_mechanism_plan(self.levers)
-        fused_mapping = _fused_sibling_leaf_mapping_from_profile(profile)
-        self.fisher_rows = (
-            _FisherRowWeightCache(h_detail_dir, fused_mapping or None)
-            if bool(self.levers.get("fisher_gptq", False)) and h_detail_dir
-            else None
-        )
         self.cache = ProductionWeightCache(
             weights={},
             levers=dict(self.levers),
@@ -696,7 +679,6 @@ class StreamedProductionAnchorRenderer:
             cache_dir_path=None,
             profile=self.profile,
             device=self.device,
-            fisher_rows=self.fisher_rows,
             render_score_records=render_scores,
             col_weights=self.col_weights,
             retain_rendered=True,
@@ -845,7 +827,6 @@ class StreamedProductionAnchorRenderer:
             cache_dir_path=None,
             profile=self.profile,
             device=self.device,
-            fisher_rows=self.fisher_rows,
             render_score_records=render_scores,
             col_weights=self.col_weights,
             retain_rendered=False,
@@ -1028,7 +1009,6 @@ def run_streaming_render(
     expert_render_mode: str = "batched",
     expert_module_token_budget: int = 32768,
     max_rows_per_expert: int = 2048,
-    h_detail_dir: str | Path | None = None,
     col_weights: Mapping[str, torch.Tensor] | None = None,
     render_scope: str = "assignment",
     calibration_hash: str | None = None,
@@ -1070,16 +1050,6 @@ def run_streaming_render(
         failed={},
         cache_dir=str(cache_dir_path) if cache_dir_path is not None else None,
         metadata={},
-    )
-
-    fused_mapping = (
-        _fused_sibling_leaf_mapping_from_profile(profile)
-        if profile is not None else {}
-    )
-    fisher_rows = (
-        _FisherRowWeightCache(h_detail_dir, fused_mapping or None)
-        if (bool(levers.get("fisher_gptq", False)) and h_detail_dir)
-        else None
     )
 
     include_qname_set = (
@@ -1159,7 +1129,6 @@ def run_streaming_render(
                 cache_dir_path=cache_dir_path,
                 profile=profile,
                 device=device,
-                fisher_rows=fisher_rows,
                 render_score_records=render_score_records,
                 col_weights=col_weights,
                 retain_rendered=True,
@@ -1278,7 +1247,6 @@ def fill_production_weight_cache_streaming(
     expert_render_mode: str = "batched",
     expert_module_token_budget: int = 32768,
     max_rows_per_expert: int = 2048,
-    h_detail_dir: str | Path | None = None,
     col_weights: Mapping[str, torch.Tensor] | None = None,
     render_scope: str = "assignment",
     calibration_hash: str | None = None,
@@ -1356,7 +1324,6 @@ def fill_production_weight_cache_streaming(
             expert_render_mode=expert_render_mode,
             expert_module_token_budget=expert_module_token_budget,
             max_rows_per_expert=max_rows_per_expert,
-            h_detail_dir=h_detail_dir,
             col_weights=col_weights,
             render_scope=render_scope,
             calibration_hash=calibration_hash,

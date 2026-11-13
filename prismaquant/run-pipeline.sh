@@ -661,9 +661,8 @@ EXPORT_PIN_ARGS=(--ignore "${REMAINING_PROFILE_PINS[@]}")
 : "${PIPELINE_SPEC_PATH:=${WORK_DIR}/artifacts/pipeline_spec.json}"
 : "${PIPELINE_SPEC_VALIDATE:=1}"
 # Fisher-weighted GPTQ + Fisher output-MSE allocator are archived under
-# archive/fisher_2026-05-15/ (the row-weighting + allocator-objective code
-# paths remain in the live tree but are unreachable from the production
-# pipeline). Any explicit override here fails fast.
+# archive/fisher_2026-05-15/. Any explicit override here fails fast. The
+# pipeline spec writer refuses an unknown PRODUCTION_CACHE_LEVERS name.
 : "${FISHER_WEIGHTED_GPTQ:=0}"
 : "${FISHER_OUTPUT_MSE_ALLOCATOR:=0}"
 for _legacy_fisher_var in FISHER_WEIGHTED_GPTQ FISHER_OUTPUT_MSE_ALLOCATOR; do
@@ -676,12 +675,6 @@ for _legacy_fisher_var in FISHER_WEIGHTED_GPTQ FISHER_OUTPUT_MSE_ALLOCATOR; do
   esac
 done
 unset _legacy_fisher_var
-case ",$PRODUCTION_CACHE_LEVERS," in
-  *,fisher_gptq,*)
-    echo "[pipeline] ERROR: PRODUCTION_CACHE_LEVERS includes fisher_gptq — Fisher levers are archived under archive/fisher_2026-05-15." >&2
-    exit 2
-    ;;
-esac
 # Selection mode. Under a byte budget the ship bpp is FIXED by the card, so
 # the only open question is which of the ~3 fitting allocations measures best
 # — that is validated-surrogate's job and it costs ~3 KL evals there (re-vet

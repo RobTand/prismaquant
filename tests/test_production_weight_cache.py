@@ -725,136 +725,6 @@ def test_production_cache_gates_four_over_six_as_first_class_plugin(monkeypatch)
         for step in trace
     )
 
-def test_production_cache_passes_fisher_row_weights(monkeypatch, tmp_path):
-    import prismaquant.production_weight_cache as pwc
-
-    model = _TinyChain()
-    calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
-    torch.save({"g2_per_token": torch.tensor([1.0, 2.0, 3.0])}, tmp_path / "l1.pt")
-    seen: list[torch.Tensor | None] = []
-
-    def fake_render_production_weight(
-        weight,
-        fmt,
-        *,
-        fisher_row_weights=None,
-        **_kwargs,
-    ):
-        seen.append(fisher_row_weights)
-        return weight.detach().to(torch.float32)
-
-    monkeypatch.setattr(pwc, "render_production_weight", fake_render_production_weight)
-
-    cache = fill_production_weight_cache(
-        model,
-        calib_ids,
-        qnames=["l1"],
-        formats=["NVFP4"],
-        levers={"gptq": False, "scale_sweep": False, "fisher_gptq": True},
-        h_detail_dir=tmp_path,
-        max_act_rows=8,
-        progress=False,
-    )
-
-    assert seen and torch.equal(seen[0], torch.tensor([1.0, 2.0, 3.0]))
-    assert cache.metadata["fisher_weighted_gptq"]["loaded"] == 1
-
-
-def test_production_cache_fisher_rows_resolve_fused_qkv_and_gate_up(
-    monkeypatch,
-    tmp_path,
-):
-    import prismaquant.production_weight_cache as pwc
-
-    class FusedTiny(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.embed = nn.Embedding(4, 32)
-            self.model = nn.Module()
-            self.model.layers = nn.ModuleList([nn.Module()])
-            layer = self.model.layers[0]
-            layer.self_attn = nn.Module()
-            layer.self_attn.qkv_proj = nn.Linear(32, 96, bias=False)
-            layer.mlp = nn.Module()
-            layer.mlp.gate_up_proj = nn.Linear(32, 64, bias=False)
-
-        def forward(self, input_ids, use_cache=False):
-            x = self.embed(input_ids)
-            layer = self.model.layers[0]
-            return layer.self_attn.qkv_proj(x) + layer.mlp.gate_up_proj(x).sum() * 0
-
-    def save_detail(name: str, values: list[float]) -> None:
-        safe = pwc._FisherRowWeightCache._FNAME_SUB.sub("__", name)
-        torch.save({"g2_per_token": torch.tensor(values)}, tmp_path / f"{safe}.pt")
-
-    save_detail("model.layers.0.self_attn.q_proj", [1.0, 2.0, 3.0])
-    save_detail("model.layers.0.self_attn.k_proj", [3.0, 4.0, 5.0])
-    save_detail("model.layers.0.self_attn.v_proj", [5.0, 6.0, 7.0])
-    save_detail("model.layers.0.mlp.gate_proj", [2.0, 4.0, 6.0])
-    save_detail("model.layers.0.mlp.up_proj", [4.0, 6.0, 8.0])
-
-    seen: dict[str, torch.Tensor | None] = {}
-
-    def fake_render_production_weight(
-        weight,
-        fmt,
-        *,
-        qname=None,
-        fisher_row_weights=None,
-        **_kwargs,
-    ):
-        seen[str(qname)] = fisher_row_weights
-        return weight.detach().to(torch.float32)
-
-    monkeypatch.setattr(pwc, "render_production_weight", fake_render_production_weight)
-
-    cache = fill_production_weight_cache(
-        FusedTiny(),
-        torch.tensor([[0, 1]], dtype=torch.long),
-        qnames=[
-            "model.layers.0.self_attn.qkv_proj",
-            "model.layers.0.mlp.gate_up_proj",
-        ],
-        formats=["NVFP4"],
-        levers={"gptq": False, "scale_sweep": False, "fisher_gptq": True},
-        h_detail_dir=tmp_path,
-        max_act_rows=8,
-        progress=False,
-    )
-
-    assert torch.equal(
-        seen["model.layers.0.self_attn.qkv_proj"],
-        torch.tensor([3.0, 4.0, 5.0]),
-    )
-    assert torch.equal(
-        seen["model.layers.0.mlp.gate_up_proj"],
-        torch.tensor([3.0, 5.0, 7.0]),
-    )
-    assert cache.metadata["fisher_weighted_gptq"]["loaded"] == 2
-    assert cache.metadata["fisher_weighted_gptq"]["misses"] == 0
-
-
-def test_fisher_row_cache_uses_configured_fused_sibling_mapping(tmp_path):
-    import prismaquant.production_weight_cache as pwc
-
-    def save_detail(name: str, values: list[float]) -> None:
-        safe = pwc._FisherRowWeightCache._FNAME_SUB.sub("__", name)
-        torch.save({"g2_per_token": torch.tensor(values)}, tmp_path / f"{safe}.pt")
-
-    save_detail("model.layers.0.custom.left", [1.0, 3.0])
-    save_detail("model.layers.0.custom.right", [5.0, 7.0])
-
-    cache = pwc._FisherRowWeightCache(
-        tmp_path,
-        fused_sibling_mapping={"combo": ("left", "right")},
-    )
-
-    assert torch.equal(
-        cache.get("model.layers.0.custom.combo"),
-        torch.tensor([3.0, 5.0]),
-    )
-
-
 def test_production_cache_mxfp8_uses_activation_scale_sweep(monkeypatch):
     model = _TinyChain()
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
@@ -1639,7 +1509,7 @@ def test_render_gate_scores_on_gptq_clipped_activations():
     # the returned weight.
     final_clipped = score_render_error(weight.float(), rendered.float(), X)
     step = trace[1]
-    assert step["mechanism"] in ("gptq", "fisher_gptq")
+    assert step["mechanism"] == "gptq"
     selected_score = (
         step["candidate_score"] if step["accepted"] else step["baseline_score"]
     )

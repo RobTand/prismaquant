@@ -267,14 +267,10 @@ def test_batched_paths_match_per_linear_with_four_over_six(seeded):
     assert torch.allclose(per_sweep, batch_sweep, atol=1e-4, rtol=1e-3)
 
 
-def test_batched_paths_match_per_linear_with_clip_and_fisher(seeded):
+def test_batched_paths_match_per_linear_with_clip(seeded):
     E, out_features, in_features = 3, 24, 48
     weights, activations_list = _make_inputs(E, out_features, in_features, T=96)
     reference_weights = weights.clone()
-    row_weights_list = [
-        torch.linspace(0.5, 2.0, activations.shape[0], dtype=torch.float32)
-        for activations in activations_list
-    ]
     clip_threshold = 0.75
 
     per_gptq = torch.stack([
@@ -283,7 +279,6 @@ def test_batched_paths_match_per_linear_with_clip_and_fisher(seeded):
             activations_list[e],
             group_size=16,
             clip_threshold=clip_threshold,
-            fisher_row_weights=row_weights_list[e],
             levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
         )
         for e in range(E)
@@ -293,7 +288,6 @@ def test_batched_paths_match_per_linear_with_clip_and_fisher(seeded):
         activations_list,
         group_size=16,
         clip_threshold=clip_threshold,
-        row_weights_list=row_weights_list,
         expert_chunk=2,
         levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
     )
@@ -305,7 +299,6 @@ def test_batched_paths_match_per_linear_with_clip_and_fisher(seeded):
             reference_weight=reference_weights[e],
             group_size=16,
             clip_threshold=clip_threshold,
-            fisher_row_weights=row_weights_list[e],
             levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
         )
         for e in range(E)
@@ -316,7 +309,6 @@ def test_batched_paths_match_per_linear_with_clip_and_fisher(seeded):
         reference_weights=reference_weights,
         group_size=16,
         clip_threshold=clip_threshold,
-        row_weights_list=row_weights_list,
         expert_chunk=2,
         levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
     )

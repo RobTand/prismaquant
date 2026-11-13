@@ -53,7 +53,6 @@ def _build_H_stack(
     damp: float | None = None,
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    row_weights_list: list[torch.Tensor | None] | None = None,
     *,
     levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -109,18 +108,12 @@ def _build_H_stack(
         # the host. Moving X to the GPU lets the bmm/matmul run as
         # a real CUDA kernel and is what delivers the projected
         # speedup at production scale.
-        row_weights = (
-            row_weights_list[e]
-            if row_weights_list is not None and e < len(row_weights_list)
-            else None
-        )
         X = activation_matrix_for_gptq(
             a,
             in_features,
             device=device,
             clip_threshold=clip_threshold,
             clip_rescale=clip_rescale,
-            row_weights=row_weights,
             levers=levers,
         )
         H = X.t() @ X
@@ -152,7 +145,6 @@ def gptq_obs_rounding_nvfp4_batched(
     global_real_overrides: torch.Tensor | None = None,
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    row_weights_list: list[torch.Tensor | None] | None = None,
     expert_chunk: int = 32,
     static_act_order: bool = False,
     joint_scale_opt: bool = False,
@@ -212,11 +204,6 @@ def gptq_obs_rounding_nvfp4_batched(
                 if global_real_overrides is not None
                 else None
             )
-            row_weights = (
-                row_weights_list[e]
-                if row_weights_list is not None and e < len(row_weights_list)
-                else None
-            )
             outputs.append(gptq_obs_rounding_nvfp4(
                 weights[e],
                 activations_list[e],
@@ -225,7 +212,6 @@ def gptq_obs_rounding_nvfp4_batched(
                 global_real_override=override,
                 clip_threshold=clip_threshold,
                 clip_rescale=clip_rescale,
-                fisher_row_weights=row_weights,
                 static_act_order=static_act_order,
                 joint_scale_opt=joint_scale_opt,
                 levers=levers,
@@ -247,10 +233,6 @@ def gptq_obs_rounding_nvfp4_batched(
             damp=damp,
             clip_threshold=clip_threshold,
             clip_rescale=clip_rescale,
-            row_weights_list=(
-                row_weights_list[e_start:e_end]
-                if row_weights_list is not None else None
-            ),
             levers=levers,
         )
         # We do NOT zero the weights of dead columns (deliberate
@@ -401,7 +383,6 @@ def scale_sweep_nvfp4_batched(
     global_real_overrides: torch.Tensor | None = None,
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    row_weights_list: list[torch.Tensor | None] | None = None,
     grid: int = 32,
     span: tuple[float, float] = (0.5, 1.5),
     expert_chunk: int = 32,
@@ -456,12 +437,6 @@ def scale_sweep_nvfp4_batched(
             # Same v23 device-fix as in the GPTQ path: move X to the
             # target device so the per-column statistics run as CUDA
             # ops rather than on the host.
-            row_weights = (
-                row_weights_list[e_start + j]
-                if row_weights_list is not None
-                and (e_start + j) < len(row_weights_list)
-                else None
-            )
             a32 = activation_matrix_for_gptq(
                 a,
                 in_features,
@@ -469,7 +444,6 @@ def scale_sweep_nvfp4_batched(
                 clip_threshold=clip_threshold,
                 clip_rescale=clip_rescale,
                 clip_quantile=0.0 if clip_threshold is None else None,
-                row_weights=row_weights,
                 levers=levers,
             )
             col_imp[j] = a32.pow(2).mean(dim=0).clamp_min(1e-12)
