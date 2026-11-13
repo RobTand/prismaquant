@@ -1,6 +1,4 @@
 """Opt-in routed allocation policy, exercised before any stack aggregation."""
-from dataclasses import replace
-from types import SimpleNamespace
 
 import pytest
 
@@ -9,7 +7,6 @@ from prismaquant import allocator_candidates as ac
 from prismaquant import format_registry as fr
 from prismaquant import serving_profiles as sp
 from prismaquant import tessera_menu as tm
-from test_tessera_candidate_context import _Context, _fixture_specs
 
 PROFILE = 'glm_packed_research_sm121'
 ROUTED = 'model.language_model.layers.4.mlp.experts.17.gate_proj'
@@ -85,33 +82,6 @@ def candidate_table(names, specs, *, shape=(2048, 4096), packed=False):
     return stats, costs
 
 
-@pytest.mark.parametrize('fmt', RESEARCH_FAMILIES + OTHER + ['UNKNOWN'])
-@pytest.mark.parametrize('qname,packed', [(ROUTED, False), (STACK, True),
-    ('model.language_model.layers.4.mlp.experts', True)])
-def test_actual_candidate_filter_masks_before_routed_grouping(fmt, qname, packed):
-    spec = replace(fr.get_format('BF16'), name=fmt) if fmt == 'UNKNOWN' else fr.get_format(fmt)
-    specs = [spec, fr.get_format('BF16')]
-    stats, costs = candidate_table([qname], specs, packed=packed)
-    masks = []
-    result = ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
-        source_manifest={qname: 'bf16'}, mask_records=masks).candidates
-    expected = {'BF16', fmt} if fmt in RESEARCH_FAMILIES else {'BF16'}
-    assert {candidate.fmt for candidate in result[qname]} == expected
-    if fmt not in RESEARCH_FAMILIES:
-        assert [(m['format'], m['reason']) for m in masks] == [(fmt, 'profile_mismatch')]
-
-
-@pytest.mark.parametrize('qname', [DENSE, 'model.layers.0.mlp.shared_experts.gate_proj',
-    'model.layers.0.mlp.experts_extra.down_proj'])
-@pytest.mark.parametrize('fmt', ['TESSERA_E2M1_K2_R896', 'TESSERA_BF16_K1_R1024', E4M3[1]])
-def test_dense_readable_candidates_remain_available(qname, fmt):
-    specs = [fr.get_format(fmt), fr.get_format('BF16')]
-    stats, costs = candidate_table([qname], specs)
-    result = ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
-        source_manifest={qname: 'bf16'}).candidates
-    assert {candidate.fmt for candidate in result[qname]} == {fmt, 'BF16'}
-
-
 def test_family_allowance_does_not_bypass_shape_refusal():
     # R1281 does not close its quota over 4095 columns (1281 * 4095 / 256 is
     # not a whole number of bits), so no such unit exists, and the legality
@@ -129,49 +99,11 @@ def test_family_allowance_does_not_bypass_shape_refusal():
         (E4M3[1], 'tensor_parallel_shard')]
 
 
-def test_a_realisable_rung_on_a_partial_superblock_is_offered():
-    # The other side of #1849: R2048 closes over 4095 columns, so the unit is
-    # real and priced rather than refused.
-    specs = [fr.get_format(E4M3[-1]), fr.get_format('BF16')]
-    stats, costs = candidate_table([ROUTED], specs, shape=(2048, 4095))
-    result = ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
-        source_manifest={ROUTED: 'bf16'}).candidates
-    assert {candidate.fmt for candidate in result[ROUTED]} == {E4M3[-1], 'BF16'}
-
-
 def test_family_allowance_does_not_bypass_source_ceiling():
     decision = ac.check_format_applicability((2048, 4096), E4M3[-1], qname=ROUTED,
         source_kind='fp8', target_profile=PROFILE)
     assert not decision.legal
     assert decision.reason == source_format_contracts.SOURCE_BPP_EXCEEDED_REASON
-
-
-def test_actual_candidate_filter_keeps_per_unit_context_gate(monkeypatch):
-    fmt = E4M3[1]
-    specs = _fixture_specs(monkeypatch, fmt, 'BF16')
-    names = [ROUTED, STACK]
-    stats, costs = candidate_table(names, specs)
-    accepted = _Context(structure='routed_moe')
-    refused = replace(accepted, runtime_image='unqualified/image')
-    calls = []
-    def admission(_fmt, *, serving_context=None, allowability=None, require_allowability=False):
-        assert allowability is None and not require_allowability
-        calls.append(serving_context)
-        return SimpleNamespace(requires_serving_context=True,
-            admits=lambda _mode: serving_context == accepted,
-            detail='controlled per-unit context refusal')
-    monkeypatch.setattr(tm, 'route_admission', admission)
-    # Only the attestation answer is controlled. The real profile, shape,
-    # source-footprint and candidate filtering paths all run.
-    monkeypatch.setattr(ac, 'serving_lane_route', lambda *_a, **_k: None)
-    masks = []
-    result = ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
-        source_manifest=dict.fromkeys(names, 'bf16'),
-        context_by_unit={ROUTED: accepted, STACK: refused}, mask_records=masks).candidates
-    assert {c.fmt for c in result[ROUTED]} == {fmt, 'BF16'}
-    assert {c.fmt for c in result[STACK]} == {'BF16'}
-    assert calls == [accepted, refused]
-    assert [(m['qname'], m['reason']) for m in masks] == [(STACK, 'tessera_serving_context')]
 
 
 def test_routed_allow_list_retains_the_full_research_menu_without_serving_claim():

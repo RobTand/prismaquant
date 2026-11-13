@@ -217,6 +217,7 @@ def test_a_unit_with_no_candidate_is_stamped_unrecorded_not_omitted():
 # that ships selections rather than a helper beside it.
 
 _NAMES = [f"model.layers.{i}.self_attn.o_proj" for i in range(4)]
+_CALIBRATION_NAMES = _NAMES[:2]
 _OUT = _IN = 256
 _OVERHEAD_RESERVE = 512
 _FLOOR_TENSORS = {
@@ -234,24 +235,35 @@ def _fixture(tmp_path):
         tensors[f"{n}.weight"] = ("BF16", (_OUT, _IN))
     _write_safetensors(model_dir / "model-00001.safetensors", tensors)
     stats = {
-        n: {"h_trace": 1.0 + 0.1 * i, "n_params": _OUT * _IN,
+        n: {"n_params": _OUT * _IN,
             "in_features": _IN, "out_features": _OUT}
-        for i, n in enumerate(_NAMES)
+        for n in _NAMES
     }
     probe = {"stats": stats, "meta": {"model": str(model_dir)}}
-    costs = {
-        "costs": {
-            n: {
-                # Measured dense rows for one family; weight-only rows for
-                # the other, i.e. the mixed-estimator shape P5a exists for.
+    costs = {"costs": {}}
+    for i, n in enumerate(_NAMES):
+        if n in _CALIBRATION_NAMES:
+            # Measured dense rows with no predicted_dloss: calibration
+            # evidence for both families, never a price (#3448). The bit-exact
+            # BF16 rung keeps the unit priceable.
+            costs["costs"][n] = {
                 "NVFP4": {"weight_mse": 1e-4, "output_mse": 4e-4,
                           "output_mse_measured": True},
                 "FP8_E4M3": {"weight_mse": 1e-6, "output_mse": 2e-6,
                              "output_mse_measured": True},
+                "BF16": {"weight_mse": 0.0},
             }
-            for n in _NAMES
-        },
-        "meta": {"formats": ["NVFP4", "FP8_E4M3"]},
+        else:
+            # Weight-only rows, i.e. the mixed-estimator shape P5a exists for.
+            costs["costs"][n] = {
+                "NVFP4": {"predicted_dloss": 1e-4 * (1.0 + 0.1 * i),
+                          "output_mse_measured": False},
+                "FP8_E4M3": {"predicted_dloss": 1e-6 * (1.0 + 0.1 * i),
+                             "output_mse_measured": False},
+                "BF16": {"weight_mse": 0.0},
+            }
+    costs.update({
+        "meta": {"formats": ["NVFP4", "FP8_E4M3", "BF16"]},
         # A stale cost run's codebook-ladder verdict (the retired codebook
         # lane, archived 2026-09-25, #1304). The allocator no longer
         # republishes it; the payload must still load.
@@ -263,7 +275,7 @@ def _fixture(tmp_path):
                 "detail": "synthetic asymmetric bands",
             }
         },
-    }
+    })
     probe_p = tmp_path / "probe.pkl"
     cost_p = tmp_path / "cost.pkl"
     probe_p.write_bytes(pickle.dumps(probe))
@@ -272,12 +284,14 @@ def _fixture(tmp_path):
 
 
 def _stub_solver(fmt):
+    """Assign ``fmt`` wherever it is a candidate, else the BF16 terminal."""
     def solve(stats, candidates, target_bits, format_specs, format_rank,
               bit_precision, **kw):
-        assign = {n: fmt for n in candidates}
+        assign = {n: fmt if any(c.fmt == fmt for c in candidates[n]) else "BF16"
+                  for n in candidates}
         total_params = sum(stats[n]["n_params"] for n in assign)
         bits = sum(
-            8.0 * next(c for c in candidates[n] if c.fmt == fmt).memory_bytes
+            8.0 * next(c for c in candidates[n] if c.fmt == assign[n]).memory_bytes
             for n in assign
         )
         achieved = bits / max(total_params, 1)
@@ -302,8 +316,10 @@ def test_selection_json_carries_the_p5a_and_p5b_provenance(
         "allocator",
         "--probe", str(probe_p),
         "--costs", str(cost_p),
-        "--formats", "NVFP4,FP8_E4M3",
-        "--pareto-targets", "4.6,8.2",
+        "--formats", "NVFP4,FP8_E4M3,BF16",
+        # The two calibration-only units sit at BF16, so the mix lands near
+        # 10.3 bpp: 10.5 keeps a reachable rung on the grid.
+        "--pareto-targets", "4.6,8.2,10.5",
         "--target-disk-gb", repr(1.0),
         "--layer-config", str(lc),
         "--pareto-csv", str(csv),
@@ -330,8 +346,11 @@ def test_selection_json_carries_the_p5a_and_p5b_provenance(
     # `research` (the default profile here) declares no CB lane, so every
     # selected unit reports laneless rather than claiming a fast path.
     assert lanes["route_status_counts"] == {"no_declared_lane": len(_NAMES)}
-    assert set(lanes["activation_pricing_branches"]) == {
-        "measured_output_mse"}
+    # The weight-only units took the calibrated branch; the calibration-only
+    # units carry no NVFP4 price and land on their bit-exact BF16 rung.
+    assert lanes["activation_pricing_branches"] == {
+        "weight_only_activation_calibrated": len(_NAMES) - len(_CALIBRATION_NAMES),
+        "bit_exact": len(_CALIBRATION_NAMES)}
 
 
 def test_the_applicability_report_carries_the_same_blocks(
@@ -346,9 +365,9 @@ def test_the_applicability_report_carries_the_same_blocks(
         "allocator",
         "--probe", str(probe_p),
         "--costs", str(cost_p),
-        "--formats", "NVFP4,FP8_E4M3",
-        "--pareto-targets", "4.6",
-        "--target-bits", "4.6",
+        "--formats", "NVFP4,FP8_E4M3,BF16",
+        "--pareto-targets", "10.5",
+        "--target-bits", "10.5",
         "--layer-config", str(lc),
         "--pareto-csv", str(csv),
         "--allow-default-profile",

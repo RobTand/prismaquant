@@ -19,7 +19,8 @@ The mechanism ported here, not the trellis vocabulary:
 * an unstamped table carrying Tessera rows is refused rather than compared
   against a default, and a COST_MODE naming no objective is refused rather
   than defaulted;
-* a Tessera-currency table on a non-render-score run is refused: ranking two
+* a Tessera-currency table is refused on every run: the render-score
+  objective it is measured in was removed (#3448), and ranking two
   numbers that are not the same kind of quantity is an error of UNITS, not
   of slope (cf. ``tessera_menu.surrogate_selection_caveat``, which records
   the slope half and must not be conflated with this one).
@@ -85,30 +86,22 @@ def test_aura_stamped_table_with_tessera_rows_refuses():
         require_run_currency(payload)
 
 
-def test_render_score_stamped_table_with_tessera_rows_passes():
-    """The campaign measures the render-score objective, so a table stamped
-    for it is the one currency the Tessera rows are in."""
-    from prismaquant.cost_currency import require_run_currency
+@pytest.mark.parametrize("mode", ["production-render-score", "production-render"])
+def test_render_score_stamped_table_with_tessera_rows_refuses(mode):
+    """The render-score objective the campaign measures was removed (#3448),
+    in both spellings: its stamp names no objective, so the Tessera rows have
+    no currency to be ranked in."""
+    from prismaquant.cost_currency import (
+        CostCurrencyError,
+        require_run_currency,
+    )
 
-    payload = _payload("production-render-score", {
+    payload = _payload(mode, {
         "NVFP4": {"output_mse": 2e-3, "output_mse_measured": True},
         "TESSERA_E2M1_K2_R896": _tessera_row(),
     })
-    report = require_run_currency(payload)
-    assert report["expected_currency"] == "render-score"
-    assert report["tessera_rows"] == 1
-
-
-def test_legacy_production_render_alias_passes():
-    """`production-render` is the legacy spelling of the same objective
-    (`run-pipeline.sh` groups them in one case arm); refusing it would be a
-    spelling refusal, not a currency one."""
-    from prismaquant.cost_currency import require_run_currency
-
-    payload = _payload("production-render", {
-        "TESSERA_E2M1_K2_R896": _tessera_row(),
-    })
-    assert require_run_currency(payload)["tessera_rows"] == 1
+    with pytest.raises(CostCurrencyError, match="names no objective"):
+        require_run_currency(payload)
 
 
 def test_stock_tables_are_outside_this_gate_jurisdiction():
@@ -147,10 +140,10 @@ def test_the_expected_currency_comes_from_the_stamp_not_the_environment(monkeypa
     with pytest.raises(CostCurrencyError, match="aura"):
         require_run_currency(aura_stamp)
 
-    render_stamp = _payload("production-render-score", {
-        "TESSERA_E2M1_K2_R896": _tessera_row()})
-    monkeypatch.setenv("COST_MODE", "aura")
-    assert require_run_currency(render_stamp)["tessera_rows"] == 1
+    monkeypatch.setenv("COST_MODE", "grouped-kl")
+    report = require_run_currency(_payload("aura", {"NVFP4": _aura_row()}))
+    assert report["cost_mode"] == "aura"
+    assert report["expected_currency"] == "aura-adjoint"
 
 
 def test_the_tessera_currency_the_gate_reads_is_the_one_the_campaign_stamps():
@@ -177,7 +170,7 @@ def test_allocator_main_refuses_an_aura_table_with_tessera_rows(tmp_path, monkey
 
     names = [f"model.layers.{i}.self_attn.o_proj" for i in range(2)]
     stats = {
-        n: {"h_trace": 1.0, "n_params": 4096 * 4096, "shape": [4096, 4096]}
+        n: {"n_params": 4096 * 4096, "shape": [4096, 4096]}
         for n in names
     }
     probe = {"stats": stats, "meta": {"model": None}}
@@ -210,12 +203,15 @@ def test_allocator_main_refuses_an_aura_table_with_tessera_rows(tmp_path, monkey
         alloc.main()
 
 
-def test_a_campaign_payload_carries_its_own_cost_mode_stamp():
+def test_a_campaign_payload_carries_no_cost_mode_stamp_and_is_refused():
     """The campaign measures output_mse under the route's activation
-    contract -- the render-score objective -- so its payload stamps
-    `provenance['cost_mode']` accordingly, and the gate admits its own
-    product. An unstamped campaign table would otherwise refuse itself."""
-    from prismaquant.cost_currency import require_run_currency
+    contract -- the render-score objective, removed with its COST_MODE
+    (#3448) -- so its payload stamps no `provenance['cost_mode']`, and the
+    gate refuses the unattested table rather than ranking it."""
+    from prismaquant.cost_currency import (
+        CostCurrencyError,
+        require_run_currency,
+    )
     from prismaquant.tessera_campaign_table import (CampaignAnchor, campaign_cost_payload)
 
     anchor = CampaignAnchor(
@@ -228,5 +224,6 @@ def test_a_campaign_payload_carries_its_own_cost_mode_stamp():
     payload = campaign_cost_payload(
         {"u.q_proj": {"TESSERA_E2M1_K2": [anchor]}},
         {}, loo={}, provenance={})
-    assert payload["provenance"]["cost_mode"] == "production-render-score"
-    assert require_run_currency(payload)["tessera_rows"] == 1
+    assert "cost_mode" not in payload["provenance"]
+    with pytest.raises(CostCurrencyError, match="cost_mode"):
+        require_run_currency(payload)

@@ -6,7 +6,6 @@ import json
 import pytest
 import torch
 
-from prismaquant import production_render_cost as cost
 from prismaquant import production_weight_cache as pwc
 from prismaquant.native_render_levers import NativeRenderLevers
 from test_production_weight_cache import _TinyChain
@@ -19,13 +18,6 @@ SCORE_FIELDS = (
     "activation_quantized", "activation_clipped",
 )
 IDS = torch.tensor([[0, 1]], dtype=torch.long)
-
-
-def _cost_baseline():
-    return {
-        "formats": ["FP8_E4M3"],
-        "costs": {"l1": {"FP8_E4M3": {"weight_mse": 99.0}}},
-    }
 
 
 def _model(dtype):
@@ -60,10 +52,6 @@ def _assert_scores(cache, model, stored):
     assert record["rendered_weight_dtype"] == str(stored.dtype)
     for field in SCORE_FIELDS:
         assert record[field] == expected[field], field
-    for field, key in (("weight_mse", "weight_mse"), ("output_mse", "output_mse")):
-        payload = cost.synthesize_production_render_cost_payload(cache, _cost_baseline(), score_field=field)
-        assert payload["costs"]["l1"]["FP8_E4M3"][key] == expected[
-            "raw_render_score" if field == "output_mse" else field]
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=["bf16", "fp16", "fp32"])
@@ -152,38 +140,6 @@ def test_streamed_dense_scores_price_the_consumed_candidate(tmp_path, dtype, ret
     cache.metadata = {"render_scores": {"records": records}}
     assert stored.dtype == (torch.bfloat16 if dtype == torch.float32 else dtype)
     _assert_scores(cache, model, stored)
-
-
-@pytest.mark.parametrize("fields", [
-    {}, {"rendered_weight_dtype": "torch.bfloat16"},
-    {"scoring_contract": pwc.STORED_CANDIDATE_RENDER_SCORE_CONTRACT},
-    {"scoring_contract": "older", "rendered_weight_dtype": "torch.bfloat16"},
-    {"scoring_contract": pwc.STORED_CANDIDATE_RENDER_SCORE_CONTRACT, "rendered_weight_dtype": "torch.int8"},
-    {"scoring_contract": pwc.STORED_CANDIDATE_RENDER_SCORE_CONTRACT, "rendered_weight_dtype": []},
-])
-def test_present_unqualified_selected_cost_refuses_even_with_baseline_fallback(fields):
-    record = {"qname": "l1", "format": "FP8_E4M3", "metric": "output_mse", "score": 1.0, "score_sum": 2.0, **fields}
-    cache = pwc.ProductionWeightCache(weights={}, levers={}, metadata={"render_scores": {"records": {"l1|FP8_E4M3": record}}})
-    with pytest.raises(ValueError, match="l1@FP8_E4M3.*resume.*rescore.*rebuild"):
-        cost.synthesize_production_render_cost_payload(cache, _cost_baseline())
-
-
-@pytest.mark.parametrize("record", [None, 17])
-def test_malformed_present_selected_cost_cannot_become_missing_fallback(record):
-    cache = pwc.ProductionWeightCache(
-        weights={}, levers={},
-        metadata={"render_scores": {"records": {"l1|FP8_E4M3": record}}},
-    )
-    with pytest.raises(ValueError, match="l1@FP8_E4M3.*resume.*rescore.*rebuild"):
-        cost.synthesize_production_render_cost_payload(cache, _cost_baseline())
-
-
-def test_unselected_unqualified_record_does_not_replace_missing_score_fallback():
-    cache = pwc.ProductionWeightCache(weights={}, levers={}, metadata={"render_scores": {"records": {"outside|FP8_E4M3": {"qname": "outside", "format": "FP8_E4M3", "score": 1.0}}}})
-    payload = cost.synthesize_production_render_cost_payload(cache, _cost_baseline())
-    assert payload["costs"]["l1"]["FP8_E4M3"]["weight_mse"] == 99.0
-    with pytest.raises(ValueError, match="missing 1 production render scores"):
-        cost.synthesize_production_render_cost_payload(cache, _cost_baseline(), require_render_scores=True)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=["bf16", "fp16", "fp32"])

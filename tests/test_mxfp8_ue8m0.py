@@ -429,7 +429,7 @@ def test_the_stock_mxfp8_encoder_is_the_one_that_cannot_do_this():
 def _menu_tables(cost_entry):
     """One dense Linear with a real sensitivity, priced by ``cost_entry``."""
     name = "model.layers.0.self_attn.q_proj"
-    stats = {name: {"h_trace": 2.0, "n_params": 512 * 1024,
+    stats = {name: {"n_params": 512 * 1024,
                     "in_features": 1024, "out_features": 512}}
     costs = {name: {FMT: dict(cost_entry),
                     "BF16": {"weight_mse": 0.0, "output_mse": 0.0,
@@ -453,10 +453,11 @@ def test_an_unmeasured_activation_side_is_masked_not_admitted():
 
     # The bare predicate: weight-lossless, no measured output side, priced 0.
     assert cost_entry_prices_unmeasured_activation_at_zero(
-        {"h_trace": 2.0}, {"weight_mse": 0.0}, 0.0, FMT)
+        {}, {"weight_mse": 0.0}, 0.0, FMT)
 
     name, stats, costs = _menu_tables(
-        {"weight_mse": 0.0, "output_mse": 0.0, "output_mse_measured": False})
+        {"weight_mse": 0.0, "output_mse": 0.0, "output_mse_measured": False,
+         "predicted_dloss": 0.0})
     masks: list[dict] = []
     cands = build_candidates(
         stats, costs,
@@ -474,7 +475,7 @@ def test_a_measured_activation_side_passes_menu_admission():
 
     name, stats, costs = _menu_tables(
         {"weight_mse": 0.0, "output_mse": 3.5e-4,
-         "output_mse_measured": True})
+         "output_mse_measured": True, "predicted_dloss": 3.5e-4})
     cands = build_candidates(
         stats, costs,
         [fr.get_format(FMT), fr.get_format("BF16")],
@@ -491,8 +492,10 @@ def test_a_measured_activation_side_passes_menu_admission():
     # lane.  No surviving profile declares a serving lane, so
     # ``chosen[FMT].serving_lane`` is ``None`` for every profile and there is
     # no route left to assert.
-    # Priced from the real A-side measurement, not short-circuited: the
-    # weight side is exactly lossless here and would otherwise read as free.
+    # Priced from the row's own A-side-inclusive predicted_dloss, not
+    # short-circuited: the weight side is exactly lossless here and would
+    # otherwise read as free. A measured row takes no family transfer (#3448).
+    assert chosen[FMT].predicted_dloss == 3.5e-4
     assert chosen[FMT].activation_pricing == "measured_output_mse"
     assert chosen["BF16"].activation_pricing == "bit_exact"
 

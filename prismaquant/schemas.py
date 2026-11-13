@@ -33,7 +33,6 @@ class CostEntry(TypedDict, total=False):
     output_mse: float
     rel_output_mse: float
     predicted_dloss: float
-    fisher_output_mse: float
     output_mse_measured: bool
     cost_source: NotRequired[str]
     weight_mse_per_expert: NotRequired[list[float]]
@@ -212,11 +211,8 @@ def validate_probe_payload(payload, path: str | None = None):
             _fail(path, ".stats", "stat keys must be strings")
         if not _is_mapping(entry):
             _fail(path, f".stats[{name!r}]", "entry is not a mapping")
-        if "h_trace" not in entry:
-            _fail(path, f".stats[{name!r}].h_trace", "required field missing")
         if "n_params" not in entry:
             _fail(path, f".stats[{name!r}].n_params", "required field missing")
-        _as_number(entry["h_trace"], path, f".stats[{name!r}].h_trace")
         _as_non_negative_int(entry["n_params"], path, f".stats[{name!r}].n_params")
         for optional in ("in_features", "out_features", "num_experts"):
             if optional in entry and entry[optional] is not None:
@@ -291,7 +287,6 @@ def validate_cost_payload(payload, path: str | None = None):
                 "weight_mse",
                 "predicted_dloss",
                 "output_mse",
-                "fisher_output_mse",
             ):
                 if field in entry:
                     _as_finite_cost_number(

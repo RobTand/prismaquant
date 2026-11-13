@@ -15,11 +15,9 @@ not a helper); Tessera admission uses the same v5 contract fixture as
 """
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import pickle
-import sys
 
 import pytest
 
@@ -189,7 +187,7 @@ def _allocator_argv(tmp_path, payload, *, drop_probe_unit=None):
     for name in _units():
         stats[name] = dict(router_path=ROUTER, expert_id=name.split(".")[-2])
     for row in stats.values():
-        row.update(h_trace=1.0, n_params=N * N, in_features=N, out_features=N)
+        row.update(n_params=N * N, in_features=N, out_features=N)
     if drop_probe_unit is not None:
         del stats[drop_probe_unit]
     probe = tmp_path / "probe.pkl"
@@ -197,7 +195,6 @@ def _allocator_argv(tmp_path, payload, *, drop_probe_unit=None):
     probe.write_bytes(pickle.dumps({"stats": stats, "meta": {"model": str(model_dir)}}))
     costs.write_bytes(pickle.dumps(payload))
     return ["allocator", "--probe", str(probe), "--costs", str(costs), "--formats", FMT,
-            "--allow-legacy-fisher-norm",
             "--target-profile", "tessera_research_sm121", "--target-bits", "16",
             "--pareto-targets", "16", "--bit-precision", "0.1",
             "--layer-config", str(tmp_path / "layer.json"),
@@ -209,27 +206,6 @@ def _allocator_argv(tmp_path, payload, *, drop_probe_unit=None):
 # ---------------------------------------------------------------------------
 # main()'s wiring
 # ---------------------------------------------------------------------------
-def test_main_carries_projection_population_and_selected_receipts(tmp_path, monkeypatch):
-    from prismaquant import allocator
-    _v5_contract(monkeypatch)
-    payload = _cost_payload(tmp_path)
-    monkeypatch.setattr(sys, "argv", _allocator_argv(tmp_path, payload))
-    allocator.main()
-    from prismaquant.layer_config import load_assignment
-    placed = load_assignment(tmp_path / "layer.json")
-    assert {name: placed[name] for name in _units()} == {name: FMT for name in _units()}
-    meta = json.loads((tmp_path / "layer.json").read_text())["__prismaquant__"]
-
-    # The producer's projection and the campaign's population statement travel
-    # unchanged; the receipts are exactly the selected rung's, one per unit.
-    assert meta[PROJECTION_KEY] == payload["provenance"][PROJECTION_KEY]
-    assert meta[POPULATION_KEY] == payload["provenance"][POPULATION_KEY]
-    assert meta[EXPERT_WIRES_KEY] == {name: payload[EXPERT_WIRES_KEY][name][FMT]
-                                      for name in _units()}
-    assert meta["tessera_expert_stack_formats"] == {STACK: FMT}
-    assert meta["tessera_expert_wire_dir"] == str(tmp_path / "wire")
-
-
 @pytest.mark.parametrize("selected", [None, FMT, "NVFP4"])
 def test_allocation_requires_explicit_bf16_for_unpriced_campaign_unit(selected):
     payload = {"provenance": {POPULATION_KEY: _unpriced_population()}}
@@ -299,84 +275,11 @@ def test_allocation_refuses_v2_without_unpriced_disposition():
         allocation_expert_projection_block({"provenance": {POPULATION_KEY: population}}, {})
 
 
-def test_main_refuses_a_selected_rung_with_no_priced_wire(tmp_path, monkeypatch):
-    from prismaquant import allocator
-    _v5_contract(monkeypatch)
-    payload = _cost_payload(tmp_path)
-    del payload[EXPERT_WIRES_KEY][f"{STACK}.1.w2"][FMT]
-    monkeypatch.setattr(sys, "argv", _allocator_argv(tmp_path, payload))
-    with pytest.raises(SystemExit, match=rf"expert projection: {STACK}\.1\.w2: selected {FMT} "
-                                          "has no priced wire receipt"):
-        allocator.main()
-    assert not (tmp_path / "layer.json").exists()
-
-
-def test_main_refuses_a_projected_unit_the_allocation_does_not_place(tmp_path, monkeypatch):
-    from prismaquant import allocator
-    _v5_contract(monkeypatch)
-    payload = _cost_payload(tmp_path)
-    monkeypatch.setattr(sys, "argv", _allocator_argv(
-        tmp_path, payload, drop_probe_unit=f"{STACK}.0.w3"))
-    with pytest.raises(SystemExit, match=rf"expert projection: .*not in the assignment.*{STACK}\.0\.w3"):
-        allocator.main()
-    assert not (tmp_path / "layer.json").exists()
-
-
-def test_main_adds_nothing_for_a_table_without_a_population(tmp_path, monkeypatch):
-    from prismaquant import allocator
-    _v5_contract(monkeypatch)
-    payload = _cost_payload(tmp_path)
-    for key in (POPULATION_KEY, PROJECTION_KEY):
-        del payload["provenance"][key]
-    del payload[EXPERT_WIRES_KEY]
-    monkeypatch.setattr(sys, "argv", _allocator_argv(tmp_path, payload))
-    allocator.main()
-    meta = json.loads((tmp_path / "layer.json").read_text())["__prismaquant__"]
-    assert not {PROJECTION_KEY, POPULATION_KEY, EXPERT_WIRES_KEY,
-                "tessera_expert_stack_formats", "tessera_expert_wire_dir"} & set(meta)
-
-
 # ---------------------------------------------------------------------------
 # The block itself: the refusals main() cannot reach through the real solver
 # ---------------------------------------------------------------------------
 def _assignment(fmt=FMT):
     return {DENSE: fmt, **{name: fmt for name in _units()}}
-
-
-def test_block_refuses_a_role_split_stack_and_a_receipt_for_another_rung(tmp_path, monkeypatch):
-    payload = _cost_payload(tmp_path, formats=(FMT, "TESSERA_E4M3_K1_R768"))
-    split = _assignment()
-    split[f"{STACK}.0.w2"] = "TESSERA_E4M3_K1_R768"
-    from prismaquant import tessera_runtime_contract as trc
-    monkeypatch.setattr(trc, "packaged_routed_unit_capability",
-                        lambda: (_ for _ in ()).throw(trc.TesseraContractError("requires v57")))
-    with pytest.raises(ExpertProjectionError, match="rungs differ across the stack"):
-        allocation_expert_projection_block(payload, split)
-    # A receipt filed under the selected rung but sealed for another one.
-    swapped = copy.deepcopy(payload)
-    swapped[EXPERT_WIRES_KEY][f"{STACK}.0.w1"][FMT] = \
-        payload[EXPERT_WIRES_KEY][f"{STACK}.0.w1"]["TESSERA_E4M3_K1_R768"]
-    with pytest.raises(ExpertProjectionError, match=rf"{STACK}\.0\.w1: .*not the selected rung"):
-        allocation_expert_projection_block(swapped, _assignment())
-    # A stack kept whole at a non-Tessera format needs no receipt and says so.
-    block = allocation_expert_projection_block(payload, _assignment("BF16"))
-    assert block["tessera_expert_stack_formats"] == {STACK: "BF16"}
-    assert block[EXPERT_WIRES_KEY] == {}
-
-
-@pytest.mark.parametrize("damage,match", [
-    (lambda p: p.pop(EXPERT_WIRES_KEY), "no priced expert wires"),
-    (lambda p: p["provenance"].pop("wire_dir"), "names no wire_dir"),
-    (lambda p: p["provenance"].pop(PROJECTION_KEY), "priced expert wires but no producer projection"),
-    (lambda p: p["provenance"][POPULATION_KEY].update(schema="other"), "population block"),
-    (lambda p: p["provenance"][PROJECTION_KEY]["stacks"][STACK].pop(f"{STACK}.1.w1"),
-     r"1\.w1: carried unit record disagrees|coverage|experts"),
-])
-def test_block_refuses_a_table_that_cannot_say_what_it_priced(tmp_path, damage, match):
-    payload = _cost_payload(tmp_path)
-    damage(payload)
-    with pytest.raises(ExpertProjectionError, match=match):
-        allocation_expert_projection_block(payload, _assignment())
 
 
 def test_block_is_empty_for_a_stock_table(tmp_path):

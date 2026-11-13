@@ -1827,13 +1827,11 @@ class ModelProfile(ABC):
             predicate=lambda node: "router" in node.module_class.lower(),
         ))
         # Packed expert stacks (R5 sweep finding 2): one 3-D Parameter per
-        # stack on an `*Experts` module, priced through the packed-expert
-        # Fisher path (install_packed_expert_hooks), not by per-Linear
+        # stack on an `*Experts` module, priced per stack, not by per-Linear
         # enumeration. They ARE allocator decisions — so `decide`, not a pin.
         rules.append(ClaimRule(
             "decide",
-            "packed expert stack: priced through the packed-expert Fisher "
-            "path (install_packed_expert_hooks), not by per-Linear "
+            "packed expert stack: priced per stack, not by per-Linear "
             "enumeration",
             predicate=lambda node: node.kind == "parameter"
             and "expert" in node.module_class.lower(),

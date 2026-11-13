@@ -119,8 +119,6 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
     from prismaquant import incremental_measure_quant_cost as baseline
     from prismaquant import memory_management
     from prismaquant.model_profiles import detect_profile
-    from prismaquant.production_render_cost import synthesize_production_render_cost_payload
-    from prismaquant.production_weight_cache import fill_production_weight_cache
     from prismaquant.streaming_model import load_resident_source_model
 
     source, expected = producer_source(tmp_path)
@@ -132,7 +130,7 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
     backfill_name = names[0].replace('o_proj', 'q_proj')
     probe_names = [*names, backfill_name]
     probe = tmp_path / 'probe.pkl'
-    stats = {name: {'h_trace': 1., 'n_params': expected[name + '.weight'].numel()} for name in probe_names}
+    stats = {name: {'n_params': expected[name + '.weight'].numel()} for name in probe_names}
     probe.write_bytes(pickle.dumps({'stats': stats, 'meta': {}}))
     activations = tmp_path / 'activations'
     activations.mkdir()
@@ -145,7 +143,7 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
         '--probe', str(probe), '--activation-cache-dir', str(activations),
         '--work-dir', str(tmp_path / 'baseline-work'), '--output', str(base_path),
         '--device', 'cpu', '--dtype', 'bf16', '--mode', 'unbatched',
-        '--formats', 'FP8_E4M3,BF16', '--cost-mode', 'local', '--threads', '1',
+        '--formats', 'FP8_E4M3,BF16', '--cost-mode', 'aura', '--threads', '1',
         '--no-include-mtp', '--no-include-visual', '--no-include-lm-head', '--no-watchdog'])
     baseline.main()
     base = pickle.loads(base_path.read_bytes())
@@ -158,12 +156,7 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
         n_probes=1, n_linear_chunks=1, min_free_gib=0,
         unit_filter=re.escape(names[0]) + '$', allow_packed_expert_omission=True,
         profile=detect_profile(str(source)), checkpoint_identity_extra={'source_binding': binding})
-    cache = fill_production_weight_cache(model, tokens, [names[1]], formats=['FP8_E4M3'],
-        levers={'gptq': False, 'scale_sweep': False}, source_binding=binding,
-        max_act_rows=4, progress=False)
-    render_base = {**base, 'costs': {names[1]: base['costs'][names[1]]}}
-    rendered = synthesize_production_render_cost_payload(cache, render_base, score_field='weight_mse')
-    dense = {**aura_payload, 'costs': {**aura_payload['costs'], **rendered['costs']}}
+    dense = {**aura_payload, 'costs': dict(aura_payload['costs'])}
     dense['provenance'].update(model=str(source), cost_mode='aura')
     dense_path = tmp_path / 'dense.pkl'
     dense_path.write_bytes(pickle.dumps(dense))
@@ -175,8 +168,8 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
         '--merge-base', str(dense_path), '--backfill-base', str(base_path), '--cost-mode', 'aura']) == 0
     payload = pickle.loads(output.read_bytes())
     assert payload['costs'][names[0]] == aura_payload['costs'][names[0]]
-    assert payload['costs'][names[1]] == rendered['costs'][names[1]]
-    assert payload['costs'][backfill_name] == base['costs'][backfill_name]
+    for name in (names[1], backfill_name):
+        assert payload['costs'][name] == base['costs'][name]
     assert len(payload['costs']) > len(probe_names), 'include real empirical expert rows'
     result = _pipeline_reusable(output, source)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -205,7 +198,7 @@ def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch, laye
                    if name.endswith('.self_attn.o_proj.weight')) + ['lm_head']
     probe = tmp_path / 'hub-probe.pkl'
     probe.write_bytes(pickle.dumps({'stats': {
-        name: {'h_trace': 1., 'n_params': expected[name + '.weight'].numel()}
+        name: {'n_params': expected[name + '.weight'].numel()}
         for name in names}, 'meta': {}}))
     activations = tmp_path / 'hub-activations'
     activations.mkdir()
@@ -227,7 +220,7 @@ def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch, laye
         '--work-dir', str(tmp_path / 'hub-work'), '--output', str(output),
         '--layers-per-shard', layers_per_shard,
         '--device', 'cpu', '--dtype', 'bf16', '--mode', 'unbatched', '--formats', 'FP8_E4M3',
-        '--cost-mode', 'local', '--threads', '1', '--no-include-mtp', '--no-include-visual',
+        '--cost-mode', 'aura', '--threads', '1', '--no-include-mtp', '--no-include-visual',
         '--no-watchdog'])
     baseline.main()
     assert snapshots == [hub_id]
@@ -239,9 +232,8 @@ def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch, laye
             assert row['source_binding'] == binding
 
 
-@pytest.mark.parametrize("mode", ["local", "aura", "production-render-score"])
 @pytest.mark.parametrize("state", ["unbound", "current", "foreign", "bf16-unbound"])
-def test_baseline_reuse_checks_source_in_every_cost_mode(tmp_path, mode, state):
+def test_baseline_reuse_checks_source_in_the_aura_cost_mode(tmp_path, state):
     source, _ = producer_source(tmp_path, native=state != "bf16-unbound")
     binding = identity.build_source_model_binding(source, dtype=torch.bfloat16)
     if state == "foreign":
@@ -249,7 +241,7 @@ def test_baseline_reuse_checks_source_in_every_cost_mode(tmp_path, mode, state):
         binding = identity.build_source_model_binding(source, dtype=torch.bfloat16)
         (source / "foreign.py").unlink()
     payload = _payload(binding)
-    payload['provenance'] = {'cost_mode': 'local'}
+    payload['provenance'] = {'cost_mode': 'aura'}
     if state in {"unbound", "bf16-unbound"}:
         for row in payload['costs']['unit'].values():
             row.pop('source_binding')
@@ -260,8 +252,8 @@ def test_baseline_reuse_checks_source_in_every_cost_mode(tmp_path, mode, state):
         '\nrequire_stage_settings() {', 1)[0]
     decision = 'BASE_COST_REUSABLE=1' + driver.split('BASE_COST_REUSABLE=1', 1)[1].split(
         '\nif [[ "$BASE_COST_REUSABLE" == "0" ]]', 1)[0]
-    environment = dict(os.environ, COST_MODE=mode, MODEL_PATH=str(source),
-        BASE_COST_PATH=str(baseline), COST_PATH=str(baseline if mode == 'local' else tmp_path / 'cost.pkl'))
+    environment = dict(os.environ, COST_MODE='aura', MODEL_PATH=str(source),
+        BASE_COST_PATH=str(baseline), COST_PATH=str(tmp_path / 'cost.pkl'))
     environment['PATH'] = str(Path(sys.executable).parent) + os.pathsep + environment.get('PATH', '')
     result = subprocess.run(['bash', '-euo', 'pipefail', '-c', functions + '\n' + decision +
         '\nprintf "BASE_REUSABLE=%s\\n" "$BASE_COST_REUSABLE"'],
@@ -290,7 +282,7 @@ def test_native_baseline_sidecars_carry_only_checkpoint_evidence(tmp_path, monke
     config.update(num_nextn_predict_layers=1)
     (source / 'config.json').write_text(json.dumps(config))
     probe = tmp_path / 'sidecar-probe.pkl'
-    probe.write_bytes(pickle.dumps({'stats': {name: {'h_trace': 1., 'n_params': 16}
+    probe.write_bytes(pickle.dumps({'stats': {name: {'n_params': 16}
         for name in names}, 'meta': {}}))
     activations = tmp_path / 'sidecar-act'
     activations.mkdir()
@@ -303,7 +295,7 @@ def test_native_baseline_sidecars_carry_only_checkpoint_evidence(tmp_path, monke
         selected = {name: {'BF16': {'weight_mse': 0.}}
                     for name in names if re.search(kwargs['linear_include'], name)}
         Path(kwargs['output_path']).write_bytes(pickle.dumps({'costs': selected,
-            'formats': ['BF16'], 'meta': {}, 'provenance': {'cost_mode': 'local'}}))
+            'formats': ['BF16'], 'meta': {}, 'provenance': {'cost_mode': 'aura'}}))
         return None
 
     monkeypatch.setattr(baseline, '_run_mtp_cost_shard', sidecar)
@@ -312,7 +304,7 @@ def test_native_baseline_sidecars_carry_only_checkpoint_evidence(tmp_path, monke
         '--probe', str(probe), '--activation-cache-dir', str(activations),
         '--work-dir', str(tmp_path / 'sidecar-work'), '--output', str(output),
         '--device', 'cpu', '--dtype', 'bf16', '--mode', 'unbatched', '--formats', 'BF16',
-        '--cost-mode', 'local', '--threads', '1', '--no-include-lm-head', '--no-watchdog'])
+        '--cost-mode', 'aura', '--threads', '1', '--no-include-lm-head', '--no-watchdog'])
     baseline.main()
     payload = pickle.loads(output.read_bytes())
     assert set(payload['costs']) == set(names)

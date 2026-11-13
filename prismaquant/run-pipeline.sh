@@ -301,10 +301,9 @@ echo "[pipeline] preflight: EXPORT_CONTAINER=${EXPORT_CONTAINER} lane OK; target
 #
 # COST_MODE remains the documented spelling and keeps its exact meaning; the
 # axes are the mechanism underneath, and setting them directly is equivalent:
-#   local                  = inline      x weight-recon
-#   production-render-score= cached-menu x render-score
 #   aura                   = cached-menu x aura-adjoint
-# Only those three pairs are implemented; anything else stops with the reason.
+# Only that pair is implemented (#3448 removed local and
+# production-render-score); anything else stops with the reason.
 # -----------------------------------------------------------------------
 if [[ -n "${COST_RENDER:-}" || -n "${COST_OBJECTIVE:-}" ]]; then
   if [[ -n "${COST_MODE:-}" ]]; then
@@ -312,21 +311,11 @@ if [[ -n "${COST_RENDER:-}" || -n "${COST_OBJECTIVE:-}" ]]; then
     exit 2
   fi
   : "${COST_RENDER:=cached-menu}"
-  : "${COST_OBJECTIVE:=render-score}"
+  : "${COST_OBJECTIVE:=aura-adjoint}"
   case "${COST_RENDER}|${COST_OBJECTIVE}" in
-    "inline|weight-recon")           COST_MODE="local" ;;
-    "cached-menu|render-score")      COST_MODE="production-render-score" ;;
     "cached-menu|aura-adjoint")      COST_MODE="aura" ;;
-    "inline|aura-adjoint")
-      echo "[pipeline] ERROR: COST_RENDER=inline x COST_OBJECTIVE=aura-adjoint is not implemented — the AURA adjoint consumes production-rendered dW from a format-menu cache (aura_cost --require-production-cache), which is the cached-menu render by definition." >&2
-      exit 2
-      ;;
-    "cached-menu|weight-recon")
-      echo "[pipeline] ERROR: COST_RENDER=cached-menu x COST_OBJECTIVE=weight-recon is not implemented — production_render_cost derives cost from the scores the render recorded (render-score), and the weight-recon objective is the inline stage's own measurement. Use COST_MODE=local or COST_MODE=production-render-score." >&2
-      exit 2
-      ;;
     *)
-      echo "[pipeline] ERROR: COST_RENDER must be inline|cached-menu and COST_OBJECTIVE must be weight-recon|render-score|aura-adjoint (got '${COST_RENDER}' x '${COST_OBJECTIVE}')" >&2
+      echo "[pipeline] ERROR: only COST_RENDER=cached-menu x COST_OBJECTIVE=aura-adjoint is implemented (got '${COST_RENDER}' x '${COST_OBJECTIVE}')" >&2
       exit 2
       ;;
   esac
@@ -336,9 +325,6 @@ fi
 # lane render-faithfulness assertion runs before it.
 : "${COST_MODE:=aura}"
 case "$COST_MODE" in
-  local)                              COST_RENDER=inline;      COST_OBJECTIVE=weight-recon ;;
-  production-render-score|production-render)
-                                      COST_RENDER=cached-menu; COST_OBJECTIVE=render-score ;;
   aura)                               COST_RENDER=cached-menu; COST_OBJECTIVE=aura-adjoint ;;
   *)                                  COST_RENDER=unknown;     COST_OBJECTIVE=unknown ;;
 esac
@@ -670,21 +656,6 @@ EXPORT_PIN_ARGS=(--ignore "${REMAINING_PROFILE_PINS[@]}")
 : "${PRODUCTION_CACHE_DISABLE_LEVERS:=}"
 # COST_MODE / COST_RENDER / COST_OBJECTIVE are resolved in the cost-axes block
 # above (re-vet R3), which runs before the lane render-faithfulness assertion.
-: "${PRODUCTION_RENDER_COST_NSAMPLES:=8}"
-: "${PRODUCTION_RENDER_COST_SEQLEN:=1024}"
-: "${PRODUCTION_RENDER_COST_SEED:=42}"
-# weight_mse default since 2026-07-02 (audit M6): the legacy
-# h_trace*output_mse product carries the activation energy E||x||^2 twice
-# (h_trace is the weight-space Fisher trace and already contains it), a
-# per-Linear multiplicative bias ~ in_features*x_rms^2. Served two-arm A/B
-# at matched 4.75 bpp, 5 window draws + 32k-token PPL per model:
-#   Qwen3-4B:   KL -50.8% (31/40 windows), PPL 21.82 -> 18.52 (-15.1%)
-#   Qwen3-0.6B: KL -58.5% (35/40 windows), PPL 45.20 -> 34.16 (-24.4%)
-# output_mse reproduces the historical objective. Target-scale (27B-class)
-# confirmation is ladder debt, mirroring the damp-1.0 promotion.
-: "${PRODUCTION_RENDER_COST_SCORE_FIELD:=weight_mse}"
-: "${PRODUCTION_RENDER_COST_REQUIRE_SCORES:=0}"
-: "${PRODUCTION_RENDER_COST_REQUIRE_OUTPUT:=1}"
 : "${EXPORT_GPTQ:=auto}"
 : "${EXPORT_SCALE_SWEEP:=auto}"
 : "${PIPELINE_SPEC_PATH:=${WORK_DIR}/artifacts/pipeline_spec.json}"
@@ -711,7 +682,6 @@ case ",$PRODUCTION_CACHE_LEVERS," in
     exit 2
     ;;
 esac
-export PRISMAQUANT_FISHER_OUTPUT_MSE_ALLOCATOR=0
 # Selection mode. Under a byte budget the ship bpp is FIXED by the card, so
 # the only open question is which of the ~3 fitting allocations measures best
 # — that is validated-surrogate's job and it costs ~3 KL evals there (re-vet
@@ -809,10 +779,6 @@ case "$COST_MODE" in
       --calibration-draw "$AURA_COST_NSAMPLES" "$AURA_COST_SEQLEN" "$AURA_COST_CALIB_SEED"
       --calibration-draw "$AURA_EXPERT_NSAMPLES" "$AURA_EXPERT_SEQLEN" 42
     )
-    ;;
-  production-render-score|production-render)
-    FRONTIER_CALIBRATION_ARGS+=(--calibration-draw "$PRODUCTION_RENDER_COST_NSAMPLES"
-      "$PRODUCTION_RENDER_COST_SEQLEN" "$PRODUCTION_RENDER_COST_SEED")
     ;;
 esac
 VALIDATED_FRONTIER_CALIB_SKIP_FIRST="$(python3 -m prismaquant.pipeline \
@@ -915,24 +881,12 @@ fi
 
 PROBE_PATH="${WORK_DIR}/artifacts/probe.pkl"
 case "$COST_MODE" in
-  local)
-    BASE_COST_PATH="${WORK_DIR}/artifacts/cost.pkl"
-    COST_PATH="${BASE_COST_PATH}"
-    PRODUCTION_RENDER_COST_CACHE_PATH=""
-    PRODUCTION_RENDER_COST_CACHE_DIR=""
-    ;;
   grouped-kl)
-    echo "[pipeline] ERROR: COST_MODE=grouped-kl — the grouped-KL (fusion-matched) cost surrogate is archived under archive/grouped_kl_2026-05-28. It fixed a local allocator non-monotonicity but LOST the shipped vLLM A/B on Qwen3.6-27B (worse exact vLLM KL and direct WikiText PPL than the shipped 5.5 artifact); see archive/grouped_kl_2026-05-28/README.md. Use production-render-score (default), aura, or local." >&2
+    echo "[pipeline] ERROR: COST_MODE=grouped-kl — the grouped-KL (fusion-matched) cost surrogate is archived under archive/grouped_kl_2026-05-28. It fixed a local allocator non-monotonicity but LOST the shipped vLLM A/B on Qwen3.6-27B (worse exact vLLM KL and direct WikiText PPL than the shipped 5.5 artifact); see archive/grouped_kl_2026-05-28/README.md. Use aura." >&2
     exit 2
     ;;
-  production-render-score|production-render)
-    BASE_COST_PATH="${WORK_DIR}/artifacts/cost_baseline.pkl"
-    COST_PATH="${WORK_DIR}/artifacts/cost.pkl"
-    PRODUCTION_RENDER_COST_CACHE_PATH="${WORK_DIR}/artifacts/production_render_score_cache.pkl"
-    PRODUCTION_RENDER_COST_CACHE_DIR="${WORK_DIR}/artifacts/production_render_score_weight_cache"
-    ;;
   production-render-staged|production-render-tail)
-    echo "[pipeline] ERROR: COST_MODE=$COST_MODE — the staged (NVFP4-first, promote-the-tail) production-render cost is archived under archive/production_render_staged_2026-07-30. Its own 27B result doc is a refusal: the last-token-KL screen IMPROVED (0.0232 vs 0.0280) while direct WikiText PPL REGRESSED (10.83 vs 8.33) — \"Do not ship\" (docs/results/production_render_staged_27b_results_2026-05-21.md). Promote on the serving metric, not the screen. Use production-render-score (default), aura, or local." >&2
+    echo "[pipeline] ERROR: COST_MODE=$COST_MODE — the staged (NVFP4-first, promote-the-tail) production-render cost is archived under archive/production_render_staged_2026-07-30. Its own 27B result doc is a refusal: the last-token-KL screen IMPROVED (0.0232 vs 0.0280) while direct WikiText PPL REGRESSED (10.83 vs 8.33) — \"Do not ship\" (docs/results/production_render_staged_27b_results_2026-05-21.md). Promote on the serving metric, not the screen. Use aura." >&2
     exit 2
     ;;
   aura)
@@ -961,7 +915,7 @@ case "$COST_MODE" in
     fi
     ;;
   *)
-    echo "[pipeline] ERROR: COST_MODE must be local, production-render-score, or aura" >&2
+    echo "[pipeline] ERROR: COST_MODE must be aura (#3448 removed local and production-render-score)" >&2
     exit 2
     ;;
 esac
@@ -1052,9 +1006,6 @@ echo "  PRODUCTION_CACHE_RENDER_SCOPE=$PRODUCTION_CACHE_RENDER_SCOPE"
 echo "  PRODUCTION_CACHE_LEVERS=$PRODUCTION_CACHE_LEVERS"
 echo "  PRODUCTION_CACHE_DISABLE_LEVERS=$PRODUCTION_CACHE_DISABLE_LEVERS"
 echo "  COST_MODE=$COST_MODE"
-if [[ "$COST_MODE" == "production-render-score" || "$COST_MODE" == "production-render" ]]; then
-  echo "  PRODUCTION_RENDER_COST_NSAMPLES=$PRODUCTION_RENDER_COST_NSAMPLES PRODUCTION_RENDER_COST_SEQLEN=$PRODUCTION_RENDER_COST_SEQLEN PRODUCTION_RENDER_COST_SEED=$PRODUCTION_RENDER_COST_SEED SCORE_FIELD=$PRODUCTION_RENDER_COST_SCORE_FIELD"
-fi
 if [[ "$COST_MODE" == "aura" ]]; then
   echo "  AURA_COST_NPROBES=$AURA_COST_NPROBES AURA_COST_NSAMPLES=$AURA_COST_NSAMPLES AURA_COST_SEQLEN=$AURA_COST_SEQLEN AURA_COST_CALIB_SEED=$AURA_COST_CALIB_SEED AURA_COST_DTYPE=$AURA_COST_DTYPE STREAMING=$AURA_COST_STREAMING"
   echo "  AURA_EXPERT_NSAMPLES=$AURA_EXPERT_NSAMPLES AURA_EXPERT_SEQLEN=$AURA_EXPERT_SEQLEN VALIDATED_FRONTIER_MATERIALIZATION=$VALIDATED_FRONTIER_MATERIALIZATION"
@@ -1140,12 +1091,6 @@ STAGE_SETTINGS_ENV=(
   "COST_MODE=$COST_MODE"
   "SELECTION_MODE=$SELECTION_MODE"
   "PRODUCTION_CACHE_RENDER_SCOPE=$PRODUCTION_CACHE_RENDER_SCOPE"
-  "PRODUCTION_RENDER_COST_NSAMPLES=$PRODUCTION_RENDER_COST_NSAMPLES"
-  "PRODUCTION_RENDER_COST_SEQLEN=$PRODUCTION_RENDER_COST_SEQLEN"
-  "PRODUCTION_RENDER_COST_SEED=$PRODUCTION_RENDER_COST_SEED"
-  "PRODUCTION_RENDER_COST_SCORE_FIELD=$PRODUCTION_RENDER_COST_SCORE_FIELD"
-  "PRODUCTION_RENDER_COST_REQUIRE_SCORES=$PRODUCTION_RENDER_COST_REQUIRE_SCORES"
-  "PRODUCTION_RENDER_COST_REQUIRE_OUTPUT=$PRODUCTION_RENDER_COST_REQUIRE_OUTPUT"
   "AURA_COST_NPROBES=$AURA_COST_NPROBES"
   "AURA_COST_NSAMPLES=$AURA_COST_NSAMPLES"
   "AURA_COST_SEQLEN=$AURA_COST_SEQLEN"
@@ -1320,28 +1265,19 @@ harvest_cb_col_weights() {
   fi
   echo "[pipeline] ${stage} harvesting CB col-weights (imatrix source=${imatrix_source}) ..."
   CB_ACT_DIR="${WORK_DIR}/act" CB_COL_WEIGHTS="$CB_COL_WEIGHTS" \
-  CB_PROBE_PATH="$PROBE_PATH" CB_IMATRIX_SOURCE="$imatrix_source" \
+  CB_IMATRIX_SOURCE="$imatrix_source" \
   MODEL_PATH="$MODEL_PATH" CB_STAGE="$stage" python3 - <<'PY'
 import json, os, pickle
 from pathlib import Path
 
-from prismaquant.moe_imatrix import (
-    canonical_imatrix_sha256,
-    imatrix_from_probe_file,
-)
+from prismaquant.moe_imatrix import canonical_imatrix_sha256
 from prismaquant.export_gguf import build_imatrix_from_act_cache
 from prismaquant.moe_imatrix import synthesize_packed_expert_col_weights
 act_dir = os.environ["CB_ACT_DIR"]
 out = os.environ["CB_COL_WEIGHTS"]
 stage = os.environ["CB_STAGE"]
 source = os.environ["CB_IMATRIX_SOURCE"]
-if source == "probe":
-    cw, provenance = imatrix_from_probe_file(os.environ["CB_PROBE_PATH"])
-    if not provenance.get("calibration_hash"):
-        raise SystemExit(
-            "[pipeline] ERROR: probe-derived CB imatrix has no calibration hash"
-        )
-elif source == "activation-cache":
+if source == "activation-cache":
     cw = build_imatrix_from_act_cache(act_dir)
     provenance = {
         "schema": "prismaquant.cb_imatrix.activation_cache_rows.v1",
@@ -1349,7 +1285,7 @@ elif source == "activation-cache":
     }
 else:
     raise SystemExit(
-        "[pipeline] ERROR: CB_IMATRIX_SOURCE must be probe or activation-cache"
+        "[pipeline] ERROR: CB_IMATRIX_SOURCE must be activation-cache (#3448 removed probe)"
     )
 if not cw:
     raise SystemExit(
@@ -1397,7 +1333,6 @@ if [[ ! -f "${PROBE_PATH}" ]]; then
     --output "${PROBE_PATH}" \
     --activation-cache-dir "${WORK_DIR}/act" \
     --work-dir "${WORK_DIR}/work" \
-    --layers-per-shard "$LAYERS_PER_SHARD" \
     --prefetch-lookahead "$PREFETCH_LOOKAHEAD" \
     --prefetch-workers "$PREFETCH_WORKERS" \
     --prefetch-min-available-gb "$PREFETCH_MIN_AVAILABLE_GB" \
@@ -1415,9 +1350,8 @@ if [[ -n "$PREPRICED_COST_REPORT" ]]; then
   echo "[pipeline] [2/4] using validated prepriced input: $COST_PATH (cost builders skipped)"
 else
 require_stage_settings "${BASE_COST_PATH}" base-cost
-# Every baseline passes source admission. In local mode it is also the
-# allocator's table, so its stored estimator must match COST_MODE. A separate
-# baseline retains its stored estimator and can be reused across mode changes.
+# Every baseline passes source admission. The baseline retains its stored
+# estimator and can be reused across mode changes.
 BASE_COST_REUSABLE=1
 if [[ ! -f "${BASE_COST_PATH}" ]]; then
   BASE_COST_REUSABLE=0
@@ -1456,60 +1390,6 @@ COST_CACHE_COL_WEIGHT_ARGS=()
 if [[ "$COST_CACHE_COL_WEIGHTS_REQUIRED" == "1" ]]; then
   harvest_cb_col_weights "[2b/4] cost-cache"
   COST_CACHE_COL_WEIGHT_ARGS=(--col-weights "$CB_COL_WEIGHTS")
-fi
-
-if [[ "$COST_MODE" == "production-render-score" || "$COST_MODE" == "production-render" ]]; then
-  require_stage_settings "$PRODUCTION_RENDER_COST_CACHE_PATH" render-cost-cache
-  if [[ ! -f "$PRODUCTION_RENDER_COST_CACHE_PATH" ]]; then
-    echo "[pipeline] [2b/4] rendering production weights for allocator cost ..."
-    python3 -m prismaquant.build_production_cache \
-      --model "$MODEL_PATH" \
-      --output "$PRODUCTION_RENDER_COST_CACHE_PATH" \
-      --formats "$COST_FORMATS" \
-      --render-scope format-menu \
-      --activation-cache-dir "${WORK_DIR}/act" \
-      "${PRODUCTION_CACHE_PIN_ARGS[@]}" \
-      "${COST_CACHE_COL_WEIGHT_ARGS[@]+"${COST_CACHE_COL_WEIGHT_ARGS[@]}"}" \
-      --n-calib-samples "$PRODUCTION_RENDER_COST_NSAMPLES" \
-      --calib-seqlen "$PRODUCTION_RENDER_COST_SEQLEN" \
-      --calib-seed "$PRODUCTION_RENDER_COST_SEED" \
-      --dataset "$DATASET" \
-      --dtype bf16 \
-      --max-act-rows "$PRODUCTION_CACHE_MAX_ACT_ROWS" \
-      --enable "$PRODUCTION_CACHE_LEVERS" \
-      --disable "$PRODUCTION_CACHE_DISABLE_LEVERS" \
-      --cache-dir "$PRODUCTION_RENDER_COST_CACHE_DIR" \
-      2>&1 | tee "${WORK_DIR}/logs/production_render_score_cache.log"
-  else
-    echo "[pipeline] [2b/4] production-render cost cache exists, skipping"
-  fi
-  require_stage_settings "$COST_PATH" render-cost
-  if ! cost_table_reusable "$COST_PATH"; then
-    echo "[pipeline] [2c/4] synthesizing production-render allocator cost ..."
-    PROD_RENDER_COST_ARGS=()
-    case "$PRODUCTION_RENDER_COST_REQUIRE_SCORES" in
-      1|true|True|TRUE|yes|Yes|YES|on|On|ON)
-        PROD_RENDER_COST_ARGS+=(--require-render-scores)
-        ;;
-    esac
-    case "$PRODUCTION_RENDER_COST_REQUIRE_OUTPUT" in
-      0|false|False|FALSE|no|No|NO|off|Off|OFF|"") ;;
-      *)
-        PROD_RENDER_COST_ARGS+=(--require-output-metric)
-        ;;
-    esac
-    python3 -m prismaquant.production_render_cost \
-      --cost-mode "$COST_MODE" \
-      --production-cache "$PRODUCTION_RENDER_COST_CACHE_PATH" \
-      --baseline-cost "$BASE_COST_PATH" \
-      --output "$COST_PATH" \
-      --formats "$COST_FORMATS" \
-      --score-field "$PRODUCTION_RENDER_COST_SCORE_FIELD" \
-      "${PROD_RENDER_COST_ARGS[@]}" \
-      2>&1 | tee "${WORK_DIR}/logs/production_render_cost.log"
-  else
-    echo "[pipeline] [2c/4] production-render allocator cost exists, skipping"
-  fi
 fi
 
 if [[ "$COST_MODE" == "aura" ]]; then

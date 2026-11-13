@@ -1,24 +1,35 @@
-"""Exercise the production body composition against end-to-end autograd."""
+"""Exercise the production no-grad body forward against a reference forward."""
 from __future__ import annotations
 
 import hashlib
-import pickle
 import struct
 
-import numpy as np
-import pytest
 import torch
 from transformers import Qwen3Config, Qwen3ForCausalLM
 
 from prismaquant import incremental_probe as probe, probe_statistics
-from prismaquant.sensitivity_probe import FisherAccumulator
 from prismaquant.streaming_model import _build_streaming_context
 
 
-@pytest.mark.parametrize("importance_weighting", [False, True])
-def test_real_streamed_body_rows_match_end_to_end_fisher(
-        tmp_path, monkeypatch, importance_weighting):
-    monkeypatch.setenv("PRISMAQUANT_PROBE_MARGINALS", "1")
+def _forward(checkpoint, tmp_path, ids, *, act, rows_limit, tag=""):
+    context = _build_streaming_context(str(checkpoint), device=torch.device("cpu"),
+        dtype=torch.float32, offload_folder=str(tmp_path / f"offload{tag}"),
+        layers_per_shard=1, max_cache_slots=2, prefetch_workers=1,
+        prefetch_min_available_gb=0, cache_headroom_gb=0, attn_implementation="eager")
+    act_rows = probe._ActRowCache(str(act), rows_limit)
+    try:
+        stats, _routing, _embeds, _final = probe._probe_forward(
+            context, calib=ids, scope=".*", exclude="(?!)", act_rows=act_rows,
+            prefetch_lookahead=1)
+        act_rows.drain()
+        assert all(parameter.is_meta for layer in context.layers
+                   for parameter in layer.parameters())
+    finally:
+        context.shutdown()
+    return stats
+
+
+def test_real_streamed_body_rows_match_the_reference_forward(tmp_path, monkeypatch):
     monkeypatch.setenv("PRISMAQUANT_ACT_CACHE_WORKERS", "1")
     monkeypatch.setenv("PRISMAQUANT_LAYER_READ_THREADS", "1")
     torch.manual_seed(123)
@@ -32,12 +43,8 @@ def test_real_streamed_body_rows_match_end_to_end_fisher(
     ids = torch.tensor([[1, 3, 7, 11], [2, 5, 13, 17]], dtype=torch.int64)
     tracked = [name for name, module in reference.named_modules()
                if isinstance(module, torch.nn.Linear)]
-    for parameter in reference.parameters():
-        parameter.requires_grad_(False)
-    collector = FisherAccumulator(reference, tracked, {},
-                                  hook_packed_experts=False, emit_dense_marginals=True)
-    # Body Linear inputs of the grad-enabled forward: the oracle for the act/
-    # rows that the no-grad phase-1 forward writes.
+    # Body Linear inputs of a reference forward: the oracle for the act/ rows
+    # that the no-grad probe forward writes.
     body_inputs = {}
     input_hooks = [module.register_forward_hook(
         lambda _m, inp, _o, _name=name: body_inputs.__setitem__(
@@ -45,98 +52,66 @@ def test_real_streamed_body_rows_match_end_to_end_fisher(
         for name, module in reference.named_modules()
         if name.startswith("model.layers.") and isinstance(module, torch.nn.Linear)]
     try:
-        inputs = reference.get_input_embeddings()(ids).detach().requires_grad_(True)
-        hidden = reference.model(inputs_embeds=inputs, use_cache=False).last_hidden_state
+        with torch.no_grad():
+            hidden = reference.model(input_ids=ids, use_cache=False).last_hidden_state
+    finally:
         for handle in input_hooks:
             handle.remove()
-        logits = reference.lm_head(hidden[:, :-1, :]).float()
-        log_prob = torch.nn.functional.log_softmax(logits.reshape(-1, config.vocab_size), dim=-1)
-        ce = -log_prob.gather(1, ids[:, 1:].reshape(-1, 1)).squeeze(1)
-        if importance_weighting:
-            weights = (ce.detach() / ce.detach().mean()).clamp(.25, 4.)
-            loss = (ce * weights).sum()
-        else:
-            loss = ce.sum()
-        head_grad, = torch.autograd.grad(loss, logits, retain_graph=True)
-        x = hidden[:, :-1, :].detach().reshape(-1, config.hidden_size).float()
-        g = head_grad.detach().reshape(-1, config.vocab_size).float()
-        h = g.square().T @ x.square()
-        trace = float(h.sum())
-        weighted_trace = float((h * reference.lm_head.weight.detach().float().square()).sum())
-        head_expected = {
-            "n_tokens_seen": x.size(0), "h_trace_raw": trace,
-            "h_w2_sum_raw": weighted_trace, "h_trace": trace / ids.numel(),
-            "h_w2_sum": weighted_trace / ids.numel(),
-            "fisher_row": h.sum(dim=1).numpy(), "fisher_col": h.sum(dim=0).numpy(),
-            "g_sq_sum": g.square().sum(dim=0).numpy(),
-            "act_sq_sum": x.square().sum(dim=0).numpy(),
-            "act_absmax": x.abs().amax(dim=0).numpy(),
-        }
-        loss.backward()
-        collector.finalize(tracker=None, global_tokens=ids.numel())
-    finally:
-        collector.remove_hooks()
 
-    context = _build_streaming_context(str(checkpoint), device=torch.device("cpu"),
-        dtype=torch.float32, offload_folder=str(tmp_path / "offload"), layers_per_shard=1,
-        max_cache_slots=2, prefetch_workers=1, prefetch_min_available_gb=0,
-        cache_headroom_gb=0, attn_implementation="eager")
-    try:
-        precomputed = probe._compute_global_precompute(context, calib=ids,
-            importance_weighting=importance_weighting, prefetch_lookahead=1,
-            minimax_fast_moe=False, minimax_fast_moe_chunk_size=32,
-            resident_include_union=".*", resident_exclude="(?!)",
-            activation_cache_dir=str(tmp_path / "activations"),
-            activation_rows_limit=ids.numel())
-        assert len(body_inputs) == 14
-        for name, rows in body_inputs.items():
-            blob = torch.load(tmp_path / "activations" / (name.replace(".", "__") + ".pt"),
-                              weights_only=False)
-            torch.testing.assert_close(blob["inputs"], rows[blob["row_indices"]])
-        output = tmp_path / "probe.pkl"
-        probe._run_body_streaming_shard(context, calib=ids, linear_include=".*",
-            linear_exclude="(?!)", importance_weighting=importance_weighting,
-            activation_cache_dir=str(tmp_path / "activations"), h_detail_dir=None,
-            output_path=str(output), dataset_name="explicit-tokens", dtype_name="fp32",
-            seqlen=ids.size(1), model_path=str(checkpoint), prefetch_lookahead=1,
-            minimax_fast_moe=False, activation_rows_limit=ids.numel(),
-            precomputed=precomputed)
-        with output.open("rb") as handle:
-            actual = pickle.load(handle)["stats"]
-        assert set(actual) == set(tracked)
-        for name in tracked:
-            expected = head_expected if name == "lm_head" else collector.stats[name]
-            assert actual[name]["n_tokens_seen"] == expected["n_tokens_seen"], name
-            for field in ("h_trace_raw", "h_w2_sum_raw", "h_trace", "h_w2_sum",
-                          "fisher_row", "fisher_col", "g_sq_sum", "act_sq_sum", "act_absmax"):
-                np.testing.assert_allclose(actual[name][field], expected[field],
-                                           rtol=2e-5, atol=1e-7, err_msg=f"{name}/{field}")
-        assert all(parameter.is_meta for layer in context.layers for parameter in layer.parameters())
-        assert len(precomputed.activations_cpu) == 3
-    finally:
-        context.shutdown()
+    act = tmp_path / "activations"
+    actual = _forward(checkpoint, tmp_path, ids, act=act, rows_limit=ids.numel())
+    assert len(body_inputs) == 14
+    for name, rows in body_inputs.items():
+        blob = torch.load(act / (name.replace(".", "__") + ".pt"), weights_only=False)
+        torch.testing.assert_close(blob["inputs"], rows[blob["row_indices"]])
+    # lm_head row = sample * T + token over the scored (non-last) positions.
+    head = torch.load(act / "lm_head.pt", weights_only=False)
+    assert head["row_indices"].numel() == ids.size(0) * (ids.size(1) - 1)
+    assert not bool((head["row_indices"] % ids.size(1) == ids.size(1) - 1).any())
+    torch.testing.assert_close(
+        head["inputs"],
+        hidden.reshape(-1, config.hidden_size)[head["row_indices"]])
+    assert set(actual) == set(tracked)
+    for name in tracked:
+        weight = reference.get_submodule(name).weight.detach()
+        expected_tokens = ids.size(0) * (ids.size(1) - 1) if name == "lm_head" else ids.numel()
+        assert actual[name]["n_tokens_seen"] == expected_tokens, name
+        assert actual[name]["n_params"] == weight.numel(), name
+        torch.testing.assert_close(
+            torch.tensor(actual[name]["w_norm_sq"]), weight.float().square().sum(),
+            msg=name)
+        torch.testing.assert_close(
+            torch.tensor(actual[name]["w_max_abs"]), weight.float().abs().max(),
+            msg=name)
 
 
-@pytest.mark.parametrize("marginals", ["0", "1"])
-def test_ordinary_mtp_retains_its_declared_legacy_marginal_payload(monkeypatch, marginals):
-    monkeypatch.setenv("PRISMAQUANT_PROBE_MARGINALS", marginals)
-    torch.manual_seed(42)
-    wrapper = torch.nn.Module()
-    wrapper.mtp = torch.nn.Module()
-    wrapper.mtp.fc = torch.nn.Linear(3, 2, bias=False)
-    collector = probe._build_mtp_fisher_accumulator(wrapper, ["mtp.fc"], {}, None,
-        input_rows_limit=8, detail_dir=None)
-    try:
-        inputs = torch.randn(1, 2, 3, requires_grad=True)
-        wrapper.mtp.fc(inputs).sum().backward()
-        collector.finalize(tracker=None, global_tokens=4)
-        row = collector.stats["mtp.fc"]
-        assert row["n_tokens_seen"] == 2
-        assert row["h_trace_raw"] > 0
-        assert row["h_trace"] == pytest.approx(row["h_trace_raw"] / 4)
-        assert not ({"fisher_row", "fisher_col", "g_sq_sum", "act_sq_sum", "act_absmax"} & row.keys())
-    finally:
-        collector.remove_hooks()
+class _GroupedLinear(torch.nn.Linear):
+    """A declared grouped class: `[G*R, D]` weight consumed per group."""
+
+    def __init__(self, d_in, out_features, n_groups):
+        super().__init__(d_in, out_features, bias=False)
+        self.n_groups = n_groups
+
+
+def test_a_grouped_linear_row_carries_num_groups_not_num_experts():
+    """`num_groups` -- never `num_experts`, which downstream reads as a
+    packed expert stack (`_shape_from_stats`, `_stats_indicates_packed_expert`)."""
+    from prismaquant.probe_inventory import ProbeUnit
+
+    class _Profile:
+        def probe_grouped_module_class_names(self):
+            return ("_GroupedLinear",)
+
+    groups, rows_per_group, d_in = 2, 3, 4
+    model = torch.nn.Module()
+    model.grouped = _GroupedLinear(d_in, groups * rows_per_group, groups)
+    unit = ProbeUnit("grouped", "grouped_linear", ("grouped.weight",))
+    entry = probe._probe_unit_rows(model, _Profile(), unit, {})["grouped"]
+    assert entry["num_groups"] == groups
+    assert "num_experts" not in entry
+    assert entry["in_features"] == d_in
+    assert entry["out_features"] == groups * rows_per_group
+    assert entry["n_params"] == groups * rows_per_group * d_in
 
 
 def _scalar_priority(row: int) -> int:
@@ -188,25 +163,7 @@ def test_act_cache_is_byte_identical_under_different_global_rng_states(
     for seed in (1, 2):
         torch.manual_seed(seed)
         act = tmp_path / f"act{seed}"
-        context = _build_streaming_context(str(checkpoint), device=torch.device("cpu"),
-            dtype=torch.float32, offload_folder=str(tmp_path / f"offload{seed}"),
-            layers_per_shard=1, max_cache_slots=2, prefetch_workers=1,
-            prefetch_min_available_gb=0, cache_headroom_gb=0, attn_implementation="eager")
-        try:
-            precomputed = probe._compute_global_precompute(context, calib=ids,
-                importance_weighting=True, prefetch_lookahead=1,
-                minimax_fast_moe=False, minimax_fast_moe_chunk_size=32,
-                resident_include_union=".*", resident_exclude="(?!)",
-                activation_cache_dir=str(act), activation_rows_limit=37)
-            probe._run_body_streaming_shard(context, calib=ids, linear_include=".*",
-                linear_exclude="(?!)", importance_weighting=True,
-                activation_cache_dir=str(act), h_detail_dir=None,
-                output_path=str(tmp_path / f"probe{seed}.pkl"),
-                dataset_name="explicit-tokens", dtype_name="fp32", seqlen=ids.size(1),
-                model_path=str(checkpoint), prefetch_lookahead=1, minimax_fast_moe=False,
-                activation_rows_limit=37, precomputed=precomputed)
-        finally:
-            context.shutdown()
+        _forward(checkpoint, tmp_path, ids, act=act, rows_limit=37, tag=str(seed))
         acts.append({p.name: p.read_bytes() for p in sorted(act.glob("*.pt"))})
     assert len(acts[0]) == 15 and acts[0] == acts[1]
     head = torch.load(tmp_path / "act1" / "lm_head.pt", weights_only=False)

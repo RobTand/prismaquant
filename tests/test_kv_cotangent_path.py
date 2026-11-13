@@ -8,8 +8,9 @@ forwards each layer in ISOLATION from a phase-1 capture, and that capture is
 detached — so a sharing layer's backward stopped dead at the borrowed K/V and
 the storing layer's ``h_trace`` for ``k_proj``/``v_proj`` counted only its own
 layer's gradient, missing the gradient flowing through EVERY layer that
-consumes its K/V. ``incremental_probe.kv_shared_fisher_block_reason`` blocked
-the probe over that under-count (MINOR-M33).
+consumes its K/V. The probe was blocked over that under-count (MINOR-M33);
+the isolated reverse sweeps of the AURA and joint cost stages use the same
+accumulator.
 
 ``SharedStateCotangents`` closes it: borrowed tensors are grafted as
 grad-enabled leaves, each consumer's ``leaf.grad`` is summed per source, and
@@ -21,8 +22,8 @@ merely produces a *bigger* number could be bigger for the wrong reason, so
 these tests compute the same Fisher two ways on the same synthetic weights —
 (a) one end-to-end autograd backward over the composed model, (b) the isolated
 phase-3 reverse sweep with cotangent accumulation — and require them to agree,
-using the shipped ``FisherAccumulator`` for both arms so only the cotangent
-differs. Then they show the pre-fix protocol is strictly smaller.
+using one test-local per-token Fisher accumulator for both arms so only the
+cotangent differs. Then they show the pre-fix protocol is strictly smaller.
 
 No GPU, no Gemma4 weights, no checkpoint: synthetic modules whose contract
 mirrors the real one (unconditional read, int keys, several consumers per
@@ -41,7 +42,6 @@ from prismaquant.layer_streaming import _call_layer
 from prismaquant.model_profiles.gemma4 import Gemma4Profile
 from prismaquant.model_profiles.qwen3 import Qwen3Profile
 from prismaquant.sensitivity_probe import (
-    FisherAccumulator,
     SharedStateCotangents,
     kv_cotangent_path_enabled,
 )
@@ -151,9 +151,42 @@ def _loss(model: _ToyModel, hidden, ids):
     )
 
 
+class _Fisher:
+    """Per-token empirical Fisher trace of each body Linear,
+    sum_t ||gy_t||^2 * ||x_t||^2 / global_tokens: a full-backward hook POPs the
+    forward input it saved, so a hook that fired twice would drop a gradient."""
+
+    def __init__(self, model):
+        self.raw: dict[str, float] = {}
+        self.stats: dict[str, dict] = {}
+        self._saved: dict[str, torch.Tensor] = {}
+        self._handles = []
+        for name in _body_linears(model):
+            module = model.get_submodule(name)
+            self.raw[name] = 0.0
+            self._handles.append(module.register_forward_hook(
+                lambda _m, inp, _o, _n=name: self._saved.__setitem__(
+                    _n, inp[0].detach())))
+            self._handles.append(module.register_full_backward_hook(
+                lambda _m, _gi, go, _n=name: self._accumulate(_n, go[0])))
+
+    def _accumulate(self, name, gy):
+        x = self._saved.pop(name)
+        x2 = x.reshape(-1, x.size(-1))
+        gy2 = gy.reshape(-1, gy.size(-1))
+        self.raw[name] += float((gy2.pow(2).sum(dim=1) * x2.pow(2).sum(dim=1)).sum())
+
+    def finalize(self, _tracker, global_tokens):
+        self.stats = {name: {"h_trace": raw / global_tokens}
+                      for name, raw in self.raw.items()}
+
+    def remove_hooks(self):
+        for handle in self._handles:
+            handle.remove()
+
+
 def _fisher(model):
-    return FisherAccumulator(model, tracked=_body_linears(model),
-                             expert_info={}, hook_packed_experts=False)
+    return _Fisher(model)
 
 
 def _calib(model: _ToyModel, n=2, t=5, seed=3):
@@ -206,7 +239,7 @@ def run_protocol(model: _ToyModel, ids, profile, *, cotangents: bool):
     CE grad at the tail; phase-3 sweeps in REVERSE, re-forwarding each layer in
     isolation from its captured input and chaining `x_in.grad` upward.
 
-    Mirrors `incremental_probe._run_shard_body`'s phase-3 call sequence:
+    The call sequence the shipped reverse sweeps use:
     graft -> forward -> produced_roots -> backward -> harvest.
     """
     # ---- phase 1 ----
@@ -340,7 +373,7 @@ def test_h_trace_equivalence_and_the_size_of_the_undercount():
     for name in sorted(base):
         b, f = base[name], fixed[name]
         rel = abs(f - b) / abs(b)
-        # fp32 inside FisherAccumulator's squaring is the only slack.
+        # Floating-point summation order is the only slack.
         assert rel < 1e-6, f"{name}: baseline {b!r} vs protocol {f!r} ({rel:.2e})"
 
     for name in producers:
@@ -362,8 +395,7 @@ def test_h_trace_equivalence_and_the_size_of_the_undercount():
 
 def test_producer_backward_hook_fires_exactly_once_with_the_total():
     """The silent-halving trap. Every Fisher hook in this repo POPs its saved
-    forward input (`saved_inputs.pop(name)` in `incremental_probe`'s phase-3
-    hooks, `self._saved_inputs.pop` in `FisherAccumulator`), so a
+    forward input (`self._saved.pop` in this file's `_Fisher`), so a
     `full_backward_hook` that fired twice — once per backward root — would
     accumulate the first gradient and silently drop the second. Autograd only
     runs a node after every contribution has arrived, which is exactly why the
@@ -625,7 +657,7 @@ def test_k_eq_v_layer_seeds_one_root_and_still_matches_end_to_end():
 
 
 # --------------------------------------------------------------------------
-# The guard, inverted
+# The flag
 # --------------------------------------------------------------------------
 def test_flag_default_and_parsing(monkeypatch):
     monkeypatch.delenv("PRISMAQUANT_KV_COTANGENT", raising=False)
@@ -636,48 +668,6 @@ def test_flag_default_and_parsing(monkeypatch):
     for on in ("1", "true", "yes"):
         monkeypatch.setenv("PRISMAQUANT_KV_COTANGENT", on)
         assert kv_cotangent_path_enabled() is True, on
-
-
-def test_probe_sweeps_wire_the_accumulator_in_the_right_order():
-    """AST pin on the shipped reverse sweep: the accumulator is built ONCE per
-    sweep (not per layer — a per-layer instance would lose every consumer's
-    cotangent), the layer's pass state goes through `graft`, and the backward is
-    the two-root form guarded by `produced_roots`."""
-    import ast
-    import inspect
-    import textwrap
-
-    from prismaquant import incremental_probe as ip
-
-    tree = ast.parse(textwrap.dedent(inspect.getsource(ip._run_body_streaming_shard)))
-    news = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
-            and isinstance(n.func, ast.Name)
-            and n.func.id == "SharedStateCotangents"]
-    assert len(news) == 1, "one accumulator per sweep"
-    # ... and it is gated by the flag, not hard-wired on.
-    assert any(kw.arg == "enabled" for kw in news[0].keywords), \
-        "accumulator not gated by PRISMAQUANT_KV_COTANGENT"
-    loops = [n for n in ast.walk(tree) if isinstance(n, ast.For)
-             and isinstance(n.target, ast.Name) and n.target.id == "L"
-             and isinstance(n.iter, ast.Call)
-             and isinstance(n.iter.func, ast.Name)
-             and n.iter.func.id == "reversed"]
-    assert len(loops) == 1, "reverse sweep not found"
-    body = list(ast.walk(loops[0]))
-    assert news[0] not in body, "accumulator rebuilt per layer"
-    for attr in ("produced_roots", "harvest", "graft"):
-        assert any(isinstance(n, ast.Call)
-                   and isinstance(n.func, ast.Attribute)
-                   and n.func.attr == attr for n in body), \
-            f"reverse sweep never calls .{attr}()"
-    # The seeded backward must be the multi-root form; a plain
-    # `out.backward(g)` cannot carry the shared-state cotangent.
-    assert any(isinstance(n, ast.Call)
-               and isinstance(n.func, ast.Attribute)
-               and n.func.attr == "backward"
-               and isinstance(n.func.value, ast.Attribute)
-               and n.func.value.attr == "autograd" for n in body), \
-        "no torch.autograd.backward multi-root path"
 
 
 def test_the_sweep_order_claim_holds_for_gemma4():
@@ -757,27 +747,3 @@ def test_the_sweep_order_claim_holds_for_gemma4():
             "two-pass scheme."
         )
     assert sharing > 0, "config declared KV sharing but no layer reported it"
-
-
-def test_guard_no_longer_blocks_kv_sharing_by_default(monkeypatch):
-    from prismaquant import incremental_probe as ip
-
-    monkeypatch.setattr(ip, "config_num_kv_shared_layers", lambda p: 5)
-    monkeypatch.delenv("PRISMAQUANT_ALLOW_KV_SHARED_FISHER", raising=False)
-    monkeypatch.delenv("PRISMAQUANT_KV_COTANGENT", raising=False)
-    assert ip.kv_shared_fisher_block_reason("any/model") is None
-
-
-def test_guard_fires_when_the_cotangent_path_is_switched_off(monkeypatch):
-    from prismaquant import incremental_probe as ip
-
-    monkeypatch.setattr(ip, "config_num_kv_shared_layers", lambda p: 5)
-    monkeypatch.delenv("PRISMAQUANT_ALLOW_KV_SHARED_FISHER", raising=False)
-    monkeypatch.setenv("PRISMAQUANT_KV_COTANGENT", "0")
-    msg = ip.kv_shared_fisher_block_reason("any/model")
-    assert msg is not None
-    assert "num_kv_shared_layers=5" in msg
-    assert "PRISMAQUANT_KV_COTANGENT=0" in msg
-    # ... and the explicit accept-the-under-count override still wins.
-    monkeypatch.setenv("PRISMAQUANT_ALLOW_KV_SHARED_FISHER", "1")
-    assert ip.kv_shared_fisher_block_reason("any/model") is None

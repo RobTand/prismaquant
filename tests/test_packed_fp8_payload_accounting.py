@@ -51,7 +51,6 @@ def test_allocator_candidate_prices_the_admitted_fp8_payload(shape):
     weight = _weight(shape)
     payload_bytes = _emitted_payload_bytes(weight)
     stats = {qname: {
-        "h_trace": 1.0,
         "n_params": weight.numel(),
         "out_features": shape[-2],
         "in_features": shape[-1],
@@ -61,6 +60,7 @@ def test_allocator_candidate_prices_the_admitted_fp8_payload(shape):
         "weight_mse": 1.0e-4,
         "output_mse": 2.0e-4,
         "output_mse_measured": True,
+        "predicted_dloss": 1.0e-4,
     }}}
     masks = []
     built = build_candidates(

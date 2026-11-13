@@ -347,7 +347,7 @@ def test_base_rules_claim_router_gates_and_packed_expert_stacks():
     assert result.claims["router.weight"].disposition == "pin"
     assert "never" in result.claims["router.weight"].reason
     assert result.claims["experts.gate_proj"].disposition == "decide"
-    assert "packed-expert Fisher path" in \
+    assert "priced per stack" in \
         result.claims["experts.gate_proj"].reason
     # And the discovered edges exist for both (they are genuinely fed).
     assert any(e.op == "linear" for e in result.edges_for("router.weight"))

@@ -77,8 +77,8 @@ class _StrictLayer(nn.Module):
 
 
 def _run_pass(profile, layers, hidden):
-    """Mimic the production loop (`incremental_probe._compute_global_precompute`
-    phase-1): build the shared state ONCE at the outermost scope of the pass, thread it
+    """Mimic the production loop (`incremental_probe._probe_forward`):
+    build the shared state ONCE at the outermost scope of the pass, thread it
     into every layer call. Returns the pass state so tests can inspect it."""
     pass_state = profile.new_forward_pass_state()
     for layer in layers:
@@ -324,37 +324,6 @@ def test_gemma4_capture_is_detached_cpu_and_layer_indexed():
                for t in captured[3])
 
 
-# --- the probe's phase-1 -> phase-3 hand-off survives the disk cache -------
-def test_precompute_cache_round_trips_shared_pass_state(tmp_path):
-    """Phase-3 rebuilds KV-sharing layers' borrowed K/V from
-    `GlobalPrecompute.shared_pass_state`. The shard runners routinely read the
-    precompute back from disk (resume / one process per shard), so dropping
-    the key on save made every cached run raise inside attention."""
-    from prismaquant import incremental_probe as ip
-
-    kv = (torch.randn(1, 2, 3), torch.randn(1, 2, 3))
-    pre = ip.GlobalPrecompute(
-        activations_cpu=[torch.zeros(1, 2, 3)],
-        grad_at_tail=torch.zeros(1, 2, 3),
-        ids=torch.zeros(1, 2, dtype=torch.long),
-        resident_stats={}, resident_h_full={}, resident_g2_per_token={},
-        resident_act_snaps={}, resident_act_row_indices={},
-        expert_info={}, router_counts={}, router_totals={},
-        router_active_counts={}, expert_route_stats={},
-        shared_pass_state={5: kv},
-    )
-    meta = {"model": "m", "nsamples": 1}
-    path = tmp_path / "work" / "precomputed.pt"
-
-    ip._save_precompute_cache(path, pre, meta)
-    loaded = ip._load_precompute_cache(path, meta, torch.device("cpu"))
-
-    assert loaded is not None
-    assert set(loaded.shared_pass_state) == {5}
-    assert torch.equal(loaded.shared_pass_state[5][0], kv[0])
-    assert torch.equal(loaded.shared_pass_state[5][1], kv[1])
-
-
 # --- where the production loops build the shared state ---------------------
 def _fn_ast(func):
     import ast
@@ -384,7 +353,7 @@ def _layer_loops(node):
     return out
 
 
-def test_probe_phase1_builds_shared_state_outside_the_layer_loop():
+def test_probe_forward_builds_shared_state_outside_the_layer_loop():
     """Per PASS, not per layer: hoisted above `for L in range(num_layers)` so
     the storing layer's K/V is still there when a later layer borrows it (and
     so `_call_layer` receives the same object every iteration)."""
@@ -392,11 +361,11 @@ def test_probe_phase1_builds_shared_state_outside_the_layer_loop():
 
     from prismaquant import incremental_probe as ip
 
-    fn = _fn_ast(ip._compute_global_precompute)
+    fn = _fn_ast(ip._probe_forward)
     news = _calls(fn, "new_forward_pass_state")
-    assert len(news) == 1, "phase-1 must build the shared state exactly once"
+    assert len(news) == 1, "the forward must build the shared state exactly once"
     loops = _layer_loops(fn)
-    assert loops, "phase-1 layer loop not found — did the loop shape change?"
+    assert loops, "forward layer loop not found — did the loop shape change?"
     for loop in loops:
         assert news[0] not in list(ast.walk(loop)), \
             "shared state rebuilt per layer would lose earlier layers' writes"
@@ -405,27 +374,4 @@ def test_probe_phase1_builds_shared_state_outside_the_layer_loop():
                     and isinstance(c.func, ast.Name)
                     and c.func.id == "_call_layer"
                     and any(kw.arg == "pass_state" for kw in c.keywords)]
-        assert threaded, "phase-1 layer call does not thread pass_state"
-
-
-def test_precompute_cache_without_shared_state_loads_as_none(tmp_path):
-    """Architectures that declare nothing (and caches written before the key
-    existed) load with `shared_pass_state=None`."""
-    from prismaquant import incremental_probe as ip
-
-    pre = ip.GlobalPrecompute(
-        activations_cpu=[torch.zeros(1, 2, 3)],
-        grad_at_tail=torch.zeros(1, 2, 3),
-        ids=torch.zeros(1, 2, dtype=torch.long),
-        resident_stats={}, resident_h_full={}, resident_g2_per_token={},
-        resident_act_snaps={}, resident_act_row_indices={},
-        expert_info={}, router_counts={}, router_totals={},
-        router_active_counts={}, expert_route_stats={},
-    )
-    meta = {"model": "m"}
-    path = tmp_path / "precomputed.pt"
-
-    ip._save_precompute_cache(path, pre, meta)
-    loaded = ip._load_precompute_cache(path, meta, torch.device("cpu"))
-
-    assert loaded is not None and loaded.shared_pass_state is None
+        assert threaded, "forward layer call does not thread pass_state"

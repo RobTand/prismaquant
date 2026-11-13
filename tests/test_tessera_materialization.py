@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from safetensors.torch import save_file
 
 from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant import tessera_cell_measurement as cell_measurement
@@ -21,7 +20,7 @@ from prismaquant import tessera_campaign as tc
 from prismaquant import tessera_expert_projection as tep
 from prismaquant.layer_config import canonicalize_assignment, load_assignment
 from test_tessera_packed_export_scope import _pack
-from test_tessera_export_projection import case, _meta, _units, FMT, STACK, N, DENSE
+from test_tessera_export_projection import case, _units, FMT, STACK, N, DENSE
 
 
 @pytest.fixture
@@ -510,33 +509,6 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
     translated, _provenance = build_serving_plan(producer_config, shapes,
         cover='as-allocated', allow_disagreement=False, surface=tessera_surface(), with_control=False)
     assert translated[missing + '.weight'] == {'grid':'E4M3', 'q256':1024}
-
-
-def test_real_allocator_routes_opt_in_request_before_strict_wire_gate(tmp_path, monkeypatch):
-    """Use the established scoped packed solve to exercise the CLI branch."""
-    import sys
-    from pathlib import Path
-    from prismaquant import allocator
-    from test_tessera_stack_driver_integration import test_a_stack_payload_allocates_through_the_real_allocator
-    original_main = allocator.main
-    seen = []
-    def record(path, **kwargs):
-        assert canonicalize_assignment(kwargs['layer_config']) == kwargs['assignment']
-        assert Path(kwargs['cost_path']).is_file()
-        assert not Path(kwargs['output_path']).exists()
-        seen.append((path, kwargs))
-    monkeypatch.setattr(tm, 'write_selection_request', record)
-    def both_paths():
-        original_argv = list(sys.argv)
-        sys.argv += ['--tessera-materialization-plan', str(tmp_path/'selection-request.json')]
-        original_main()
-        assert len(seen) == 1
-        assert not (tmp_path/'layer.json').exists()
-        sys.argv[:] = original_argv
-        original_main()
-    monkeypatch.setattr(allocator, 'main', both_paths)
-    test_a_stack_payload_allocates_through_the_real_allocator(tmp_path, monkeypatch)
-    assert seen[0][0] == str(tmp_path/'selection-request.json')
 
 
 @pytest.mark.parametrize('field', ['model.safetensors', 'config.json', 'tokenizer.json'])

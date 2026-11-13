@@ -2517,33 +2517,6 @@ def _verify_route_histogram(
     return []
 
 
-def kv_shared_fisher_echo(env: Mapping[str, str] | None = None) -> dict[str, Any]:
-    """Echo the KV-cotangent / shared-Fisher flag state (D24 caveat).
-
-    An allocation probed with `PRISMAQUANT_ALLOW_KV_SHARED_FISHER=1` (or with the
-    cotangent path switched off) rode an under-counted `k_proj`/`v_proj`
-    `h_trace`. That is currently visible only in a probe log; putting it on the
-    ship record makes it visible on the artifact.
-    """
-    env = os.environ if env is None else env
-    allow = env.get("PRISMAQUANT_ALLOW_KV_SHARED_FISHER", "0")
-    cotangent = env.get("PRISMAQUANT_KV_COTANGENT", "1")
-    allow_on = allow not in ("", "0", "false", "False")
-    cotangent_on = cotangent not in ("", "0", "false", "False")
-    return {
-        "PRISMAQUANT_ALLOW_KV_SHARED_FISHER": allow,
-        "PRISMAQUANT_KV_COTANGENT": cotangent,
-        "kv_cotangent_path_enabled": cotangent_on,
-        "unvalidated_kv_fisher_correction": bool(allow_on or not cotangent_on),
-        "caveat": (
-            "D24: the KV-cotangent path has never been run on a real "
-            "num_kv_shared_layers>0 checkpoint; ALLOW_KV_SHARED_FISHER=1 or "
-            "KV_COTANGENT=0 means this allocation rode an under-counted "
-            "k_proj/v_proj h_trace"
-        ),
-    }
-
-
 def _verify_build_block(card: Mapping[str, Any]) -> list[str]:
     """Replay the build-lane forensic block the exporter stamps on the card.
 
@@ -2556,13 +2529,6 @@ def _verify_build_block(card: Mapping[str, Any]) -> list[str]:
 
     What is replayed here, and why each half is shaped this way:
 
-    * The `kv_shared_fisher` policy bit is a gate: the echo's own caveat says
-      the allocation rode an under-counted `k_proj`/`v_proj` `h_trace`, and
-      the probe lane already refuses to PRODUCE such an allocation by default
-      (`incremental_probe.kv_shared_fisher_block_reason`) — reaching export
-      takes an explicit override, and publication past this gate takes the
-      stamped `--force-unverified` hatch. Default-path cards echo `False`
-      and are silent here.
     * The forensic hashes and counters are shape-replayed against what the
       producer can stamp (`file_sha256` emits 64 hex chars or None; the
       assignment digests are 16 hex chars or None; the histogram is a
@@ -2593,24 +2559,6 @@ def _verify_build_block(card: Mapping[str, Any]) -> list[str]:
         prefill_frontier_replay_claim(build)
     except ValueError as exc:
         problems.append(str(exc))
-    fisher = build.get("kv_shared_fisher")
-    if isinstance(fisher, Mapping):
-        flag = fisher.get("unvalidated_kv_fisher_correction")
-        if flag is True:
-            problems.append(
-                "build.kv_shared_fisher reports "
-                "unvalidated_kv_fisher_correction=true: this allocation rode "
-                "an under-counted k_proj/v_proj h_trace "
-                f"({fisher.get('caveat') or 'D24'}) — re-probe with the "
-                "KV-cotangent path enabled and without "
-                "PRISMAQUANT_ALLOW_KV_SHARED_FISHER=1, or ship it stamped "
-                "--force-unverified"
-            )
-        elif flag is not False:
-            problems.append(
-                "build.kv_shared_fisher carries no boolean "
-                f"unvalidated_kv_fisher_correction flag: {flag!r}"
-            )
     for key, width in (
         ("layer_config_sha", 64),
         ("assignment_hash", 16),

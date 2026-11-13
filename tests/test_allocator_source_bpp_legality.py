@@ -27,7 +27,6 @@ from prismaquant.allocator_candidates import (
 
 def _stats(shape: tuple[int, ...]) -> dict[str, object]:
     row: dict[str, object] = {
-        "h_trace": 1.0,
         "n_params": math.prod(shape),
         "out_features": shape[-2],
         "in_features": shape[-1],
@@ -42,6 +41,7 @@ def _measured_cost() -> dict[str, object]:
         "weight_mse": 1.0e-4,
         "output_mse": 2.0e-4,
         "output_mse_measured": True,
+        "predicted_dloss": 1.0e-4,
     }
 
 
@@ -252,7 +252,7 @@ def test_source_census_without_exact_linear_shape_fails_closed():
     qname = "model.layers.0.legacy_rank1"
     with pytest.raises(ValueError, match="exact rank>=2 Linear shape"):
         build_candidates(
-            {qname: {"h_trace": 1.0, "n_params": 4096}},
+            {qname: {"n_params": 4096}},
             {qname: {"NVFP4": _measured_cost()}},
             [fr.get_format("NVFP4")],
             source_manifest={qname: "bf16"},

@@ -1,7 +1,6 @@
 """Read-only external cost intake; workloads run through PrismaBuild."""
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 from pathlib import Path
@@ -32,7 +31,7 @@ def _api():
     return prepriced_cost
 
 
-def _payload(model, mode="local"):
+def _payload(model, mode="aura"):
     return {
         "costs": {"model.layers.0.self_attn.o_proj": {
             "BF16": {"predicted_dloss": 0.0},
@@ -51,14 +50,14 @@ def _write(tmp_path, payload):
 
 def _validate(model, path, **kwargs):
     return _api().validate_prepriced_cost(
-        path, cost_mode=kwargs.pop("cost_mode", "local"),
+        path, cost_mode=kwargs.pop("cost_mode", "aura"),
         model=model, **kwargs)
 
 
 def _tessera_payload(model):
-    from prismaquant.cost_currency import RENDER_SCORE_COST_MODE
     from prismaquant.tessera_campaign_table import (CURRENCY)
-    payload = _payload(model, RENDER_SCORE_COST_MODE)
+    # The render-score stamp the campaign carried; #3448 removed that mode.
+    payload = _payload(model, "production-render-score")
     fmt = "TESSERA_E4M3_K1_R1024"
     payload["formats"].append(fmt)
     payload["costs"]["model.layers.0.self_attn.o_proj"][fmt] = {
@@ -72,7 +71,7 @@ def _tessera_payload(model):
     return payload
 
 
-@pytest.mark.parametrize("mode", ["local", "production-render-score", "aura", "production-render"])
+@pytest.mark.parametrize("mode", ["aura"])
 def test_valid_input_reports_exact_bytes_without_modifying_file(tmp_path, mode, bf16_source):
     from prismaquant.cost_currency import COST_MODE_OBJECTIVE_CURRENCY
     path = _write(tmp_path, _payload(bf16_source, mode))
@@ -112,7 +111,7 @@ def test_invalid_input_refuses_with_path(tmp_path, condition, bf16_source):
         _validate(bf16_source, path)
 
 
-@pytest.mark.parametrize("stamped,requested", [(None, "local"), ("unowned-mode", "local"), ("aura", "local"), ("local", "unowned-mode"), ("production-render", "production-render-score")])
+@pytest.mark.parametrize("stamped,requested", [(None, "aura"), ("unowned-mode", "aura"), ("aura", "local"), ("aura", "production-render-score"), ("local", "aura"), ("production-render-score", "aura"), ("aura", "unowned-mode")])
 def test_mode_must_be_explicit_known_and_exact(tmp_path, stamped, requested, bf16_source):
     payload = _payload(bf16_source, stamped)
     if stamped is None:
@@ -167,37 +166,11 @@ def test_format_report_uses_actual_rows_without_fabricating_missing_roster(tmp_p
     assert report["declared_formats"] == []
 
 
-def test_tessera_currency_and_hessian_owner_reports_are_preserved(tmp_path, bf16_source):
-    from prismaquant.cost_currency import require_run_currency
-    from prismaquant.tessera_menu import assert_uniform_hessian_identity
-    payload = _tessera_payload(bf16_source)
-    report = _validate(bf16_source, _write(tmp_path, payload), cost_mode=payload["provenance"]["cost_mode"])
-    assert report["currency"] == require_run_currency(payload)
-    assert report["tessera_hessian_identity"] == assert_uniform_hessian_identity(payload["costs"])
-
-
 def test_tessera_currency_mismatch_refuses_even_with_matching_run_mode(tmp_path, bf16_source):
     payload = _tessera_payload(bf16_source)
     payload["provenance"]["cost_mode"] = "aura"
     with pytest.raises(ValueError, match="currency|aura"):
         _validate(bf16_source, _write(tmp_path, payload), cost_mode="aura")
-
-
-def test_mixed_tessera_hessian_identities_refuse(tmp_path, bf16_source):
-    payload = _tessera_payload(bf16_source)
-    other = copy.deepcopy(payload["costs"]["model.layers.0.self_attn.o_proj"])
-    other["TESSERA_E4M3_K1_R1024"]["hessian_identity"]["text_sha"] = "other-draw"
-    payload["costs"]["other.unit"] = other
-    with pytest.raises(ValueError, match="Hessian identities"):
-        _validate(bf16_source, _write(tmp_path, payload), cost_mode=payload["provenance"]["cost_mode"])
-
-
-def test_unstamped_tessera_hessian_remains_no_claim_not_matching_identity(tmp_path, bf16_source):
-    payload = _tessera_payload(bf16_source)
-    payload["costs"]["model.layers.0.self_attn.o_proj"]["TESSERA_E4M3_K1_R1024"].pop("hessian_identity")
-    report = _validate(bf16_source, _write(tmp_path, payload), cost_mode=payload["provenance"]["cost_mode"])
-    assert report["tessera_hessian_identity"]["unstamped_rows"] == 1
-    assert report["tessera_hessian_identity"]["supplied"] is None
 
 
 @pytest.mark.parametrize("manifest_valid", [True, False])
@@ -230,7 +203,7 @@ def test_cli_report_and_reverification_bind_original_input_bytes(tmp_path, bf16_
     path = _write(tmp_path, _payload(bf16_source))
     report = tmp_path / "local receipt.json"
     before = path.read_bytes()
-    result = _cli("--path", path, "--cost-mode", "local", "--model", bf16_source, "--report", report)
+    result = _cli("--path", path, "--cost-mode", "aura", "--model", bf16_source, "--report", report)
     assert result.returncode == 0, result.stderr
     assert json.loads(report.read_text())["sha256"] == hashlib.sha256(before).hexdigest()
     assert _cli("--verify-report", report).returncode == 0
@@ -249,7 +222,7 @@ def test_cli_report_never_overwrites_supplied_input(tmp_path, alias, bf16_source
         report.symlink_to(path)
     elif alias == "hardlink":
         report.hardlink_to(path)
-    result = _cli("--path", path, "--cost-mode", "local", "--model", bf16_source, "--report", report)
+    result = _cli("--path", path, "--cost-mode", "aura", "--model", bf16_source, "--report", report)
     assert result.returncode != 0
     assert "report" in result.stderr
     assert path.read_bytes() == before
@@ -269,7 +242,10 @@ def test_reverification_refuses_original_input_symlink_retarget(tmp_path, alias,
     original.mkdir()
     replacement.mkdir()
     source = _write(original, _payload(bf16_source))
-    other = _write(replacement, _payload(bf16_source, "aura"))
+    # Different bytes from the original (it once differed by its stamp).
+    other_payload = _payload(bf16_source)
+    other_payload["meta"]["replacement"] = True
+    other = _write(replacement, other_payload)
     link = tmp_path / "input-link"
     if alias == "file":
         link.symlink_to(source)

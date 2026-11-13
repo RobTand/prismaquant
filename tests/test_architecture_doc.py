@@ -537,33 +537,24 @@ def test_selection_mode_default_documented():
     assert "TARGET_DISK_GB" in doc
 
 
-def test_cost_mode_default_is_aura_with_the_legacy_mode_still_reachable():
-    """re-vet R2: the default flipped to `aura` on 2026-07-30. Both halves are
-    pinned — the flip itself (so it cannot silently revert) and the continued
-    reachability of `production-render-score`, which is how every pre-flip
-    artifact reproduces."""
+def test_cost_mode_aura_is_the_only_mode():
+    """#3448 removed COST_MODE local and production-render-score: the probe
+    measures no Fisher to price their rows. `aura` is the default and the only
+    accepted mode, and the doc says so."""
     script, doc = _pipeline(), _doc()
     assert _shell_default(script, "COST_MODE") == "aura"
-    assert "production-render-score|production-render)" in script, (
-        "production-render-score must stay an accepted COST_MODE: it is the "
-        "explicit spelling that reproduces every pre-2026-07-30 artifact."
-    )
-    assert "COST_MODE=aura" in doc and "explicit/legacy" in doc
+    assert "production-render-score|production-render)" not in script
+    assert "  local)" not in script
+    assert "COST_MODE=aura" in doc and "#3448" in doc
 
 
-def test_cost_axes_are_declared_with_back_compat_aliases():
-    """re-vet R3: COST_MODE is a spelling over (COST_RENDER x COST_OBJECTIVE),
-    and the three documented values keep their exact meanings."""
+def test_cost_axes_declare_only_the_aura_pair():
+    """re-vet R3: COST_MODE is a spelling over (COST_RENDER x COST_OBJECTIVE);
+    since #3448 only the aura pair is implemented and anything else stops."""
     script, doc = _pipeline(), _doc()
-    for pair, mode in (
-        ('"inline|weight-recon")', "local"),
-        ('"cached-menu|render-score")', "production-render-score"),
-        ('"cached-menu|aura-adjoint")', "aura"),
-    ):
-        assert pair in script and mode in script
-    # The two unimplemented pairs must stop with a reason, not fall through.
-    assert '"inline|aura-adjoint")' in script
-    assert '"cached-menu|weight-recon")' in script
+    assert '"cached-menu|aura-adjoint")      COST_MODE="aura"' in script
+    assert '"inline|weight-recon")' not in script
+    assert '"cached-menu|render-score")' not in script
     assert "COST_RENDER" in doc and "COST_OBJECTIVE" in doc
 
 

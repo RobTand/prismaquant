@@ -73,8 +73,6 @@ FLEET_DATA_DECORATOR = ["pytest", "mark", "fleet_data"]
 #: hermetic tests that used to share a file with it run in the merge queue
 #: (PQ #1954).
 MARKED_FILES = {
-    "test_tessera_census_stats_glm53.py": {
-        "test_glm53_probe_expands_onto_the_census_roster"},
     "test_glm_joint_data_manifest_at_submit_fleet_data.py": {
         "test_the_real_joint_pass_read_set_is_terabytes_in_bounded_phases"},
 }

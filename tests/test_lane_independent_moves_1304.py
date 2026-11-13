@@ -1,8 +1,8 @@
 """Pin the helpers moved out of the retired codebook lane's modules (#1304).
 
 The whole-artifact budget helpers moved from ``nvfp4_cb_footprint`` to
-``footprint``, and the probe-derived imatrix helpers moved from ``cb_imatrix``
-to ``moe_imatrix``. The move is a pure refactor: every expected value below was
+``footprint``, and the imatrix helpers moved from ``cb_imatrix`` to
+``moe_imatrix`` (#3448 later removed the probe-derived ones). The move is a pure refactor: every expected value below was
 computed by the pre-move functions on ``origin/main`` 253cc885c28, so a drift
 in any digest, stamp field, or provenance record fails here.
 """
@@ -56,21 +56,6 @@ def _imatrix_sha():
     })
 
 
-def _probe_provenance():
-    _values, provenance = moe_imatrix.imatrix_from_probe_stats({
-        "dense": {
-            "act_sq_sum": torch.tensor([4.0, 8.0, 12.0]),
-            "n_tokens_seen": 4,
-            "in_features": 3,
-        },
-        "experts": {
-            "expert_act_sq_sum": torch.tensor([[2.0, 4.0], [9.0, 12.0]]),
-            "expert_tokens": torch.tensor([2, 3]),
-        },
-    })
-    return provenance
-
-
 @pytest.mark.parametrize(
     ("name", "compute", "expected"),
     [
@@ -98,22 +83,6 @@ def _probe_provenance():
             "canonical_imatrix_sha256",
             _imatrix_sha,
             "97b7c5655039ec23c746b151392838f889e93b3a98481fc9d6a39b08039564ce",
-        ),
-        (
-            "imatrix_from_probe_stats",
-            _probe_provenance,
-            {
-                "dense_entries": 1,
-                "packed_entries": 1,
-                "schema": (
-                    "prismaquant.cb_imatrix.probe_act_sq_sum_over_tokens.v1"
-                ),
-                "skipped_missing_entries": 0,
-                "value_sha256": (
-                    "14582372dfa35bd941d2bcb9df91ea59"
-                    "bbdd58c5b237652c12db79d3adef3c30"
-                ),
-            },
         ),
     ],
 )

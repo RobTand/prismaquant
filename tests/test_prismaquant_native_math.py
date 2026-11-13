@@ -1,7 +1,6 @@
 import json
 import tempfile
 import unittest
-from unittest import mock
 
 import torch
 import torch.nn as nn
@@ -82,12 +81,10 @@ class TestPrismaQuantFormatRegistry(unittest.TestCase):
 
 class TestPrismaQuantAllocatorMath(unittest.TestCase):
     def test_build_candidates_uses_shape_aware_bits(self):
-        # Predicted Δloss = 0.5 · h_trace · output_mse  (joint W·X
-        # perturbation under diagonal-Fisher curvature; output_mse is
-        # the cost step's W*A*-aware error metric).
+        # The price is the row's own predicted_dloss (#3448: the probe
+        # measures no Fisher to price output_mse).
         stats = {
             "layer.weight": {
-                "h_trace": 2.0,
                 "out_features": 5,
                 "in_features": 7,
                 "n_params": 35,
@@ -95,7 +92,8 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
         }
         costs = {
             "layer.weight": {
-                "FP8_E4M3": {"weight_mse": 0.10, "output_mse": 0.25},
+                "FP8_E4M3": {"weight_mse": 0.10, "output_mse": 0.25,
+                             "predicted_dloss": 0.25},
                 "BF16": {"weight_mse": 0.0, "output_mse": 0.0},
             }
         }
@@ -109,39 +107,8 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
             by_fmt["FP8_E4M3"].memory_bytes,
             fr.get_format("FP8_E4M3").memory_bytes_for_shape((5, 7)),
         )
-        self.assertAlmostEqual(by_fmt["FP8_E4M3"].predicted_dloss, 0.5 * 2.0 * 0.25)
+        self.assertAlmostEqual(by_fmt["FP8_E4M3"].predicted_dloss, 0.25)
         self.assertAlmostEqual(by_fmt["BF16"].predicted_dloss, 0.0)
-
-    def test_build_candidates_can_use_fisher_output_mse(self):
-        stats = {
-            "layer.weight": {
-                "h_trace": 2.0,
-                "out_features": 5,
-                "in_features": 7,
-                "n_params": 35,
-            }
-        }
-        costs = {
-            "layer.weight": {
-                "FP8_E4M3": {
-                    "weight_mse": 0.10,
-                    "output_mse": 0.25,
-                    "fisher_output_mse": 0.05,
-                },
-            }
-        }
-
-        with mock.patch.dict("os.environ", {}, clear=True):
-            cands = build_candidates(stats, costs, [fr.get_format("FP8_E4M3")]).candidates
-        self.assertAlmostEqual(cands["layer.weight"][0].predicted_dloss, 0.25)
-
-        with mock.patch.dict(
-            "os.environ",
-            {"PRISMAQUANT_FISHER_OUTPUT_MSE_ALLOCATOR": "1"},
-            clear=True,
-        ):
-            cands = build_candidates(stats, costs, [fr.get_format("FP8_E4M3")]).candidates
-            self.assertAlmostEqual(cands["layer.weight"][0].predicted_dloss, 0.05)
 
     def test_cost_entry_source_reports_authoritative_fallback(self):
         stats = {"h_trace": 2.0, "num_experts": 1}
@@ -292,7 +259,6 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
     def test_build_candidates_applies_calibrated_gains(self):
         stats = {
             "layer.weight": {
-                "h_trace": 2.0,
                 "out_features": 128,
                 "in_features": 128,
                 "n_params": 128 * 128,
@@ -300,11 +266,11 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
         }
         costs = {
             "layer.weight": {
-                "NVFP4": {"weight_mse": 0.10},
-                "MXFP8": {"weight_mse": 0.02},
+                "NVFP4": {"weight_mse": 0.10, "predicted_dloss": 0.10},
+                "MXFP8": {"weight_mse": 0.02, "predicted_dloss": 0.02},
             }
         }
-        # Without calibration: NVFP4 = 0.10, MXFP8 = 0.02 (per-element MSE).
+        # Without calibration: NVFP4 = 0.10, MXFP8 = 0.02.
         # With α_NVFP4=2 the NVFP4 candidate's predicted Δloss should double.
         cands = build_candidates(
             stats, costs,
@@ -312,16 +278,15 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
             calibrated_gains={"NVFP4": 2.0, "MXFP8": 1.0},
         ).candidates
         by_fmt = {c.fmt: c for c in cands["layer.weight"]}
-        self.assertAlmostEqual(by_fmt["NVFP4"].predicted_dloss, 0.5 * 2.0 * 0.10 * 2.0)
+        self.assertAlmostEqual(by_fmt["NVFP4"].predicted_dloss, 0.10 * 2.0)
         self.assertAlmostEqual(
             by_fmt["MXFP8_E4M3"].predicted_dloss,
-            0.5 * 2.0 * 0.02 * 1.0,
+            0.02 * 1.0,
         )
 
     def test_build_candidates_ignores_unmeasured_packed_output_mse(self):
         stats = {
             "model.layers.0.mlp.experts.gate_up_proj": {
-                "h_trace": 3.0,
                 "out_features": 8,
                 "in_features": 16,
                 "n_params": 2 * 8 * 16,
@@ -349,6 +314,7 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
                     "weight_mse": 0.25,
                     "output_mse": 0.0,
                     "output_mse_measured": False,
+                    "predicted_dloss": 0.375,
                 },
             }
         }
@@ -363,7 +329,7 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
         }
         self.assertAlmostEqual(by_fmt["NVFP4"].predicted_dloss, 7.0)
         self.assertAlmostEqual(by_fmt["MXFP4"].predicted_dloss, 2.0)
-        self.assertAlmostEqual(by_fmt["BF16"].predicted_dloss, 0.5 * 3.0 * 0.25)
+        self.assertAlmostEqual(by_fmt["BF16"].predicted_dloss, 0.375)
         expected_nvfp4_bytes = fr.get_format("NVFP4").memory_bytes_for_shape(
             (2, 8, 16)
         )

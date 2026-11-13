@@ -2,54 +2,15 @@
 """allocator.py — multi-choice knapsack mixed-precision assignment.
 
 Given:
-  - per-Linear empirical Fisher diagonal trace (from sensitivity_probe.py)
-  - per-(Linear, format) measured quantization cost (from measure_quant_cost.py)
+  - the probe's per-Linear shape rows (from incremental_probe.py)
+  - per-(Linear, format) predicted loss increase `predicted_dloss` (the AURA
+    KL adjoint times the production-rendered dW, from aura_cost.py)
   - a bit budget (target average bits per parameter)
   - a format registry (any subset of registered formats)
 
 Solve for a per-Linear format assignment that minimizes total predicted
-loss increase subject to the bit budget.
-
-Derivation of the per-(layer, format) predicted loss term
----------------------------------------------------------
-Let L be the per-token loss (negative log-likelihood). Quantizing layer
-ℓ's weight tensor W by ΔW = W_q - W produces a perturbed loss whose
-expectation under the calibration distribution admits the standard
-second-order expansion:
-
-    E[ΔL] ≈ 0.5 · ΔW · F · ΔWᵀ                         (1)
-
-where F is the Fisher information matrix of L w.r.t. W. Replacing F by
-its diagonal (the standard HAWQ-V1 simplification) and approximating
-F_ww by the empirical Fisher diagonal F̂_ww = E_token[(∂L/∂W_w)²]:
-
-    E[ΔL] ≈ 0.5 · Σ_w F̂_ww · (ΔW_w)²                   (2)
-
-Under the further assumption that the per-weight quantization error
-(ΔW_w)² and the per-weight Fisher diagonal F̂_ww are uncorrelated across
-w (which is the same assumption HAWQ already makes when it summarizes a
-layer by a single scalar), this collapses to the product of two
-per-layer scalars:
-
-    E[ΔL] ≈ 0.5 · H_trace · MSE_W                       (3)
-
-where
-    H_trace = Σ_w F̂_ww            (per-token Fisher diagonal trace)
-    MSE_W   = (1/n_w) · Σ_w (ΔW_w)²
-
-Both quantities are produced by upstream stages:
-    H_trace ← sensitivity_probe.py / FisherAccumulator (`h_trace`)
-    MSE_W   ← measure_quant_cost.py (per-(layer, format) `weight_mse`)
-
-So we use eq. (3) directly. There is no `* d_out` factor; the previous
-implementation carried one but it does not appear in the derivation —
-it was a holdover from an earlier output-side formulation that mixed
-units and was off by a per-layer multiplicative constant that varies
-with d_out.
-
-For MoE experts an additional route-probability normalization is folded
-into H_trace inside the probe so that sparsely-routed experts' Fisher
-contributions are on the same per-token footing as dense layers'.
+loss increase subject to the bit budget. The probe measures no Fisher
+(#3448): a cost row without `predicted_dloss` cannot be priced.
 
 Solver:
   Multi-choice knapsack via DP with bit-budget discretization (we round
@@ -81,7 +42,6 @@ and the curve is tiny so the dependency would not pay for itself.)
 """
 from __future__ import annotations
 
-from . import probe_statistics
 
 
 import argparse
@@ -1072,12 +1032,8 @@ def _build_bit_attribution(
             continue
         entry = stats_entry_for(name)
         n_params = None
-        h_trace = None
-        if isinstance(entry, dict):
-            if entry.get("n_params") is not None:
-                n_params = int(entry["n_params"])
-            if entry.get("h_trace") is not None:
-                h_trace = float(entry["h_trace"])
+        if isinstance(entry, dict) and entry.get("n_params") is not None:
+            n_params = int(entry["n_params"])
 
         cand = _find_candidate_for_format(candidates, name, fmt)
         bits = None
@@ -1113,7 +1069,6 @@ def _build_bit_attribution(
             "bits": bits,
             "bpp": bpp,
             "n_params": n_params,
-            "h_trace": h_trace,
             "predicted_dloss": pred_dloss,
         })
 
@@ -1126,8 +1081,6 @@ def _build_bit_attribution(
             "format_counts": defaultdict(int),
             "sum_predicted_dloss": 0.0,
             "predicted_dloss_n": 0,
-            "sum_h_trace": 0.0,
-            "h_trace_n": 0,
         })
         bucket["n_linears"] += 1
         bucket["format_counts"][fmt] += 1
@@ -1140,9 +1093,6 @@ def _build_bit_attribution(
         if pred_dloss is not None:
             bucket["sum_predicted_dloss"] += pred_dloss
             bucket["predicted_dloss_n"] += 1
-        if h_trace is not None:
-            bucket["sum_h_trace"] += h_trace
-            bucket["h_trace_n"] += 1
 
     bucket_list: list[dict] = []
     for bucket in buckets.values():
@@ -1158,7 +1108,6 @@ def _build_bit_attribution(
             "sum_predicted_dloss": (
                 bucket["sum_predicted_dloss"] if bucket["predicted_dloss_n"] else None),
             "predicted_dloss_coverage": f"{bucket['predicted_dloss_n']}/{bucket['n_linears']}",
-            "sum_h_trace": bucket["sum_h_trace"] if bucket["h_trace_n"] else None,
         })
 
     bucket_list.sort(key=lambda r: (_bit_attr_block_sort_key(r["block_id"]), r["role"]))
@@ -1239,7 +1188,7 @@ def _write_bit_attribution_reports(
             writer = csv.writer(handle)
             writer.writerow([
                 "qname", "block_id", "role", "format",
-                "bits", "bpp", "n_params", "h_trace", "predicted_dloss",
+                "bits", "bpp", "n_params", "predicted_dloss",
             ])
             for row in per_linear:
                 writer.writerow([
@@ -1247,7 +1196,6 @@ def _write_bit_attribution_reports(
                     "" if row["bits"] is None else f"{row['bits']:.6g}",
                     "" if row["bpp"] is None else f"{row['bpp']:.6g}",
                     "" if row["n_params"] is None else row["n_params"],
-                    "" if row["h_trace"] is None else f"{row['h_trace']:.6g}",
                     "" if row["predicted_dloss"] is None else f"{row['predicted_dloss']:.6g}",
                 ])
         print(f"[alloc] bit attribution (per Linear) → {path}", flush=True)
@@ -1428,122 +1376,6 @@ def validate_final_serving_promotion_noop(
     )
 
 
-_FISHER_CAP_ROLE_RE = re.compile(r"layers\.(\d+)\.[a-z_]+\.([a-z_]+)$")
-
-
-def _fisher_cap_role(qname: str) -> str | None:
-    """Role bucket for the robust-Fisher clip, or ``None`` to skip the row.
-
-    Deliberately the REFERENCE TOOL's grouping
-    (``/home/rob/dq-runs/robust_fisher_clip.py``), not the wider
-    ``_parse_role_from_qname`` used for bit attribution: it requires exactly
-    one container segment between ``layers.<N>.`` and the leaf, so dense
-    attention/MLP projections bucket by their leaf role
-    (``q_proj``/``k_proj``/``v_proj``/``o_proj``/``gate_proj``/``up_proj``/
-    ``down_proj``) and everything else — packed and unpacked MoE experts,
-    shared experts, MTP/visual sidecars, non-``layers`` names — is skipped.
-    That is the grouping the 4B research result was measured under; widening
-    it would change the medians and is a separate, unmeasured lever.
-    """
-    m = _FISHER_CAP_ROLE_RE.search(qname)
-    return m.group(2) if m else None
-
-
-def clip_probe_fisher_outliers(stats: dict, meta: dict | None = None, *,
-                               cap_multiplier: float | None = None
-                               ) -> dict | None:
-    """OPT-IN robust-Fisher clip: cap each row's ``h_trace`` at
-    ``K x median(h_trace)`` over its role bucket.
-
-    Off unless ``PRISMAQUANT_FISHER_CAP_MULTIPLIER`` is set (or
-    ``cap_multiplier`` is passed explicitly); when off this is a byte-identical
-    no-op and returns ``None``. Research lever — a per-role h_trace clip at
-    K=3 measured ~5% better WikiText PPL at 6.0 bpp on Qwen3-4B (2026-05-19),
-    never promoted to a default because it has no served A/B.
-
-    Rationale: ``predicted_dloss = 1/2 h_trace MSE`` is linear in ``h_trace``,
-    so a handful of heavy-tailed Fisher rows can capture the DP's whole bit
-    budget. Clipping the tail bounds that leverage without touching the rest
-    of the distribution (values below the cap are unchanged).
-
-    ``h_w2_sum`` is rescaled by the same ratio so the derived cost math stays
-    consistent with the clipped scalar, exactly as the reference tool does.
-    The raw accumulators (``h_trace_raw`` / ``h_w2_sum_raw``) are NOT touched
-    — they remain the source of truth for renormalization, so this must run
-    AFTER :func:`renormalize_probe_fisher`, never before.
-
-    Returns a summary dict (``cap_multiplier``, ``role_median``, ``role_cap``,
-    ``n_clipped``, ``n_considered``) when active, else ``None``.
-    """
-    import os
-    import statistics
-
-    if cap_multiplier is None:
-        raw = os.environ.get("PRISMAQUANT_FISHER_CAP_MULTIPLIER")
-        if raw is None or not str(raw).strip():
-            return None
-        try:
-            cap_multiplier = float(raw)
-        except (TypeError, ValueError):
-            raise SystemExit(
-                "[alloc] ERROR: PRISMAQUANT_FISHER_CAP_MULTIPLIER must be a "
-                f"float multiple of the per-role median, got {raw!r}.")
-    K = float(cap_multiplier)
-    if not (K > 0.0) or not math.isfinite(K):
-        raise SystemExit(
-            "[alloc] ERROR: PRISMAQUANT_FISHER_CAP_MULTIPLIER must be a "
-            f"finite value > 0 (it is a multiple of the role median), got {K}.")
-
-    by_role: dict[str, list[float]] = defaultdict(list)
-    for qname, entry in stats.items():
-        if not isinstance(entry, dict):
-            continue
-        role = _fisher_cap_role(qname)
-        if role is None:
-            continue
-        by_role[role].append(float(entry.get("h_trace", 0.0) or 0.0))
-
-    role_median = {r: statistics.median(v) for r, v in by_role.items() if v}
-    role_cap = {r: K * m for r, m in role_median.items()}
-
-    n_clipped = 0
-    n_considered = 0
-    for qname, entry in stats.items():
-        if not isinstance(entry, dict):
-            continue
-        role = _fisher_cap_role(qname)
-        if role is None:
-            continue
-        cap = role_cap.get(role)
-        if cap is None:
-            continue
-        n_considered += 1
-        old = float(entry.get("h_trace", 0.0) or 0.0)
-        if old <= cap:
-            continue
-        entry["h_trace"] = cap
-        old_w2 = entry.get("h_w2_sum")
-        if old_w2 is not None and old > 0:
-            entry["h_w2_sum"] = float(old_w2) * (cap / old)
-        n_clipped += 1
-
-    summary = {
-        "schema": "prismaquant.robust_fisher_clip.v1",
-        "cap_multiplier": K,
-        "role_median": role_median,
-        "role_cap": role_cap,
-        "n_clipped": n_clipped,
-        "n_considered": n_considered,
-    }
-    if isinstance(meta, dict):
-        meta.setdefault("clip_history", []).append(summary)
-    print(f"[alloc] robust Fisher clip ACTIVE (research lever, "
-          f"PRISMAQUANT_FISHER_CAP_MULTIPLIER={K:g}): clipped {n_clipped} of "
-          f"{n_considered} role-bucketed rows at K x per-role median "
-          f"({len(role_median)} roles)", flush=True)
-    return summary
-
-
 @dataclass(frozen=True)
 class MeasuredRuntimeSweep:
     """What ``main(measured_runtime_sweep=...)`` hands its caller.
@@ -1689,17 +1521,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "silently-corrupt artifact. Off by default: "
                          "the allocator hard-errors instead and asks for "
                          "--model-override.")
-    ap.add_argument("--allow-legacy-fisher-norm", action="store_true",
-                    help="Permit allocation from a probe whose rows carry "
-                         "neither a per-row h_trace_norm_tokens stamp nor "
-                         "meta fisher_norm_tokens / nsamples+seqlen, i.e. whose "
-                         "h_trace cannot be renormalized by the global calib "
-                         "token count. Such probes carry the legacy per-row "
-                         "normalization that inflates routed-expert Fisher "
-                         "by (global/routed) — typically ~n_experts/top_k. "
-                         "Off by default: the allocator hard-errors and asks "
-                         "for a re-probe. Use only to reproduce historical "
-                         "allocations.")
     ap.add_argument("--target-bits", type=float, default=4.75)
     ap.add_argument("--target-disk-gb", type=float, default=None,
                     help="Fit-the-card ship selection: instead of --target-bits, "
@@ -1963,11 +1784,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     help="Optional path: write a read-only 'where did the "
                          "budget go' report bucketing the final body "
                          "assignment by (block, role) with per-bucket bpp, "
-                         "format mix, summed predicted_dloss and h_trace.")
+                         "format mix and summed predicted_dloss.")
     ap.add_argument("--bit-attribution-csv", default=None,
                     help="Optional path: write the flat per-Linear bit "
                          "attribution table (qname, block, role, format, "
-                         "bits, bpp, n_params, h_trace, predicted_dloss).")
+                         "bits, bpp, n_params, predicted_dloss).")
     # ---- Hard serving constraints: the second selection axis (P5c) ----
     # format-speed-policy.md §1's constrained problem. Latency is NEVER
     # blended into the objective (no lambda, no phase-weighted serve_ms):
@@ -2602,21 +2423,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # fact per run, read once through the lane's one contract read.
     tessera_dev_pin = lane.allocation_runtime_identity()
 
-    # ---- Fisher renormalization ----
-    # One shared denominator (the global calib token count) recomputed
-    # from the stored raw accumulators; hard error on probes that cannot
-    # be renormalized unless --allow-legacy-fisher-norm. See
-    # renormalize_probe_fisher for the full story.
-    probe_statistics.renormalize_probe_fisher(stats, probe.get("meta", {}),
-                             allow_legacy=args.allow_legacy_fisher_norm)
-
-    # ---- Robust Fisher clip (opt-in research lever) ----
-    # PRISMAQUANT_FISHER_CAP_MULTIPLIER=K caps each dense row's h_trace at
-    # K x its role's median. Unset => byte-identical no-op. Must run AFTER
-    # the renormalization above (it clips the finalized scalar, not the raw
-    # accumulator). See clip_probe_fisher_outliers.
-    clip_probe_fisher_outliers(stats, probe.get("meta", {}))
-
     allow_pinned = list(parse_allow_pinned(args.allow_pinned))
     lm_head_format_canonical = fr.get_format(args.lm_head_format).name
     lm_head_dp_unpinned = allow_pinned_lifts_lm_head(
@@ -2909,8 +2715,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         activation_pricing_stats,
         activation_pricing_costs,
         specs_sorted,
-    pricing_policy=pricing_policy,
-                         )
+    )
     if activation_pricing.enabled:
         print(
             "[alloc] activation-fair pricing: "
