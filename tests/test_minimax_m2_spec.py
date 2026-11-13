@@ -222,7 +222,7 @@ def test_declared_fields_that_had_no_python_equivalent(spec_only):
     `packed_expert_module_class_names` existed as an accessor with no spec
     declaring it; `unpacked_expert_projection_names` was the field no spec
     had ever declared (`base.py:470-495`). Declaring them here is what lets
-    `incremental_probe` ask the profile instead of comparing a class name.
+    consumers ask the profile instead of comparing a class name.
     """
     assert spec_only.packed_expert_module_class_names() == frozenset(
         {"MiniMaxM2Experts"})
@@ -302,50 +302,3 @@ def test_fp8_rewrite_bypass_is_false_without_a_config(tmp_path):
     from prismaquant.streaming_model import _bypass_hf_fp8_module_rewrite
 
     assert _bypass_hf_fp8_module_rewrite(str(tmp_path)) is False
-
-
-def test_expert_container_detection_is_profile_driven():
-    """`incremental_probe.py:113-122` compared `type(module).__name__` to the
-    literal "MiniMaxM2Experts"; it now asks the profile
-    (`packed_expert_module_class_names()`). Both conditions stay required: the
-    declared class AND the ModuleList-of-experts shape the replacement forward
-    needs."""
-    import torch.nn as nn
-
-    from prismaquant.incremental_probe import _is_unpacked_experts_module
-
-    class MiniMaxM2Experts(nn.ModuleList):
-        pass
-
-    class SomeOtherExperts(nn.ModuleList):
-        pass
-
-    def _build(container_cls):
-        expert = nn.Module()
-        expert.w1 = nn.Linear(4, 4)
-        expert.w2 = nn.Linear(4, 4)
-        expert.w3 = nn.Linear(4, 4)
-        expert.act_fn = nn.SiLU()
-        container = container_cls([expert])
-        container.num_experts = 1
-        container.top_k = 1
-        return container
-
-    declared = frozenset(MiniMaxM2Profile().packed_expert_module_class_names())
-    assert declared == frozenset({"MiniMaxM2Experts"})
-
-    assert _is_unpacked_experts_module(_build(MiniMaxM2Experts),
-                                       ("w1", "w2", "w3"), declared)
-    # undeclared container class: no swap (its forward signature is unknown)
-    assert not _is_unpacked_experts_module(_build(SomeOtherExperts),
-                                           ("w1", "w2", "w3"), declared)
-    # declared class but wrong shape (packed 3D experts): no swap
-    packed = MiniMaxM2Experts()
-    packed.num_experts = 1
-    assert not _is_unpacked_experts_module(packed, ("w1", "w2", "w3"), declared)
-    # a profile that declares nothing keeps today's behaviour: no swap
-    assert not _is_unpacked_experts_module(_build(MiniMaxM2Experts),
-                                           ("w1", "w2", "w3"), frozenset())
-    # a non-indexable module must not raise
-    assert not _is_unpacked_experts_module(nn.Linear(4, 4),
-                                           ("w1", "w2", "w3"), declared)

@@ -227,7 +227,7 @@ def check_frontier_materialization(model_path: str | Path, mode: str) -> tuple[i
 #
 # Each entry is (manifest_key, settings_source). They differ where a stage
 # historically recorded a short manifest key (`NS`) for a specific setting
-# (`PRODUCTION_RENDER_COST_NSAMPLES`); keeping the historical manifest key
+# (`AURA_COST_NSAMPLES`); keeping the historical manifest key
 # means artifacts built before R5 stay valid instead of forcing a rebuild.
 # ---------------------------------------------------------------------------
 
@@ -310,7 +310,7 @@ _TESSERA_SCOPE_SETTINGS: tuple[str, ...] = (
 
 
 def _key_pairs(*specs: str) -> tuple[tuple[str, str], ...]:
-    """``"NS<-PRODUCTION_RENDER_COST_NSAMPLES"`` -> ``("NS", "PRODUCTION_…")``."""
+    """``"NS<-AURA_COST_NSAMPLES"`` -> ``("NS", "AURA_COST_NSAMPLES")``."""
     out: list[tuple[str, str]] = []
     for spec in specs:
         if "<-" in spec:
@@ -350,26 +350,6 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
     "base-cost": _key_pairs(
         "MODEL_PATH", "DATASET", "NSAMPLES", "SEQLEN", "ACT_ROW_SELECTION",
         "FORMATS<-COST_FORMATS", *_HEAD_SETTINGS,
-        *_CB_SERIALIZATION_SETTINGS,
-    ),
-    # production-render-score: the rendered format-menu cache the score reads.
-    "render-cost-cache": _key_pairs(
-        "MODEL_PATH", "DATASET", "FORMATS<-COST_FORMATS",
-        "NS<-PRODUCTION_RENDER_COST_NSAMPLES",
-        "SL<-PRODUCTION_RENDER_COST_SEQLEN",
-        "SEED<-PRODUCTION_RENDER_COST_SEED",
-        *_HEAD_SETTINGS,
-        *_RENDER_SETTINGS,
-        *_CB_SERIALIZATION_SETTINGS,
-    ),
-    # …and the allocator cost table synthesized from it. Cheap to rebuild, so
-    # it carries the score field and the require-flags too.
-    "render-cost": _key_pairs(
-        "MODEL_PATH", "FORMATS<-COST_FORMATS", "COST_MODE",
-        "SCORE_FIELD<-PRODUCTION_RENDER_COST_SCORE_FIELD",
-        "REQUIRE_SCORES<-PRODUCTION_RENDER_COST_REQUIRE_SCORES",
-        "REQUIRE_OUTPUT<-PRODUCTION_RENDER_COST_REQUIRE_OUTPUT",
-        *_HEAD_SETTINGS,
         *_CB_SERIALIZATION_SETTINGS,
     ),
     # AURA dW cache. FORMATS is the derived non-BF16 menu (AURA_CACHE_FORMATS);

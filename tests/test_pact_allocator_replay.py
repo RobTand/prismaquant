@@ -51,8 +51,8 @@ M = 2048
 def _fixture(tmp_path, monkeypatch, *, units=None):
     from lane_table_fixtures import down_convert_lane_table
     from test_allocator_measured_runtime_cli import _main_fixture
-    from test_allocator_tessera_priced_inputs import SCALE, _campaign_outputs, _stamp_rows
-    from test_tessera_scope_endpoints import DENSE, IMAGE, _cli_scope
+    from test_tessera_scope_endpoints import (
+        DENSE, IMAGE, _campaign_outputs, _cli_scope, _stamp_rows)
 
     from prismaquant import lane_eligibility, tessera_menu, tessera_render
     from prismaquant import shape_runtime_prices as srp
@@ -115,9 +115,9 @@ def _fixture(tmp_path, monkeypatch, *, units=None):
              "--pact-tensor-parallel", "1"]
     for fmt in MENU:
         if units is None:
-            _stamp_rows(argv, fmt=fmt, capture_sha256=digest, scale=SCALE)
+            _stamp_rows(argv, fmt=fmt, capture_sha256=digest)
         else:
-            _stamp_rows(argv, fmt=fmt, capture_sha256=digest, scale=SCALE, units=chosen_units)
+            _stamp_rows(argv, fmt=fmt, capture_sha256=digest, units=chosen_units)
     return SimpleNamespace(argv=argv, dense=DENSE, capture=capture, scales=scales,
                            table_path=table_path, units=chosen_units)
 

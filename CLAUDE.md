@@ -109,14 +109,12 @@ unary cost* over `(Linear, format)`, solved by a multi-choice knapsack DP:
   `predicted_dloss` from a **KL-adjoint** probe × the production-rendered `dW`
   (`aura_cost.py`), worth **−38%/−39.5% KL @4B** across two calibrations and
   **−17.9% @27B** against the `h_trace × output_mse` baseline, and the recipe
-  behind both flagships. `production-render-score` is the explicit/legacy
-  spelling that reproduces every pre-flip artifact — per-Linear error measured
-  on the **production-rendered** weights the export will actually ship (score
-  field `weight_mse` since audit M6), so the surrogate, the KL validation and
-  the exported bytes are the same rendering (principle 8). Either way the
-  rendering identity is the point; what the flip changed is the *objective*
-  applied to it. `COST_MODE` is a spelling over `COST_RENDER × COST_OBJECTIVE`
-  (re-vet R3). On MoE the smooth
+  behind both flagships. Since #3448 (2026-11-13) it is the ONLY cost mode:
+  the probe measures no Fisher, so `local` and `production-render-score`
+  were removed. The dW is the production-rendered weight the export ships, so
+  the surrogate, the KL validation and the exported bytes are the same
+  rendering (principle 8). `COST_MODE` is a spelling over
+  `COST_RENDER × COST_OBJECTIVE` (re-vet R3). On MoE the smooth
   cost is route-flip-blind for routed experts, so packed experts get **measured**
   empirical unit-KL instead (`expert_empirical_cost.py`), merged into one hybrid
   payload. Fisher normalization detail: every `h_trace` row — dense or MoE
@@ -450,12 +448,10 @@ executor. Stages are file-artifact-coupled and skip-if-exists. `WORK_DIR/`:
 `act/`, `work/` (shards), `logs/`, `exported/`.
 
 ```
-incremental_probe ─► probe.pkl            (per-Linear empirical Fisher H_trace; streaming)
+incremental_probe ─► probe.pkl + act/     (one no-grad streamed forward; no Fisher, #3448)
    │
-incremental_measure_quant_cost            (per-(Linear,format) error — L1 baseline)
- OR production_render_cost                (default: derive allocator cost from a dedicated
-   │                                        render-score cache; export/validated KL use
-   │                                        their selected-assignment production cache)
+incremental_measure_quant_cost            (per-(Linear,format) error — the P5a/MTP baseline)
+aura_cost                                 (predicted_dloss: KL adjoint × production-rendered dW)
 allocator + allocator_solver ─► layer_config.json + pareto*    (knapsack DP + log-error kneedle)
    │                                        (fused-sibling & packed-MoE union-find promotion)
 build_production_cache / production_recache ─► ProductionWeightCache
@@ -472,11 +468,8 @@ validate_quantized_model (PPL / p99-NLL / MMLU / MTP-acceptance ship gate)
 `FORMATS=NVFP4,FP8_DYNAMIC,BF16` (note: **MXFP8 is de-menued for inference** —
 exact-scale FP8 Pareto-dominates it), `NSAMPLES=32 SEQLEN=1024`,
 `PRODUCTION_CACHE_LEVERS=gptq,static_act_order,joint_scale_opt`,
-**`COST_MODE=aura`** (flipped from `production-render-score` on 2026-07-30,
-re-vet R2 — both flagships were produced with it; `production-render-score` is
-the explicit/legacy spelling that reproduces every pre-flip artifact, and a
-stale `WORK_DIR` now **rebuilds loudly** on the mode change instead of silently
-allocating on the other estimator), **`SELECTION_MODE=surrogate`** (set
+**`COST_MODE=aura`** (the default since 2026-07-30, re-vet R2, and the only
+mode since #3448; both flagships were produced with it), **`SELECTION_MODE=surrogate`** (set
 `validated-surrogate` to opt into the real-KL frontier selection that produced
 the shipped 27B), `TARGET_PROFILE=<unset, spec-resolved>`
 (`TARGET_PROFILE_DEFAULT=vllm_packed_moe` is the fallback when an architecture
@@ -503,7 +496,7 @@ at `archive/gridbook_lane_2026-09-02/`; that lane is retired.
 |---|---|
 | Orchestrate / contract | `run-pipeline.sh` (exec) · `pipeline.py` (declarative spec + owner validation, not executor) · `__init__.py` (lazy public exports) |
 | Allocate | `allocator.py` (CLI, Pareto sweep, log-error kneedle, `--bit-attribution-json/csv`) · `allocator_solver.py` (numpy multi-choice knapsack DP, union-find serving-unit promotion, `predicted_dloss`) · `allocator_candidates.py` (legality gate + cost-source precedence + passthrough integrity) · `decision_units.py` |
-| Probe / cost | `incremental_probe.py` + `sensitivity_probe.py` + `kl_fisher.py` (Fisher probe) · `incremental_measure_quant_cost.py` + `measure_quant_cost.py` · `production_render_cost.py` (default cost) · `aura_cost.py` + `expert_empirical_cost.py` (`COST_MODE=aura`, MoE hybrid) · `kl_measurement.py` (whole-assignment KL + per-sequence tail) · `perturbed_x_cache.py` (activation cache / model loading — **not** a cost stage). The L3 propagated stack is walled at `archive/l3_propagated_2026-07-30/` |
+| Probe / cost | `incremental_probe.py` + `sensitivity_probe.py` (no-grad probe: shape rows + act/) · `kl_fisher.py` · `incremental_measure_quant_cost.py` + `measure_quant_cost.py` · `aura_cost.py` + `expert_empirical_cost.py` (`COST_MODE=aura`, MoE hybrid) · `kl_measurement.py` (whole-assignment KL + per-sequence tail) · `perturbed_x_cache.py` (activation cache / model loading — **not** a cost stage). The L3 propagated stack is walled at `archive/l3_propagated_2026-07-30/` |
 | Formats | `format_registry.py` (FormatSpec + RTN `quantize_dequantize`/`activation_quantize_dequantize`, codebook bucketize, E8M0 snap, `torch.compile` hot path) · `mx_formats.py` · `fp8_dynamic.py` |
 | The one cache + render | `production_weight_cache.py` (`ProductionWeightCache` + `render_production_weight`) · `build_production_cache.py` · `production_recache.py` · `render_score.py` (output-MSE render scorer + gate + mechanism registry/topo-order) · `native_render_codec.py` (render arithmetic) |
 | Streaming (huge models) | `layer_streaming.py` (LRU + pressure shrink + FP8 block dequant + per-expert→packed bridge) · `streaming_model.py` · `source_prefetch.py` (fail-fast residency gate) · `autoscale.py` |
@@ -620,11 +613,8 @@ a `TARGET_DISK_GB` card).
   monkey-patches, vLLM 0.20 native, **pruning disabled** (REAP under-counts
   misrouting cost). ~88 GB at 2.5 bpp. v2 SVD expert-factorization design deferred
   (prefer no new vLLM kernel).
-- **Robust Fisher clip** (K×median per-role h_trace clip): a research **WIN**
-  (~5% better at 6.0 on 4B). **Wired as an opt-in lever 2026-07-30 (R28)**:
-  `PRISMAQUANT_FISHER_CAP_MULTIPLIER=K` → `allocator.clip_probe_fisher_outliers`,
-  unset = byte-identical no-op. Still **research** — no served A/B; do not
-  default it on. Reference tool: `/home/rob/dq-runs/robust_fisher_clip.py`.
+- **Robust Fisher clip** (K×median per-role h_trace clip): removed with the
+  probe Fisher by #3448. Reference tool: `/home/rob/dq-runs/robust_fisher_clip.py`.
 - **Production-faithful polish** (5.39 bpp / polish-time KL 0.0054): **provisional**
   — that number is a polish-time signal on a 2×128 calibration, **not** a held-out
   8×512 claim. Do not cite −2.8× as a result until the 8×512 re-measurement lands.

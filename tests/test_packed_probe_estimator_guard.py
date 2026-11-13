@@ -1,8 +1,7 @@
-"""Pinning test for the pre-fix packed-Fisher probe guard."""
-import os
+"""The cost context accepts packed and dense probes; the probe measures no
+Fisher, so the retired packed-Fisher estimator stamp is not read (#3448)."""
 import pickle
 import re
-
 
 import pytest
 import torch
@@ -37,19 +36,12 @@ def _write_act_cache(tmp_path, stats):
 
 
 PACKED = {"model.layers.0.mlp.experts.gate_up_proj": {
-    "h_trace": 1.0, "_packed_experts_module": "model.layers.0.mlp.experts"}}
-DENSE = {"model.layers.0.q_proj": {"h_trace": 1.0}}
+    "n_params": 32, "_packed_experts_module": "model.layers.0.mlp.experts"}}
+DENSE = {"model.layers.0.q_proj": {"n_params": 16}}
 
 
-def test_stale_packed_probe_refused(tmp_path):
+def test_unstamped_packed_probe_accepted(tmp_path):
     p = _write_probe(tmp_path, {}, PACKED)
-    act = _write_act_cache(tmp_path, PACKED)
-    with pytest.raises(SystemExit, match="sum-then-square"):
-        prepare_cost_context(p, act, "NVFP4", True)
-
-
-def test_stamped_packed_probe_accepted(tmp_path):
-    p = _write_probe(tmp_path, {"packed_fisher_estimator": "per_token_v2"}, PACKED)
     act = _write_act_cache(tmp_path, PACKED)
     prepare_cost_context(p, act, "NVFP4", True)
 
@@ -67,9 +59,3 @@ def test_retired_codebook_rung_is_refused_by_explicit_cost_menu(tmp_path):
     with pytest.raises(SystemExit, match="gridbook_lane"):
         prepare_cost_context(p, act, "FP8_CB_K29", True)
 
-
-def test_escape_env_accepts_stale(tmp_path, monkeypatch):
-    monkeypatch.setenv("PRISMAQUANT_ALLOW_SUMSQ_PACKED_FISHER", "1")
-    p = _write_probe(tmp_path, {}, PACKED)
-    act = _write_act_cache(tmp_path, PACKED)
-    prepare_cost_context(p, act, "NVFP4", True)

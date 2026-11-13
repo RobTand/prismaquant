@@ -12,8 +12,8 @@ describes the live system · **HISTORICAL** = dated record, true when written, n
 guidance · **ARCHIVED** = superseded narrative, kept for provenance.
 
 Three things older docs get wrong and this index does not:
-`COST_MODE` defaults to `aura`; `production-render-score` is the
-explicit/legacy spelling (`docs/ARCHITECTURE.md` §3.3–§4.3);
+`COST_MODE` is `aura`, the only cost mode since #3448
+(`docs/ARCHITECTURE.md` §3.3–§4.3);
 `SELECTION_MODE` defaults to `surrogate` (`:250`);
 `run-pipeline.sh` lives at `prismaquant/run-pipeline.sh`, not the repo root.
 

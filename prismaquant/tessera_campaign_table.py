@@ -1056,9 +1056,7 @@ def campaign_cost_payload(
                     # ``predicted_dloss`` is already the 1/2*h_trace*mse
                     # product; writing the MSE into both fields would have the
                     # weight-only branch price a Tessera rung ~h_trace/2 times
-                    # low against every other format on the menu. Leaving the
-                    # field out puts these rows on the same branch, in the same
-                    # currency, as production_render_cost's.
+                    # low against every other format on the menu.
                     "output_mse": anchor.dloss,
                     "output_mse_measured": True,
                     "cost_source": "tessera_campaign_measured",
@@ -1165,19 +1163,10 @@ def campaign_cost_payload(
         },
         "non_interpolable": canonical_refusals(refused),
     })
-    # The attested objective this table prices (re-vet R2; read for reuse by
-    # `cost_currency.require_run_currency`, never from the environment). Every
-    # row here is an `output_mse` under the route's activation contract --
-    # the render-score objective -- so the stamp is unconditional: a caller
-    # claim of any other mode would launder cross-currency rows into that
-    # run's knapsack (RobTand/prismaquant#127).
-    from .cost_currency import RENDER_SCORE_COST_MODE
-
-    nested = payload.get("provenance")
-    if not isinstance(nested, dict):
-        nested = {}
-        payload["provenance"] = nested
-    nested["cost_mode"] = RENDER_SCORE_COST_MODE
+    # No COST_MODE stamp: its render-score objective was removed (#3448), so
+    # cost_currency refuses these rows in any run.
+    if not isinstance(payload.get("provenance"), dict):
+        payload["provenance"] = {}
     return payload
 
 

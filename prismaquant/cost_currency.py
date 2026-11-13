@@ -13,9 +13,9 @@ Three rules, all fail-closed:
 
 1. The COST_MODE -> objective-currency table is derived definitionally from
    the COST_RENDER x COST_OBJECTIVE decomposition ``run-pipeline.sh``
-   resolves (``local = inline x weight-recon``,
-   ``production-render-score = cached-menu x render-score``,
-   ``aura = cached-menu x aura-adjoint``) -- never a threshold anyone picks.
+   resolves (``aura = cached-menu x aura-adjoint``; #3448 removed the
+   ``local`` and ``production-render-score`` modes) -- never a threshold
+   anyone picks.
 2. The run's objective is read from the ATTESTED ``provenance['cost_mode']``
    the cost stage stamps -- never from ``os.environ``. ``run-pipeline.sh``
    assigns COST_MODE with ``:=`` and never exports it, so an environment read
@@ -42,21 +42,10 @@ from .digests import DIRECT_ASCII_STRICT
 
 #: COST_MODE -> the objective currency the run's DP ranks in, read off the
 #: COST_RENDER x COST_OBJECTIVE decomposition `run-pipeline.sh` resolves
-#: (re-vet R3 block). `production-render` is the legacy spelling of the same
-#: objective the driver groups in one case arm; anything else is refused
-#: rather than defaulted.
+#: (re-vet R3 block); anything else is refused rather than defaulted.
 COST_MODE_OBJECTIVE_CURRENCY = {
-    "local": "weight-recon",
-    "production-render-score": "render-score",
-    "production-render": "render-score",
     "aura": "aura-adjoint",
 }
-
-#: The objective a Tessera campaign table prices. The campaign measures
-#: `output_mse` under the route's activation contract via the production
-#: scorer -- the render-score objective -- so this is what its payload stamps
-#: into `provenance['cost_mode']`.
-RENDER_SCORE_COST_MODE = "production-render-score"
 
 
 class CostCurrencyError(RuntimeError):
@@ -209,10 +198,8 @@ def require_run_currency(cost_data: Mapping[str, Any]) -> dict[str, Any]:
             f"{expected!r} but carries {len(tessera)} Tessera-currency rows "
             f"priced in {tessera[0][2]!r} (e.g. "
             f"{tessera[0][0]}/{tessera[0][1]}): two numbers in one knapsack "
-            f"that are not the same kind of quantity. Price the campaign "
-            f"under COST_MODE={RENDER_SCORE_COST_MODE} (the objective its "
-            f"output_mse rows measure), or price this run without Tessera "
-            f"rows.")
+            f"that are not the same kind of quantity. Price this run without "
+            f"Tessera rows.")
     return {
         "cost_mode": cost_mode,
         "expected_currency": expected,

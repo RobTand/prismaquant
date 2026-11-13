@@ -10,7 +10,7 @@ to its true cost. ``cost_entry_act_dloss`` closes that.
 The risk in closing it is double-counting, because three of the four pricing
 branches must NOT receive the term:
 
-  * ``_prices_from_output_mse`` rows are already activation-inclusive by
+  * measured ``output_mse`` rows are already activation-inclusive by
     construction -- the measurement saw the activation path.
   * exact-by-construction rows are 0.0 because nothing happens to the tensor.
   * super-item rows already contain their members' A-side, since a super item is
@@ -107,7 +107,7 @@ def test_the_a_side_rides_the_same_p5a_transfer_as_the_w_side():
 
 
 def test_it_is_not_added_to_an_activation_inclusive_measurement():
-    """The double-count guard for ``_prices_from_output_mse``.
+    """The double-count guard for a measured row.
 
     A measured output_mse row already saw the activation path. Adding the
     modelled A-side on top would charge that layer twice for the same physics,
@@ -115,11 +115,8 @@ def test_it_is_not_added_to_an_activation_inclusive_measurement():
     would mis-rank rungs within one family, which is the failure mode this
     branch was split out to fix in the first place.
     """
-    from prismaquant.priced_cell import _prices_from_output_mse
     measured = {"output_mse": 0.5, "output_mse_measured": True,
-                ACT_DLOSS_KEY: ACT}
-    if not _prices_from_output_mse(STATS, measured):
-        pytest.skip("this cost shape does not take the output_mse branch")
+                "predicted_dloss": 0.25, ACT_DLOSS_KEY: ACT}
     with_act = cost_entry_predicted_dloss(STATS, measured, format_name="NVFP4")
     without = dict(measured)
     without.pop(ACT_DLOSS_KEY)

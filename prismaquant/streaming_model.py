@@ -1556,8 +1556,7 @@ class StreamingContext:
         # N+1's phase-1 forward.
         self.layer_cache.clear_done()
         # v20 fix #4-A: clear priority too.
-        # set_priority_layers is called per-shard from
-        # _run_body_streaming_shard; carrying chunk N's priority into
+        # set_priority_layers is called per-shard; carrying chunk N's priority into
         # chunk N+1 means stale layers are protected before the new
         # shard re-registers them. Reapply the pressure floor after
         # cleanup so retained caches keep responding to current memory.

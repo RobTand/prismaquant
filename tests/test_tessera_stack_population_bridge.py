@@ -1,18 +1,13 @@
 """Packed campaign decisions retain honest source coverage and priced receipts."""
 from __future__ import annotations
 import copy
-import json
-import pickle
-import sys
 
 import pytest
 
 from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_expert_projection as tep
 from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
-from test_allocator_expert_projection import (
-    _receipt, _v5_contract, _allocator_argv, DENSE, FMT, N, STACK, SHARD,
-)
+from test_allocator_expert_projection import _receipt, FMT, N, STACK, SHARD
 
 
 def _fixture(tmp_path, *, sampled=False):
@@ -123,20 +118,3 @@ def test_bridge_refuses_mapping_a_member_to_two_packed_decisions(tmp_path):
     mapping[names[0]]['members'].append(mapping[names[1]]['members'][0])
     with pytest.raises(tep.ExpertProjectionError, match='more than one|multiple'):
         tep.allocation_expert_projection_block(payload, {q: FMT for q in stats})
-
-
-def test_main_packed_census_maps_to_the_producer_projection(tmp_path, monkeypatch):
-    from prismaquant import allocator
-    _v5_contract(monkeypatch)
-    payload, stats = _with_population(tmp_path)
-    argv = _allocator_argv(tmp_path, payload)
-    probe_path = tmp_path/'probe.pkl'
-    probe = pickle.loads(probe_path.read_bytes())
-    probe['stats'] = stats
-    probe_path.write_bytes(pickle.dumps(probe))
-    monkeypatch.setattr(sys, 'argv', argv)
-    allocator.main()
-    result = json.loads((tmp_path/'layer.json').read_text())
-    meta = result['__prismaquant__']
-    assert meta[tep.STACK_FORMATS_KEY] == {STACK: FMT}
-    assert len(meta[tep.EXPERT_WIRES_KEY]) == 12

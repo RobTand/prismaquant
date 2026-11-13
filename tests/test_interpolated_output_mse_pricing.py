@@ -1,57 +1,33 @@
-"""Band-interpolated rungs are priced from their OWN output_mse, not the
-per-family activation constant.
+"""Band-interpolated rungs: provenance, calibration and guards.
 
-The defect this file pins (found 2026-08-07 validating the NVFP4 menu ahead of
-the DSv4-Flash allocation grid, ``dq-runs/nvfp4-cbl/MENU_PRICING_BUG.md``):
+Until #3448 an interpolated rung (``output_mse_measured=False`` with an
+interpolated ``cost_source``) was priced from its OWN ``output_mse`` (times
+``0.5*h_trace``), because one per-family activation constant cannot serve
+projections whose ``output_mse/weight_mse`` ratios span ~20x (2026-08-07,
+``dq-runs/nvfp4-cbl/MENU_PRICING_BUG.md``). The probe measures no Fisher since
+#3448, so no row is priced from ``output_mse``: a row without
+``predicted_dloss`` has no price, and one with it takes the weight-only branch.
 
-``activation_fair_pricing``'s design argues a per-family multiplicative
-constant is safe because it "cannot reorder rungs *inside* a family, so the
-holdout-gated ladder shape survives untouched". That is true only while every
-rung of the family takes the SAME pricing branch. It did not. A CB ladder's
-interpolated rungs are stamped ``output_mse_measured=False`` with
-``cost_source: band_interpolated``, so ``_has_measured_output_mse`` rejected
-them and they fell to ``weight_mse x family_penalty`` while their measured
-neighbours were priced from ``output_mse`` directly — two bases inside one
-ladder.
+What this file still pins:
 
-The constant is a family-wide geometric mean, and ``nvfp4_cb``'s true
-``output_mse/weight_mse`` ratio is not family-wide at all: 187-320 on
-gate/up_proj against 9.4-22 on down_proj, a ~20x spread. Applying 112.5 to
-both over-priced the down_proj interpolated rungs ~12x (a HIGHER rung cost
-MORE than the one below it on 85% of experts, so it could never be selected)
-and under-priced the gate/up_proj ones ~1.6x. The menu was wrong in both
-directions at once, with the direction set by the projection — the real
-mechanism behind "the 4-bit band has only 4 usable rungs, not 7".
-
-What this file pins:
-
-1. Rung monotonicity inside the family, through the REAL pricing function, on
-   two projections with ratios ~10 and ~250 — and the same property FAILING
-   under the old rule, so the test demonstrably catches the bug.
-2. The calibration sample is untouched: same rows, same count, same digest,
-   same fitted penalty whether or not interpolated rows are present. Their
-   ``output_mse`` is derived from this family's own measured anchors, so
-   admitting it would be circular.
-3. The new branch has its own label, ``BRANCH_INTERPOLATED_OUTPUT``, so a
-   shipped artifact can still say which of its selected prices were
-   predictions.
-4. Nothing else moves: the ``output_mse == 0.0`` placeholders keep the
-   weight-only branch, the provenance and noise-band guards keep full
-   strength, and the row's own claims about itself are unchanged.
+1. The calibration sample is untouched by interpolated rows: same rows,
+   same count, same digest, same fitted penalty whether or not they are
+   present. Their ``output_mse`` is derived from this family's own measured
+   anchors, so admitting it would be circular.
+2. The row's own claims about itself are unchanged, and the provenance and
+   noise-band guards keep full strength.
+3. The ``output_mse == 0.0`` placeholder takes the calibrated weight-only
+   branch, and the super-item UCB conversion removes every member's hedge.
+4. The census interpolated-rung guard reads the campaign's measured LOO band.
 """
 from __future__ import annotations
 
 import pytest
 
 from prismaquant import format_registry as fr
-from prismaquant.activation_fair_pricing import (
-    BRANCH_CALIBRATED,
-    BRANCH_INTERPOLATED_OUTPUT,
-    BRANCH_MEASURED,
-)
+from prismaquant.activation_fair_pricing import BRANCH_CALIBRATED
 from prismaquant.allocator_candidates import (
     _super_item_ucb_hedge,
-    build_candidates,
     calibrate_activation_fair_pricing,
     collect_activation_calibration_rows,
     drop_interpolated_candidates_dominated_by_measured,
@@ -78,10 +54,6 @@ _RUNGS = ["MXFP4", "MXFP8_E5M2", "MXFP8_UE8M0_G32", "MXFP8_E4M3"]
 _MEASURED_RUNGS = ("MXFP4", "MXFP8_E4M3")
 _INTERPOLATED_RUNGS = ("MXFP8_E5M2", "MXFP8_UE8M0_G32")
 _FAMILY = "mx"
-
-# h_trace = 2 makes predicted_dloss = 0.5*h_trace*mse exactly the mse, so every
-# expected number below is readable as an MSE.
-_H_TRACE = 2.0
 
 # The two projections of the bug report, at their measured extremes. The whole
 # defect lives in this spread: one family constant cannot serve both.
@@ -110,7 +82,6 @@ def _stats_entry() -> dict:
     # in_features % 32 == 0 and both dims >= 128 keep every MX rung legal,
     # so nothing drops out of build_candidates for shape reasons.
     return {
-        "h_trace": _H_TRACE,
         "n_params": 1024 * 512,
         "in_features": 1024,
         "out_features": 512,
@@ -153,147 +124,6 @@ def _tables() -> tuple[dict, dict]:
 
 def _specs():
     return [fr.get_format(name) for name in _RUNGS]
-
-
-def _priced_ladder(stats: dict, costs: dict, qname: str, pricing) -> list[float]:
-    """Every rung of one tensor, through the allocator's own pricing."""
-    return [
-        cost_entry_predicted_dloss(
-            stats[qname],
-            costs[qname][rung],
-            format_name=rung,
-            activation_pricing=pricing,
-        )
-        for rung in _RUNGS
-    ]
-
-
-def _pre_fix_costs(costs: dict) -> dict:
-    """The same table as the OLD rule saw it.
-
-    Not a reimplementation of the old pricing — the old branch never read
-    ``output_mse`` on an ``output_mse_measured=False`` row, so deleting the key
-    makes the CURRENT function take the weight-only branch and produce
-    arithmetically the pre-fix number. Everything else (the calibration, the
-    family penalty, the weight_mse ladder) is identical, so the only thing the
-    comparison varies is the branch.
-    """
-    return {
-        qname: {
-            rung: {k: v for k, v in row.items()
-                   if not (k == "output_mse" and rung in _INTERPOLATED_RUNGS)}
-            for rung, row in rows.items()
-        }
-        for qname, rows in costs.items()
-    }
-
-
-def _violations(prices: list[float]) -> list[int]:
-    """Indices where a HIGHER rung costs more than the rung below it."""
-    return [i for i in range(1, len(prices)) if prices[i] > prices[i - 1]]
-
-
-# ---------------------------------------------------------------------------
-# 1. Rung monotonicity inside the family
-# ---------------------------------------------------------------------------
-
-def test_interpolated_rungs_are_priced_between_their_measured_neighbours():
-    """The acceptance property, on BOTH projections, through the real code.
-
-    K13 and K14 are interpolated; K12 and K15 are measured. A CB ladder spends
-    bits to buy error, so price must fall monotonically in K — and each
-    interpolated rung must sit strictly between the rungs on either side of
-    it, on a projection whose ratio is 5x below the family constant and on
-    one 5x above it.
-    """
-    stats, costs = _tables()
-    pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
-    assert pricing.enabled
-    assert pricing.families[_FAMILY].penalty == pytest.approx(
-        _EXPECTED_PENALTY)
-
-    for qname, ratio in ((_DOWN_PROJ, _RATIO_DOWN_PROJ),
-                         (_GATE_PROJ, _RATIO_GATE_PROJ)):
-        prices = _priced_ladder(stats, costs, qname, pricing)
-        assert _violations(prices) == [], (
-            f"{qname}: rung order broken at {_violations(prices)} "
-            f"(prices={prices})")
-        # Strictly between its neighbours, both interpolated rungs.
-        assert prices[0] > prices[1] > prices[2] > prices[3]
-        # Every rung, interpolated or not, is now 0.5*h_trace*output_mse: one
-        # basis for the whole ladder, which is what makes the order meaningful.
-        for rung, price in zip(_RUNGS, prices):
-            assert price == pytest.approx(ratio * _weight_mse(rung))
-        # The bug report's own yardstick: an interpolated rung against the
-        # geometric mean of its neighbours. 12x/0.43x before, ~1.00x now.
-        for i in (1, 2):
-            neighbour_gm = (prices[i - 1] * prices[i + 1]) ** 0.5
-            assert prices[i] / neighbour_gm == pytest.approx(1.0, rel=0.015)
-
-
-def test_the_old_rule_breaks_rung_order_in_both_directions():
-    """The same assertions FAIL pre-fix, so the test above catches the bug.
-
-    Down_proj's true ratio is 10 and the family constant is 50, so its
-    interpolated rungs are priced 5x high and K13 leaps over K12. Gate_proj's
-    ratio is 250, so its interpolated rungs are priced 5x LOW and the measured
-    K15 leaps over the under-priced K14. One constant, two failure directions,
-    exactly as observed on the banked menu.
-    """
-    stats, costs = _tables()
-    pre_fix = _pre_fix_costs(costs)
-    pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
-    # The calibration is not what changed: the interpolated rows never entered
-    # it, so stripping their output_mse leaves the same fit.
-    assert calibrate_activation_fair_pricing(
-        stats, pre_fix, _specs()).families[_FAMILY].penalty == pytest.approx(
-            _EXPECTED_PENALTY)
-
-    down = _priced_ladder(stats, pre_fix, _DOWN_PROJ, pricing)
-    gate = _priced_ladder(stats, pre_fix, _GATE_PROJ, pricing)
-
-    # Both projections are non-monotone, at opposite seams of the ladder.
-    assert _violations(down) == [1], f"down_proj prices={down}"
-    assert _violations(gate) == [3], f"gate_proj prices={gate}"
-    # And the misprice is the family constant standing in for the ratio.
-    assert down[1] == pytest.approx(
-        _EXPECTED_PENALTY * _weight_mse("MXFP8_E5M2"))
-    assert down[1] / (_RATIO_DOWN_PROJ * _weight_mse("MXFP8_E5M2")) == (
-        pytest.approx(_EXPECTED_PENALTY / _RATIO_DOWN_PROJ))   # 5x over
-    assert gate[1] / (_RATIO_GATE_PROJ * _weight_mse("MXFP8_E5M2")) == (
-        pytest.approx(_EXPECTED_PENALTY / _RATIO_GATE_PROJ))   # 0.2x under
-    # The measured rungs are untouched by the fix, on both tables.
-    fixed_down = _priced_ladder(stats, costs, _DOWN_PROJ, pricing)
-    assert down[0] == pytest.approx(fixed_down[0])
-    assert down[3] == pytest.approx(fixed_down[3])
-
-
-def test_build_candidates_prices_and_labels_the_interpolated_rung():
-    """End to end through candidate construction, not just the scalar path."""
-    stats, costs = _tables()
-    pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
-    # The campaign's interpolated rows need its leave-one-anchor-out table; a
-    # zero band drops nothing that is not an exact tie, so pricing is what
-    # this test sees.
-    loo = {qname: {_FAMILY: {"max_abs_log2_error": 0.0}}
-           for qname in (_DOWN_PROJ, _GATE_PROJ)}
-    cands = build_candidates(
-        stats, costs, _specs(), target_profile="research",
-        activation_pricing=pricing, census_loo=loo).candidates
-
-    for qname, ratio in ((_DOWN_PROJ, _RATIO_DOWN_PROJ),
-                         (_GATE_PROJ, _RATIO_GATE_PROJ)):
-        priced = {c.fmt: c for c in cands[qname]}
-        assert set(priced) == set(_RUNGS)
-        ladder = [priced[rung].predicted_dloss for rung in _RUNGS]
-        assert _violations(ladder) == [], f"{qname}: {ladder}"
-        for rung in _INTERPOLATED_RUNGS:
-            assert priced[rung].predicted_dloss == pytest.approx(
-                ratio * _weight_mse(rung))
-            # Its own label: priced in output space, but still a PREDICTION.
-            assert priced[rung].activation_pricing == BRANCH_INTERPOLATED_OUTPUT
-        for rung in _MEASURED_RUNGS:
-            assert priced[rung].activation_pricing == BRANCH_MEASURED
 
 
 # ---------------------------------------------------------------------------
@@ -361,15 +191,16 @@ def test_the_row_still_says_exactly_what_it_said_about_itself():
     # ...and "is a real measurement behind this row" is still answered no.
     assert not cost_entry_uses_measured_output_mse(
         stats[_DOWN_PROJ], entry, "MXFP8_E5M2")
+    # No output-space price since #3448: the row takes the calibrated
+    # weight-only branch.
     assert cost_entry_activation_pricing_branch(
         stats[_DOWN_PROJ], entry, "MXFP8_E5M2",
         calibrate_activation_fair_pricing(stats, costs, _specs()),
-    ) == BRANCH_INTERPOLATED_OUTPUT
+    ) == BRANCH_CALIBRATED
 
 
 def test_the_noise_band_guard_still_drops_a_dominated_interpolated_rung():
-    """``drop_interpolated_candidates_dominated_by_measured`` is unchanged,
-    and becomes meaningful again now that both sides are on one basis."""
+    """``drop_interpolated_candidates_dominated_by_measured`` is unchanged."""
     _stats, costs = _tables()
     cands = {
         _DOWN_PROJ: [
@@ -393,7 +224,7 @@ def test_a_zero_output_mse_placeholder_still_takes_the_weight_only_branch(
     The retired ladder wrote such rows (a weight-space-only packed fit, and a
     dense fit that could not be made); an interpolated row of any stamp at 0.0
     carries no output-space information, and 0.0 is the DP's global optimum —
-    so it must keep falling through to weight-only pricing.
+    so it takes the calibrated weight-only branch on its ``predicted_dloss``.
     """
     stats, costs = _tables()
     pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
@@ -406,6 +237,7 @@ def test_a_zero_output_mse_placeholder_still_takes_the_weight_only_branch(
         "rel_output_mse": 0.0,
         "output_mse_measured": False,
         "cost_source": TESSERA_INTERPOLATED_COST_SOURCE,
+        "predicted_dloss": _weight_mse("MXFP8_E5M2"),
     }
     priced = cost_entry_predicted_dloss(
         stats_entry, entry, format_name="MXFP8_E5M2",
@@ -443,26 +275,13 @@ def test_a_retired_ladder_row_refuses(source, output_mse):
         cost_entry_is_band_interpolated(entry)
 
 
-def test_a_genuinely_measured_row_is_priced_exactly_as_before():
-    stats, costs = _tables()
-    pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
-    entry = costs[_GATE_PROJ]["MXFP4"]
-    assert cost_entry_predicted_dloss(
-        stats[_GATE_PROJ], entry, format_name="MXFP4",
-        activation_pricing=pricing,
-    ) == pytest.approx(_RATIO_GATE_PROJ * _W12)
-    assert cost_entry_activation_pricing_branch(
-        stats[_GATE_PROJ], entry, "MXFP4", pricing) == BRANCH_MEASURED
-
-
-def test_the_ucb_hedge_conversion_follows_the_pricing_branch():
+def test_the_ucb_hedge_conversion_removes_every_member_hedge():
     """``_super_item_ucb_hedge`` mirrors ``cost_entry_predicted_dloss``.
 
-    A member priced from its own interpolated ``output_mse`` never had a
-    ``z*stderr`` hedge added to its dloss, so the super-item conversion must
-    not subtract one — that would over-subtract the linear hedge it exists to
-    undo. The control below is the same row with nothing to price it in output
-    space, which still hedges.
+    Every member is priced on its ``predicted_dloss`` with the ``z*stderr``
+    hedge added (no member is priced from its ``output_mse`` since #3448), so
+    the super-item conversion removes the hedge from an interpolated member
+    and from the same row without an ``output_mse`` alike.
     """
     stats_entry = _stats_entry()
     interpolated = {
@@ -473,15 +292,12 @@ def test_the_ucb_hedge_conversion_follows_the_pricing_branch():
         "output_mse_measured": False,
         "cost_source": TESSERA_INTERPOLATED_COST_SOURCE,
     }
-    hedge, stderr_agg = _super_item_ucb_hedge(
-        [(stats_entry, interpolated, 1.0e-3, 1.0)], ucb_z=2.0)
-    assert hedge == 0.0 and stderr_agg == 0.0
-
     weight_only = {k: v for k, v in interpolated.items() if k != "output_mse"}
-    hedge, stderr_agg = _super_item_ucb_hedge(
-        [(stats_entry, weight_only, 1.0e-4, 1.0)], ucb_z=2.0)
-    assert hedge == pytest.approx(2.0 * 2.0e-5)
-    assert stderr_agg == pytest.approx(2.0e-5)
+    for row in (interpolated, weight_only):
+        hedge, stderr_agg = _super_item_ucb_hedge(
+            [(stats_entry, row, 1.0e-4, 1.0)], ucb_z=2.0)
+        assert hedge == pytest.approx(2.0 * 2.0e-5)
+        assert stderr_agg == pytest.approx(2.0e-5)
 
 
 # ---------------------------------------------------------------------------
@@ -497,9 +313,8 @@ def test_the_ucb_hedge_conversion_follows_the_pricing_branch():
 #
 # Rows below are the real layer-0 gate/up cells of that table
 # (extension-r1024-02/workspace/merged/cost.pkl, sha256 cd215410...):
-# (output_mse, memory_bytes, measured). The DP prices every one of them as
-# 0.5 * h_trace * output_mse, and h_trace cancels in the log ratio the guard
-# compares, so output_mse stands in for predicted_dloss.
+# (output_mse, memory_bytes, measured). The guard compares log ratios of the
+# candidates' prices, so output_mse stands in for predicted_dloss.
 
 _CENSUS_GATE = "model.language_model.layers.0.mlp.gate_proj"
 _CENSUS_UP = "model.language_model.layers.0.mlp.up_proj"
@@ -702,7 +517,7 @@ def test_census_loo_band_prints_its_own_report_line(capsys, monkeypatch):
     monkeypatch.setattr(ac, "reduce_continuous_menu",
                         lambda out, stats, **kwargs: out)
     names = ("layer.self_attn.o_proj", "layer.mlp.down_proj")
-    stats = {name: {"n_params": 1600, "h_trace": 1.0, "in_features": 40,
+    stats = {name: {"n_params": 1600, "in_features": 40,
                     "out_features": 40} for name in names}
     stock = {name: {"NVFP4": {"weight_mse": 0.01, "predicted_dloss": 0.005},
                     "BF16": {"weight_mse": 0.0, "predicted_dloss": 0.0}}

@@ -15,7 +15,7 @@ from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_campaign as campaign
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from test_tessera_stack_sample_cost import _profile, _packed_probe_row, _anchor, _sample, _payload, STEM
+from test_tessera_stack_sample_cost import _profile, _packed_probe_row, _anchor, STEM
 
 
 def _plan(tmp_path, monkeypatch):
@@ -72,83 +72,6 @@ def test_selection_rejects_independent_gate_and_up_draws(tmp_path, monkeypatch):
     selection['groups'][0]['sampled'].pop()
     with pytest.raises(campaign_table.StackSampleError, match='sampled members'):
         campaign_table.selection_stack_samples(selection, _profile())
-
-
-def test_a_stack_payload_allocates_through_the_real_allocator(tmp_path, monkeypatch):
-    """Criterion 4 end to end: allocator.main() places the STACK, scoped.
-
-    The probe is the packed probe -- not the per-expert expansion #290
-    retired -- so the packed qname is a row the candidate builder can see, the
-    explicit Tessera scope resolves it as ``routed_moe`` with no fallback to
-    the serving profile, and the layer config names the stack, never a member.
-    """
-    import pickle
-    import sys
-
-    from test_tessera_scope_endpoints import _cli_scope, _v5_contract
-
-    from prismaquant import allocator
-
-    _v5_contract(monkeypatch)
-
-    model_dir = tmp_path / "model"
-    model_dir.mkdir()
-    (model_dir / "config.json").write_text(json.dumps({
-        "model_type": "lfm2_moe", "architectures": ["Lfm2MoeForCausalLM"]}))
-
-    fmt, family, q256 = "TESSERA_E2M1_K2_R896", "TESSERA_E2M1_K2", 896
-    gate_up = f"{STEM}.gate_up_proj"
-    stats = {
-        gate_up: _packed_probe_row(4, [1.0, 2.0, 3.0, 4.0],
-                                   out_features=512, in_features=256),
-        "model.layers.18.self_attn.out_proj": {
-            "h_trace": 1.0, "n_params": 256 * 256, "in_features": 256,
-            "out_features": 256, "router_path": None, "expert_id": None},
-    }
-    probe = tmp_path / "probe.pkl"
-    probe.write_bytes(pickle.dumps(
-        {"stats": stats, "meta": {"model": str(model_dir)}}))
-
-    anchors = {
-        f"{STEM}.{e}.{role}": {family: [
-            _anchor(f"{STEM}.{e}.{role}", family, fmt, q256, 0.02)]}
-        for e in range(4) for role in ("w1", "w3")}
-    sample = _sample(stats[gate_up])
-    payload = _payload(anchors, {sample.packed_qname: sample})
-    # The dense unit is priced by the same table so the run has one currency.
-    payload["costs"]["model.layers.18.self_attn.out_proj"] = {
-        fmt: {"output_mse": 4e-4, "output_mse_measured": True,
-              "currency": campaign_table.CURRENCY}}
-    payload["formats"] = sorted(set(payload["formats"]) | {fmt})
-    costs = tmp_path / "cost.pkl"
-    costs.write_bytes(pickle.dumps(payload))
-
-    layer_config = tmp_path / "layer.json"
-    from prismaquant import allocator_candidates
-    seen = {}
-    original = allocator_candidates.selection_serving_lane_provenance
-
-    def provenance(*args, **kwargs):
-        seen.update(kwargs)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(allocator, "selection_serving_lane_provenance", provenance)
-    monkeypatch.setattr(sys, "argv", [
-        "allocator", "--probe", str(probe), "--costs", str(costs),
-        "--formats", fmt, "--allow-legacy-fisher-norm",
-        "--target-profile", "tessera_research_sm121", "--target-bits", "16",
-        "--pareto-targets", "16", "--bit-precision", "0.1",
-        "--layer-config", str(layer_config),
-        "--pareto-csv", str(tmp_path / "pareto.csv"), *_cli_scope()])
-    allocator.main()
-
-    assert seen["context_by_unit"][gate_up].structure == "routed_moe"
-    written = json.loads(layer_config.read_text())
-    assert gate_up in written
-    assert f"{STEM}.0.w1" not in written
-    route = written["__prismaquant__"]["serving_lane_provenance"]["by_unit"][gate_up]
-    assert route["format"] == fmt
-    assert route["serving_context"]["structure"] == "routed_moe"
 
 
 def test_draw_receipt_must_replay_from_the_carried_probe(tmp_path, monkeypatch):

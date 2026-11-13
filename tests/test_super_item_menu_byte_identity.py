@@ -159,9 +159,6 @@ class _PackedProfile:
 def _row(d_out: int, d_in: int, h_trace: float, mse: float,
          stderr: float) -> tuple[dict, dict]:
     stats = {
-        "h_trace": h_trace,
-        "h_trace_raw": h_trace * 1.5,
-        "h_w2_sum": h_trace * 0.25,
         "w_max_abs": 0.75,
         "w_norm_sq": float(d_out * d_in) * 1e-4,
         "n_params": d_out * d_in,

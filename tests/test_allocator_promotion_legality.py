@@ -71,17 +71,17 @@ def _stats_and_costs(shapes: dict[str, tuple[int, int]], fmt_names):
     stats, costs = {}, {}
     for name, (out_f, in_f) in shapes.items():
         stats[name] = {
-            "h_trace": 0.7,
             "n_params": out_f * in_f,
             "in_features": in_f,
             "out_features": out_f,
             "n_tokens_seen": 4096,
         }
         # Cheaper formats cost more predicted loss, as measured cost tables do.
-        costs[name] = {
-            f: {"weight_mse": 0.5 / max(fr.REGISTRY[f].effective_bits, 1e-9)}
-            for f in fmt_names
-        }
+        costs[name] = {}
+        for f in fmt_names:
+            weight_mse = 0.5 / max(fr.REGISTRY[f].effective_bits, 1e-9)
+            costs[name][f] = {"weight_mse": weight_mse,
+                              "predicted_dloss": 0.35 * weight_mse}
     return stats, costs
 
 
@@ -417,7 +417,6 @@ def test_cli_no_packed_aggregation_emits_a_coherent_legal_moe_unit(tmp_path):
     stats, costs = {}, {}
     for name, (out_f, in_f) in shapes.items():
         stats[name] = {
-            "h_trace": 1.0,
             "n_params": out_f * in_f,
             "in_features": in_f,
             "out_features": out_f,
