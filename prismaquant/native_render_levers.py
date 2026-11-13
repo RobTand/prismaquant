@@ -64,7 +64,6 @@ class NativeRenderLevers:
     scale_sweep: bool = False
     static_act_order: bool = False
     joint_scale_opt: bool = False
-    fisher_gptq: bool = False
     weighted_vq: bool = True
     render_progressive_gates: bool = True
     render_gate_min_gain: float = 0.0
@@ -81,7 +80,6 @@ class NativeRenderLevers:
     nvfp4_snapped_scale_scoring: bool = False
     nvfp4_input_global_scale_policy: str = "legacy_6_over_calibration_amax.v1"
     act_clip_quantile: float | None = 0.999
-    fisher_row_weight_clip: float = 64.0
     do_no_harm: bool = True
     mxfp8_joint_scale_shifts: tuple[int, ...] = (-1, 0)
     mxfp8_scale_sweep_shifts: tuple[int, ...] = (0,)
@@ -196,7 +194,6 @@ class NativeRenderLevers:
         """Bind existing defaults and every numerical environment control."""
         from .native_render_codec import resolve_nvfp4_scale_rule
         from .nvfp4_activation_contract import resolve_input_global_scale_policy
-        from .render_score import resolve_fisher_row_weight_clip
         if isinstance(overrides, cls):
             return overrides
         if overrides is not None and overrides.get("schema") == SCHEMA:
@@ -205,8 +202,7 @@ class NativeRenderLevers:
         optional_defaults = not bool(values.pop("none", False))
         for name, env in (("scale_sweep", None),
                           ("static_act_order", "PRISMAQUANT_GPTQ_STATIC_ACT_ORDER"),
-                          ("joint_scale_opt", "PRISMAQUANT_NVFP4_JOINT_SCALE_OPT"),
-                          ("fisher_gptq", "PRISMAQUANT_FISHER_WEIGHTED_GPTQ")):
+                          ("joint_scale_opt", "PRISMAQUANT_NVFP4_JOINT_SCALE_OPT")):
             values.setdefault(name, bool(optional_defaults and optional_flags_from_env and env and _flag(env)))
         values.setdefault("gptq", bool(optional_defaults and gptq_default))
         values.setdefault("render_progressive_gates", _flag("PRISMAQUANT_RENDER_PROGRESSIVE_GATES", True))
@@ -256,7 +252,6 @@ class NativeRenderLevers:
         except ValueError:
             quantile = None
         values.setdefault("act_clip_quantile", quantile if quantile is not None and 0.0 < quantile < 1.0 else None)
-        values.setdefault("fisher_row_weight_clip", resolve_fisher_row_weight_clip())
         values.setdefault("do_no_harm", os.environ.get("PRISMAQUANT_DO_NO_HARM", "1") != "0")
         values.setdefault("mxfp8_joint_scale_shifts", _int_set(os.environ.get("PRISMAQUANT_MXFP8_JOINT_SCALE_SHIFTS", "-1,0")))
         try:

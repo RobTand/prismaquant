@@ -10,7 +10,6 @@ import prismaquant.export_native_compressed as exporter
 from prismaquant.native_render_levers import NativeRenderLevers
 from prismaquant.model_profiles.default import DefaultProfile
 from prismaquant.model_profiles import vllm_registry
-from prismaquant.production_weight_cache import _fused_sibling_leaf_mapping_from_profile
 
 
 class DeclarationFailed(RuntimeError):
@@ -31,7 +30,6 @@ class FailedProfile(DefaultProfile):
         levers=NativeRenderLevers()),
     lambda profile: exporter._unify_input_global_scales_across_fused_siblings(
         {"model.layers.0.self_attn.q_proj": 1.0}, profile=profile),
-    lambda profile: _fused_sibling_leaf_mapping_from_profile(profile),
 ])
 def test_failed_fused_declaration_propagates_to_every_render_consumer(consumer):
     with pytest.raises(DeclarationFailed, match="unavailable"):

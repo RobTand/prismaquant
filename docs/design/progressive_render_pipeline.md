@@ -7,8 +7,7 @@ render score used for allocator-style output error:
 2. Render the candidate after one mechanism, or a candidate package when a
    mechanism can only be useful as an initializer for downstream refinement.
 3. Score both on the same activation rows.
-4. If h-detail/Fisher rows are available, use Fisher-weighted output MSE.
-   Otherwise use activation output MSE. Weight MSE is only a fallback when
+4. Use activation output MSE. Weight MSE is only a fallback when
    activations are unavailable.
 5. Accept the candidate only when the score improves by the configured
    minimum gain. If it regresses or ties, keep the baseline and continue to

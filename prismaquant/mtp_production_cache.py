@@ -31,9 +31,7 @@ from prismaquant.production_weight_cache import (
     MTP_APPEND_SIDECAR_KEY,
     NVFP4_JOINT_GLOBAL_WITNESS_KEY,
     ProductionWeightCache,
-    _FisherRowWeightCache,
     _check_and_record_append_identity,
-    _fused_sibling_leaf_mapping_from_profile,
     _weighted_render_family,
     _write_render_score_sidecar,
     build_mtp_append_identity,
@@ -289,7 +287,6 @@ def fill_profile_mtp_production_cache(
     device: torch.device | str = "cuda",
     dtype: torch.dtype = torch.bfloat16,
     max_act_rows: int = 256,
-    h_detail_dir: str | Path | None = None,
     include_qnames: Sequence[str] | None = None,
     col_weights: Mapping[str, torch.Tensor] | None = None,
     progress: bool = True,
@@ -513,12 +510,6 @@ def fill_profile_mtp_production_cache(
             )
         score_meta, render_score_records = _existing_render_score_records(cache)
 
-        fused_mapping = _fused_sibling_leaf_mapping_from_profile(profile)
-        fisher_rows = (
-            _FisherRowWeightCache(h_detail_dir, fused_mapping or None)
-            if bool(cache.levers.get("fisher_gptq", False)) and h_detail_dir
-            else None
-        )
         rendered = _render_dense_layer(
             wrapper,
             selected_linears,
@@ -529,7 +520,6 @@ def fill_profile_mtp_production_cache(
             cache_dir_path=cache_dir_path,
             profile=profile,
             device=device_t,
-            fisher_rows=fisher_rows,
             render_score_records=render_score_records,
             col_weights=col_weights,
             retain_rendered=True,

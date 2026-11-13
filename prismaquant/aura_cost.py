@@ -2777,7 +2777,6 @@ def run_streamed_production_anchor_aura(
     seed_base: int = 7000,
     cold_expert_provenance: Mapping[str, object] | None = None,
     max_act_rows: int = 512,
-    h_detail_dir: str | Path | None = None,
     checkpoint_identity_extra: Mapping[str, object] | None = None,
     include_routed_experts: bool = True,
     allow_packed_expert_omission: bool = False,
@@ -2929,7 +2928,6 @@ def run_streamed_production_anchor_aura(
         model_identity=model_identity,
         cold_expert_provenance=cold_expert_provenance,
         max_act_rows=max_act_rows,
-        h_detail_dir=h_detail_dir,
         transient_consumer_identity=(
             {**AURA_PRODUCTION_ANCHOR_DELTA_CONSUMER_IDENTITY,
              "storage_dtype": "torch.float32"}

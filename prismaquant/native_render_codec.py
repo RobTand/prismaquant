@@ -19,7 +19,6 @@ from .format_registry import _mx_rounded_amax_power2
 from .fp8_dynamic import fp8_dynamic_weight_qdq
 from .mx_formats import e8m0_to_scale, mxfp8_e4m3_qdq
 from .native_render_levers import NativeRenderLevers
-from .render_score import normalize_clipped_fisher_row_weights
 
 # `compressed_tensors.compressors.nvfp4.helpers.pack_fp4_to_uint8` and is
 # verified byte-identical in tests. We pack indices directly rather than call
@@ -626,7 +625,6 @@ def activation_matrix_for_gptq(
     clip_threshold: float | None = None,
     clip_quantile: float | None = None,
     clip_rescale: str | None = None,
-    row_weights: torch.Tensor | None = None,
     levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Flatten activations and apply the same optional clipping used by GPTQ.
@@ -654,42 +652,7 @@ def activation_matrix_for_gptq(
         if q is not None and 0.0 < q < 1.0 and X.numel() > 0:
             thresh = X.abs().quantile(float(q), dim=1, keepdim=True)
             X = X.clamp(min=-thresh, max=thresh)
-    if row_weights is not None and X.numel() > 0:
-        rw = _normalize_fisher_row_weights(row_weights, X.shape[0], X.device, levers=levers)
-        if rw is not None:
-            X = X * rw.sqrt().unsqueeze(1).to(dtype=X.dtype)
     return X
-
-
-def _normalize_fisher_row_weights(
-    row_weights: torch.Tensor | None,
-    n_rows: int,
-    device: torch.device,
-    *,
-    levers: NativeRenderLevers,
-) -> torch.Tensor | None:
-    """Return non-negative Fisher row weights normalized to mean 1.
-
-    The h-detail probe stores per-token gradient² weights.  For a local
-    least-squares GPTQ objective, `X.T @ diag(g²) @ X` is equivalent to
-    scaling each activation row by `sqrt(g²)`.  Normalizing the selected
-    slice to mean 1 preserves the scale expected by the existing damping
-    candidates and local error gates. The normalise-then-clip rule itself
-    lives in render_score.normalize_clipped_fisher_row_weights so the cost
-    paths cannot drift (issue #159).
-    """
-    if row_weights is None or n_rows <= 0:
-        return None
-    try:
-        rw = row_weights.detach().reshape(-1).to(device=device, dtype=torch.float32)
-    except Exception:
-        return None
-    if rw.numel() < n_rows:
-        return None
-    rw = rw[:n_rows]
-    return normalize_clipped_fisher_row_weights(
-        rw, levers.fisher_row_weight_clip, require_positive_mean=True
-    )
 
 
 def _activation_col_importance_for_gptq(
@@ -700,7 +663,6 @@ def _activation_col_importance_for_gptq(
     clip_threshold: float | None = None,
     clip_quantile: float | None = None,
     clip_rescale: str | None = None,
-    row_weights: torch.Tensor | None = None,
     levers: NativeRenderLevers,
 ) -> torch.Tensor:
     X = activation_matrix_for_gptq(
@@ -710,7 +672,6 @@ def _activation_col_importance_for_gptq(
         clip_threshold=clip_threshold,
         clip_quantile=clip_quantile,
         clip_rescale=clip_rescale,
-        row_weights=row_weights,
         levers=levers,
     )
     if X.numel() == 0:
@@ -725,7 +686,6 @@ def _activation_weighted_weight_error(
     *,
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    row_weights: torch.Tensor | None = None,
     levers: NativeRenderLevers,
 ) -> float:
     """Score a rendered weight with the same cheap local gate as NVFP4.
@@ -742,7 +702,6 @@ def _activation_weighted_weight_error(
         device=ref.device,
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
-        row_weights=row_weights,
         levers=levers,
     )
     return float((a2 * (ref - cand).pow(2).sum(dim=0)).sum())
@@ -969,7 +928,6 @@ def gptq_obs_rounding_nvfp4(
     global_real_override: torch.Tensor | None = None,
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    fisher_row_weights: torch.Tensor | None = None,
     static_act_order: bool = False,
     joint_scale_opt: bool = False,
     *,
@@ -1021,7 +979,6 @@ def gptq_obs_rounding_nvfp4(
         device=W.device,
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
-        row_weights=fisher_row_weights,
         levers=levers,
     )
     # H = X^T X; guard against near-zero diagonal (dead channels).
@@ -1163,7 +1120,6 @@ def gptq_obs_rounding_nvfp4_swept(
     damp_candidates: tuple[float, ...] = (0.001, 0.005, 0.01, 0.05, 0.1),
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    fisher_row_weights: torch.Tensor | None = None,
     static_act_order: bool = False,
     joint_scale_opt: bool = False,
     linear_name: str | None = None,
@@ -1197,7 +1153,6 @@ def gptq_obs_rounding_nvfp4_swept(
         device=weight.device,
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
-        row_weights=fisher_row_weights,
         levers=levers,
     )
     H_full = X.t() @ X  # [in, in], shared evaluator
@@ -1250,7 +1205,6 @@ def gptq_obs_rounding_nvfp4_swept(
                     damp=damp_pred, global_real_override=global_real_override,
                     clip_threshold=clip_threshold,
                     clip_rescale=clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
                     static_act_order=static_act_order,
                     joint_scale_opt=joint_scale_opt,
                     levers=levers,
@@ -1288,7 +1242,6 @@ def gptq_obs_rounding_nvfp4_swept(
                 damp=damp, global_real_override=global_real_override,
                 clip_threshold=clip_threshold,
                 clip_rescale=clip_rescale,
-                fisher_row_weights=fisher_row_weights,
                 static_act_order=static_act_order,
                 joint_scale_opt=joint_scale_opt,
                 levers=levers,
@@ -1341,7 +1294,6 @@ def scale_sweep_nvfp4(
     reference_weight: torch.Tensor | None = None,
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    fisher_row_weights: torch.Tensor | None = None,
     *,
     levers: NativeRenderLevers,
 ) -> torch.Tensor:
@@ -1390,7 +1342,6 @@ def scale_sweep_nvfp4(
             device=W_in.device,
             clip_threshold=clip_threshold,
             clip_rescale=clip_rescale,
-            row_weights=fisher_row_weights,
             levers=levers,
         )
     else:
@@ -1399,7 +1350,6 @@ def scale_sweep_nvfp4(
             cols,
             device=W_in.device,
             clip_quantile=0.0,
-            row_weights=fisher_row_weights,
             levers=levers,
         )
     col_importance = a.pow(2).mean(dim=0).clamp_min(1e-12)  # [in]
@@ -2016,7 +1966,6 @@ def mxfp8_scale_sweep_quantize(
     group_size: int = 32,
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    fisher_row_weights: torch.Tensor | None = None,
     levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Activation-weighted E8M0 scale search for MXFP8_E4M3.
@@ -2047,7 +1996,6 @@ def mxfp8_scale_sweep_quantize(
         device=W.device,
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
-        row_weights=fisher_row_weights,
         levers=levers,
     ).reshape(1, cols // group_size, group_size)
 
@@ -2257,7 +2205,6 @@ def gptq_obs_rounding_mxfp4(
     damp: float | None = None,
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    fisher_row_weights: torch.Tensor | None = None,
     static_act_order: bool = False,
     levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -2279,7 +2226,6 @@ def gptq_obs_rounding_mxfp4(
         device=W.device,
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
-        row_weights=fisher_row_weights,
         levers=levers,
     )
     if damp is None:
@@ -2372,7 +2318,6 @@ def gptq_obs_rounding_mxfp4_swept(
     damp_candidates: tuple[float, ...] = (0.001, 0.005, 0.01, 0.05, 0.1),
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    fisher_row_weights: torch.Tensor | None = None,
     static_act_order: bool = False,
     levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -2383,7 +2328,6 @@ def gptq_obs_rounding_mxfp4_swept(
         device=W_orig.device,
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
-        row_weights=fisher_row_weights,
         levers=levers,
     )
     H_full = X.t() @ X
@@ -2398,7 +2342,6 @@ def gptq_obs_rounding_mxfp4_swept(
                 damp=damp,
                 clip_threshold=clip_threshold,
                 clip_rescale=clip_rescale,
-                fisher_row_weights=fisher_row_weights,
                 static_act_order=static_act_order,
                 levers=levers,
             )
@@ -2418,7 +2361,6 @@ def gptq_obs_rounding_mxfp4_swept(
         damp=0.01,
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
-        fisher_row_weights=fisher_row_weights,
         static_act_order=static_act_order,
         levers=levers,
     )
@@ -2433,7 +2375,6 @@ def gptq_obs_rounding_fp8_like(
     damp: float | None = None,
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    fisher_row_weights: torch.Tensor | None = None,
     joint_scale_opt: bool = False,
     static_act_order: bool = False,
     levers: NativeRenderLevers,
@@ -2471,7 +2412,6 @@ def gptq_obs_rounding_fp8_like(
         device=W.device,
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
-        row_weights=fisher_row_weights,
         levers=levers,
     )
     if damp is None:
@@ -2593,7 +2533,6 @@ def gptq_obs_rounding_fp8_like_swept(
     damp_candidates: tuple[float, ...] = (0.001, 0.005, 0.01, 0.05, 0.1),
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    fisher_row_weights: torch.Tensor | None = None,
     joint_scale_opt: bool = False,
     static_act_order: bool = False,
     levers: NativeRenderLevers,
@@ -2605,7 +2544,6 @@ def gptq_obs_rounding_fp8_like_swept(
         device=W_orig.device,
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
-        row_weights=fisher_row_weights,
         levers=levers,
     )
     H_full = X.t() @ X
@@ -2621,7 +2559,6 @@ def gptq_obs_rounding_fp8_like_swept(
                 damp=damp,
                 clip_threshold=clip_threshold,
                 clip_rescale=clip_rescale,
-                fisher_row_weights=fisher_row_weights,
                 joint_scale_opt=joint_scale_opt,
                 static_act_order=static_act_order,
                 levers=levers,
@@ -2643,7 +2580,6 @@ def gptq_obs_rounding_fp8_like_swept(
         damp=0.01,
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
-        fisher_row_weights=fisher_row_weights,
         joint_scale_opt=joint_scale_opt,
         static_act_order=static_act_order,
         levers=levers,
@@ -2663,7 +2599,6 @@ def fp8_dynamic_scale_sweep_quantize(
     *,
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
-    fisher_row_weights: torch.Tensor | None = None,
     levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Activation-weighted per-row scale search for vLLM FP8 E4M3."""
@@ -2680,7 +2615,6 @@ def fp8_dynamic_scale_sweep_quantize(
         device=w_f.device,
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
-        row_weights=fisher_row_weights,
         levers=levers,
     ).to(device=w_f.device, dtype=torch.float32)
     base = (
@@ -2751,7 +2685,6 @@ def quantize_2d(
     input_global_scale_override: float | None = None,
     act_clip_threshold: float | None = None,
     act_clip_rescale: str | None = None,
-    fisher_row_weights: torch.Tensor | None = None,
     linear_name: str | None = None,
     gptq_enabled: bool | None = None,
     scale_sweep_enabled: bool | None = None,
@@ -2792,10 +2725,6 @@ def quantize_2d(
     activation-aware NVFP4/MXFP4/MXFP8_E4M3/MXFP8_E5M2 passes.  When None, legacy behavior is
     preserved: GPTQ/do-no-harm honor ``levers.act_clip_quantile``,
     while scale_sweep uses raw cached activations.
-
-    `fisher_row_weights`: optional per-token gradient² weights aligned to
-    cached activation rows. When provided, GPTQ/scale-sweep local objectives
-    become output/Fisher-weighted by scaling activation rows by sqrt(weight).
 
     `fmt = MXFP8_E4M3` and `fmt = MXFP8_E5M2` emit fp8 weights plus E8M0
     uint8 per-group scales (group_size=32). A bare `MXFP8` input is accepted
@@ -2855,7 +2784,6 @@ def quantize_2d(
                         global_real_override=nvfp4_global_real_override,
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
-                        fisher_row_weights=fisher_row_weights,
                         static_act_order=static_act_order_enabled,
                         joint_scale_opt=joint_scale_opt_enabled,
                         linear_name=linear_name,
@@ -2867,7 +2795,6 @@ def quantize_2d(
                         global_real_override=nvfp4_global_real_override,
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
-                        fisher_row_weights=fisher_row_weights,
                         static_act_order=static_act_order_enabled,
                         joint_scale_opt=joint_scale_opt_enabled,
                         levers=levers,
@@ -2887,7 +2814,6 @@ def quantize_2d(
                     reference_weight=weight.to(torch.float32),
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
                     levers=levers,
                 )
 
@@ -2913,7 +2839,6 @@ def quantize_2d(
                     device=w_orig_f.device,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
-                    row_weights=fisher_row_weights,
                     levers=levers,
                 )
                 mse_rtn = float((a2 * (w_orig_f - w_rtn).pow(2)
@@ -3005,7 +2930,6 @@ def quantize_2d(
                         group_size=32,
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
-                        fisher_row_weights=fisher_row_weights,
                         joint_scale_opt=False,
                         static_act_order=use_static_act_order,
                         levers=levers,
@@ -3017,7 +2941,6 @@ def quantize_2d(
                     group_size=32,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
                     joint_scale_opt=False,
                     static_act_order=use_static_act_order,
                     levers=levers,
@@ -3034,7 +2957,6 @@ def quantize_2d(
                     acts_work,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
-                    row_weights=fisher_row_weights,
                     levers=levers,
                 ),
             )
@@ -3045,7 +2967,6 @@ def quantize_2d(
                     group_size=32,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
                     levers=levers,
                 )
             if levers.do_no_harm:
@@ -3057,7 +2978,6 @@ def quantize_2d(
                         acts_work,
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
-                        row_weights=fisher_row_weights,
                         levers=levers,
                     )
                     err_work = _activation_weighted_weight_error(
@@ -3066,7 +2986,6 @@ def quantize_2d(
                         acts_work,
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
-                        row_weights=fisher_row_weights,
                         levers=levers,
                     )
                     if err_rtn < err_work:
@@ -3088,7 +3007,6 @@ def quantize_2d(
                 group_size=32,
                 clip_threshold=act_clip_threshold,
                 clip_rescale=act_clip_rescale,
-                fisher_row_weights=fisher_row_weights,
                 levers=levers,
             )
         else:
@@ -3106,7 +3024,6 @@ def quantize_2d(
                     fmt=fmt,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
                     joint_scale_opt=False,
                     levers=levers,
                 )
@@ -3117,7 +3034,6 @@ def quantize_2d(
                     fmt=fmt,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
                     joint_scale_opt=False,
                     levers=levers,
                 )
@@ -3127,7 +3043,6 @@ def quantize_2d(
                     acts_work,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
                     levers=levers,
                 )
         elif (scale_sweep_enabled and acts_work is not None
@@ -3138,7 +3053,6 @@ def quantize_2d(
                 acts_work,
                 clip_threshold=act_clip_threshold,
                 clip_rescale=act_clip_rescale,
-                fisher_row_weights=fisher_row_weights,
                 levers=levers,
             )
         else:
@@ -3170,7 +3084,6 @@ def quantize_2d(
                         group_size=32,
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
-                        fisher_row_weights=fisher_row_weights,
                         static_act_order=use_static_act_order,
                         levers=levers,
                     )
@@ -3180,7 +3093,6 @@ def quantize_2d(
                     group_size=32,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
                     static_act_order=use_static_act_order,
                     levers=levers,
                 )
@@ -3196,7 +3108,6 @@ def quantize_2d(
                     acts_work,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
-                    row_weights=fisher_row_weights,
                     levers=levers,
                 ),
             )
@@ -3209,7 +3120,6 @@ def quantize_2d(
                         acts_work,
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
-                        row_weights=fisher_row_weights,
                         levers=levers,
                     )
                     err_work = _activation_weighted_weight_error(
@@ -3218,7 +3128,6 @@ def quantize_2d(
                         acts_work,
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
-                        row_weights=fisher_row_weights,
                         levers=levers,
                     )
                     if err_rtn < err_work:

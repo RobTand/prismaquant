@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from prismaquant.pipeline import (
     ArtifactSpec,
     MetricGateSpec,
@@ -166,6 +168,17 @@ def test_production_pipeline_spec_records_run_config():
     assert spec.metadata["render_mechanisms"] == ["joint_scale_opt", "gptq"]
     assert spec.metadata["target_profile"] == "vllm_packed_moe"
     assert spec.metadata["formats"] == "NVFP4,BF16"
+
+
+def test_pipeline_cli_refuses_archived_fisher_gptq_lever(tmp_path):
+    """run-pipeline.sh passes PRODUCTION_CACHE_LEVERS here under set -e."""
+    path = tmp_path / "pipeline_spec.json"
+    with pytest.raises(ValueError, match="unknown render mechanism: fisher_gptq"):
+        main([
+            "--write-default-production", str(path),
+            "--render-mechanisms", "gptq,static_act_order,joint_scale_opt,fisher_gptq",
+        ])
+    assert not path.exists()
 
 
 def test_surrogate_run_spec_omits_unexecuted_validation_stages():

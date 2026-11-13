@@ -109,7 +109,6 @@ from prismaquant.file_identity import file_stat_signature, _production_cache_ide
 from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.render_score import (
     gate_render_candidate,
-    normalize_row_weights,
     resolve_render_mechanism_order,
     score_render_error,
 )
@@ -2099,119 +2098,6 @@ class _LinearActivationCollector:
         return out
 
 
-
-
-
-
-
-
-class _FisherRowWeightCache:
-    """Lazy loader for h-detail `g2_per_token` vectors."""
-
-    _FNAME_SUB = re.compile(r"[^A-Za-z0-9_-]")
-
-    def __init__(
-        self,
-        h_detail_dir: str | Path | None,
-        fused_sibling_mapping: Mapping[str, Sequence[str]] | None = None,
-    ):
-        self.detail_dir = Path(h_detail_dir) if h_detail_dir else None
-        self.fused_sibling_mapping = {
-            str(fused): tuple(str(member) for member in members)
-            for fused, members in (fused_sibling_mapping or {}).items()
-        }
-        self._cache: dict[str, torch.Tensor | None] = {}
-        self.loads = 0
-        self.misses = 0
-
-    def _path_for_name(self, name: str) -> Path | None:
-        if self.detail_dir is None:
-            return None
-        return self.detail_dir / (self._FNAME_SUB.sub("__", name) + ".pt")
-
-    def _load_exact(self, name: str) -> torch.Tensor | None:
-        if self.detail_dir is None:
-            return None
-        path = self._path_for_name(name)
-        if path is None:
-            return None
-        if not path.is_file():
-            return None
-        try:
-            blob = torch.load(path, map_location="cpu", weights_only=False)
-            weights = blob.get("g2_per_token") if isinstance(blob, dict) else None
-            if not isinstance(weights, torch.Tensor) or weights.numel() == 0:
-                weights = None
-            else:
-                weights = weights.detach().to(torch.float32).cpu()
-        except Exception:
-            weights = None
-        return weights
-
-    def _split_fused_names(self, qname: str) -> tuple[str, ...]:
-        if "." not in qname:
-            return ()
-        prefix, leaf = qname.rsplit(".", 1)
-        members = self.fused_sibling_mapping.get(leaf)
-        if not members:
-            return ()
-        return tuple(f"{prefix}.{member}" for member in members)
-
-    @staticmethod
-    def _combine_split_weights(parts: Sequence[torch.Tensor]) -> torch.Tensor | None:
-        tensors = [
-            p.detach().reshape(-1).to(torch.float32).cpu()
-            for p in parts
-            if isinstance(p, torch.Tensor) and p.numel() > 0
-        ]
-        if not tensors:
-            return None
-        n = min(int(t.numel()) for t in tensors)
-        if n <= 0:
-            return None
-        stacked = torch.stack([t[:n] for t in tensors], dim=0)
-        return stacked.mean(dim=0)
-
-    def get(self, qname: str) -> torch.Tensor | None:
-        if self.detail_dir is None:
-            return None
-        if qname in self._cache:
-            return self._cache[qname]
-
-        weights = self._load_exact(qname)
-        if weights is None:
-            split = self._split_fused_names(qname)
-            if split:
-                parts = [
-                    part for name in split
-                    if (part := self._load_exact(name)) is not None
-                ]
-                weights = self._combine_split_weights(parts)
-
-        if weights is None:
-            self.misses += 1
-        else:
-            self.loads += 1
-        self._cache[qname] = weights
-        return weights
-
-
-def _fused_sibling_leaf_mapping_from_profile(profile) -> dict[str, tuple[str, ...]]:
-    if profile is None:
-        return {}
-    getter = getattr(profile, "fused_sibling_leaf_mapping", None)
-    if not callable(getter):
-        return {}
-    mapping = getter()
-    return {
-        str(fused): tuple(str(member) for member in members)
-        for fused, members in (mapping or {}).items()
-    }
-
-
-
-
-
 def _env_flag(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
     if value is None:
@@ -2369,7 +2255,6 @@ def _render_score_for_gate(
                 reference_weight,
                 rendered_weight,
                 activations,
-                row_weights=None,
             ),
             "output_mse",
         )
@@ -2391,13 +2276,12 @@ def _gate_activation_matrix(
     device: torch.device,
     act_clip_threshold: float | None,
     act_clip_rescale: str | None,
-    fisher_row_weights: torch.Tensor | None,
 ) -> torch.Tensor | None:
     """Return the clip-consistent activation matrix for progressive gates.
 
     Gates must score candidates under the objective GPTQ optimized: export's
-    ``activation_matrix_for_gptq`` applies the quantile/threshold clip and
-    the Fisher row weighting before the Hessian build ("intentionally shared
+    ``activation_matrix_for_gptq`` applies the quantile/threshold clip
+    before the Hessian build ("intentionally shared
     by the Hessian build, damping sweep evaluator, and do-no-harm gate"), so
     the cache-fill gate reuses it with identical settings instead of scoring
     on the raw capture.
@@ -2411,7 +2295,6 @@ def _gate_activation_matrix(
         device=device,
         clip_threshold=act_clip_threshold,
         clip_rescale=act_clip_rescale,
-        row_weights=fisher_row_weights,
         levers=levers,
     )
 
@@ -3276,7 +3159,6 @@ def _format_supports_render_mechanism(fmt: str, mechanism: str) -> bool:
             "gptq",
             "static_act_order",
             "joint_scale_opt",
-            "fisher_gptq",
             "scale_sweep",
         }
     if fmt_u in {"FP8_E4M3", "FP8_E5M2"}:
@@ -3546,7 +3428,6 @@ def _render_nvfp4_progressive_candidate(
     joint_global_real: torch.Tensor | None,
     act_clip_threshold: float | None,
     act_clip_rescale: str | None,
-    fisher_row_weights: torch.Tensor | None,
     include_gptq: bool,
     include_scale_sweep: bool,
 ) -> torch.Tensor:
@@ -3569,7 +3450,6 @@ def _render_nvfp4_progressive_candidate(
                 global_real_override=joint_global_real,
                 clip_threshold=act_clip_threshold,
                 clip_rescale=act_clip_rescale,
-                fisher_row_weights=fisher_row_weights,
                 static_act_order=bool(
                     levers.get("static_act_order", False)
                 ),
@@ -3587,7 +3467,6 @@ def _render_nvfp4_progressive_candidate(
                 global_real_override=joint_global_real,
                 clip_threshold=act_clip_threshold,
                 clip_rescale=act_clip_rescale,
-                fisher_row_weights=fisher_row_weights,
                 static_act_order=bool(
                     levers.get("static_act_order", False)
                 ),
@@ -3605,7 +3484,6 @@ def _render_nvfp4_progressive_candidate(
             reference_weight=weight_scaled,
             clip_threshold=act_clip_threshold,
             clip_rescale=act_clip_rescale,
-            fisher_row_weights=fisher_row_weights,
             levers=render_options,
         )
     return current
@@ -3620,7 +3498,6 @@ def _render_nvfp4_progressively(
     joint_global_real: torch.Tensor | None,
     act_clip_threshold: float | None,
     act_clip_rescale: str | None,
-    fisher_row_weights: torch.Tensor | None,
     gate_trace: list[dict[str, object]] | None,
 ) -> torch.Tensor:
 
@@ -3658,17 +3535,16 @@ def _render_nvfp4_progressively(
         if acts is not None and int(acts.shape[-1]) == int(weight.shape[1])
         else None
     )
-    # Score gate candidates on the same clipped/weighted matrix the GPTQ
-    # loop optimizes under (audit 2026-07-02 §3.9): the loop passes
-    # act_clip_threshold/act_clip_rescale/fisher_row_weights into
-    # activation_matrix_for_gptq, so the gate must too.
+    # Score gate candidates on the same clipped matrix the GPTQ loop
+    # optimizes under (audit 2026-07-02 §3.9): the loop passes
+    # act_clip_threshold/act_clip_rescale into activation_matrix_for_gptq,
+    # so the gate must too.
     acts_for_gate = _gate_activation_matrix(
         render_options, acts_for_render,
         int(weight.shape[1]),
         device=weight.device,
         act_clip_threshold=act_clip_threshold,
         act_clip_rescale=act_clip_rescale,
-        fisher_row_weights=fisher_row_weights,
     )
     reference_for_render = reference
 
@@ -3689,7 +3565,6 @@ def _render_nvfp4_progressively(
             joint_global_real=joint_global_real,
             act_clip_threshold=act_clip_threshold,
             act_clip_rescale=act_clip_rescale,
-            fisher_row_weights=fisher_row_weights,
             include_gptq=include_gptq,
             include_scale_sweep=include_scale_sweep,
         )
@@ -3791,15 +3666,11 @@ def _render_nvfp4_progressively(
         )
 
     if gptq_enabled and acts_for_render is not None:
-        gptq_name = "fisher_gptq" if fisher_row_weights is not None else "gptq"
         primary_scale_rule = gptq_scale_rule or current.scale_rule
-        primary_package = (
-            (gptq_name, "gptq") if gptq_name != "gptq" else ("gptq",)
-        )
-        primary_package = tuple(dict.fromkeys((*gptq_modifiers, *primary_package)))
+        primary_package = tuple(dict.fromkeys((*gptq_modifiers, "gptq")))
         packages: list[_RenderedCandidate] = [
             candidate(
-                label="+".join((primary_scale_rule, *gptq_modifiers, gptq_name)),
+                label="+".join((primary_scale_rule, *gptq_modifiers, "gptq")),
                 scale_rule=primary_scale_rule,
                 package=primary_package,
                 include_gptq=True,
@@ -3812,17 +3683,13 @@ def _render_nvfp4_progressively(
             and current.scale_rule != _native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
         ):
             packages.append(candidate(
-                label=f"four_over_six+{gptq_name}",
+                label="four_over_six+gptq",
                 scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
-                package=(
-                    (*gptq_modifiers, "four_over_six", gptq_name, "gptq")
-                    if gptq_name != "gptq" else
-                    (*gptq_modifiers, "four_over_six", "gptq")
-                ),
+                package=(*gptq_modifiers, "four_over_six", "gptq"),
                 include_gptq=True,
                 include_scale_sweep=False,
             ))
-        apply_gate(mechanism=gptq_name, candidates=packages)
+        apply_gate(mechanism="gptq", candidates=packages)
 
     if scale_sweep_enabled and acts_for_render is not None:
         scale_candidates: list[_RenderedCandidate] = [
@@ -3835,16 +3702,10 @@ def _render_nvfp4_progressively(
             )
         ]
         if gptq_enabled and not current.has_gptq:
-            gptq_name = "fisher_gptq" if fisher_row_weights is not None else "gptq"
             scale_rule = gptq_scale_rule or current.scale_rule
-            pkg = (
-                (gptq_name, "gptq", "scale_sweep")
-                if gptq_name != "gptq" else
-                ("gptq", "scale_sweep")
-            )
-            pkg = tuple(dict.fromkeys((*gptq_modifiers, *pkg)))
+            pkg = tuple(dict.fromkeys((*gptq_modifiers, "gptq", "scale_sweep")))
             scale_candidates.append(candidate(
-                label="+".join((scale_rule, *gptq_modifiers, gptq_name, "scale_sweep")),
+                label="+".join((scale_rule, *gptq_modifiers, "gptq", "scale_sweep")),
                 scale_rule=scale_rule,
                 package=pkg,
                 include_gptq=True,
@@ -3855,14 +3716,10 @@ def _render_nvfp4_progressively(
             and not joint_scale_opt_enabled
             and current.scale_rule != _native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
         ):
-            gptq_name = "fisher_gptq" if fisher_row_weights is not None else "gptq"
             include_gptq = bool(gptq_enabled)
             pkg = [*gptq_modifiers, "four_over_six"]
             if include_gptq:
-                if gptq_name != "gptq":
-                    pkg.extend([gptq_name, "gptq"])
-                else:
-                    pkg.append("gptq")
+                pkg.append("gptq")
             pkg.append("scale_sweep")
             scale_candidates.append(candidate(
                 label="+".join(pkg),
@@ -3946,7 +3803,6 @@ def render_production_weight(
     input_global_scale: float | None = None,
     act_clip_threshold: float | None = None,
     act_clip_rescale: str | None = None,
-    fisher_row_weights: torch.Tensor | None = None,
     col_weights: torch.Tensor | None = None,
     gate_trace: list[dict[str, object]] | None = None,
 ) -> torch.Tensor:
@@ -3965,8 +3821,7 @@ def render_production_weight(
     isolated Linears with no fused siblings).
 
     ``act_clip_threshold`` is an optional scalar clamp for activation-aware
-    render passes. ``fisher_row_weights`` optionally weights local objectives
-    by per-token gradient² from h-detail.
+    render passes.
 
     ``col_weights`` is the per-input-column imatrix vector (``(in_features,)``)
     for this ``qname`` — re-vet **R3**. It is applied for the weighted-render
@@ -4037,7 +3892,6 @@ def render_production_weight(
             joint_global_real=joint_global_real,
             act_clip_threshold=act_clip_threshold,
             act_clip_rescale=clip_rescale,
-            fisher_row_weights=fisher_row_weights,
             gate_trace=gate_trace,
         )
 
@@ -4070,7 +3924,6 @@ def render_production_weight(
             device=weight.device,
             act_clip_threshold=act_clip_threshold,
             act_clip_rescale=clip_rescale,
-            fisher_row_weights=fisher_row_weights,
         )
         baseline_score, baseline_metric = _render_score_for_gate(
             reference,
@@ -4205,7 +4058,6 @@ def render_production_weight(
                             group_size=32,
                             clip_threshold=act_clip_threshold,
                             clip_rescale=clip_rescale,
-                            fisher_row_weights=fisher_row_weights,
                             static_act_order=use_static_act_order,
                             levers=render_options,
                         )
@@ -4216,7 +4068,6 @@ def render_production_weight(
                             group_size=32,
                             clip_threshold=act_clip_threshold,
                             clip_rescale=clip_rescale,
-                            fisher_row_weights=fisher_row_weights,
                             static_act_order=use_static_act_order,
                             levers=render_options,
                         )
@@ -4228,7 +4079,6 @@ def render_production_weight(
                         group_size=32,
                         clip_threshold=act_clip_threshold,
                         clip_rescale=clip_rescale,
-                        fisher_row_weights=fisher_row_weights,
                         joint_scale_opt=joint_scale_opt,
                         static_act_order=use_static_act_order,
                         levers=render_options,
@@ -4241,7 +4091,6 @@ def render_production_weight(
                         group_size=32,
                         clip_threshold=act_clip_threshold,
                         clip_rescale=clip_rescale,
-                        fisher_row_weights=fisher_row_weights,
                         joint_scale_opt=joint_scale_opt,
                         static_act_order=use_static_act_order,
                         levers=render_options,
@@ -4277,7 +4126,6 @@ def render_production_weight(
                     group_size=32,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
                     levers=render_options,
                 )
             else:
@@ -4290,7 +4138,6 @@ def render_production_weight(
                     acts_for_render,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
                     levers=render_options,
                 )
             candidate = _non_nv_candidate(
@@ -4324,7 +4171,6 @@ def render_production_weight(
         input_global_scale_override=input_global_scale,
         act_clip_threshold=act_clip_threshold,
         act_clip_rescale=clip_rescale,
-        fisher_row_weights=fisher_row_weights,
         compute_only=True,
         levers=render_options,
     )
@@ -4383,8 +4229,6 @@ def _resolve_render_mechanism_plan(levers: Mapping[str, object]):
         enabled_mechanisms.append("static_act_order")
     if bool(levers.get("joint_scale_opt", False)):
         enabled_mechanisms.append("joint_scale_opt")
-    if bool(levers.get("fisher_gptq", False)):
-        enabled_mechanisms.append("fisher_gptq")
     if bool(levers.get("scale_sweep", False)):
         enabled_mechanisms.append("scale_sweep")
     mechanism_plan = resolve_render_mechanism_order(enabled_mechanisms)
@@ -6151,7 +5995,6 @@ def fill_production_weight_cache(
     recache_profile=None,
     recache_include_activation_quant: bool = True,
     recache_microbatch_size: int = 1,
-    h_detail_dir: str | Path | None = None,
     col_weights: Mapping[str, torch.Tensor] | None = None,
     source_binding: Mapping[str, object] | None = None,
 ) -> ProductionWeightCache:
@@ -6188,8 +6031,6 @@ def fill_production_weight_cache(
       recache_assignment: required when ``recache_pass`` is True.  Candidate
         caches with multiple possible formats per Linear are ambiguous; recache
         needs the actual export assignment.
-      h_detail_dir: optional probe h-detail directory retained for archived
-        Fisher ablations. V1 production defaults do not require it.
       col_weights: optional ``{qname: (in_features,)}`` imatrix map (re-vet
         R3). Applied only to the weighted-render families
         (``WEIGHTED_RENDER_FAMILIES``); every other format's rendered bytes are
@@ -6577,33 +6418,6 @@ def fill_production_weight_cache(
         if qname in qname_set:
             qname_to_module[qname] = mod
 
-    fused_sibling_mapping = (
-        _fused_sibling_leaf_mapping_from_profile(model_profile)
-        if model_profile is not None
-        else {}
-    )
-    fisher_rows = (
-        _FisherRowWeightCache(
-            h_detail_dir,
-            fused_sibling_mapping or None,
-        )
-        if (bool(levers.get("fisher_gptq", False)) and h_detail_dir)
-        else None
-    )
-    if progress and bool(levers.get("fisher_gptq", False)):
-        if fisher_rows is None:
-            print(
-                "[prod-cache] Fisher weighting requested but no h_detail_dir "
-                "was provided; falling back to unweighted objectives",
-                flush=True,
-            )
-        else:
-            print(
-                f"[prod-cache] Fisher weighting using h-detail dir "
-                f"{fisher_rows.detail_dir}",
-                flush=True,
-            )
-
     # HIGH-1: compute joint NVFP4 fused-sibling globals so q/k/v share a
     # per-tensor scale (and gate/up likewise), matching the export's
     # `_compute_nvfp4_joint_global` behavior.  Without this each sibling
@@ -6725,12 +6539,6 @@ def fill_production_weight_cache(
         weight = mod.weight.data
         joint = joint_globals.get(qname)
         max_abs = activation_max_abs.get(qname)
-        row_weights = (
-            fisher_rows.get(qname)
-            if bool(levers.get("fisher_gptq", False))
-            and fisher_rows is not None
-            else None
-        )
         # quantize_2d's input_global_scale_override expects the export
         # convention.  It only affects emitted metadata in compute_only
         # mode (not the dequantized weight values), but we pass the
@@ -6831,7 +6639,6 @@ def fill_production_weight_cache(
                     levers=levers,
                     joint_global_real=joint,
                     input_global_scale=export_scale,
-                    fisher_row_weights=row_weights,
                     col_weights=(
                         None if col_weights is None
                         else col_weights.get(qname)
@@ -6986,22 +6793,6 @@ def fill_production_weight_cache(
                     "reasons": {},
                 }
             ),
-            "fisher_weighted_gptq": {
-                "enabled": bool(levers.get("fisher_gptq", False)),
-                "h_detail_dir": str(h_detail_dir) if h_detail_dir else None,
-                "loaded": (
-                    int(fisher_rows.loads)
-                    if fisher_rows is not None
-                    and bool(levers.get("fisher_gptq", False))
-                    else 0
-                ),
-                "misses": (
-                    int(fisher_rows.misses)
-                    if fisher_rows is not None
-                    and bool(levers.get("fisher_gptq", False))
-                    else 0
-                ),
-            },
             "render_scope": render_scope,
             # #130: render_scope alone cannot tell a reader which rows this
             # cache was rendered against -- a stripe and a whole build both
