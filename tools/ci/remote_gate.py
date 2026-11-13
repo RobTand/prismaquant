@@ -16,7 +16,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_sha256hex
 from tools.ci import bazel_artifacts as artifacts
-from tools.ci.bazel_artifacts import BuildBuddy, RemoteError
+from tools.ci.bazel_artifacts import BuildBuddy, REFUSAL_DETAIL, RemoteError
 
 IMAGE = ('docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:'
          '5f0c01e5f6d79e58d7a996330de33aa38ce599bf8431eaf27521e7602daadf50')
@@ -25,11 +25,14 @@ RESULT = 'gate-result.json'
 
 
 @contextlib.contextmanager
-def _evidence_phase(phase):
+def _evidence_phase(phase, invocation=None, artifact=None):
     try:
         yield
     except (RemoteError, OSError, ValueError, KeyError, TypeError, RuntimeError):
         print('Remote evidence refused at ' + phase, file=sys.stderr)
+        if invocation:
+            print('Private detail: BuildBuddy invocation ' + invocation
+                  + (' artifact ' + artifact if artifact else ''), file=sys.stderr)
         raise
 
 
@@ -182,9 +185,9 @@ def run_gate(client, args, *, clock=time.monotonic):
     if not invocation:
         raise RemoteError('plan submission returned no acknowledgement ID')
     print('Remote Bazel plan: ' + invocation, flush=True)
-    with _evidence_phase('plan-await'):
+    with _evidence_phase('plan-await', invocation, REFUSAL_DETAIL):
         record = await_invocation(client, invocation, clock() + args.timeout * 60, clock=clock)
-    with _evidence_phase('plan-validate'):
+    with _evidence_phase('plan-validate', invocation):
         if record.get('commitSha') != args.head:
             raise RemoteError('plan runner has the wrong source head')
         artifacts = {}
@@ -194,10 +197,10 @@ def run_gate(client, args, *, clock=time.monotonic):
                     or not rows[0]['uri'].startswith('bytestream://')):
                 raise RemoteError('plan has no unique own ' + name + ' artifact')
             artifacts[name] = rows[0]['uri']
-    with _evidence_phase('plan-fetch'):
+    with _evidence_phase('plan-fetch', invocation):
         receipt_raw = client.call('GetFile', {'uri': artifacts[RESULT]}, raw=True)
         raw = client.call('GetFile', {'uri': artifacts['shard-manifest.json']}, raw=True)
-    with _evidence_phase('plan-validate'):
+    with _evidence_phase('plan-validate', invocation):
         receipt = parse_result(receipt_raw, args.head)
         try:
             manifest = json.loads(raw)
@@ -218,15 +221,15 @@ def run_gate(client, args, *, clock=time.monotonic):
 
 
 def verify_shard_result(client, invocation_id, expected, head, deadline, *, clock):
-    with _evidence_phase('shard-await'):
+    with _evidence_phase('shard-await', invocation_id):
         record = await_invocation(client, invocation_id, deadline, clock=clock)
-    with _evidence_phase('shard-validate'):
+    with _evidence_phase('shard-validate', invocation_id):
         artifacts = [row for row in record.get('artifacts', []) if row.get('name') == RESULT]
         if len(artifacts) != 1:
             raise RemoteError('shard has no unique own result artifact')
-    with _evidence_phase('shard-fetch'):
+    with _evidence_phase('shard-fetch', invocation_id):
         raw = client.call('GetFile', {'uri': artifacts[0]['uri']}, raw=True)
-    with _evidence_phase('shard-validate'):
+    with _evidence_phase('shard-validate', invocation_id):
         result = parse_result(raw, head)
         if any(result.get(key) != expected[key] for key in (
                 'architecture', 'index', 'manifest_sha256', 'partition_sha256')):
