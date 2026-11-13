@@ -16,8 +16,6 @@ from prismaquant import shipcard
 from tools import dsv4_wikitext_inputs as inputs
 from tools.full_kl_teacher_payload import tokenizer_identity
 
-pytestmark = pytest.mark.task_suite
-
 
 @pytest.mark.parametrize("argv", [
     ["sh", "-c", "flux submit true"],
