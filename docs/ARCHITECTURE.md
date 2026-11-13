@@ -1,7 +1,7 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-13. The multimodal probe and the streaming visual-tower load (#3442) are removed;
-every visual Linear takes `VISUAL_FORMAT`.
+As of: 2026-11-13. Flux CPU tests run with `tools/flux/run_tests.sh` in a venv built from the gate's hashed requirements.
+The multimodal probe and the streaming visual-tower load (#3442) are removed; every visual Linear takes `VISUAL_FORMAT`.
 The probe selects act/ rows by a keyed rule, not a random draw (#3425).
 PrismaSnap and its SSH campaign runner are removed (#3382).
 The classic pipeline starts from the source checkpoint. Tessera callers retain the existing no-clobber byte writer.
@@ -4732,15 +4732,7 @@ handoff, spool, retirement and render-publication suites then refused the SDK4
 archive by version. A census of 121 test files showed 255 such failures.
 `tests/test_pb_generation_pin_1084.py` now requires one commit for both pins.
 The SDK4 archive stays on the mount. The consumer still refuses it by exact
-version. Source qualification is independent of live worker activation. The
-pbtest pin guard reads the reader pin. It refuses a shard when the interpreter
-has no non-editable Git install of that commit. Every PrismaQuant pbtest run
-now needs an SDK5 interpreter, and the SDK4 interpreters are refused. The x86
-interpreter is `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python`
-(PQ #2467). It is a layer over `/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9`,
-which holds PrismaBuild `027103d9` and Tessera `fca4c6ce`. The guard passes in
-PB action `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`.
-PB #1485 still owns the portable Python 3.12 pack.
+version. Source qualification is independent of live worker activation.
 
 Re-stamped 2026-10-09 (Refs PQ #2152, #2455, CEO D32): the Original reader
 qualification (`source_generation._require_original_reader_producer` and
@@ -4781,10 +4773,9 @@ the real consumer join. Certified matching identity reaches the helper-tree
 seal; foreign nonce and scope identities refuse, while D32 dev controls join
 and stamp. It proves contract integration only. Historical retained-producer
 evidence recovery and PB #1485 native qualification remain separate.
-The current x86 CPU interpreter is
-`/home/rob/venvs/pq-pin-aaa41700-pb20261016-git/bin/python`; it carries the
-reviewed SDK5 and current Tessera development pins. The October 9 task-suite
-layer above predates the current Tessera pin and refuses in pbtest preflight.
+Flux CPU tests run with `tools/flux/run_tests.sh`. Its venv is
+`pq-test-<first 12 hex digits of the SHA-256 of tools/bazel/requirements_linux_x86_64.txt>`,
+built inside a Flux job from that hashed file, the set the gate installs.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
@@ -6062,28 +6053,7 @@ The base owner supplies one explicit-before-declared alias reader for GLM and Qw
 It preserves top-level precedence over `text_config` and keeps empty prefix lists as explicit values.
 The helper gate uses its unchanged baseline; neither profile defines a second prefix reader.
 
-The current CPU command uses `/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python` on x86.
-Its installed Tessera commit is `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`.
-Its installed PrismaBuild commit is `027103d9a8417e06c7f13356e58779a313cd7088`, as required after the merge of main.
-The `pbtest` dependency guard verifies both Git identities and installed package bytes before pytest.
 The Tessera package supplies `tessera.serving.dense_ownership`; no fallback or test exemption replaces that owner.
-
-Run the affected CPU population with:
-
-```bash
-python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
-  --checkout /path/to/prismaquant \
-  --python /home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python \
-  --tag x86 --tmpdir /tmp --shards 4 \
-  --workers-per-shard 1 --threads-per-shard 1 --mem-gb 4 \
-  --timeout-s 600 --wait-s 300 \
-  --pytest-args '["-m", "not integration and not slow"]' \
-  tests/test_pact_frontier_profile_adapter.py tests/test_model_structure.py \
-  tests/test_spec_match_profile.py tests/test_model_profile_conformance.py \
-  tests/test_name_projection.py tests/test_profile_detection_and_calibration.py \
-  tests/test_profile_name_remap_validation.py tests/test_qwen3_profile.py \
-  tests/test_glm5_next_attention_fused_groups.py tests/test_duplication_baseline.py
-```
 
 The historical source `72ebedaf33de` used `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python` with PrismaBuild `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`.
 PB actions `8b6da86ec9b9`, `b69df9dffdfb`, `b8d6a1d78a42`, and `5c2fd3921c9c` passed its eight-file population.
