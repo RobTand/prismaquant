@@ -189,6 +189,10 @@ fi
 # PRISMAQUANT_CALIBRATION_DIR wherever you keep them, or set DATASET directly
 # to any .jsonl / .txt / HF dataset id.
 PIPELINE_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Pinned fla kernel configs (#3446): for each autotune key it holds, fla loads
+# the recorded GB10 choice instead of timing configs, so two runs agree bitwise.
+export FLA_CACHE_MODE="${FLA_CACHE_MODE:-strict}"
+export FLA_CONFIG_DIR="${FLA_CONFIG_DIR:-$PIPELINE_SCRIPT_DIR/fla_configs/gb10}"
 : "${PRISMAQUANT_CALIBRATION_DIR:=${PIPELINE_SCRIPT_DIR%/}/../calibration}"
 : "${DATASET:=${PRISMAQUANT_CALIBRATION_DIR%/}/diverse-v1.jsonl}"
 # MINOR-M2: packed-MoE experts use a cross-domain held-out corpus for the

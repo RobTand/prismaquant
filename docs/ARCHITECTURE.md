@@ -23770,6 +23770,8 @@ PRISMAQUANT_CB_LDLQ / _SCOPE / _GATE, PRISMAQUANT_CB_MINCHAIN* — no shell
                      their code was archived on 2026-09-25 (#1304, debt D34
                      closed). They stay so existing WORK_DIR hashes hold.
 AURA_ADDITIVITY_GATE=measure  STOP_AFTER=<unset> (cost: exit 0 before [3/4], #3418)
+FLA_CACHE_MODE=strict  FLA_CONFIG_DIR=prismaquant/fla_configs/gb10 (pinned fla kernel configs;
+                     probe meta and AURA provenance record `fla_configs`, #3446)
 PRISMAQUANT_GGUF_IMATRIX=1  DEVICE=cuda  EXPORT_DEVICE=cuda
 ```
 

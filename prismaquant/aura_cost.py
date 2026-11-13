@@ -64,6 +64,7 @@ from prismaquant.routed_experts import (
 )
 from . import aura_checkpoint_journal, aura_provenance
 from .digests import bytes_sha256hex
+from .fla_config_pin import fla_config_identity
 from .joint_price_step import (AuraUnitMeasurements, JointPriceStep, JointResumeContract,
                                ProbeResumePolicy, RequiredAttribution)
 
@@ -3425,6 +3426,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "production_cache": str(args.production_cache or ""),
         # re-vet R2 precondition (i): which pipeline COST_MODE produced this.
         "cost_mode": str(args.cost_mode or ""),
+        "fla_configs": fla_config_identity(),
     })
     if calibration_input_receipt is not None:
         payload["provenance"]["calibration_input"] = calibration_input_receipt

@@ -36,6 +36,7 @@ from __future__ import annotations
 from . import probe_inventory
 
 from . import probe_statistics
+from .fla_config_pin import fla_config_identity
 from .sample_parallel_artifacts import SAMPLE_PARALLEL_META_FIELDS
 
 
@@ -5020,6 +5021,7 @@ def main():
     _meta["packed_fisher_estimator"] = "per_token_v2"
     _meta["emit_marginals"] = _marginals_enabled()
     _meta["activation_rows_limit"] = int(args.activation_rows_limit)
+    _meta["fla_configs"] = fla_config_identity()
     _merged["meta"] = _meta
     output_payload = pickle.dumps(_merged, protocol=pickle.HIGHEST_PROTOCOL)
     from prismaquant.cost_stage_checkpoint import atomic_write_bytes
