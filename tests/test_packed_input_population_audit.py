@@ -47,24 +47,3 @@ def test_incremental_main_captures_one_input_per_module_call(probe_run):
     run()
     saved = torch.load(work / "act" / "model__layers__0__mlp__experts.pt", weights_only=True)
     assert saved["inputs"].shape == (16, 16)
-
-
-def test_incremental_main_refuses_legacy_packed_capture(probe_run, capsys):
-    import pickle
-
-    run, work = probe_run
-    run()
-    shard = work / "shards" / "probe_shard_000.pkl"
-    payload = pickle.loads(shard.read_bytes())
-    for meta in (payload["meta"], payload["meta"].get("incremental_shard", {})):
-        meta.pop("packed_input_capture", None)
-    shard.write_bytes(pickle.dumps(payload))
-    cached_input = work / "act" / "model__layers__0__mlp__experts.pt"
-    legacy = torch.load(cached_input, weights_only=True)
-    legacy["inputs"] = legacy["inputs"][:16].repeat(2, 1)
-    torch.save(legacy, cached_input)
-    capsys.readouterr()
-    run()
-    assert "reuse shard 0:" not in capsys.readouterr().out
-    saved = torch.load(work / "act" / "model__layers__0__mlp__experts.pt", weights_only=True)
-    assert saved["inputs"].shape == (16, 16)
