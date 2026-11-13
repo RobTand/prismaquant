@@ -137,7 +137,8 @@ def test_query_population_keeps_package_groups_as_dependency_records(architectur
 
 
 @pytest.mark.parametrize('phase', ['command', 'json', 'population'])
-def test_revision_query_refusal_names_check_without_private_diagnostics(tmp_path, capsys, phase):
+def test_revision_query_refusal_names_check_without_private_diagnostics(
+        tmp_path, monkeypatch, capsys, phase):
     from types import SimpleNamespace
     def query(command, **kwargs):
         return SimpleNamespace(returncode=1 if phase == 'command' else 0,
@@ -148,6 +149,21 @@ def test_revision_query_refusal_names_check_without_private_diagnostics(tmp_path
     output = capsys.readouterr()
     assert 'Revision query refused at ' + phase in output.err
     assert 'private-path-token-query' not in output.err + output.out
+    if phase != 'command':
+        return
+    monkeypatch.setattr(selection.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(selection.artifacts, 'scan_runtime_available', lambda: True)
+    monkeypatch.setattr(selection, 'plan_revisions', lambda root, directory, **kwargs:
+                        selection.query_revision(root, directory, 'amd64', runner=query))
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(tmp_path / 'upload'))
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'plan-test-secret-sentinel')
+    assert selection.main(['plan', '--mode', 'pr', '--base', 'b' * 40,
+                           '--head', 'a' * 40, '--branch', 'bbrun/cutover']) == 75
+    output = capsys.readouterr()
+    assert 'Private detail: invocation artifact plan-refusal.json' in output.err
+    assert 'private-path-token-query' not in output.err + output.out
+    detail = json.loads((tmp_path / 'upload/plan-refusal.json').read_text())
+    assert detail['phase'] == 'planning' and 'private-path-token-query' in detail['error']
 
 
 @pytest.mark.parametrize('rows', [

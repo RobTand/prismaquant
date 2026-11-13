@@ -590,6 +590,10 @@ def test_remote_evidence_refusal_reports_fixed_subphase_without_private_values(
     output = capsys.readouterr()
     assert 'Remote evidence refused at ' + operation + '-' + stage in output.err
     assert 'private-value/path-token' not in output.out + output.err
+    assert ('Private detail: BuildBuddy invocation '
+            + ('parent-0' if operation == 'shard' else 'plan-parent')
+            + (' artifact plan-refusal.json' if operation + stage == 'planawait' else '\n')
+            ) in output.err
     calls = client.calls if operation == 'shard' else client.plan_calls
     assert calls.count('Run') <= 1
 

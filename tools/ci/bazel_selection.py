@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 import argparse
+import contextlib
 import io
 import json
 import os
@@ -12,6 +13,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import traceback
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -224,7 +226,7 @@ def query_revision(root, directory, architecture, *, bazel='bazel', runner=subpr
                           '--config=ci'], cwd=root, env=child_environment(), text=True,
                          capture_output=True, check=False)
         if queried.returncode:
-            raise SelectionError('revision graph query failed')
+            raise SelectionError('revision graph query failed:\n' + queried.stderr)
         def rows():
             nonlocal phase
             for line in queried.stdout.splitlines():
@@ -238,9 +240,9 @@ def query_revision(root, directory, architecture, *, bazel='bazel', runner=subpr
         query = directory / 'query.jsonl'
         query.write_text(queried.stdout)
         return {'population': population, 'query': query}
-    except (OSError, ValueError, TypeError, AttributeError, SelectionError):
+    except (OSError, ValueError, TypeError, AttributeError, SelectionError) as error:
         print('Revision query refused at ' + phase, file=sys.stderr)
-        raise SelectionError('revision graph query is incomplete or unavailable') from None
+        raise SelectionError('revision graph query is incomplete or unavailable') from error
 
 
 def collect_revision(root, directory, architecture, *, java, jar, bazel='bazel',
@@ -403,6 +405,8 @@ def main(argv=None):
         print('plan upload directory unavailable', file=sys.stderr)
         return 75
     upload = Path(directory)
+    keys = ['BUILDBUDDY_API_KEY'] + [name for name in (
+        'GITHUB_TOKEN', 'MERGIFY_TOKEN') if os.environ.get(name)]
     phase = 'upload-precondition'
     try:
         upload.mkdir(parents=True, exist_ok=True)
@@ -421,20 +425,23 @@ def main(argv=None):
             result.update({'schema': 'prismaquant.bazel-gate.v1',
                 'operation': 'plan', 'verdict': 'pass',
                 'manifest_sha256': bytes_sha256hex(raw)})
-            keys = ['BUILDBUDDY_API_KEY'] + [name for name in (
-                'GITHUB_TOKEN', 'MERGIFY_TOKEN') if os.environ.get(name)]
             phase = 'publication'
             artifacts.publish_json(upload, {
                 'shard-manifest.json': raw,
                 'gate-result.json': DIRECT_ASCII_SPACED_LAX.encoded(result) + b'\n'}, keys)
         return 0
-    except (SelectionError, ValueError, TypeError, KeyError, OSError, RuntimeError):
+    except (SelectionError, ValueError, TypeError, KeyError, OSError, RuntimeError) as error:
         if upload.is_symlink():
             upload.unlink()
         elif upload.exists():
             shutil.rmtree(upload)
         upload.mkdir(parents=True, exist_ok=True)
         print('plan refused at ' + phase + '; upload refused', file=sys.stderr)
+        if phase == 'planning':
+            with contextlib.suppress(RuntimeError, OSError):
+                artifacts.publish_json(upload, {artifacts.REFUSAL_DETAIL: json.dumps({'phase': phase,
+                    'error': ''.join(traceback.format_exception(error))}).encode()}, keys)
+                print('Private detail: invocation artifact ' + artifacts.REFUSAL_DETAIL, file=sys.stderr)
         return 75
 
 
