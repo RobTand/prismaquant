@@ -74,11 +74,10 @@ def _specs(menu=None):
     return [fr.get_format(name) for name in (menu or _MENU)]
 
 
-def _shape_stats(h_trace: float) -> dict:
+def _shape_stats() -> dict:
     # in_features % 32 == 0 and out_features % 16 == 0 keeps every rung
     # legal, so nothing drops out for shape reasons here.
     return {
-        "h_trace": h_trace,
         "n_params": 1024 * 512,
         "in_features": 1024,
         "out_features": 512,
@@ -226,7 +225,7 @@ def _two_family_tables(*, fp4_weight_only=True, fp8_weight_only=True):
     stats, costs = {}, {}
     for i in range(2):
         name = f"model.layers.{i}.mlp.down_proj"
-        stats[name] = _shape_stats(1.0)
+        stats[name] = _shape_stats()
         costs[name] = {
             # measured/weight-only ratio 4x for the fp4 family (0.5*1.0*mse)
             "NVFP4": _measured_row(weight_mse=1e-4, output_mse=4e-4),
@@ -236,7 +235,7 @@ def _two_family_tables(*, fp4_weight_only=True, fp8_weight_only=True):
                      "output_mse_measured": True},
         }
     expert = "model.layers.9.mlp.experts.gate_up_proj"
-    stats[expert] = _shape_stats(1.0)
+    stats[expert] = _shape_stats()
     costs[expert] = {"BF16": _weight_only_row(0.0)}
     for rung in _FP4_RUNGS:
         costs[expert][rung] = (
@@ -249,13 +248,13 @@ def _two_family_tables(*, fp4_weight_only=True, fp8_weight_only=True):
     return stats, costs, expert
 
 
-def test_calibration_corrects_weight_only_rows_and_leaves_measured_rows_alone():
+def test_calibration_corrects_weight_only_rows_and_measured_rows_only_calibrate():
     stats, costs, expert = _two_family_tables()
     pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
     assert pricing.enabled
-    # Both branches are 1/2*h_trace*MSE over the SAME h_trace, so the fitted
-    # factor is exactly output_mse/weight_mse: 4x for the W4 family, 2x for
-    # the W8 one — the activation-contract asymmetry the audit describes.
+    # The fitted factor is exactly output_mse/weight_mse: 4x for the W4
+    # family, 2x for the W8 one — the activation-contract asymmetry the audit
+    # describes.
     assert pricing.families["nv"].penalty == pytest.approx(4.0)
     assert pricing.families["fp"].penalty == pytest.approx(2.0)
 
@@ -268,11 +267,11 @@ def test_calibration_corrects_weight_only_rows_and_leaves_measured_rows_alone():
     assert priced["NVFP4"].predicted_dloss == pytest.approx(4e-3)
     assert priced["FP8_E4M3"].predicted_dloss == pytest.approx(2e-3)
     assert priced["NVFP4"].activation_pricing == BRANCH_CALIBRATED
-    # ...while the measured dense rows keep the activation-inclusive price
-    # they already had, bit for bit.
+    # ...while the measured dense rows carry no predicted_dloss: they are
+    # calibration evidence, not prices (#3448), so only their bit-exact BF16
+    # rung is a candidate.
     dense = {c.fmt: c for c in cands["model.layers.0.mlp.down_proj"]}
-    assert dense["NVFP4"].predicted_dloss == pytest.approx(0.5 * 4e-4)
-    assert dense["NVFP4"].activation_pricing == BRANCH_MEASURED
+    assert set(dense) == {"BF16"}
     # BF16 quantizes no activations, so it is never in scope.
     assert priced["BF16"].activation_pricing == BRANCH_ACTIVATION_IDENTITY
     assert priced["BF16"].predicted_dloss == 0.0
@@ -369,10 +368,10 @@ def test_the_unmeasured_activation_removal_gate_is_not_weakened():
     """A multiplicative penalty cannot lift an exactly-0.0 price off the DP's
     global minimum, so the pre-existing candidate removal still fires on a
     weight-lossless re-encode of an activation-quantizing format."""
-    stats = {"model.layers.0.mlp.down_proj": _shape_stats(1.0)}
+    stats = {"model.layers.0.mlp.down_proj": _shape_stats()}
     costs = {
         "model.layers.0.mlp.down_proj": {
-            # Lossless W side, no measured output_mse, positive h_trace: the
+            # Lossless W side, no measured output_mse, input energy: the
             # exact predicate cost_entry_prices_unmeasured_activation_at_zero
             # describes.
             "NVFP4": {"weight_mse": 0.0, "predicted_dloss": 0.0,
@@ -452,7 +451,7 @@ def test_a_fused_super_item_folds_the_family_penalty_in_exactly_once():
     stats, costs = {}, {}
     for leaf in ("gate_proj", "up_proj"):
         name = f"model.layers.0.mlp.{leaf}"
-        stats[name] = _shape_stats(1.0)
+        stats[name] = _shape_stats()
         costs[name] = {
             "NVFP4": _weight_only_row(1e-3),
             "BF16": _weight_only_row(0.0),
@@ -460,7 +459,7 @@ def test_a_fused_super_item_folds_the_family_penalty_in_exactly_once():
     # Separate measured rows supply the fp4 family's calibration (ratio 3x).
     for i in range(2):
         dense = f"model.layers.{i}.self_attn.o_proj"
-        stats[dense] = _shape_stats(1.0)
+        stats[dense] = _shape_stats()
         costs[dense] = {
             "NVFP4": _measured_row(weight_mse=1e-4, output_mse=3e-4),
             "BF16": {"weight_mse": 0.0, "output_mse": 0.0,
@@ -495,21 +494,25 @@ def test_a_super_item_with_mixed_member_branches_says_so():
     is the fact the stamp exists to preserve; a majority vote would erase
     it."""
     stats, costs = {}, {}
-    stats["model.layers.0.mlp.gate_proj"] = _shape_stats(1.0)
+    stats["model.layers.0.mlp.gate_proj"] = _shape_stats()
     costs["model.layers.0.mlp.gate_proj"] = {
         "NVFP4": _measured_row(weight_mse=1e-4, output_mse=3e-4),
         "BF16": {"weight_mse": 0.0, "output_mse": 0.0,
                  "output_mse_measured": True},
     }
-    stats["model.layers.0.mlp.up_proj"] = _shape_stats(1.0)
+    stats["model.layers.0.mlp.up_proj"] = _shape_stats()
     costs["model.layers.0.mlp.up_proj"] = {
         "NVFP4": _weight_only_row(1e-3),
         "BF16": _weight_only_row(0.0),
     }
     for i in range(2):
         dense = f"model.layers.{i}.self_attn.o_proj"
-        stats[dense] = _shape_stats(1.0)
+        stats[dense] = _shape_stats()
         costs[dense] = dict(costs["model.layers.0.mlp.gate_proj"])
+    # Priced rows need a predicted_dloss (#3448); the dense copies above stay
+    # measured-only, the calibration sample.
+    costs["model.layers.0.mlp.gate_proj"]["NVFP4"] = {
+        **costs["model.layers.0.mlp.gate_proj"]["NVFP4"], "predicted_dloss": 2e-4}
     specs = _specs(["NVFP4", "BF16"])
     pricing = calibrate_activation_fair_pricing(stats, costs, specs)
     cands = build_candidates(
@@ -555,7 +558,7 @@ def test_the_dp_flips_to_fp8_once_the_w4_activation_cost_is_priced():
     # already used).
     for i in range(2):
         name = f"model.layers.{i}.self_attn.o_proj"
-        stats[name] = _shape_stats(1.0)
+        stats[name] = _shape_stats()
         costs[name] = {
             "NVFP4": _measured_row(weight_mse=1e-5, output_mse=3e-5),
             "FP8_E4M3": _measured_row(weight_mse=1e-5, output_mse=1e-5),
@@ -566,7 +569,7 @@ def test_the_dp_flips_to_fp8_once_the_w4_activation_cost_is_priced():
     # NVFP4 (4.5 bpw) is both CHEAPER in bytes and priced lower than FP8_E4M3
     # (8 bpw plus one tensor scale): dominant, on weight-only evidence alone.
     expert = "model.layers.9.mlp.experts.gate_up_proj"
-    stats[expert] = _shape_stats(1.0)
+    stats[expert] = _shape_stats()
     costs[expert] = {
         "NVFP4": _weight_only_row(1.0e-3),
         "FP8_E4M3": _weight_only_row(1.2e-3),
@@ -596,14 +599,10 @@ def test_branch_label_is_derivable_without_a_calibration_object():
     """``activation_pricing=None`` is the pre-P5a path every direct caller
     outside candidate construction still uses; it must still name the
     branch honestly rather than claim a correction it did not apply."""
-    stats = _shape_stats(1.0)
+    stats = _shape_stats()
     assert cost_entry_activation_pricing_branch(
         stats, _weight_only_row(1e-3), "NVFP4", None
     ) == BRANCH_UNCALIBRATED
-    assert cost_entry_activation_pricing_branch(
-        stats, _measured_row(weight_mse=1e-4, output_mse=2e-4),
-        "NVFP4", None
-    ) == BRANCH_MEASURED
     assert cost_entry_activation_pricing_branch(
         stats, _weight_only_row(0.0), "BF16", None
     ) == BRANCH_ACTIVATION_IDENTITY

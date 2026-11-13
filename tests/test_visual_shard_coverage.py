@@ -143,7 +143,9 @@ def test_production_dispatch_uses_typed_schedule_not_regex_guess(module):
         and node.func.id == '_classify_shard'
         for node in ast.walk(tree)
     )
-    assert any(
+    # Per-shard dispatch reads `kind = schedule[i].kind`; the one-forward
+    # probe (#3448) reads `entry.kind` over `for entry in schedule`.
+    per_shard = any(
         isinstance(node, ast.Assign)
         and any(isinstance(target, ast.Name) and target.id == 'kind'
                 for target in node.targets)
@@ -153,3 +155,17 @@ def test_production_dispatch_uses_typed_schedule_not_regex_guess(module):
         and node.value.value.value.id == 'schedule'
         for node in ast.walk(tree)
     )
+    over_schedule = any(
+        isinstance(node, ast.comprehension)
+        and isinstance(node.iter, ast.Name) and node.iter.id == 'schedule'
+        and isinstance(node.target, ast.Name)
+        and any(isinstance(use, ast.Attribute) and use.attr == 'kind'
+                and isinstance(use.value, ast.Name)
+                and use.value.id == node.target.id
+                for use in ast.walk(parent))
+        for parent in ast.walk(tree)
+        if isinstance(parent, (ast.GeneratorExp, ast.ListComp, ast.SetComp))
+        for node in parent.generators
+    )
+    # Each production entry keeps exactly its own typed form.
+    assert over_schedule if module is incremental_probe else per_shard

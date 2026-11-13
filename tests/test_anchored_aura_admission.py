@@ -70,7 +70,7 @@ def test_anchored_row_needs_all_three_stamps_and_refuses_near_misses():
 
 def test_anchored_zero_is_retained_but_the_guard_keeps_full_strength():
     """The zero-admission bypass is scoped, not a global weakening."""
-    stats = {"h_trace": 1.0}
+    stats = {}
     fmt = "NVFP4"
     assert fr.get_format(fmt).act_quant_changes_input, (
         "test premise: the rung quantizes activations")
@@ -94,14 +94,14 @@ def test_anchored_zero_is_retained_but_the_guard_keeps_full_strength():
         assert priced_cell.cost_entry_prices_unmeasured_activation_at_zero(
             stats, entry, 0.0, fmt), entry
 
-    # And the guard's own positive-sensitivity exemption still governs: a
+    # And the guard's own no-input-energy exemption still governs: a
     # measured-dead unit stays free to take the cheapest format.
     assert not priced_cell.cost_entry_prices_unmeasured_activation_at_zero(
-        {"h_trace": 0.0}, {"predicted_dloss": 0.0}, 0.0, fmt)
+        {}, {"predicted_dloss": 0.0, "x2_per_probe": [0.0, 0.0]}, 0.0, fmt)
 
 
 def test_anchored_row_is_priced_directly_and_stamped_with_its_own_branch():
-    stats = {"h_trace": 2.0}
+    stats = {}
     fmt = "FP8_E4M3"
     entry = _anchored_entry(predicted_dloss=7.5e-6)
 
@@ -118,7 +118,7 @@ def test_anchored_row_is_priced_directly_and_stamped_with_its_own_branch():
 
 def test_anchored_rows_never_enter_the_p5a_calibration_sample():
     fmt = fr.get_format("FP8_E4M3")
-    stats = {"unit.0": {"h_trace": 1.0}}
+    stats = {"unit.0": {}}
     costs = {"unit.0": {fmt.name: _anchored_entry()}}
 
     rows, measured, weight_only = (
@@ -204,7 +204,7 @@ def test_terminals_keep_the_passthrough_contract_not_the_aura_branch():
     assert not fr.get_format(fmt).act_quant_changes_input
     assert priced_cell.cost_entry_is_source_passthrough(terminal, fmt)
     assert priced_cell.cost_entry_activation_pricing_branch(
-        {"h_trace": 1.0}, terminal, fmt) == candidates.BRANCH_SOURCE_PASSTHROUGH
+        {}, terminal, fmt) == candidates.BRANCH_SOURCE_PASSTHROUGH
 
     block = "FP8_BLOCK_UE8M0_SOURCE"
     assert not fr.get_format(block).act_quant_changes_input

@@ -29,11 +29,3 @@ def test_readme_shipping_menu_matches_pipeline_default():
     assert "export FORMATS=NVFP4,FP8_DYNAMIC,BF16" in readme
     assert "MXFP8_E4M3,BF16" not in readme
 
-
-def test_claude_production_render_cost_describes_dedicated_score_cache():
-    text = (ROOT / "CLAUDE.md").read_text()
-
-    assert "rendered weights export will ship" not in text
-    assert "dedicated" in text
-    assert "render-score cache" in text
-    assert "selected-assignment production cache" in text

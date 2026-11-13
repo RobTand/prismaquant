@@ -28,7 +28,6 @@ from prismaquant.shipcard import (
     build_shipcard,
     compute_model_sha,
     fill_slot,
-    kv_shared_fisher_echo,
     lane_gate_slots,
     load_shipcard,
     required_slots,
@@ -640,19 +639,6 @@ def test_unknown_slot_is_rejected(tmp_path):
 # ---------------------------------------------------------------------------
 # Build-lane facts
 # ---------------------------------------------------------------------------
-def test_kv_shared_fisher_echo_flags_an_unvalidated_allocation():
-    clean = kv_shared_fisher_echo({})
-    assert clean["unvalidated_kv_fisher_correction"] is False
-
-    overridden = kv_shared_fisher_echo(
-        {"PRISMAQUANT_ALLOW_KV_SHARED_FISHER": "1"})
-    assert overridden["unvalidated_kv_fisher_correction"] is True
-
-    severed = kv_shared_fisher_echo({"PRISMAQUANT_KV_COTANGENT": "0"})
-    assert severed["kv_cotangent_path_enabled"] is False
-    assert severed["unvalidated_kv_fisher_correction"] is True
-
-
 def test_export_writes_a_card_with_build_facts_and_empty_slots(tmp_path, monkeypatch):
     """Export records captured render options and the missing serving gates."""
     from prismaquant import export_native_compressed as exporter
@@ -705,7 +691,7 @@ def test_export_writes_a_card_with_build_facts_and_empty_slots(tmp_path, monkeyp
     assert recorded["gptq_fixed_damp"] == 0.125
     assert recorded["gptq_damp_roles"] == {"q_proj": 0.25}
     assert recorded["nvfp4_joint_scale_levels"] == [6.0, 4.0, 3.0]
-    assert "unvalidated_kv_fisher_correction" in build["kv_shared_fisher"]
+    assert "kv_shared_fisher" not in build
     assert card["artifact_bytes"] == len(b"weights")
 
 
@@ -1455,33 +1441,9 @@ def _forensic_build(**overrides):
         "read_gb_per_token": {"value": 3.127, "source": "measured"},
         "format_histogram": {"NVFP4/packed": 208},
         "render_levers": {"PRISMAQUANT_DO_NO_HARM": "1"},
-        "kv_shared_fisher": kv_shared_fisher_echo({}),
     }
     build.update(overrides)
     return {"build": build}
-
-
-def test_build_refuses_an_unvalidated_kv_fisher_correction():
-    """An allocation that rode an under-counted h_trace must not verify.
-
-    The exporter echoes the KV-cotangent / shared-Fisher flag state onto the
-    card (D24), but `verify` never read it, so a card carrying
-    `unvalidated_kv_fisher_correction=true` verified clean. The echo is
-    derived from the function that owns it, not restated.
-    """
-    card = _forensic_build(kv_shared_fisher=kv_shared_fisher_echo(
-        {"PRISMAQUANT_ALLOW_KV_SHARED_FISHER": "1"}))
-    assert card["build"]["kv_shared_fisher"][
-        "unvalidated_kv_fisher_correction"] is True
-
-    problems = verify(card, model_dir=None, required=[])
-    assert any("unvalidated_kv_fisher_correction" in p for p in problems), (
-        problems)
-
-    clean = _forensic_build()
-    assert clean["build"]["kv_shared_fisher"][
-        "unvalidated_kv_fisher_correction"] is False
-    assert verify(clean, model_dir=None, required=[]) == []
 
 
 def test_build_refuses_fabricated_forensic_hashes():

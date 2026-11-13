@@ -104,37 +104,6 @@ def test_measured_and_interpolated_rows_are_told_apart():
     assert cost_entry_is_band_interpolated(interp)
 
 
-def test_an_interpolated_row_is_priced_in_output_space():
-    """Not from weight_mse via h_trace: the fit IS an output-space number.
-
-    The failure this pins is silent and expensive -- an interpolated row that
-    fell through to the weight-only branch would be multiplied by the unit's
-    Fisher trace, double-counting a transfer the number already contains, and
-    the DP would rank Tessera's rungs against each other on a scale nothing
-    else on the menu uses.
-    """
-    from prismaquant.priced_cell import (
-        cost_entry_activation_pricing_branch,
-        cost_entry_predicted_dloss,
-    )
-    from prismaquant.tessera_campaign_table import campaign_cost_payload
-
-    q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
-    anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
-                         ((128, 1e-2), (512, 1e-3), (896, 1e-4))]}}
-    payload = campaign_cost_payload(
-        anchors, _menu(q, fam, {128, 384, 512, 896}), loo={}, provenance={})
-    row = payload["costs"][q][f"{fam}_R384"]
-    stats = {"h_trace": 1e6, "n_params": 2048 * 1024}
-    priced = cost_entry_predicted_dloss(stats, row, format_name=f"{fam}_R384")
-    assert math.isclose(
-        priced, 0.5 * stats["h_trace"] * row["output_mse"], rel_tol=1e-9)
-    assert "predicted_dloss" not in row
-    branch = cost_entry_activation_pricing_branch(
-        stats, row, f"{fam}_R384", None)
-    assert "interpolated" in branch or "measured" in branch, branch
-
-
 def test_a_rung_outside_the_envelope_is_omitted_not_extrapolated():
     from prismaquant.tessera_campaign_table import campaign_cost_payload
 

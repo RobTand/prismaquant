@@ -100,8 +100,6 @@ def load_campaign_measurements(cost_path, checkpoint_path, plan):
              and payload.get("currency") == CURRENCY == plan["currency"],
              "current campaign importer only accepts recorded output-MSE currency")
     provenance = payload["provenance"]
-    _require(provenance.get("cost_mode") == "production-render-score",
-             "campaign is not attested production-render-score")
     wire_dir = Path(provenance["wire_dir"])
     journal = checkpoint_path.with_name(checkpoint_path.name + ".parts")
     units = identity["units"]

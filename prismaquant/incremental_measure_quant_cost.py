@@ -57,20 +57,17 @@ from .incremental_probe import (
 )
 from prismaquant.measure_quant_cost import (
     ActivationIndex,
-    HDetailIndex,
     _accumulate_result,
     _expert_cost_sample_split,
     _extrapolate_expert_costs,
     _finalize_results,
     _measure_packed_experts,
-    _normalize_fisher_output_mse_row_weights,
     measure_batched_gpu,
     measure_unbatched,
     prepare_cost_context,
     resolve_cost_target_name,
     start_mem_watchdog,
 )
-from prismaquant.probe_statistics import h_detail_expected_norm_tokens
 from .streaming_model import (
     StreamingContext,
     _build_streaming_context,
@@ -117,17 +114,6 @@ def merge_cost_pickles(paths: list[Path], output_path: Path):
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "wb") as f:
-        h_detail_dirs = set()
-        for shard_meta in shard_metas:
-            if not isinstance(shard_meta, dict):
-                continue
-            h_detail_dir = shard_meta.get("h_detail_dir")
-            if h_detail_dir is None:
-                nested = shard_meta.get("incremental_shard")
-                if isinstance(nested, dict):
-                    h_detail_dir = nested.get("h_detail_dir")
-            if h_detail_dir is not None:
-                h_detail_dirs.add(h_detail_dir)
         merged_provenance = _cost_mode_provenance()
         pickle.dump({
             "costs": merged_costs,
@@ -137,11 +123,6 @@ def merge_cost_pickles(paths: list[Path], output_path: Path):
                 "incremental": True,
                 "n_shards": len(paths),
                 "shards": shard_metas,
-                "h_detail_dir": (
-                    next(iter(h_detail_dirs))
-                    if len(h_detail_dirs) == 1
-                    else None
-                ),
             },
         }, f)
 
@@ -155,7 +136,6 @@ def _expected_cost_shard_meta(*,
                               activation_cache_dir: str,
                               mode: str,
                               chunk_size: int,
-                              h_detail_dir: str | None,
                               formats: list[str],
                               render_path: str = "registry",
                               n_linears_expected: int = 0) -> dict[str, Any]:
@@ -167,7 +147,6 @@ def _expected_cost_shard_meta(*,
         "linear_include": linear_include,
         "mode": mode,
         "chunk_size": chunk_size,
-        "h_detail_dir": str(Path(h_detail_dir)) if h_detail_dir else None,
         "shard_idx": shard_idx,
         "formats": list(formats),
         "n_linears_expected": int(n_linears_expected),
@@ -233,7 +212,6 @@ def _run_cost_measurement(
     dtype: torch.dtype,
     mode: str,
     chunk_size: int,
-    h_detail: "HDetailIndex | None",
     log_prefix: str,
     profile=None,
     render_path: str = "registry",
@@ -253,23 +231,22 @@ def _run_cost_measurement(
             specs=specs,
             device=device,
             dtype=dtype,
-            h_detail=h_detail,
             profile=profile,
             log_prefix=log_prefix,
         )
     elif chosen_mode == "batched":
         results = measure_batched_gpu(
             module, act_cache, target_names, specs, device, dtype,
-            chunk_size=chunk_size, h_detail=h_detail, profile=profile)
+            chunk_size=chunk_size, profile=profile)
     else:
         results = measure_unbatched(
             module, act_cache, target_names, specs, device, dtype,
-            h_detail=h_detail, profile=profile)
+            profile=profile)
 
     packed_accum: dict[str, dict] = {}
     _measure_packed_experts(
         module, target_names, specs, device, dtype, packed_accum,
-        act_cache=act_cache, h_detail=h_detail, profile=profile)
+        act_cache=act_cache, profile=profile)
     if packed_accum:
         results.update(_finalize_results(packed_accum))
         print(f"{log_prefix} measured {len(packed_accum)} packed-expert tensors",
@@ -300,7 +277,6 @@ def _measure_production_render_dense(
     specs: list[fr.FormatSpec],
     device: str,
     dtype: torch.dtype,
-    h_detail: "HDetailIndex | None",
     profile=None,
     log_prefix: str,
 ) -> dict:
@@ -341,27 +317,9 @@ def _measure_production_render_dense(
             continue
 
         W = mod.weight.detach().to(device=dev, dtype=dtype)
-        X_cpu, row_indices = act_cache.load_with_row_indices(canonical_name)
-        X = X_cpu.to(device=dev, dtype=dtype)
+        X = act_cache.load(canonical_name).to(device=dev, dtype=dtype)
         y_ref = X @ W.T
         ref_energy = float(y_ref.float().pow(2).mean().item())
-
-        h_full = None
-        gq_rows = None
-        if h_detail is not None and canonical_name in h_detail:
-            blob = h_detail.load_blob(canonical_name)
-            try:
-                h_full = HDetailIndex.h_diag_from_blob(blob).to(dev).float()
-                if h_full.shape != W.shape:
-                    h_full = None
-            except Exception:
-                h_full = None
-            gq_rows = _normalize_fisher_output_mse_row_weights(
-                blob.get("g2_per_token") if isinstance(blob, dict) else None,
-                row_indices,
-                int(X.shape[0]),
-                dev,
-            )
 
         activations = {canonical_name: X.detach()}
         for spec in specs:
@@ -378,7 +336,7 @@ def _measure_production_render_dense(
                         qname=canonical_name,
                         activations=activations,
                         levers=levers,
-                        fisher_row_weights=gq_rows,
+                        fisher_row_weights=None,
                         gate_trace=gate_trace,
                     )
                     gptq_steps = [
@@ -412,14 +370,6 @@ def _measure_production_render_dense(
                 err = (W - W_hat).float()
                 y_q = X_hat @ W_hat.T
                 y_err_sq = (y_ref - y_q).float().pow(2)
-                fisher_output_mse = None
-                if gq_rows is not None:
-                    fisher_output_mse = float(
-                        (y_err_sq * gq_rows.unsqueeze(1)).mean().item()
-                    )
-                predicted_dloss = None
-                if h_full is not None:
-                    predicted_dloss = float(0.5 * (h_full * err.pow(2)).sum().item())
                 _accumulate_result(
                     accum,
                     canonical_name,
@@ -427,8 +377,6 @@ def _measure_production_render_dense(
                     float(err.pow(2).mean().item()),
                     float(y_err_sq.mean().item()),
                     float(y_err_sq.mean().item()) / max(ref_energy, 1e-12),
-                    predicted_dloss=predicted_dloss,
-                    fisher_output_mse=fisher_output_mse,
                 )
             except Exception as e:
                 accum.setdefault(canonical_name, {})[spec.name] = {
@@ -475,7 +423,6 @@ def _run_body_cost_shard(
     dtype: torch.dtype,
     mode: str,
     chunk_size: int,
-    h_detail: "HDetailIndex | None",
     output_path: str,
     model_name: str,
     probe_path: str,
@@ -571,7 +518,6 @@ def _run_body_cost_shard(
             dtype=dtype,
             mode=mode,
             chunk_size=chunk_size,
-            h_detail=h_detail,
             log_prefix=f"[incremental-cost/{shard_kind}]",
             profile=profile,
             render_path=render_path,
@@ -633,7 +579,6 @@ def _run_mtp_cost_shard(
     dtype: torch.dtype,
     mode: str,
     chunk_size: int,
-    h_detail: "HDetailIndex | None",
     output_path: str,
     model_name: str,
     probe_path: str,
@@ -748,7 +693,6 @@ def _run_mtp_cost_shard(
             dtype=dtype,
             mode=mode,
             chunk_size=chunk_size,
-            h_detail=h_detail,
             log_prefix="[incremental-cost/mtp]",
             profile=profile,
             render_path=render_path,
@@ -857,12 +801,6 @@ def main():
                     help="Measure cost for the profile-declared LM head.")
     ap.add_argument("--no-include-lm-head", action="store_false",
                     dest="include_lm_head")
-    ap.add_argument("--h-detail-dir", default=None,
-                    help="If set, read per-Linear Fisher H diagonal (from "
-                         "incremental_probe's --h-detail-dir) and emit "
-                         "per-(layer, format) predicted_dloss and "
-                         "Fisher row-weighted fisher_output_mse alongside "
-                         "weight_mse in cost.pkl.")
     args = ap.parse_args()
     from prismaquant.gpu_guard import require_cuda_hot_path
     require_cuda_hot_path("incremental_measure_quant_cost", args.device)
@@ -970,26 +908,6 @@ def main():
             f"({preview}{suffix}); pass --skip-missing-activations to proceed."
         )
 
-    # H-detail is optional. Built against the full probe stat set so the
-    # intersect-per-shard logic just checks `name in h_detail` when needed.
-    h_detail: "HDetailIndex | None" = None
-    if args.h_detail_dir:
-        detail_path = Path(args.h_detail_dir)
-        if detail_path.exists():
-            # Gated on the probe's per-row Fisher denominators: a stale
-            # h-detail dir (v3 blobs = per-ROUTED-token on expert rows, or
-            # a dir from a different calibration size) is refused here
-            # rather than silently mis-scaling predicted_dloss.
-            h_detail = HDetailIndex(
-                detail_path, set(stats.keys()),
-                expected_norm_tokens=h_detail_expected_norm_tokens(probe))
-            print(f"[incremental-cost] h-detail cache: {len(h_detail)} Linears "
-                  "→ per-weight Δloss + Fisher row-weighted output MSE",
-                  flush=True)
-        else:
-            print(f"[incremental-cost] WARN: h-detail dir {detail_path} not "
-                  f"found; falling back to scalar proxy", flush=True)
-
     # Compute per-shard paths + expected metas up front so we can decide
     # whether to even bother loading the streaming context.
     shard_paths = [shard_dir / f"cost_shard_{i:03d}.pkl"
@@ -1004,7 +922,6 @@ def main():
             activation_cache_dir=args.activation_cache_dir,
             mode=args.mode,
             chunk_size=args.chunk_size,
-            h_detail_dir=args.h_detail_dir,
             formats=[s.name for s in specs],
             render_path=args.render_path,
             n_linears_expected=sum(
@@ -1078,8 +995,7 @@ def main():
                     dtype=dtype,
                     mode=args.mode,
                     chunk_size=args.chunk_size,
-                    h_detail=h_detail,
-                    output_path=str(shard_path),
+                            output_path=str(shard_path),
                     model_name=args.model,
                     probe_path=args.probe,
                     render_path=args.render_path,
@@ -1096,8 +1012,7 @@ def main():
                     dtype=dtype,
                     mode=args.mode,
                     chunk_size=args.chunk_size,
-                    h_detail=h_detail,
-                    output_path=str(shard_path),
+                            output_path=str(shard_path),
                     model_name=args.model,
                     probe_path=args.probe,
                     render_path=args.render_path,

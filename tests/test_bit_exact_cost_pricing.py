@@ -19,9 +19,10 @@ activations are still quantized.
 Contract pinned here:
   - weight-bit-exact + PASSTHROUGH-activation format (act_bits None or >= 16)
     short-circuits to dloss 0.0 ("bit_exact" source);
-  - weight-bit-exact + ACTIVATION-QUANTIZING format keeps its measured
-    output_mse pricing — at entry, build_candidates, and packed-group
-    aggregation level;
+  - weight-bit-exact + ACTIVATION-QUANTIZING format keeps its own
+    ``predicted_dloss`` (the row's activation-inclusive price; the probe
+    measures no Fisher to price ``output_mse`` since #3448) — at entry,
+    build_candidates, and packed-group aggregation level;
   - unknown formats and explicit-cost_source entries never short-circuit;
   - the dtype-level fact used for the gate (FormatSpec.act_quant_changes_input
     <=> a non-identity activation_quantize_dequantize) holds for every
@@ -45,7 +46,7 @@ from prismaquant.allocator_solver import solve_with_promotion
 
 
 _STATS = {
-    "h_trace": 2.5, "n_params": 1024 * 1024,
+    "n_params": 1024 * 1024,
     "in_features": 1024, "out_features": 1024,
 }
 
@@ -56,14 +57,15 @@ _ACTQUANT_FMT = "MXFP4"
 
 
 def _bit_exact_entry():
-    # Lossless weights; output probe carries A-side error and/or noise.
+    # Lossless weights; output probe carries A-side error and/or noise, and
+    # the row's activation-inclusive price is positive.
     return {"weight_mse": 0.0, "output_mse": 6.3e-3,
-            "rel_output_mse": 8.7e-3}
+            "rel_output_mse": 8.7e-3, "predicted_dloss": 7.875e-3}
 
 
 def _lossy_entry():
     return {"weight_mse": 2.0e-6, "output_mse": 1.4e-3,
-            "rel_output_mse": 1.9e-3}
+            "rel_output_mse": 1.9e-3, "predicted_dloss": 1.75e-3}
 
 
 def _random_activations():
@@ -204,13 +206,13 @@ def test_passthrough_activation_bit_exact_prices_at_zero_dloss():
 
 def test_activation_quantizing_bit_exact_keeps_measured_a_side_cost():
     """weight_mse == 0.0 on a W·A· format proves nothing about the output:
-    measure_quant_cost quantized the activations before measuring
-    output_mse, so the measured cost is real and must be charged."""
+    the activations are quantized, so the row's A-side cost is real and must
+    be charged."""
     entry = _bit_exact_entry()
     assert not cost_entry_is_bit_exact(entry, _ACTQUANT_FMT)
     assert cost_entry_uses_measured_output_mse(_STATS, entry, _ACTQUANT_FMT)
     assert cost_entry_source(_STATS, entry, _ACTQUANT_FMT) == "output_mse"
-    expected = 0.5 * _STATS["h_trace"] * entry["output_mse"]
+    expected = entry["predicted_dloss"]
     got = cost_entry_predicted_dloss(_STATS, entry, format_name=_ACTQUANT_FMT)
     assert abs(got - expected) < 1e-12
     # Every registered activation-quantizing format is gated the same way.
@@ -227,7 +229,7 @@ def test_unknown_format_never_short_circuits():
     assert not cost_entry_is_bit_exact(entry, None)
     assert not cost_entry_is_bit_exact(entry, "NOT_A_FORMAT")
     assert cost_entry_uses_measured_output_mse(_STATS, entry)
-    expected = 0.5 * _STATS["h_trace"] * entry["output_mse"]
+    expected = entry["predicted_dloss"]
     assert abs(cost_entry_predicted_dloss(_STATS, entry) - expected) < 1e-12
 
 
@@ -246,11 +248,11 @@ def test_explicit_cost_source_entries_are_never_bit_exact():
         _STATS, entry, _PASSTHROUGH_FMT) == "production_render_score"
 
 
-def test_lossy_entries_keep_measured_output_mse_pricing():
+def test_lossy_entries_keep_their_own_pricing():
     entry = _lossy_entry()
     assert not cost_entry_is_bit_exact(entry, _PASSTHROUGH_FMT)
     assert cost_entry_uses_measured_output_mse(_STATS, entry, _PASSTHROUGH_FMT)
-    expected = 0.5 * _STATS["h_trace"] * entry["output_mse"]
+    expected = entry["predicted_dloss"]
     assert abs(
         cost_entry_predicted_dloss(
             _STATS, entry, format_name=_PASSTHROUGH_FMT
@@ -271,7 +273,7 @@ def test_build_candidates_splits_passthrough_and_actquant_bit_exact():
     cands = build_candidates(stats, costs, specs).candidates
     by_fmt = {c.fmt: c for c in cands["row"]}
     assert by_fmt[_PASSTHROUGH_FMT].predicted_dloss == 0.0
-    expected_a_side = 0.5 * _STATS["h_trace"] * _bit_exact_entry()["output_mse"]
+    expected_a_side = _bit_exact_entry()["predicted_dloss"]
     assert abs(by_fmt[_ACTQUANT_FMT].predicted_dloss - expected_a_side) < 1e-12
     assert by_fmt["Q4_K"].predicted_dloss > 0.0
     # The A-side cost keeps MXFP4 comparable with the lossy k-quant on the
@@ -293,7 +295,7 @@ def test_zero_dloss_fewer_bits_strictly_dominates_in_the_dp():
     for i in range(4):
         name = f"model.layers.{i}.self_attn.o_proj"
         n = 1 << 20
-        stats[name] = {"h_trace": 1.0, "n_params": n,
+        stats[name] = {"n_params": n,
                        "in_features": 1024, "out_features": 1024}
         cands[name] = []
         for f in menu:
@@ -315,7 +317,7 @@ def test_zero_dloss_fewer_bits_strictly_dominates_in_the_dp():
             f"got {assign}")
 
 
-def _packed_stats(h_trace: float = 2.5):
+def _packed_stats():
     """A packed-expert row (what `_stats_indicates_packed_expert` recognizes).
 
     Shape/param counts are kept self-consistent with the 3D stacked tensor
@@ -323,7 +325,6 @@ def _packed_stats(h_trace: float = 2.5):
     """
     experts, out_features, in_features = 8, 1024, 1024
     return {
-        "h_trace": h_trace,
         "n_params": experts * out_features * in_features,
         "in_features": in_features, "out_features": out_features,
         "_packed_experts_module": "model.layers.0.mlp.experts",
@@ -332,11 +333,13 @@ def _packed_stats(h_trace: float = 2.5):
 
 
 def _unmeasured_output_entry(weight_mse: float):
-    """Exactly what measure_quant_cost writes when the packed routed forward
-    could not be reconstructed (`can_measure_output` false) or the run set
-    PRISMAQUANT_EXPERT_COST_SAMPLE: output_mse is a placeholder zero."""
+    """What measure_quant_cost writes when the packed routed forward could not
+    be reconstructed (`can_measure_output` false) or the run set
+    PRISMAQUANT_EXPERT_COST_SAMPLE: output_mse is a placeholder zero. The
+    row's weight-side price is proportional to its weight error, so a
+    weight-lossless re-encode prices at exactly 0.0."""
     return {"weight_mse": weight_mse, "output_mse": 0.0, "rel_output_mse": 0.0,
-            "output_mse_measured": False}
+            "output_mse_measured": False, "predicted_dloss": 1.25 * weight_mse}
 
 
 def test_unmeasured_activation_cost_is_excluded_not_priced_at_zero():
@@ -392,27 +395,35 @@ def test_unmeasured_activation_cost_is_excluded_not_priced_at_zero():
 def test_measured_output_mse_keeps_the_actquant_candidate():
     """The exclusion is about MISSING evidence, not about the format: the same
     weight-lossless W-and-A row with a real measured output_mse keeps its
-    candidate and its measured A-side price."""
+    candidate and its own A-side price — even a zero one."""
     stats = {"e": _packed_stats()}
-    entry = {"weight_mse": 0.0, "output_mse": 6.3e-3, "rel_output_mse": 8.7e-3,
-             "output_mse_measured": True}
-    costs = {"e": {_ACTQUANT_FMT: entry}}
-    cands = build_candidates(stats, costs, [fr.get_format(_ACTQUANT_FMT)]).candidates
-    got = {c.fmt: c.predicted_dloss for c in cands["e"]}
-    expected = 0.5 * stats["e"]["h_trace"] * entry["output_mse"]
-    assert abs(got[_ACTQUANT_FMT] - expected) < 1e-12
+    for price in (7.875e-3, 0.0):
+        entry = {"weight_mse": 0.0, "output_mse": 6.3e-3,
+                 "rel_output_mse": 8.7e-3, "output_mse_measured": True,
+                 "predicted_dloss": price}
+        costs = {"e": {_ACTQUANT_FMT: entry}}
+        records: list[dict] = []
+        cands = build_candidates(stats, costs, [fr.get_format(_ACTQUANT_FMT)],
+                                 mask_records=records).candidates
+        got = {c.fmt: c.predicted_dloss for c in cands["e"]}
+        assert abs(got[_ACTQUANT_FMT] - price) < 1e-12
+        assert records == []
 
 
 def test_zero_sensitivity_rows_keep_every_format():
-    """``h_trace == 0`` prices EVERY format at 0.0, passthrough ones included:
-    that is a measured statement that no perturbation of this Linear's output
-    moves the loss — the same Fisher factor multiplies the W and A sides — so
-    the row must stay free to take the cheapest format. A zero-token expert at
-    thin calibration is exactly this row; forcing it to BF16 would be a large
-    bpp regression justified by nothing."""
-    stats = {"e": _packed_stats(h_trace=0.0)}
-    costs = {"e": {_ACTQUANT_FMT: _unmeasured_output_entry(0.0),
-                   "Q4_K": _unmeasured_output_entry(2.0e-6),
+    """A row with no input energy (``x2_per_probe`` sums to 0) prices EVERY
+    format at 0.0, passthrough ones included: no input reaches this Linear,
+    so no perturbation of it moves the loss on either the W or the A side,
+    and the row must stay free to take the cheapest format. A zero-token
+    expert at thin calibration is exactly this row; forcing it to BF16 would
+    be a large bpp regression justified by nothing."""
+    def zero_energy(weight_mse):
+        return dict(_unmeasured_output_entry(weight_mse), predicted_dloss=0.0,
+                    x2_per_probe=[0.0, 0.0])
+
+    stats = {"e": _packed_stats()}
+    costs = {"e": {_ACTQUANT_FMT: zero_energy(0.0),
+                   "Q4_K": zero_energy(2.0e-6),
                    "BF16": {"weight_mse": 0.0}}}
     specs = [fr.get_format(f) for f in (_ACTQUANT_FMT, "Q4_K", "BF16")]
     records: list[dict] = []
@@ -494,7 +505,7 @@ def test_packed_group_pricing_splits_passthrough_and_actquant():
     specs = [fr.get_format(_PASSTHROUGH_FMT), fr.get_format(_ACTQUANT_FMT)]
     for e in range(n_members):
         name = f"model.layers.0.mlp.experts.{e}.gate_proj"
-        stats[name] = {"h_trace": 0.5, "n_params": 65536,
+        stats[name] = {"n_params": 65536,
                        "in_features": 256, "out_features": 256}
         costs[name] = {_PASSTHROUGH_FMT: _bit_exact_entry(),
                        _ACTQUANT_FMT: _bit_exact_entry()}
@@ -504,7 +515,7 @@ def test_packed_group_pricing_splits_passthrough_and_actquant():
     super_name = next(n for n in cands2 if _PACKED_GROUP_MARKER in n)
     by_fmt = {c.fmt: c for c in cands2[super_name]}
     assert by_fmt[_PASSTHROUGH_FMT].predicted_dloss == 0.0
-    per_member = 0.5 * 0.5 * _bit_exact_entry()["output_mse"]
+    per_member = _bit_exact_entry()["predicted_dloss"]
     assert abs(
         by_fmt[_ACTQUANT_FMT].predicted_dloss - n_members * per_member
     ) < 1e-12

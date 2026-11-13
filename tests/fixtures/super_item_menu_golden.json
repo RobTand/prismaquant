@@ -1,11 +1,11 @@
 {
- "digest": "851018a87a3748f6b3a3bab0f2bf91504e597bf273d20f2a267d9566566a10cd",
+ "digest": "5ef9a2542aa9729dc6e0247d408602e55cbb5de0cb68f14350b8fd625539c721",
  "menu": [
   "NVFP4",
   "FP8_E4M3",
   "BF16"
  ],
- "regen_reason": "PrismaQuant #236: AURA member errors share probes, so grouped UCB retains the conservative sum of scaled standard errors. z=0 candidate prices remain bit-exact; grouped stderr metadata and opt-in z>0 prices intentionally increase.",
+ "regen_reason": "#3448: the probe measures no Fisher, so a fused super item's weight_mse is its summed un-hedged predicted_dloss instead of that sum divided by 0.5*sum(member h_trace); only the fused super items' cost_rows weight_mse change",
  "scenarios": {
   "fused_hedged_gained_priced": {
    "passthrough_rows": [
@@ -25,13 +25,13 @@
        "activation_pricing_applied": true,
        "predicted_dloss": "0.0013679500000000002",
        "predicted_dloss_stderr": "0.00058315",
-       "weight_mse": "0.001954214285714286"
+       "weight_mse": "0.0013679500000000002"
       },
       "NVFP4": {
        "activation_pricing_applied": true,
        "predicted_dloss": "0.034387",
        "predicted_dloss_stderr": "0.014659000000000002",
-       "weight_mse": "0.04912428571428572"
+       "weight_mse": "0.034387"
       }
      },
      "members": [
@@ -89,13 +89,13 @@
        "activation_pricing_applied": true,
        "predicted_dloss": "0.0010545750000000003",
        "predicted_dloss_stderr": "0.0005123",
-       "weight_mse": "0.0014061000000000004"
+       "weight_mse": "0.0010545750000000003"
       },
       "NVFP4": {
        "activation_pricing_applied": true,
        "predicted_dloss": "0.026509500000000005",
        "predicted_dloss_stderr": "0.012878",
-       "weight_mse": "0.03534600000000001"
+       "weight_mse": "0.026509500000000005"
       }
      },
      "members": [
@@ -160,12 +160,12 @@
       "FP8_E4M3": {
        "predicted_dloss": "0.001255",
        "predicted_dloss_stderr": "0.0005350000000000001",
-       "weight_mse": "0.0017928571428571431"
+       "weight_mse": "0.001255"
       },
       "NVFP4": {
        "predicted_dloss": "0.0251",
        "predicted_dloss_stderr": "0.010700000000000001",
-       "weight_mse": "0.03585714285714286"
+       "weight_mse": "0.0251"
       }
      },
      "members": [
@@ -221,12 +221,12 @@
       "FP8_E4M3": {
        "predicted_dloss": "0.0009675",
        "predicted_dloss_stderr": "0.00047",
-       "weight_mse": "0.0012900000000000001"
+       "weight_mse": "0.0009675"
       },
       "NVFP4": {
        "predicted_dloss": "0.01935",
        "predicted_dloss_stderr": "0.009399999999999999",
-       "weight_mse": "0.0258"
+       "weight_mse": "0.01935"
       }
      },
      "members": [

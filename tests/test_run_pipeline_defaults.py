@@ -52,9 +52,7 @@ def test_production_render_staged_is_archived_and_blocked():
 
     assert "archive/production_render_staged_2026-07-30" in script
     assert "10.83 vs 8.33" in script
-    assert (
-        "COST_MODE must be local, production-render-score, or aura" in script
-    )
+    assert "COST_MODE must be aura" in script
     # The staged execution stages and their knobs are gone.
     assert "--select-tail-output" not in script
     assert "--promotion-qnames-file" not in script
@@ -83,20 +81,17 @@ def test_grouped_kl_is_archived_and_blocked():
     # grouped-kl is now a fail-fast dispatch arm pointing at the archive.
     assert "archive/grouped_kl_2026-05-28" in script
     # It is no longer advertised as a valid COST_MODE in the catch-all error.
-    assert (
-        "COST_MODE must be local, production-render-score, or aura"
-        in script
-    )
+    assert "COST_MODE must be aura" in script
     assert "grouped-kl" not in script.split("COST_MODE must be", 1)[1].split(
         "\n", 1)[0]
     # The grouped-kl measurement invocation and its env knobs are gone.
     assert "prismaquant.grouped_kl_cost" not in script
     assert "GROUPED_KL_NSAMPLES" not in script
     assert "GROUPED_KL_MAX_LANES" not in script
-    # production-render-score remains an ACCEPTED mode (it is the explicit /
-    # legacy spelling since the R2 default flip), which is what makes the
-    # grouped-kl arm's "use production-render-score" advice honest.
-    assert "production-render-score|production-render)" in script
+    # aura is the one ACCEPTED mode since #3448, which is what makes the
+    # grouped-kl arm's "Use aura." advice honest.
+    assert "production-render-score|production-render)" not in script
+    assert "Use aura." in script
 
 
 def test_mse_promotion_is_archived_and_blocked():

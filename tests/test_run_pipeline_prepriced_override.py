@@ -31,27 +31,21 @@ def _sections():
     return paths, text[cost_start:allocation_start], text[allocation_start:allocation_end]
 
 
-def _input(tmp_path, mode="local", *, tessera=False):
+def _input(tmp_path, mode="aura"):
     path = tmp_path / "external cost with spaces.pkl"
     model = tmp_path / "model"
     model.mkdir(exist_ok=True)
     (model / "config.json").write_text(json.dumps({"model_type": "qwen3"}))
-    fmt = "TESSERA_E4M3_K1_R1024" if tessera else "BF16"
-    row = {"predicted_dloss": 0.0}
-    if tessera:
-        from prismaquant.tessera_campaign_table import (CURRENCY)
-        row = {"weight_mse": 1e-4, "output_mse": 2e-4,
-               "output_mse_measured": True, "currency": CURRENCY}
     payload = {
-        "costs": {"model.layers.0.self_attn.o_proj": {fmt: row}},
-        "formats": [fmt], "provenance": {"cost_mode": mode},
+        "costs": {"model.layers.0.self_attn.o_proj": {"BF16": {"predicted_dloss": 0.0}}},
+        "formats": ["BF16"], "provenance": {"cost_mode": mode},
         "meta": {"model": str(model)},
     }
     path.write_bytes(pickle.dumps(payload))
     return path, model
 
 
-def _run(tmp_path, *, mode="local", override=None, tessera=False,
+def _run(tmp_path, *, mode="aura", override=None,
          mutate_before_allocator=False):
     paths, costs, allocator = _sections()
     work = tmp_path / "work"
@@ -97,8 +91,7 @@ python3() {{
         "COST_MODE": mode, "COST_PATH_OVERRIDE": str(override or ""),
         "CB_LADDER_INTERP": "0", "COST_CACHE_COL_WEIGHTS_REQUIRED": "0",
         "SELECTION_MODE": "surrogate",
-        "FORMATS": "TESSERA,BF16" if tessera else "BF16",
-        "COST_FORMATS": "TESSERA,BF16" if tessera else "BF16",
+        "FORMATS": "BF16", "COST_FORMATS": "BF16",
         "TARGET_BITS": "16", "TARGET_PROFILE_DEFAULT": "research",
         "LM_HEAD_FORMAT_CANONICAL": "BF16", "MTP_FORMAT": "BF16",
         "VISUAL_FORMAT": "BF16", "TEST_TRACE": str(trace),
@@ -113,7 +106,7 @@ python3() {{
     return result, calls, work
 
 
-@pytest.mark.parametrize("mode", ["local", "production-render-score", "aura"])
+@pytest.mark.parametrize("mode", ["aura"])
 def test_actual_driver_passes_exact_override_to_allocator_without_builders(tmp_path, mode):
     supplied, _ = _input(tmp_path, mode)
     before = hashlib.sha256(supplied.read_bytes()).hexdigest()
@@ -127,23 +120,15 @@ def test_actual_driver_passes_exact_override_to_allocator_without_builders(tmp_p
     assert receipt["sha256"] == before
 
 
-def test_actual_driver_preserves_prepriced_tessera_token_for_allocator(tmp_path):
-    supplied, _ = _input(tmp_path, "production-render-score", tessera=True)
-    result, calls, _ = _run(tmp_path, mode="production-render-score", override=supplied, tessera=True)
-    assert result.returncode == 88, (result.stdout, result.stderr, calls)
-    assert calls[0][calls[0].index("--formats") + 1] == "TESSERA,BF16"
-    assert calls[0][calls[0].index("--costs") + 1] == str(supplied)
-
-
 @pytest.mark.parametrize("condition", ["missing", "mode-mismatch", "malformed"])
 def test_override_refusal_precedes_any_cost_worker(tmp_path, condition):
-    supplied, _ = _input(tmp_path)
+    # A table stamped by another producer mode than the run's.
+    supplied, _ = _input(tmp_path, "local" if condition == "mode-mismatch" else "aura")
     if condition == "missing":
         supplied = tmp_path / "missing.pkl"
     elif condition == "malformed":
         supplied.write_bytes(pickle.dumps({"not_costs": {}}))
-    result, calls, _ = _run(tmp_path, mode="aura" if condition == "mode-mismatch" else "local",
-                            override=supplied)
+    result, calls, _ = _run(tmp_path, mode="aura", override=supplied)
     assert result.returncode == 2, (result.stdout, result.stderr, calls)
     assert calls == []
 

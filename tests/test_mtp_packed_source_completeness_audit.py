@@ -121,7 +121,7 @@ def test_mtp_cost_admits_source_before_measurement_and_preserves_no_target_skip(
             linear_include=r"^mtp\.",
             probe_stats={} if scope == "no_targets" else {"mtp.fc": {}},
             act_cache=None, specs=[], device="cpu", dtype=torch.bfloat16,
-            mode="unbatched", chunk_size=1, h_detail=None,
+            mode="unbatched", chunk_size=1,
             output_path=str(output), model_name=str(root), probe_path="probe.pkl",
         )
 

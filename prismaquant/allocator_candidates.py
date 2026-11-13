@@ -798,13 +798,14 @@ def drop_census_interpolated_within_loo(
 
 
 ACTIVATION_COST_UNMEASURED_REASON = "activation_cost_unmeasured"
+# A row with no predicted_dloss (for example an MTP baseline row) has no price.
+UNPRICED_COST_ROW_REASON = "no_predicted_dloss"
 
 
 def collect_activation_calibration_rows(
     stats: dict,
     costs: dict,
     formats: list[fr.FormatSpec],
-    *, pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> tuple[list[CalibrationRow], dict[str, int], dict[str, int]]:
     """Extract the P5a calibration sample from the run's own cost tables.
 
@@ -813,39 +814,15 @@ def collect_activation_calibration_rows(
     passthrough/A16 rung has no A side to transfer, and its measured-vs-
     weight-only disagreement is a different question.
 
-    A row joins the calibration sample when it carries BOTH estimators —
-    a real measured ``output_mse`` (``_has_measured_output_mse``) AND a
-    weight-only field, both strictly positive. Exactly-zero prices are
-    excluded on both sides: a zero denominator has no ratio, and a zero
-    measured price is the lossless-re-encode case the bit-exact
-    short-circuit and ``cost_entry_prices_unmeasured_activation_at_zero``
-    already own.
-
-    The membership test here is ``_has_measured_output_mse`` and must STAY
-    that, even though pricing now asks the broader ``_prices_from_output_mse``.
-    The two questions genuinely differ: a band-interpolated row's
-    ``output_mse`` is a fit THROUGH this family's own measured anchors, so
-    letting it into the sample would fit the measured-over-weight-only
-    transfer constant partly on its own output — circular, and it would pull
-    the constant toward whatever the interpolator already assumed. It is good
-    enough to price the row it belongs to and not good enough to define the
-    constant other rows are priced by; those are different bars, and this is
-    the one place that has to hold the higher one.
-
-    Consequence worth naming: ``weight_only_rows_by_family`` now counts some
-    rows that pricing sends down the output-space branch, so it slightly
-    OVER-counts the population the family penalty is actually applied to. That
-    count only feeds ``calibrate``'s fail-closed refusal, where over-counting
-    can make the run refuse more eagerly but never less — the safe direction —
-    so it is left alone rather than split into a third census that would have
-    to be kept in sync with the pricing precedence.
-
-    Everything is computed at ``gain=1.0`` (the ratio is gain-invariant) and
-    the iteration order is the sorted cost table, so the sample — and its
-    digest — is deterministic.
+    A row joins the calibration sample when it has a real measured
+    ``output_mse`` (``_has_measured_output_mse``), a ``weight_mse`` and no
+    ``predicted_dloss``, both MSEs strictly positive. Its ratio is
+    ``output_mse / weight_mse``: the Fisher multiplier that both estimators
+    once shared cancels, so the probe needs none (#3448). A band-interpolated
+    row stays out: its ``output_mse`` is a fit through this family's own
+    measured anchors, so the fit would be circular. The iteration order is the
+    sorted cost table, so the sample and its digest are deterministic.
     """
-    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
-                      if pricing_policy is None else pricing_policy)
     rows: list[CalibrationRow] = []
     measured_by_family: dict[str, int] = {}
     weight_only_by_family: dict[str, int] = {}
@@ -878,11 +855,10 @@ def collect_activation_calibration_rows(
                 continue
             if priced_cell._has_measured_output_mse(stats_entry, entry):
                 measured_by_family[family] += 1
-                if not ("predicted_dloss" in entry or "weight_mse" in entry):
+                if "predicted_dloss" in entry or "weight_mse" not in entry:
                     continue
-                measured = priced_cell.cost_entry_measured_activation_dloss(
-                    stats_entry, entry, policy=pricing_policy)
-                weight_only = priced_cell.cost_entry_weight_only_dloss(stats_entry, entry, policy=pricing_policy)
+                measured = float(entry["output_mse"])
+                weight_only = float(entry["weight_mse"])
                 if measured > 0.0 and weight_only > 0.0:
                     rows.append(CalibrationRow(
                         qname=str(name),
@@ -902,7 +878,6 @@ def calibrate_activation_fair_pricing(
     formats: list[fr.FormatSpec],
     *,
     enabled: bool | None = None,
-    pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> ActivationFairPricing:
     """Calibrate the per-family activation penalty ONCE for a run.
 
@@ -911,10 +886,8 @@ def calibrate_activation_fair_pricing(
     menus share one fit (the audit's "calibrated once per model") instead of
     three menu-dependent ones.
     """
-    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
-                      if pricing_policy is None else pricing_policy)
     rows, measured, weight_only = collect_activation_calibration_rows(
-        stats, costs, formats, pricing_policy=pricing_policy)
+        stats, costs, formats)
     return _calibrate_activation_pricing(
         rows,
         measured_rows_by_family=measured,
@@ -1227,8 +1200,6 @@ def _super_item_ucb_hedge(member_terms, ucb_z: float) -> tuple[float, float]:
         # from its own output_mse never had a hedge added to its dloss, so
         # subtracting one here would over-subtract the linear hedge this
         # conversion exists to undo.
-        if priced_cell._prices_from_output_mse(stats_entry, cost_entry):
-            continue
         if "predicted_dloss" not in cost_entry:
             continue
         try:
@@ -1651,9 +1622,14 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
             # Packed experts can carry an unmeasured output_mse placeholder;
             # cost_entry_predicted_dloss falls back to predicted_dloss or
             # weight_mse for those entries.
-            cell = priced_cell.price_cell(
-                s, entry, gain=gain, format_name=spec.name,
-                activation_pricing=activation_pricing, policy=pricing_policy)
+            try:
+                cell = priced_cell.price_cell(
+                    s, entry, gain=gain, format_name=spec.name,
+                    activation_pricing=activation_pricing, policy=pricing_policy)
+            except priced_cell.UnpricedCostRow:
+                masked.setdefault((spec.name, UNPRICED_COST_ROW_REASON), []).append(name)
+                unpriceable.setdefault(name, []).append(spec.name)
+                continue
             priced = cell.candidate_dloss
             if cell.unmeasured_activation_at_zero:
                 # The A-side cost of this W-and-A format was never measured for
@@ -1664,14 +1640,13 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                 # format) instead of letting the optimizer read a cost that no
                 # measurement supports. See
                 # cost_entry_prices_unmeasured_activation_at_zero.
-                h_trace = float(s.get("h_trace", 0.0) or 0.0)
                 detail = (
                     f"{spec.name} quantizes activations (act_bits="
                     f"{spec.act_bits}) but this row has no measured "
                     "output_mse, and its weight-side error is exactly 0.0 "
                     "(lossless re-encode of an already-"
                     f"{spec.name}-shaped source), so the only available "
-                    f"price is dloss 0.0 with h_trace={h_trace:.6g} > 0: an "
+                    "price is dloss 0.0 on a row with input energy: an "
                     "unmeasured activation cost at the DP's global minimum "
                     f"(cost_source="
                     f"{cell.source})"
@@ -2648,14 +2623,10 @@ def aggregate_fused_siblings(
         super_name = f"{members[0].rsplit('.', 1)[0]}{_FUSED_SIBLING_MARKER}{safe_key}"
 
         n_params = sum(stats[m]["n_params"] for m in members)
-        sum_h = sum(stats[m]["h_trace"] for m in members)
         d_out = int(stats[members[0]].get("out_features", 0) or 0)
         d_in = int(stats[members[0]].get("in_features", 0) or 0)
 
         stats_ext[super_name] = {
-            "h_trace": sum_h,
-            "h_trace_raw": sum(stats[m].get("h_trace_raw", 0.0) for m in members),
-            "h_w2_sum": sum(stats[m].get("h_w2_sum", 0.0) for m in members),
             "w_max_abs": max(stats[m].get("w_max_abs", 0.0) for m in members),
             "w_norm_sq": sum(stats[m].get("w_norm_sq", 0.0) for m in members),
             "n_params": n_params,
@@ -2705,20 +2676,29 @@ def aggregate_fused_siblings(
                 # the summed super-item dloss (below, at candidate build), so
                 # the per-member terms here — and the hedge conversion — are
                 # un-gained.
-                member_pred = priced_cell.cost_entry_predicted_dloss(
-                    stats[m], c, format_name=spec.name,
-                    activation_pricing=activation_pricing, policy=pricing_policy)
+                try:
+                    member_pred = priced_cell.cost_entry_predicted_dloss(
+                        stats[m], c, format_name=spec.name,
+                        activation_pricing=activation_pricing, policy=pricing_policy)
+                except priced_cell.UnpricedCostRow:
+                    member_terms = None
+                    break
                 sum_pred += member_pred
                 member_terms.append((stats[m], c, member_pred, act_penalty))
+            if member_terms is None:
+                # Like a missing member: an unpriced member leaves no group price.
+                super_cost[spec.name] = {"error": UNPRICED_COST_ROW_REASON}
+                continue
             # Recover the unhedged sum for weight_mse, and store the shared
             # conservative stderr bound so grouped-table consumers preserve
             # the uncertainty price. Shared probes do not justify quadrature.
             hedge_linear, stderr_agg = _super_item_ucb_hedge(
                 member_terms, ucb_z)
             base_pred = sum_pred - hedge_linear
-            effective_mse = base_pred / (0.5 * sum_h) if sum_h > 0 else 0.0
+            # Zero exactly when the group's price is zero: the bit-exact test
+            # reads only that.
             super_cost[spec.name] = {
-                "weight_mse": effective_mse,
+                "weight_mse": base_pred,
                 "predicted_dloss": base_pred,
                 "predicted_dloss_stderr": stderr_agg,
             }
@@ -2929,7 +2909,7 @@ def aggregate_fused_siblings(
                 super_cost[composite.fmt] = {
                     "predicted_dloss": point_cost,
                     "predicted_dloss_stderr": trade["paired_standard_error"] if trade is not None else 0.0,
-                    "weight_mse": point_cost / (0.5 * sum_h) if sum_h > 0 else 0.0,
+                    "weight_mse": point_cost,
                     **({"paired_rate_trade": trade} if trade is not None else {}),
                 }
                 from .rung_allowability import make_scientific_price_sum
@@ -3425,9 +3405,6 @@ def aggregate_packed_serving_groups(
         # total-parameter-consistent; exact byte paths must (and do)
         # prefer the candidate / _memory_bytes_by_format.
         stats_ext[super_name] = {
-            "h_trace": sum(
-                float(stats[m].get("h_trace", 0.0) or 0.0) for m in members
-            ),
             "n_params": n_params,
             "n_tokens_seen": sum(
                 int(stats[m].get("n_tokens_seen", 0) or 0) for m in members

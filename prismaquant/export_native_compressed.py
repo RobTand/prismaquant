@@ -192,29 +192,6 @@ def _resolve_perturbed_x_export_inputs(root: str | Path) -> tuple[Path, Path]:
     return layer_config, cache_dir
 
 
-class _LazyFisherDiagCache:
-    """HDetailIndex-backed lazy cache for per-Linear Fisher diagonal.
-
-    Mirrors `_LazyActivationCache` but loads `h_diag` tensors of shape
-    `[out, in]` from the probe's per-Linear `.pt` blobs. Returns None
-    when the requested name isn't in the index — caller (GPTQ wrapper)
-    falls back to unweighted Hessian. Loads are demand-driven so the
-    full Fisher cache (typically a few GB) doesn't sit resident."""
-
-    def __init__(self, index):
-        self.index = index
-        self.loads = 0
-
-    def get(self, name: str):
-        if name not in self.index:
-            return None
-        self.loads += 1
-        try:
-            return self.index.load(name).to(torch.float32)
-        except Exception:
-            return None
-
-
 def _activation_index_fingerprint(index, cache_dir: Path) -> dict[str, object]:
     """Cheap cache identity for export-cache invalidation.
 
@@ -4830,7 +4807,6 @@ def _write_shipcard(
         "read_gb_per_token": _read_traffic.read_traffic_claim(out_dir),
         "format_histogram": {f"{k[0]}/{k[1]}": v for k, v in hist.items()},
         "render_levers": _render_lever_provenance(),
-        "kv_shared_fisher": _shipcard.kv_shared_fisher_echo(),
     }
     # Principle 12: the recipe's route histogram travels beside the bpp. Every
     # allocation writes serving_lane_provenance into its recipe (#1387); a

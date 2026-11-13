@@ -15,7 +15,6 @@ import math
 import pickle
 import sys
 
-import pytest
 
 STOCK_DIGESTS = {
     "layer_config.json": "ffd88f90f039f69e559be73ce9e302ce5406d4f48f8b7998db2a1156918a9942",
@@ -44,20 +43,6 @@ STOCK_DIGESTS = {
         "7e80038d29a02961ddf43d27ab92268ef5506ac9b9c944308cfdb56c6aa7abcd"
     ),
 }
-TESSERA_DIGESTS = {
-    "layer.json": "86645b65e35c088897347b4ca0f3454202d3b2194313b89485da8c41eb696275",
-    "format_applicability.json": (
-        "0e3d1f837879b2e9880c3dfbcfea38b7568f5a9a7c2e6bd898ec317fdd4dcfe2"
-    ),
-    "pareto.csv": (
-        "e172f4262b5a094db870ed0a904d516d0b030926ee89431fe8472e8a5465583d"
-    ),
-    "pareto.knees.json": (
-        "3735ae8eb6ecf8837e168542460da5eb085119614eac16568f57df72acc3edff"
-    ),
-}
-
-
 def _canonical_tessera_layer(text):
     payload = json.loads(text)
     identity = payload["__prismaquant__"]["tessera_dev_pin"]
@@ -189,65 +174,3 @@ def test_stock_menu_preserves_decisions_accounting_and_companion_bytes(tmp_path,
     _assert_pareto_point(tmp_path, target=6.0, bits_per_param=bits / (14 * n), loss=loss)
     got = _digests(tmp_path)
     assert got == STOCK_DIGESTS, json.dumps(got, indent=1, sort_keys=True)
-
-
-def test_tessera_menu_keeps_allocation_and_nonidentity_outputs(tmp_path, monkeypatch):
-    pytest.importorskip("torch")
-    from test_tessera_scope_endpoints import (
-        DENSE, EXPERT, SHARED, _allocator_inputs, _cli_scope, _v5_contract,
-    )
-
-    from prismaquant import allocator
-    from prismaquant.layer_config import load_assignment
-
-    monkeypatch.delenv("PRISMAQUANT_TESSERA_DEV_PIN", raising=False)
-    _v5_contract(monkeypatch)
-    argv = _allocator_inputs(tmp_path, "TESSERA_E2M1_K2_R896")
-    monkeypatch.setattr(sys, "argv", [
-        "allocator", *argv, "--no-fused-aggregation",
-        "--no-packed-aggregation", *_cli_scope()])
-    allocator.main()
-    assert load_assignment(tmp_path / "layer.json") == {
-        unit: "TESSERA_E2M1_K2_R896" for unit in (DENSE, EXPERT, SHARED)
-    }
-    from prismaquant import tessera_runtime_contract as runtime
-    from prismaquant import tessera_serving_runtime_pin as pin
-    payload = json.loads((tmp_path / "layer.json").read_text())
-    identity = payload["__prismaquant__"]["tessera_dev_pin"]
-    raw = runtime.contract_path().read_bytes()
-    installed = json.loads(raw)
-    serving_pin = pin.load_tessera_serving_runtime_pin()
-    assert serving_pin.commit == pin.TESSERA_SERVING_RUNTIME_PINNED_COMMIT == runtime.TESSERA_DEV_PIN_COMMIT
-    assert serving_pin.contract_sha256 == hashlib.sha256(raw).hexdigest() == runtime.TESSERA_DEV_PIN_CONTRACT_SHA256
-    assert identity["requested"] == ""
-    assert identity["commit"] == identity["contract_sha256"] == identity["contract_path"] == "fixture"
-    assert identity["bytes_are_the_reviewed_bytes"] is False
-    assert identity["contract_version"] == installed["contract_version"]
-    assert identity["reviewed_contract_sha256"] == serving_pin.contract_sha256
-    assert identity["plugin_version"] == serving_pin.version == "0.1.0"
-    assert identity["quant_method"] == installed["quant_method"]["canonical"] == "tessera"
-    assert identity["default_serve_image"] == installed["versions"]["default_serve_image"]
-    for observed, published in zip(identity["native_extensions"], installed["native_extensions"], strict=True):
-        for field in ("module_name_prefix", "filename_glob", "match", "source", "loaded_by", "routes", "when_unavailable"):
-            assert observed[field] == published[field]
-    metadata = payload["__prismaquant__"]
-    # The unchanged historical side-byte oracle is also locked by the Pareto CSV.
-    _assert_accounting(metadata, params=3 * 256 * 256, bits=815784, target=16.0)
-    _assert_pareto_point(tmp_path, target=16.0, bits_per_param=815784 / (3 * 256 * 256), loss=3 * 0.5 * 1.0 * 4e-4)
-    expected_scope = {DENSE: "dense", EXPERT: "routed_moe", SHARED: "dense"}
-    provenance = metadata["serving_lane_provenance"]
-    assert provenance["units_total"] == 3
-    assert provenance["activation_pricing_branches"] == {"measured_output_mse": 3}
-    assert provenance["route_status_counts"] == {"backed_with_serve_flag": 3}
-    for name, structure in expected_scope.items():
-        assert payload[name] == dict(data_type="tessera", bits=5, tessera_format="TESSERA_E2M1_K2_R896",
-            tessera_family="TESSERA_E2M1_K2", tessera_body_rate_q256=896, tessera_body="TCQ",
-            tessera_scale_plane="lut16", sym=True, group_size=16, act_bits=4,
-            act_data_type="fp4_e2m1", act_group_size=16, act_dynamic=True, act_sym=True)
-        row = provenance["by_unit"][name]
-        assert row["format"] == "TESSERA_E2M1_K2_R896"
-        assert row["serving_context"]["structure"] == structure
-        assert row["route"]["route_status"] == "backed_with_serve_flag"
-        assert row["route"]["requires_serve_flags"] == ["TESSERA_SERVE_MODE=resident"]
-    got = _digests(tmp_path)
-    assert got == TESSERA_DIGESTS, json.dumps(got, indent=1, sort_keys=True)

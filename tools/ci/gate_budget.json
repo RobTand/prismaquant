@@ -20,9 +20,6 @@
     "tests/test_native_receipt_table_routed.py::test_the_cli_refuses_a_forged_or_changed_rank_report": 60,
     "tests/test_native_receipt_table_routed.py::test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members": 64,
     "tests/test_native_render_levers_explicit.py::test_every_live_call_site_names_the_recipe": 49,
-    "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[all]": 43,
-    "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[mtp]": 44,
-    "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[visual]": 43,
     "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": 76,
     "tests/test_packed_append_streaming_and_pair_identity.py::test_streaming_append_records_per_layer_section": 47,
     "tests/test_packed_expert_cross_domain_gate.py::test_default_path_keeps_in_domain_holdout": 42,
@@ -56,7 +53,6 @@
     "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-rewritten-metadata]": 42,
     "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-unchanged]": 41,
     "tests/test_run_pipeline_gates_execute.py::test_lm_head_policy_resolver_failure_fires": 85,
-    "tests/test_sample_parallel_artifacts.py::test_the_sample_parallel_worker_entry_refuses_the_retired_mode": 41,
     "tests/test_select_validated_frontier.py::test_tail_veto_cli_explicit_eta_beats_auto": 41,
     "tests/test_served_activation_contract.py::test_stock_nvfp4_hook_keeps_its_screen_default_and_opt_in": 45,
     "tests/test_stage_a_chain_regime.py::test_batch_eight_is_as_close_to_float64_as_batch_one": 44,
@@ -226,27 +222,6 @@
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
-    },
-    "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[all]": {
-      "seconds": 21.428,
-      "run": 41280260494,
-      "attempt": 2,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-2/effective/8/junit.xml"
-    },
-    "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[mtp]": {
-      "seconds": 21.638,
-      "run": 41280260494,
-      "attempt": 2,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-2/effective/8/junit.xml"
-    },
-    "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[visual]": {
-      "seconds": 21.058,
-      "run": 41280260494,
-      "attempt": 2,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-2/effective/8/junit.xml"
     },
     "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": {
       "seconds": 37.814,
@@ -478,13 +453,6 @@
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/5/junit.xml"
-    },
-    "tests/test_sample_parallel_artifacts.py::test_the_sample_parallel_worker_entry_refuses_the_retired_mode": {
-      "seconds": 20.146,
-      "run": 41278869921,
-      "attempt": 2,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-2/effective/6/junit.xml"
     },
     "tests/test_select_validated_frontier.py::test_tail_veto_cli_explicit_eta_beats_auto": {
       "seconds": 20.165,

@@ -1229,7 +1229,7 @@ def run_streaming_render(
         "calib_hash": calibration_hash,
         # The source-class format plan was archived with the codebook lane
         # (#1345); the key stays, always null, so cache metadata bytes do not
-        # move. production_render_cost refuses a cache that carries one.
+        # move.
         "format_plan_identity_sha256": None,
         "render_mechanism_order": [
             {

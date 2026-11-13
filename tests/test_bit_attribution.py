@@ -50,9 +50,9 @@ def test_build_bit_attribution_buckets_and_body_totals():
         "model.layers.1.mlp.down_proj": [Candidate("BF16", 16.0, 4096, 0.0)],
     }
     stats = {
-        "model.layers.0.self_attn.q_proj": {"n_params": 1024, "h_trace": 0.5},
-        "model.layers.0.mlp.down_proj": {"n_params": 2048, "h_trace": 9.0},
-        "model.layers.1.mlp.down_proj": {"n_params": 2048, "h_trace": 1.0},
+        "model.layers.0.self_attn.q_proj": {"n_params": 1024},
+        "model.layers.0.mlp.down_proj": {"n_params": 2048},
+        "model.layers.1.mlp.down_proj": {"n_params": 2048},
     }
 
     buckets, per_linear, totals = _build_bit_attribution(
@@ -69,7 +69,7 @@ def test_build_bit_attribution_buckets_and_body_totals():
     assert q["bits"] == 8.0 * (512 + 8)
     assert q["bpp"] == (8.0 * (512 + 8)) / 1024
     assert q["predicted_dloss"] == 0.01
-    assert q["h_trace"] == 0.5
+    assert "h_trace" not in q
 
     # one bucket per (block, role); down_proj appears in two different blocks.
     keys = {(b["block_id"], b["role"]) for b in buckets}
@@ -84,7 +84,7 @@ def test_build_bit_attribution_null_dloss_when_no_candidate():
     # Expanded fused-sibling member: in the assignment but no scored candidate.
     assignment = {"model.layers.0.self_attn.k_proj": "NVFP4"}
     stats = {"model.layers.0.self_attn.k_proj": {
-        "n_params": 1024, "h_trace": 0.3,
+        "n_params": 1024,
         "_memory_bytes_by_format": {"NVFP4": 512},
     }}
     buckets, per_linear, totals = _build_bit_attribution(
@@ -107,8 +107,8 @@ def test_write_bit_attribution_reports_emit_files(tmp_path):
         "model.layers.0.mlp.down_proj": [Candidate("FP8_E4M3", 8.0, 2048, 0.002)],
     }
     stats = {
-        "model.layers.0.self_attn.q_proj": {"n_params": 1024, "h_trace": 0.5},
-        "model.layers.0.mlp.down_proj": {"n_params": 2048, "h_trace": 9.0},
+        "model.layers.0.self_attn.q_proj": {"n_params": 1024},
+        "model.layers.0.mlp.down_proj": {"n_params": 2048},
     }
     jpath = tmp_path / "attr.json"
     cpath = tmp_path / "attr.csv"
@@ -128,7 +128,7 @@ def test_write_bit_attribution_reports_emit_files(tmp_path):
     assert payload["n_body_linears"] == 2
     assert len(payload["buckets"]) == 2
     csv_text = cpath.read_text()
-    assert "qname,block_id,role,format,bits,bpp,n_params,h_trace,predicted_dloss" in csv_text
+    assert "qname,block_id,role,format,bits,bpp,n_params,predicted_dloss" in csv_text
     assert "q_proj" in csv_text
 
 

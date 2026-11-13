@@ -819,7 +819,6 @@ def test_fused_group_ucb_stderr_preserves_conservative_bound(monkeypatch):
         stats, costs, specs, cands, _FakeProfile())
     super_name = next(n for n in cands_ext if _FUSED_SIBLING_MARKER in n)
     n_members = len(members)
-    sum_h = sum(stats[m]["h_trace"] for m in members)
 
     checked = 0
     for cand in cands_ext[super_name]:
@@ -833,8 +832,8 @@ def test_fused_group_ucb_stderr_preserves_conservative_bound(monkeypatch):
         entry = costs_ext[super_name][fmt]
         assert abs(entry["predicted_dloss"] - exact_sum) < 1e-12
         assert abs(entry["predicted_dloss_stderr"] - agg) < 1e-12
-        # weight_mse is derived from the UN-hedged sum (no z contamination).
-        assert abs(entry["weight_mse"] - exact_sum / (0.5 * sum_h)) < 1e-12
+        # weight_mse is the UN-hedged sum (no z contamination).
+        assert abs(entry["weight_mse"] - exact_sum) < 1e-12
         # Fully correlated errors attain this bound: no group-size discount.
         assert z * agg == z * n_members * stderr[fmt]
         checked += 1

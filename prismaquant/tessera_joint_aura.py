@@ -700,7 +700,6 @@ def _read_campaign_metadata(inputs, reuse_policy):
     _same(payload.get("currency"), CURRENCY, "campaign scalar currency")
     _same(set(payload["costs"]), names, "complete merged cost roster")
     provenance = payload["provenance"]
-    _same(provenance.get("cost_mode"), "production-render-score", "campaign cost mode")
     _same(provenance.get("model"), census["model"], "campaign model")
     _same(plan["model"], census["model"], "planned model")
     _require(provenance.get("stopped_early") is False, "campaign stopped before completing anchors")

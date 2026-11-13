@@ -129,7 +129,6 @@ SITES = (
     ("prismaquant.artifact_collection", "_canonical_bytes", _WHERE),
     ("prismaquant.glm_capture_compatibility", "_digest", {}),
     ("prismaquant.boundary_control", "digest", {}),
-    ("prismaquant.sample_parallel_artifacts", "_sample_artifact_sha256", _WHERE),
 
     ("prismaquant.joint_aura_rows", "joint_identity_sha256", {}),
     ("prismaquant.measured_runtime_prices", "identity_sha256", {}),

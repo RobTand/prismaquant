@@ -1,8 +1,9 @@
 """Single-source guard for the Fisher row-weight clip (issue #159).
 
 The mean-1 normalise-then-clip rule used to be copied across the render
-scorer, the quant-cost probe, and the native exporter, each with its own env
-read, so the cost paths could silently disagree about the same quantity. The
+scorer and the native exporter (and the retired quant-cost Fisher path,
+#3448), each with its own env read, so the paths could silently disagree
+about the same quantity. The
 rule now lives in ``prismaquant.render_score`` (see
 ``normalize_clipped_fisher_row_weights`` and
 ``resolve_fisher_row_weight_clip``). These tests pin that: every path must
@@ -30,16 +31,6 @@ def _render_path(row_weights: torch.Tensor, n_rows: int) -> torch.Tensor | None:
     return normalize_row_weights(row_weights, n_rows, _CPU)
 
 
-def _cost_path(row_weights: torch.Tensor, n_rows: int) -> torch.Tensor | None:
-    from prismaquant.measure_quant_cost import (
-        _normalize_fisher_output_mse_row_weights,
-    )
-
-    return _normalize_fisher_output_mse_row_weights(
-        row_weights, torch.arange(n_rows), n_rows, _CPU
-    )
-
-
 def _export_path(row_weights: torch.Tensor, n_rows: int) -> torch.Tensor | None:
     from prismaquant.native_render_codec import (
         _normalize_fisher_row_weights,
@@ -52,10 +43,9 @@ def _export_path(row_weights: torch.Tensor, n_rows: int) -> torch.Tensor | None:
 
 def _all_paths(
     row_weights: torch.Tensor, n_rows: int
-) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
     return (
         _render_path(row_weights, n_rows),
-        _cost_path(row_weights, n_rows),
         _export_path(row_weights, n_rows),
     )
 
@@ -75,10 +65,8 @@ def test_canonical_env_drives_all_paths(monkeypatch) -> None:
     """
     _clear_clip_env(monkeypatch)
     monkeypatch.setenv(CANONICAL_ENV, "2.0")
-    render_out, cost_out, export_out = _all_paths(_dense_vector(), 8)
-    assert render_out is not None and cost_out is not None
-    assert export_out is not None
-    assert torch.equal(render_out, cost_out)
+    render_out, export_out = _all_paths(_dense_vector(), 8)
+    assert render_out is not None and export_out is not None
     assert torch.equal(render_out, export_out)
     # The clip binds: without it the hot element would be 2.4.
     assert float(render_out[0]) < 2.4
@@ -105,10 +93,8 @@ def test_canonical_wins_when_both_set(monkeypatch) -> None:
     _clear_clip_env(monkeypatch)
     monkeypatch.setenv(CANONICAL_ENV, "2.0")
     monkeypatch.setenv(ALIAS_ENV, "33.0")
-    render_out, cost_out, export_out = _all_paths(_dense_vector(), 8)
-    assert render_out is not None and cost_out is not None
-    assert export_out is not None
-    assert torch.equal(render_out, cost_out)
+    render_out, export_out = _all_paths(_dense_vector(), 8)
+    assert render_out is not None and export_out is not None
     assert torch.equal(render_out, export_out)
     assert float(render_out[0]) < 2.4
 
@@ -121,7 +107,6 @@ def test_paths_route_through_shared_helper(monkeypatch) -> None:
     this test fails. The codec path is the native render codec's own module
     binding, which its normaliser calls by name.
     """
-    import prismaquant.measure_quant_cost as cost_mod
     import prismaquant.native_render_codec as codec_mod
     import prismaquant.render_score as score_mod
 
@@ -138,31 +123,25 @@ def test_paths_route_through_shared_helper(monkeypatch) -> None:
         score_mod, "normalize_clipped_fisher_row_weights", spy
     )
     monkeypatch.setattr(
-        cost_mod, "normalize_clipped_fisher_row_weights", spy
-    )
-    monkeypatch.setattr(
         codec_mod, "normalize_clipped_fisher_row_weights", spy
     )
     _clear_clip_env(monkeypatch)
-    render_out, cost_out, export_out = _all_paths(_dense_vector(), 8)
-    assert render_out is not None and cost_out is not None
-    assert export_out is not None
+    render_out, export_out = _all_paths(_dense_vector(), 8)
+    assert render_out is not None and export_out is not None
     # One helper call per path: the scorer keeps the legacy lenient policy
-    # while the probe and the codec keep the strict positive-mean policy.
-    assert calls == [(64.0, False), (64.0, True), (64.0, True)]
+    # while the codec keeps the strict positive-mean policy.
+    assert calls == [(64.0, False), (64.0, True)]
     # The spy delegated, so outputs are the real clipped weights.
-    assert torch.equal(render_out, cost_out)
     assert torch.equal(render_out, export_out)
 
 
 @pytest.mark.parametrize("rows", [[0.0, 0.0], [-1.0, float("nan")]])
 def test_degenerate_rows_preserve_each_consumer_policy(monkeypatch, rows) -> None:
-    """Scoring retains zero weights; cost and codec choose unweighted fallback."""
+    """Scoring retains zero weights; the codec chooses unweighted fallback."""
     _clear_clip_env(monkeypatch)
-    render_out, cost_out, codec_out = _all_paths(torch.tensor(rows), 2)
+    render_out, codec_out = _all_paths(torch.tensor(rows), 2)
     assert render_out is not None
     assert torch.equal(render_out, torch.zeros(2))
-    assert cost_out is None
     assert codec_out is None
 
 

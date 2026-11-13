@@ -9,49 +9,62 @@ import copy
 import json
 import pickle
 import sys
-from pathlib import Path
 
-from prismaquant import allocator, format_registry as fr
+from prismaquant import allocator
 from prismaquant.layer_config import load_assignment
-from test_tessera_scope_endpoints import DENSE, _allocator_inputs, _cli_scope, _v5_contract
 
 VISION = 'model.visual.blocks.0.attn.qkv'
 MERGER = 'model.visual.merger.mlp.0'
-DENSE_RUNG = 'TESSERA_E4M3_K1_R1024'
-VALUE_RUNG = 'TESSERA_E2M1_K2_R896'
+BODY = {
+    'model.layers.0.self_attn.o_proj': dict(router_path=None, expert_id=None),
+    'model.layers.0.mlp.experts.0.down_proj': dict(router_path='model.layers.0.mlp.gate',
+                                                   expert_id='0'),
+    'model.layers.0.mlp.shared_expert.down_proj': dict(router_path=None, expert_id=None),
+}
+FORMATS = ('NVFP4', 'FP8_DYNAMIC')
+
+
+def _row(**extra):
+    return dict(n_params=64 * 64, in_features=64, out_features=64, **extra)
+
+
+def _cost(nvfp4, fp8):
+    return {'NVFP4': {'predicted_dloss': nvfp4, 'weight_mse': nvfp4 / 2},
+            'FP8_DYNAMIC': {'predicted_dloss': fp8, 'weight_mse': fp8 / 2}}
 
 
 def _inputs(tmp_path, monkeypatch):
-    _v5_contract(monkeypatch)
-    argv = _allocator_inputs(tmp_path, DENSE_RUNG)
-    probe_path = Path(argv[argv.index('--probe') + 1])
-    cost_path = Path(argv[argv.index('--costs') + 1])
-    probe = pickle.loads(probe_path.read_bytes())
-    cost = pickle.loads(cost_path.read_bytes())
+    model = tmp_path / 'model'
+    model.mkdir()
+    (model / 'config.json').write_text(json.dumps({
+        'model_type': 'qwen3_moe', 'architectures': ['Qwen3MoeForCausalLM']}))
+    probe = {'stats': {name: _row(**row) for name, row in BODY.items()},
+             'meta': {'model': str(model)}}
+    costs = {name: _cost(4e-4, 1e-5) for name in BODY}
     for name, role in ((VISION, 'vis_attn_qkv'), (MERGER, 'merger_fc1')):
-        probe['stats'][name] = {**copy.deepcopy(probe['stats'][DENSE]), 'type': role}
-        row = copy.deepcopy(cost['costs'][DENSE][DENSE_RUNG])
-        cost['costs'][name] = {DENSE_RUNG: row}
-        # Keep a nonzero, measured cost: this is not a fabricated identity.
-        row['output_mse'] = 1e-5 if name == VISION else 8e-4
-        row['weight_mse'] = row['output_mse'] / 2
-        alternate = {**copy.deepcopy(row), 'output_mse': 4e-4 if name == VISION else 2e-5}
-        alternate['weight_mse'] = alternate['output_mse'] / 2
-        cost['costs'][name][VALUE_RUNG] = alternate
+        probe['stats'][name] = _row(router_path=None, expert_id=None, type=role)
+        # Nonzero AURA prices that disagree per row: an allocation would split
+        # the two visual rows, so a uniform result comes from --visual-format.
+        costs[name] = _cost(1e-5, 4e-4) if name == VISION else _cost(8e-4, 2e-5)
+    probe_path = tmp_path / 'probe.pkl'
+    cost_path = tmp_path / 'cost.pkl'
     probe_path.write_bytes(pickle.dumps(probe))
-    cost_path.write_bytes(pickle.dumps(cost))
+    cost_path.write_bytes(pickle.dumps({'costs': costs, 'formats': list(FORMATS),
+                                        'provenance': {'cost_mode': 'aura'}}))
     # Source-header census is synthetic too: exercise the late
     # uniform-restamping path without real weights.
     source_stats = {name: {**copy.deepcopy(probe['stats'][name]), 'source_dtype': 'bf16'}
                     for name in (VISION, MERGER)}
     monkeypatch.setattr(allocator, 'discover_visual_linear_stats_from_source',
                         lambda _model, **_kwargs: copy.deepcopy(source_stats))
-    argv[argv.index('--formats') + 1] = f'{DENSE_RUNG},{VALUE_RUNG}'
     monkeypatch.setattr(sys, 'argv', [
-        'allocator', *argv, '--no-fused-aggregation', '--no-packed-aggregation',
-        '--visual-format', 'BF16',
+        'allocator', '--probe', str(probe_path), '--costs', str(cost_path),
+        '--formats', ','.join(FORMATS), '--target-bits', '16', '--pareto-targets', '16',
+        '--bit-precision', '0.1', '--layer-config', str(tmp_path / 'layer.json'),
+        '--pareto-csv', str(tmp_path / 'pareto.csv'),
+        '--no-fused-aggregation', '--no-packed-aggregation', '--visual-format', 'BF16',
         '--bit-attribution-json', str(tmp_path / 'attribution.json'),
-        '--bit-attribution-csv', str(tmp_path / 'attribution.csv'), *_cli_scope(),
+        '--bit-attribution-csv', str(tmp_path / 'attribution.csv'),
     ])
     return tmp_path / 'layer.json', probe
 

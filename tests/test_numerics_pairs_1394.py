@@ -8,8 +8,9 @@ the old site's name.
 
 A tensor outcome is its dtype, shape, device type and the SHA-256 of its raw
 bytes, so "the same" means bit-identical, not close. Sites that run on the GPU
-in production (the probe's marginals and the MX scale rounding) are also
-checked on CUDA in the dtypes the probe and the render feed them.
+in production (the MX scale rounding) are also checked on CUDA in the dtypes
+the render feeds them. The probe's per-channel marginal sites were deleted with
+the probe's Fisher (#3448); their rows stay in the frozen tables unread.
 
 The CPU rows introduced by #1414 use exact integer-derived inputs and were
 recorded from the pre-consolidation source at ``d6a490cd756``. The one
@@ -259,67 +260,6 @@ def test_imatrix_keeps_its_bits(site, act_dir, tmp_path):
            bits=_imatrix_bits)
     _check(lambda: fn(tmp_path / "missing"), tmp=tmp_path, table=CPU_GOLDEN,
            bits=_imatrix_bits)
-
-
-# ---------------------------------------------------------------------------
-# 4. The probe's per-channel marginals.
-# ---------------------------------------------------------------------------
-MARGINAL_SITES = [
-    "prismaquant.incremental_probe._marginal_chunk",
-    "prismaquant.sensitivity_probe.FisherAccumulator._dense_marginal_chunk",
-]
-
-
-def _marginal_inputs(device):
-    generator = torch.Generator().manual_seed(1295)
-    cases = []
-    for tokens, out_features, in_features, dtype in (
-            (128, 96, 64, torch.bfloat16),
-            (1, 16, 24, torch.bfloat16),
-            (0, 16, 24, torch.bfloat16),
-            (37, 40, 56, torch.float16),
-            (19, 24, 32, torch.float32),
-            (512, 256, 384, torch.bfloat16)):
-        if device == "cpu":
-            gy_index = torch.arange(tokens * out_features, dtype=torch.int32)
-            x_index = torch.arange(tokens * in_features, dtype=torch.int32)
-            gy2 = ((((gy_index * 37) % 17) - 8).to(torch.float32)
-                   / 8192).reshape(tokens, out_features).to(dtype)
-            x2 = ((((x_index * 53) % 47) - 23).to(torch.float32)
-                  / 8).reshape(tokens, in_features).to(dtype)
-        else:
-            gy2 = (torch.randn(tokens, out_features, generator=generator) * 1e-3).to(dtype)
-            x2 = (torch.randn(tokens, in_features, generator=generator) * 4).to(dtype)
-        if tokens > 2:
-            x2[1, 0] = torch.finfo(dtype).max
-            x2[2, 1] = -torch.finfo(dtype).max
-        gy2, x2 = gy2.to(device), x2.to(device)
-        gy2_sq = gy2.float().pow(2).to(dtype)
-        x2_sq = x2.float().pow(2)
-        # Any (out, in) fp32 matrix: the sites only reduce it. Drawn rather
-        # than multiplied so the input itself has no kernel-choice noise.
-        if device == "cpu":
-            h_index = torch.arange(out_features * in_features, dtype=torch.int32)
-            chunk_h = (((h_index * 19) % 29).to(torch.float32)
-                       / 1048576).reshape(out_features, in_features)
-        else:
-            chunk_h = torch.rand(out_features, in_features, generator=generator) * 1e-4
-        chunk_h = chunk_h.to(device)
-        if tokens > 2:
-            chunk_h[0, 0] = math.inf
-        cases.append((gy2_sq, x2_sq, x2, chunk_h))
-    nan_x = torch.tensor([[1.0, math.nan], [-2.0, 3.0]], device=device)
-    cases.append((torch.ones(2, 3, device=device), nan_x.pow(2), nan_x, torch.ones(3, 2, device=device)))
-    return cases
-
-
-@pytest.mark.parametrize("device", DEVICES)
-@pytest.mark.parametrize("site", MARGINAL_SITES)
-def test_probe_marginals_keep_their_bits(site, device):
-    fn = _site(site)
-    table = CPU_GOLDEN if device == "cpu" else GOLDEN
-    for gy2_sq, x2_sq, x2, chunk_h in _marginal_inputs(device):
-        _check(lambda: fn(gy2_sq, x2_sq, x2, chunk_h), table=table)
 
 
 # ---------------------------------------------------------------------------

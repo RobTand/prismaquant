@@ -12,7 +12,7 @@ _UNIT = "model.layers.0.self_attn.o_proj"
 _FORMAT = "NVFP4"
 _PATH = "external costs.pkl"
 _SCALAR_FIELDS = (
-    "weight_mse", "predicted_dloss", "output_mse", "fisher_output_mse",
+    "weight_mse", "predicted_dloss", "output_mse",
 )
 
 

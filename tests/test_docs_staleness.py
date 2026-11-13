@@ -34,7 +34,6 @@ def test_runtime_flags_doc_owns_policy_without_mirroring_plugin_flags():
         "PRISMAQUANT_PRELOAD_FUSED",
     ):
         assert external_runtime_flag not in doc
-    assert "| `PRODUCTION_RENDER_COST_SCORE_FIELD` | `weight_mse` |" in doc
     assert "`joint_mse` is the production JSO scale rule" in doc
     assert "H_DETAIL_DIR" not in doc
 
