@@ -32,13 +32,6 @@ except ModuleNotFoundError:
         with torch.device("meta"):
             yield
 
-try:
-    from accelerate.hooks import remove_hook_from_module
-except ModuleNotFoundError:
-    def remove_hook_from_module(module, recurse: bool = False):
-        del recurse
-        return module
-
 from .autoscale import (
     _PACKED_BYTE_DTYPES,
     declared_expert_dtype_covers,
@@ -65,7 +58,6 @@ from .layer_streaming import (
     _read_layer_to_device,
     _resolve_base_prefix,
     _unload,
-    set_module_tensor_to_device,
 )
 from .io_spans import mem_available_bytes
 from .source_prefetch import read_ahead_layer_files
@@ -748,8 +740,6 @@ class StreamingContext:
                  weight_shard: dict[str, str], weight_ckpt: dict[str, str],
                  layer_cache: LayerCache, prefetch_pool: ThreadPoolExecutor,
                  device: torch.device, dtype: torch.dtype, offload_folder: str,
-                 visual_module: Any | None = None,
-                 visual_prefix: str | None = None,
                  multimodal: bool = False,
                  fp8_scale_inv_map: dict[str, tuple[str, str]] | None = None,
                  estimated_layer_bytes: int = 0,
@@ -780,16 +770,8 @@ class StreamingContext:
         self.device = device
         self.dtype = dtype
         self.offload_folder = offload_folder
-        # Populated only when the CALLER passed
-        # `_build_streaming_context(..., multimodal=True)`: full visual tower
-        # resident on `device`. `self.multimodal`
-        # below is the *construction* axis and can be True with no tower, on a
-        # family that has no text-only skeleton route.
-        # Also exposes `visual_prefix` so cost / probe code can iterate
-        # over visual Linears under `model.visual.*` (or whatever the
-        # declared multimodal arch calls it).
-        self.visual_module = visual_module
-        self.visual_prefix = visual_prefix
+        # The *construction* axis: True on a family that has no text-only
+        # skeleton route. The visual tower always stays on meta.
         self.multimodal = multimodal
         self.estimated_layer_bytes = int(estimated_layer_bytes or 0)
         self.max_cache_slots = layer_cache.max_entries
@@ -1737,10 +1719,7 @@ def _resolve_text_only_skeleton(config, *, log_prefix: str = "[streaming]"):
     Preference order, and why:
 
     1. **The config's own text sub-config class.** Text-only means we
-       want the body and nothing else: only the `multimodal=True` branch
-       of `_build_streaming_context` reads tower tensors onto the device
-       (`_find_visual_module` → `_read_layer_to_device` →
-       `visual_module.to(device)`), so building the declared VL
+       want the body and nothing else: building the declared VL
        architecture here would wire a tower of never-materialized meta
        tensors into the module tree — which the "head buffers left on
        meta" sweep in `_build_streaming_context` is right to reject —
@@ -1748,7 +1727,7 @@ def _resolve_text_only_skeleton(config, *, log_prefix: str = "[streaming]"):
        it. The text sub-config produces exactly the module tree the
        plain-text path produces.
     2. **The declared architecture** (`config.architectures[0]`, the
-       mechanism the multimodal branch already trusts), built against
+       mechanism the multimodal construction already trusts), built against
        *its own* `config_class` rather than the wrapper config. This is
        the answer when staging's `ForConditionalGeneration →
        ForCausalLM` rewrite lands on a real text-only class that simply
@@ -1919,18 +1898,16 @@ def _streaming_auto_model_options(config):
         raise RuntimeError(
             "undeclared dynamic AutoModelForCausalLM execution is unsupported")
     return {"trust_remote_code": False}
-def load_original_streaming_bootstrap(model_path, owner, *, multimodal=False):
+def load_original_streaming_bootstrap(model_path, owner):
     """Internal CPU body bootstrap from the existing original-material owner."""
     from .digests import indent2_json_file_bytes
     from .sensitivity_probe import text_only_stage_config
 
     if not getattr(owner, 'is_qualified_original_material', False):
         raise RuntimeError('original bootstrap requires the qualified material owner')
-    if multimodal:
-        raise RuntimeError('original bootstrap visual input is not qualified')
     original = _source_json(Path(model_path) / 'config.json', owner)
     profile = _source_profile(model_path, owner, config=original)
-    construction = construction_multimodal(profile, multimodal)
+    construction = construction_multimodal(profile, False)
     derived = original if construction else text_only_stage_config(original, profile=profile)
     derived = original if derived is None else derived
     if derived.get('configuration_files') or derived.get('auto_map'):
@@ -1960,34 +1937,6 @@ def build_streaming_skeleton(config, *, multimodal: bool,
                 return AutoModelForCausalLM.from_config(
                     config, **auto_options, **attention_kwargs)
             return model_cls._from_config(config, **attention_kwargs)
-
-
-def _find_visual_module(model) -> tuple[Any | None, str]:
-    """Return (visual_module, dotted_prefix) if the model has a visual
-    tower; (None, '') otherwise. Handles the v5 multimodal umbrella
-    layout (`model.model.visual`) and a few common variants."""
-    import torch.nn as nn
-    # Most common: `model.model.visual` (Qwen3_5MoeModel.visual)
-    cand = getattr(model, "model", None)
-    if cand is not None:
-        vis = getattr(cand, "visual", None)
-        if isinstance(vis, nn.Module):
-            return vis, "model.visual"
-    # Fallback: top-level `model.visual` (some arch variants)
-    vis = getattr(model, "visual", None)
-    if isinstance(vis, nn.Module):
-        return vis, "visual"
-    return None, ""
-
-
-def _module_has_meta_tensors(module: torch.nn.Module) -> bool:
-    return any(
-        getattr(t, "is_meta", False)
-        for t in (
-            *module.parameters(recurse=True),
-            *module.buffers(recurse=True),
-        )
-    )
 
 
 def _prefetch_widening_note(*, max_cache_slots, cache_slots, memory_slots,
@@ -2036,7 +1985,6 @@ def _build_streaming_context(model_path: str, *,
                              prefetch_workers: int | str | None = None,
                              prefetch_min_available_gb: float | str | None = None,
                              log_prefix: str = "[streaming]",
-                             multimodal: bool = False,
                              attn_implementation: str | None = None,
                              source_authentication=None,
                              source_snapshot_only: bool = False,
@@ -2049,10 +1997,9 @@ def _build_streaming_context(model_path: str, *,
     materialize only the always-resident head pieces. Decoder layers
     stay on meta until PrismaQuant streams them from safetensors.
 
-    ``multimodal`` declares visual inputs. It stages the full configuration,
-    builds the declared architecture, and loads the visual tower onto device.
-    Text-only callers load no visual tensors, including profiles that require
-    a multimodal skeleton. Unresolved wrapper classes use the text-only resolver.
+    A profile that requires a multimodal skeleton gets the multimodal
+    construction; its visual tower stays on meta and no visual tensor is read.
+    Unresolved wrapper classes use the text-only resolver.
     ``layers_per_shard`` is the caller's resolved count for cache headroom.
 
     ``source_snapshot_only`` requires authenticated source ownership. It keeps
@@ -2094,9 +2041,8 @@ def _build_streaming_context(model_path: str, *,
 
     authenticated = ({} if source_authentication is None else
                      {'source_authentication': source_authentication})
-    # Construction can require a multimodal class even for token-only input.
-    # Only the caller's input declaration permits materializing a visual tower.
-    materialize_visual = multimodal
+    # Construction can require a multimodal class; the profile decides below.
+    multimodal = False
     original_config = None
     original_profile = None
     if original_material:
@@ -2110,7 +2056,7 @@ def _build_streaming_context(model_path: str, *,
         original_entry.integer(max_cache_slots, where='max_cache_slots', minimum=1)
         original_entry.integer(prefetch_workers, where='prefetch_workers', minimum=1)
         config, original_profile, multimodal, original_config = load_original_streaming_bootstrap(
-            model_path, source_authentication, multimodal=multimodal)
+            model_path, source_authentication)
     if source_authentication is not None:
         source_authentication.require_unchanged()
     scope = None
@@ -2120,20 +2066,7 @@ def _build_streaming_context(model_path: str, *,
 
     from .sensitivity_probe import stage_multimodal, stage_text_only
 
-    # `multimodal` answers two independent questions, and only the caller can
-    # answer the second. They are separated here and never re-merged:
-    #   * CONSTRUCTION - can this family be built text-only at the pinned
-    #     transformers? A property of the architecture, declared by the
-    #     profile and flipped just below. Governs staging, the skeleton class
-    #     and the weight map.
-    #   * MODALITY - will THIS run drive visual inputs? The caller's own
-    #     declaration, and the only thing that may materialize the tower.
-    # Letting the first imply the second asked the loader for the whole
-    # `model.visual.*` namespace on a token-ID-only cost run; the run's
-    # text-only staged readset refused the first range (PQ #872). The streamed exporter already keeps the two apart:
-    # `materialize_tensors_streaming` flips on the same profile fact and
-    # leaves the visual tower on meta.
-    if not multimodal and not original_material:
+    if not original_material:
         # A family with no <Arch>ForCausalLM auto-route (e.g. glm5_next on
         # transformers 5.16) cannot build a text-only skeleton at all; the
         # profile declares that fact and every caller inherits the flip
@@ -2141,11 +2074,10 @@ def _build_streaming_context(model_path: str, *,
         from .model_profiles import detect_profile
 
         _profile = detect_profile(model_path)
-        if construction_multimodal(_profile, multimodal):
+        if construction_multimodal(_profile, False):
             print(f"{log_prefix} profile {_profile.name} has no text-only "
                   "skeleton route; using the multimodal construction "
-                  "(skeleton only: the visual tower stays on meta unless the "
-                  "caller declares multimodal)",
+                  "(skeleton only: the visual tower stays on meta)",
                   flush=True)
             multimodal = True
 
@@ -2172,8 +2104,6 @@ def _build_streaming_context(model_path: str, *,
     base_prefix = _resolve_base_prefix(skeleton, skel_base)
     num_layers = len(skel_layers) if scope is None else scope.num_layers
 
-    _skel_visual, skel_visual_prefix = _find_visual_module(skeleton)
-
     layers_prefix = f"{base_prefix}.layers." if base_prefix else "layers."
     if scope is not None and layers_prefix != scope.layers_prefix:
         raise RuntimeError(f"source scope {scope.name!r} skeleton puts its layers under "
@@ -2185,9 +2115,7 @@ def _build_streaming_context(model_path: str, *,
     t0 = time.time()
     print(f"{log_prefix} base_prefix={base_prefix!r}  layers={num_layers}  "
           f"head_resident_on={resident_device}  offload={offload_folder}  "
-          f"multimodal={multimodal}  materialize_visual={materialize_visual}  "
-          f"visual_prefix={skel_visual_prefix or 'n/a'}",
-          flush=True)
+          f"multimodal={multimodal}", flush=True)
 
     model = skeleton
     model.eval()
@@ -2221,7 +2149,7 @@ def _build_streaming_context(model_path: str, *,
     concat_merger = _build_concat_merger(model, weight_ckpt)
     resident_demand = None
     if resident_resource_check is not None:
-        if source_snapshot_only or source_scope is not None or materialize_visual or fp4_source:
+        if source_snapshot_only or source_scope is not None or fp4_source:
             raise ValueError("resident source delivery requires a text body without packed FP4")
         resident_demand = _resident_source_demand(
             model, dtype=dtype, heads=_head_prefixes(model, base_prefix),
@@ -2307,37 +2235,6 @@ def _build_streaming_context(model_path: str, *,
                 print(f"{log_prefix} materialized {_meta_fixed} non-persistent head "
                       f"buffer(s) off meta (e.g. embed_scale)", flush=True)
 
-        # Locate the visual module on the meta skeleton. When the CALLER declared
-        # visual inputs, fully materialize the visual tower onto `device`; body
-        # layers remain meta and stream per shard. A skeleton that is multimodal
-        # only because the family has no text-only construction route leaves the
-        # tower on meta - nothing on a token-ID path can reach it, and reading it
-        # would pull the vision shards into the run's readset.
-        visual_module = None
-        visual_prefix: str | None = None
-        if materialize_visual and not source_snapshot_only:
-            visual_module, visual_prefix = _find_visual_module(model)
-            if visual_module is not None and visual_prefix:
-                remove_hook_from_module(visual_module, recurse=True)
-                vis_keys = [k for k in weight_shard if k.startswith(visual_prefix + ".")]
-                # Load all visual tensors from safetensors onto device.
-                tensors = _read_layer_to_device(
-                    visual_prefix + ".",
-                    weight_shard, weight_ckpt, dtype, device,
-                    fp8_scale_inv_map=fp8_scale_inv_map,
-                    buffer_dtypes=_model_tensor_dtypes(model, dtype), **authenticated)
-                print(f"{log_prefix} materializing visual tower: "
-                      f"{len(tensors)}/{len(vis_keys)} tensors -> {device}", flush=True)
-                if _module_has_meta_tensors(visual_module):
-                    visual_module.to_empty(device=device, recurse=True)
-                for model_name, t in tensors.items():
-                    install_dtype = t.dtype if t.is_floating_point() else None
-                    set_module_tensor_to_device(
-                        model, model_name, device, value=t, dtype=install_dtype)
-                # Some visual towers carry non-checkpoint buffers initialized by
-                # the module constructor. Keep them colocated with checkpoint
-                # tensors.
-                visual_module.to(device=device)
         print(f"{log_prefix} model ready in {time.time()-t0:.1f}s", flush=True)
 
         print(f"{log_prefix} building install resolvers for {num_layers} layers ...",
@@ -2446,8 +2343,6 @@ def _build_streaming_context(model_path: str, *,
             weight_shard=weight_shard, weight_ckpt=weight_ckpt,
             layer_cache=layer_cache, prefetch_pool=prefetch_pool,
             device=device, dtype=dtype, offload_folder=offload_folder,
-            visual_module=visual_module,
-            visual_prefix=visual_prefix,
             multimodal=multimodal,
             fp8_scale_inv_map=fp8_scale_inv_map,
             estimated_layer_bytes=estimated_layer_bytes,

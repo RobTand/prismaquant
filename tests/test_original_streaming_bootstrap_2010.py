@@ -212,18 +212,10 @@ def test_multimodal_construction_does_not_materialize_visual_input(original_mode
         selected = real(path, config=config)
         selected.__class__ = ConstructionProfile
         return selected
-    real_visual = streaming_model._find_visual_module
-    calls = []
-    def visual(*args, **kwargs):
-        calls.append(args[0])
-        assert len(calls) == 1, 'construction fact authorized visual materialization'
-        return real_visual(*args, **kwargs)
     monkeypatch.setattr(model_profiles, 'detect_profile', detect)
-    monkeypatch.setattr(streaming_model, '_find_visual_module', visual)
     owner = _owner(m)
     context = _context(m, owner, m['root'])
-    assert context.multimodal and context.visual_module is None
-    calls.clear()  # The inspection spy must not retain the meta skeleton.
+    assert context.multimodal
     context.shutdown()
     del context
     gc.collect()
