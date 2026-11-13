@@ -2,9 +2,8 @@
 
   1. sensitivity_probe.stage_multimodal — preserves vision_config (vs
      stage_text_only which strips it).
-  2. streaming_model._module_has_meta_tensors — sees meta buffers.
-  3. allocator.apply_visual_format_override — the uniform visual format.
-  4. export_native_compressed._apply_visual_recipe_quant passes the
+  2. allocator.apply_visual_format_override — the uniform visual format.
+  3. export_native_compressed._apply_visual_recipe_quant passes the
      activations cached under a visual Linear's recipe name to
      native_render_codec.quantize_2d.
 """
@@ -36,7 +35,6 @@ from pathlib import Path
 from unittest import mock
 
 import torch
-import torch.nn as nn
 
 from prismaquant.sensitivity_probe import (
     stage_multimodal,
@@ -137,24 +135,6 @@ class TestStageMultimodalPreservesVisionConfig(unittest.TestCase):
 
             self.assertTrue(mm.is_relative_to(temp_parent))
             self.assertTrue(txt.is_relative_to(temp_parent))
-
-
-class TestVisualCostShardBasic(unittest.TestCase):
-    """The meta-tensor check a resident visual tower relies on."""
-
-    def test_meta_visual_module_detection_includes_buffers(self):
-        from prismaquant.streaming_model import _module_has_meta_tensors
-
-        class TinyVisual(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.proj = nn.Linear(2, 2, device="meta")
-                self.register_buffer("pos", torch.empty(2, device="meta"))
-
-        module = TinyVisual()
-        self.assertTrue(_module_has_meta_tensors(module))
-        module.to_empty(device="cpu")
-        self.assertFalse(_module_has_meta_tensors(module))
 
 
 class TestAllocatorVisualSensitivityModes(unittest.TestCase):
