@@ -106,7 +106,6 @@ def test_export_match_opt_out_still_refuses_unproven_historical_options(monkeypa
     ("gptq_damp_roles", {"down": "3.0"}),
     ("gptq_damp_roles", {"down": float("inf")}),
     ("gptq_fixed_damp", float("nan")),
-    ("fisher_row_weight_clip", float("inf")),
     ("act_clip_quantile", True),
     ("act_clip_quantile", 2.0),
     ("nvfp4_joint_scale_global_span_hi", 0.25),
@@ -124,7 +123,7 @@ def test_completed_recipe_refuses_corrupt_controls(field, value):
 
 def test_completed_recipe_preserves_supported_disabled_controls():
     options = NativeRenderLevers(
-        act_clip_quantile=None, fisher_row_weight_clip=0.0,
+        act_clip_quantile=None,
         gptq_damp_analytical_c=0.0, gptq_damp_roles=(("unmatched", 0.25),))
     parsed = NativeRenderLevers.from_record(options.record())
     assert parsed == options

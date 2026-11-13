@@ -70,14 +70,14 @@ def test_builtin_mechanism_order_uses_operation_semantics():
     plan = resolve_render_mechanism_order([
         "scale_sweep",
         "gptq",
-        "fisher_gptq",
+        "static_act_order",
         "four_over_six",
     ])
 
     assert plan.errors == ()
     assert plan.names() == (
         "four_over_six",
-        "fisher_gptq",
+        "static_act_order",
         "gptq",
         "scale_sweep",
     )

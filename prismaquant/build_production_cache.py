@@ -355,7 +355,6 @@ def _run_streaming(args, formats, levers, dtype) -> int:
         skip_tokens=skip_tokens,
         expert_render_mode=args.expert_render_mode,
         expert_module_token_budget=args.expert_token_budget,
-        h_detail_dir=args.h_detail_dir,
         col_weights=col_weights,
         render_scope=args.render_scope,
         calibration_hash=calib_hash,
@@ -377,7 +376,6 @@ def _run_streaming(args, formats, levers, dtype) -> int:
         device=device,
         dtype=dtype,
         max_act_rows=args.max_act_rows,
-        h_detail_dir=args.h_detail_dir,
         include_qnames=include_qnames,
         col_weights=col_weights,
     )
@@ -535,8 +533,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "scaled FP8 dynamic. "
         "scale_sweep regresses end-to-end KL on Qwen3-4B and was dropped "
         "from defaults 2026-05-15. "
-        "fisher_gptq is an archived legacy name and must not be used for "
-        "V1 production artifacts. "
         "Joint NVFP4 sibling globals + calibrated input_global_scale are "
         "computed unconditionally when NVFP4 is in the format menu. "
         "static_act_order applies to production microscaling GPTQ formats "
@@ -568,14 +564,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "The pickle becomes a small manifest; PerturbedActivationCache "
         "lazy-loads each weight on first access at hook time.  Required "
         "for arbitrarily-large models (e.g. 27B+ on a 121 GB UMA box).",
-    )
-    p.add_argument(
-        "--h-detail-dir",
-        default=None,
-        help="Optional h-detail directory from incremental_probe. When "
-        "'fisher_gptq' is enabled, g2_per_token vectors from this directory "
-        "weight NVFP4 GPTQ/scale-sweep and explicit microscaled-FP8 "
-        "objectives.",
     )
     p.add_argument(
         "--skip-qnames",
@@ -847,7 +835,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             recache_profile=profile,
             recache_include_activation_quant=not args.no_recache_activation_quant,
             recache_microbatch_size=args.recache_microbatch_size,
-            h_detail_dir=args.h_detail_dir,
             col_weights=col_weights,
             source_binding=source_binding,
         )
@@ -875,7 +862,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             device=device,
             dtype=dtype,
             max_act_rows=args.max_act_rows,
-            h_detail_dir=args.h_detail_dir,
             include_qnames=include_qnames,
             col_weights=col_weights,
         )
