@@ -537,79 +537,6 @@ def _served_route_refusals(family, rungs, members, *, encode_structure,
 
 
 # ---------------------------------------------------------------------------
-# The routed-expert stack, and the sample that prices it
-# ---------------------------------------------------------------------------
-#
-# A routed MoE stack is ONE decision: vLLM loads a packed ``[E, M, N]`` expert
-# tensor under a single quantization scheme, and PrismaQuant's union-find
-# serving-unit promotion already enforces that (``NameProjection.serving_units``
-# keys ``...experts.gate_up_proj`` and
-# ``...experts.down_proj`` into the same ``__packed_format__`` group).  The
-# campaign measures separate expert Linears, optionally encoding compatible
-# units together. A full census still requires every expert's wire and score.
-#
-# So the campaign may measure a SAMPLE of experts and this module estimates the
-# stack from it.  Two things have to be right for that to be honest:
-#
-# 1. The estimator must be unbiased for the stack's total, not for "the average
-#    expert".  With a probability-proportional-to-size draw the Horvitz-Thompson
-#    estimator is the one that is: ``T_hat = sum_{e in S} y_e / pi_e``.
-#
-# 2. The number written into the row must be the quantity the ALLOCATOR will
-#    multiply correctly.  ``allocator_solver.predicted_dloss`` prices a row as
-#    ``0.5 * h_trace * output_mse``, and it reads ``h_trace`` from the PROBE, so
-#    the stack row is multiplied by the packed row's own ``h_trace``.  The
-#    quantity that makes that product reproduce the stack's summed per-expert
-#    dloss is therefore
-#
-#        output_mse_stack = ( sum_e h_e * mse_e ) / h_stack
-#
-#    i.e. the h-weighted MEAN expert MSE, not the sum.  Two independent facts
-#    in this repo fix that convention rather than taste:
-#
-#      * the probe's own identity ``sum_e h_trace_per_expert[e] == h_trace``,
-#        which holds to float32 storage precision on all 44 packed rows of
-#        ``pq275-2026-09-06/probe-02/probe.pkl`` (2.0e-7 relative on layer 18),
-#        so the weights sum to the multiplier the allocator will apply; and
-#      * ``allocator_candidates``' own super-item aggregation, which inverts the
-#        same product the same way when it has to express a group's summed
-#        predicted dloss as one member-shaped MSE:
-#        ``effective_mse = base_pred / (0.5 * sum_h)``.
-#
-# A per-expert member's Fisher weight is ``h_trace_per_expert[e] / R``, where R
-# is the number of projections the packed parameter splits into -- the SAME
-# split the retired codebook lane's ``expand_packed_expert_rows`` used
-# (archived 2026-09-25 with ``tier2_per_expert_counterfactual``, #1304), and
-# R comes from the profile's ``packed_expert_projection_names``, never from a
-# hardcoded ``gate_up_proj -> 2``.
-
-
-#: ``float32`` machine epsilon.  The probe accumulates the packed row's
-#: ``h_trace`` and its ``h_trace_per_expert`` vector from the same raw sums and
-#: divides both by the same global token count
-#: (``sensitivity_probe.finalize_fisher_stats``), so the two agree exactly in
-#: exact arithmetic.  They are stored at ``float32``, which is the only reason
-#: they differ at all, so the admissible discrepancy is a property of that
-#: dtype and of how many terms are summed -- not a tolerance anyone chose.
-#: Measured on ``probe-02``'s two layer-18 packed rows: 2.0e-7 and 6.6e-8
-#: relative, against the bound below of 3.8e-6 at E=32.
-
-
-#: The anchor fields that must agree across every measured member of one stack
-#: rung, mapped to the row field they are written to.  Taking member zero's
-#: value the way the dense interpolation path takes ``ordered[0]``'s would let
-#: one expert scored under a different activation contract, or without the
-#: Hessian, disappear into a stack average.
-
-
-#: The fields of a stack row's ``sampled_experts`` block that describe the
-#: DRAW rather than an estimate made from it.  ``estimator``,
-#: ``variance_estimator`` and ``n_random_stratum`` are deliberately absent:
-#: they name a Horvitz-Thompson computation, and a row whose value no
-#: estimator produced may not claim one (#495 part 3).
-
-
-# ---------------------------------------------------------------------------
 # The dense payload
 # ---------------------------------------------------------------------------
 
@@ -2007,18 +1934,6 @@ def resolve_anchor_groups(targets: Sequence[str], *, profile,
     for key in groups:
         groups[key].sort()
     return groups
-
-
-#: The size sources a stack draw may be proportional to.  ``probe`` is the
-#: per-expert Fisher vector, which is what the estimator's variance argument
-#: rests on; ``counts`` is the census's per-expert routed-row count, which is
-#: the ONLY per-expert size available when no probe exists -- a routed-token
-#: proxy for ``h_trace`` and never a substitute for it (RobTand/prismaquant#495
-#: part 1, and the report's section 3.6 bullet on sizes).
-
-#: The design a ``counts``-sized draw declares, so a reader of ``units.json``
-#: can tell which vector the inclusion probabilities are proportional to
-#: without re-deriving it.
 
 
 def research_exact_member_scope(selection: Mapping, resolved: Mapping[str, list[str]],

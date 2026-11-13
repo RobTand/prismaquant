@@ -2546,10 +2546,6 @@ Re-stamped 2026-10-14: `measured_runtime_prices.device_placement_bytes` owns
 one-device resource composition for the exact frontier and assignment evaluator.
 Per-rank admission and shape-only withholding retain their separate contracts.
 
-Re-stamped 2026-10-14: sensitivity cards retain each Fisher row writer
-normalizer. The shared `probe_statistics.fisher_norm_tokens` rule gives a
-positive body or visual pass stamp precedence over the legacy probe count.
-
 Re-stamped 2026-10-14: staged pin release now uses the same topmost mount
 facts as staged reads and portable identity. An NFS mount above an equal-path
 autofs trigger supplies its existing major-timeout retry horizon.
@@ -13303,7 +13299,7 @@ callers now declare it through PB's admission contract:
   its own `--tag` and the image declaration is a separate envelope option.
 - `tools/dispatch_tessera_campaign.py` adds `container_images: [REF]` to every
   generated manifest row from the row's resolved container class (a class
-  override declares its own image). Direct submit-joint/submit-aqua now retain
+  override declares its own image). Direct submit-joint now retains
   the same `container_images` intent under the native caller migration and
   refuse launch until device/container and staging admission qualify.
 - `tools/tessera_campaign_container.admission_image_reference` is the one
@@ -14169,7 +14165,7 @@ says exactly that.
   was. `dispatch_tessera_campaign.py` gained `--residency stage`, passed
   through to `pbrun` before the action separator and stamped into
   `resource_demand`; `verify_joint_submission_demand` is unchanged. The flag
-  is **joint-only**: `submit-allocation`, `submit-export` and `submit-aqua`
+  is **joint-only**: `submit-allocation` and `submit-export`
   share the submission arguments but read every byte from the pool, so they
   refuse it rather than reserve cluster-scoped tier capacity nothing consumes
   (`_submit_gpu_action`; a reservation no read redeems is the failure this
@@ -15099,26 +15095,6 @@ mounted no stage, and every shard read went to the pool while the claim record
 said `resident`. An action outside the residency contract keeps a byte-identical
 argv. Gate: `tests/test_tessera_campaign_container.py` (the residency tests).
 
-Re-stamped (2026-09-17, `campaign/identity-and-coverage-main-20260916`) for
-**a joint AURA row being only its own cell**. The per-cell AQUA coverage
-requirement counts cells by their `(unit, format)` key, and
-`cost_entry_is_joint_aura` validates a row *internally*: its currency, its
-Fisher application count, and that its operator and probe digests match the
-objects they name. All of that is true of a row correctly produced for one
-Linear when it is read under another, so a valid row copied, mis-merged or
-re-keyed onto a different cell counted as that cell's activation term while the
-cell itself kept a weight-only cost -- and the fulfilled-artifact shortcut
-(`submit-aqua` queues nothing when every requested cell is already joint-priced)
-would report the campaign satisfied on it.
-`allocator_candidates.joint_row_binds_cell` is the shared predicate that
-compares the row's operator identity with the key it was found under; the
-dispatcher's requested-roster gate and the AQUA stage's own "already priced"
-set both read it, so the two cannot disagree about which cells carry an
-A-side. A joint row that does not name its own key is a refusal
-(`JointCellCoordinateError`, distinct from the malformed-row failure so
-instructions that turn one into a refusal leave the other alone), not a row to
-skip quietly.
-
 The campaign table reader parses the same owned bytes that it hashes for
 bound JSON and pickle inputs. A path replacement after hashing cannot change
 scope or shrink the requested-cell denominator. Large serialized tables are
@@ -15128,64 +15104,7 @@ memory or throughput claim. Re-stamped 2026-10-17 against the architecture
 audit fix: the admitted `table-mtp-green-v1` campaign-table shards passed 37
 cases and the companion compile action checked both touched files. Exact
 commands, source and CAS evidence remain in the audit's `celestia-tmux`
-directory. The public regression is
-`tests/test_campaign_bound_table_same_bytes_audit.py`.
-
-A joint-priced cell the plan's own bound cost table never priced refuses as
-well. Such a row is bound to the coordinate it names and to nothing else -- it
-was never compared with this campaign's draw, capture or candidate menu -- so
-an artifact from a pass over a wider roster would present prices this campaign
-never priced beside the plan's table.
-`submit-aqua --accept-joint-cells-outside-plan` is the explicit reuse path for
-an artifact sealed against an older roster, and the record it produces
-(`joint_cells_outside_plan_accepted_unverified`) travels in the skip summary and
-in the sealed manifest's `campaign_scope` annotation, so the reuse is recorded
-rather than silent. Gates: `tests/test_aqua_campaign_submit.py`,
-`tests/test_joint_aura_allocator_currency.py`,
-`tests/test_aqua_per_expert_checkpoint.py`.
-
-Re-stamped (2026-09-16, `campaign/aqua-campaign-caller-20260916`) for **the
-campaign's A-side being a submitted stage** (§11; #655). The stage existed and
-enforced its own coverage, but nothing in this repository invoked it: the
-campaign's A-side was an operator command, so "the campaign requires complete
-activation coverage" was a sentence in a handover rather than a gate any run
-had to pass. `tools/dispatch_tessera_campaign.py submit-aqua` is that caller,
-built the way the other post-campaign passes are: the same sealed plan, the
-same frozen campaign identity and the same `--require-scope` check as
-`submit-joint`, a read set declared to PrismaBuild before the action is queued
-(`glm_data_manifests.build_aqua_manifest`), and a reservation checked against
-the plan's own physical bound rather than taken from habit.
-`--require-complete-coverage` is not a flag on this submission -- it is passed
-unconditionally, so no invocation of the campaign's A-side can leave the gate
-off. The requested roster is the plan's **cells**, not the artifact's: the plan
-binds the campaign's own cost table (`inputs.merged_cost`) by path and sha256,
-`--cost-in` has to reproduce that table's `(unit, format)` cells unit for unit,
-and `--formats` has to name exactly the menu that table prices. Deriving the
-requested set from the artifact under test is the hole the binding closes,
-because the stage states acceptance against the cells it is given: a table
-narrowed to the cells that already carry a price leaves every unit present and
-every format still carried somewhere, so a unit-roster check and a
-carried-format union check both pass, and an all-joint remainder then reads as
-complete while a planned cell has no A-side at all. A unit whose entry survived
-the roster but lost every cell refuses, a cost table edited after the plan was
-sealed refuses on the plan's own digest, and a cell the plan never priced
-refuses unless it already carries its own joint A-side -- a joint pass's
-addition, which cannot hide a hole because it brings the price the hole is
-about -- and is reported as `joint_cells_outside_plan` rather than silently
-accepted. The roster is read per
-`(unit, format)` rather than as units times formats -- on the real campaign the
-dense targets carry their whole menu (515 rungs) while the routed experts carry
-only their measured rungs, which is the plan's decision and not a hole. The
-bind costs one sequential read of the cost table per submission; it does not
-re-read the multi-GiB candidate roster, and `--formats` still refuses a subset
-of the menu, since naming one would move the coverage denominator instead of
-filling it. A payload whose requested cells already all carry a joint A-side is
-**not** submitted: the requirement is satisfied by that artifact, and queuing a
-stage to add nothing is redundant GPU work. The stage is still refused at run
-time on cells that are joint-priced but unfulfilled, so the caller cannot
-launder a partially covered artifact into a green invocation. Gates:
-`tests/test_aqua_campaign_submit.py`, `tests/test_aqua_activation_cost.py`,
-`tests/test_aqua_per_expert_checkpoint.py`.
+directory.
 
 Re-stamped (2026-09-16, `campaign/identity-and-coverage-pr-20260916`) for **the
 container cap being its own spec field** (§3.4, §11). `box_memory_gb` carried
@@ -15223,44 +15142,9 @@ self-consistent with whatever census it binds. A census that names no draw
 refuses, and an identity sealed before these fields existed refuses by name and
 must be re-sealed. The checkpoint bind costs one sequential read per
 submission: it hashes the artifact rather than trusting the plan's own number,
-and it does not parse the 6.8 GB identity into a graph. On the A side,
-`aqua_activation_cost --require-complete-coverage` refuses unless every
-requested `(unit, format)` cell this lane OWES a price has one -- a joint AURA
-row, or an A-side computed and merged by this stage. Cells free by contract at
-their own shape (activation-identity formats, grids the lane never executes)
-are subtracted **per cell** and reported apart; an unbuildable cell stays a
-hole; a positive weight-only cell with no A-side is refused, because a tradeable
-surrogate is not a price; joint cells are never priced twice and an unrelated
-joint rung cannot cover a requested legacy cell. Off by default outside the
-campaign: the hole is still counted and reported for a research arm. Gates:
+and it does not parse the 6.8 GB identity into a graph. Gates:
 `tests/test_joint_campaign_scope.py`,
-`tests/test_glm_joint_data_manifest_at_submit.py`,
-`tests/test_aqua_per_expert_checkpoint.py`.
-
-Re-stamped (2026-09-16, `campaign/identity-and-coverage-pr-20260916`) for **the
-per-expert checkpoint reaching the A-side** (§11). `activation_dloss_table`
-built its resolver from the checkpoint's
-`model.safetensors.index.json`, which maps one card unit to ONE key. GLM-5.3-
-Flash does not store its packed routed experts that way: every expert is its
-own 2-D `nn.Linear` weight and the fused gate/up pair is two tensors, so 84
-packed units of a 45-layer body -- 97% of the parameters -- resolved to
-nothing and were filtered out before the shard loop that prices, leaving
-`cost_entry_act_dloss`'s `0.0` default to be read as a free 4-bit activation on
-the route the lane declares W4A4. The stage now classifies every name it cannot
-resolve from one key instead of dropping it: one key (dense trunk, or a packed
-`[E, M, N]` tensor), a per-expert layout priced by `packed_act_dloss_per_expert`
-(streaming one expert at a time through the same kernel and float64
-accumulation as the stacked path, pinned equal by
-`tests/test_aqua_per_expert_checkpoint.py`, because materializing
-`[288, 4096, 4096]` would be 19 GiB in float32 per format), or "unresolved",
-which is recorded as a HOLE for every format whose activation grid the named
-lane executes. `required_activation_formats` is the one definition of which
-formats are owed a price, shared by all three sources. On the loader side,
-`load_measured_anchor_input` refuses a checkpoint whose recorded seal is not
-the identity it read. The streaming spelling of that seal and its goldens are
-the parser PR's (`canonical_json_sha256_normalized`, #661), not this branch's:
-this branch reads the generic helper, and the two digests are equal by
-contract. Gates: `tests/test_aqua_per_expert_checkpoint.py`.
+`tests/test_glm_joint_data_manifest_at_submit.py`.
 
 Re-stamped (2026-09-16, `codex/509-pq-route-trace-gate`) for **the exact
 per-module route-trace grade** (§7.1, §9.4; the Tessera lane's serve-side leg,
@@ -17367,22 +17251,15 @@ Re-stamped (2026-09-11, `claude/495-probe-reduction-schedule`) for the routed
 stack **probe-reduction schedule**, parts 1-3 of RobTand/prismaquant#495
 (§4.10). Three changes, all opt-in or provenance-only:
 
-* `dispatch_tessera_campaign.py plan --stack-sample-sizes {probe,counts}`
-  chooses what the PPS draw is proportional to. `probe` is the default and a
-  plan written without the flag is byte-identical, field for field, to the
-  plans already on disk (gate:
-  `tests/test_tessera_stack_sample_sizes.py::test_the_default_draw_is_byte_for_byte_what_it_was`,
-  which rebuilds the pre-change record from the campaign's own primitives and
-  compares serialisations). `counts` draws on the census's per-expert
-  routed-row counts -- the only per-expert size that exists on a model with no
-  `h_trace_per_expert` probe, which is why the sampling path was unreachable on
-  GLM-5.3-Flash. A `counts` record names the source, carries the vector and its
-  digest, and suffixes `design` with `_counts`; `selection_stack_samples`
-  replays the draw on the declared vector and refuses a record whose declared
-  digest is not the draw's. The stack row's Fisher currency is untouched: the
-  allocator still multiplies by the probe's own `h_trace`, so `--stack-sample`
-  still requires `--probe`, and §5's "run without a probe" is **not** delivered
-  (see §12 debt).
+* `dispatch_tessera_campaign.py plan --stack-sample` draws proportional to the
+  census's per-expert routed-row counts. Since #3457 the counts are the only
+  size source; the `--stack-sample-sizes` flag and the probe-sized draw are
+  deleted. A record names the source, carries the vector and its digest, and
+  suffixes `design` with `_counts`; `selection_stack_samples` replays the draw
+  on that vector and refuses a record with no counts or a wrong digest
+  (`tests/test_tessera_stack_sample_sizes.py`). The stack row's Fisher currency
+  still reads the probe's `h_trace`, so `--stack-sample` still requires
+  `--probe` (§12 D36).
 * `prismaquant/tessera_rate_surface.py` gains the **stack transfer law**:
   `fit_stack_transfer_law(stacks_measured, hold_out)` pools per-projection OLS
   slopes of `log2 mse(rate)` on `log2 mse(reference)` over every stack but the
@@ -20419,7 +20296,7 @@ it, and a dotted `builtins.Exception`; a fourth, a handler that substitutes an
 answer on one branch and re-raises on the fall-through, passed
 `_handler_always_reraises`, which tested only the last statement. The census's
 whole justification is the four call sites with no behavioural test
-(`aqua_activation_cost.py:661`, `build_rtn_cache.py:500`,
+(`build_rtn_cache.py:500`,
 `sensitivity_probe.py:3616`, `streaming_production_cache.py:1776`). Now
 `CATCHES_DEAD_OVERRIDE` is derived from `DeadVendoredOverrideError.__mro__`
 rather than a second typed list, so the census follows the class if it is
@@ -21893,8 +21770,8 @@ declaration". That was the only route, so with the lane retired there is now
 capability loss alongside the four Tessera #21 names, recorded on that issue.
 Three smaller present-tense claims were re-scoped to the past in the same pass
 (`mxfp4_widen`'s `MXFP8_GROUPED_ROUTE_EVIDENCE`, which is a constant a gate
-reads and a test pins, and two `aqua_activation_cost` refusal strings that cite
-the CB lane's zero A-side as live). Guarded by
+reads and a test pins, and two AQUA refusal strings that cited
+the CB lane's zero A-side as live; AQUA was deleted by #3457). Guarded by
 `tests/test_serving_profiles.py::test_no_live_serving_profile_spec_names_the_retired_gridbook_runtime`,
 which requires every remaining mention of Gridbook in a live serving-profile
 spec to carry its retirement date — the machine-checkable half of "record the
@@ -22943,9 +22820,7 @@ WikiText gold-input contract, plus the platform-agnostic anchored-cost
 mechanism, CB mapping plugin, DSv4 one-shot acceptance-driver contract, the
 anchored-AURA allocator admission branch (P0, closed 2026-08-11), the
 one-purpose CPU-only W8A16 readmission plus the deliberately restamped v2
-pre-export handoff gate, and the shareable Sensitivity Card contract with its
-format-cost plugin seam and the default-ON probe per-channel Fisher marginal
-emission that backs it (§4.8, §8.7, §12 D30).
+pre-export handoff gate.
 
 The current handoff approval binds the 15-file
 `prismaquant.dsv4_w8a16.export_source_closure.v1` semantic closure at identity
@@ -22957,130 +22832,6 @@ and its reviewed streaming-exporter member is
 older v1 handoff receipts remain dated history and are not current export
 authority.
 
-The Sensitivity Card item changes exactly one shipping default, and it is
-probe-side: `incremental_probe.py` now emits five per-channel marginal vectors
-into `probe.pkl` unless told not to (§3.3, §4.1). The card and its three cost
-tiers remain additive modules with no `run-pipeline.sh` call site and no
-`COST_MODE` value.
-
-**AQUA-AURA is no longer one of them.** As of 2026-08-14 its activation term
-reaches a production allocation: `aqua_activation_cost.py` prices the A-side off
-a card and merges it into an existing weight-only cost pkl as `act_dloss`, and
-`priced_cell.cost_entry_predicted_dloss` adds it on the weight-only
-branches only (`78ec816`, `3c14209`). The term rides **inside** P5a's per-family
-multiply — `(base + act) · penalty`, never `base · penalty + act`, since the
-fitted constants run to ×8103 and adding outside dilutes an A-side worth 6× the
-W-side to 0.07%, which produced a Pareto byte-identical to the weight-only one.
-`act_var` is measured on the probe's real cached activations when
-`--act-dir` is given and modelled from a per-channel Gaussian fit otherwise
-(`1dbf146`; the two differ by 3.23% of Linears at 5.0–5.5 bpp). It is **still
-research** — there is no served KL/PPL A/B against the weight-only arm at
-matched bpp, and that A/B is the promotion gate.
-
-**It covers routed MoE experts as of 2026-08-20, not just the dense trunk.**
-Until then the A-side reached only `nn.Linear` units, because per-channel
-marginals come from a `register_full_backward_hook` and a packed `[E, M, N]`
-expert is an `nn.Parameter` on a fused module — on an A3B that is 94.5% of the
-quantizable parameters priced weight-only. `sensitivity_probe`'s existing
-`F.linear` interception (`install_packed_expert_hooks`) is the equivalent site
-and already holds `(x, gy)` per expert slice, **including `down_proj`'s, whose
-input is the post-SwiGLU intermediate**; it now also accumulates
-`expert_g_sq_sum [E, M]`, `expert_act_sq_sum [E, N]`, `expert_act_absmax
-[E, N]` and `expert_tokens [E]` into card **schema 1.1**. Per expert, not
-aggregated: routing makes both `g` and the activation distribution functions of
-`e`, and `Σ_e W²·g·var ≠ (Σ_e W²)(Σ_e g)(Σ_e var)`.
-
-Two normalizations, and they differ on purpose. `expert_g_sq_sum` divides by
-the **global** calib token count (the PR #14 convention — a rarely-routed
-expert *should* price low, that is its share of the objective);
-`expert_act_sq_sum` divides by **`expert_tokens[e]`**, because it fits a
-per-token noise magnitude rather than a frequency. Using the global count for
-both discounts a rare expert twice — PR #14's inverted importance weighting in
-mirror image. Corollary for the empirical branch: `expert_empirical_cost.py`
-must stay **activation-blind**, or the two paths double-count the expert
-A-side.
-
-**The selecting gate measures the same term (2026-08-20).**
-`PerturbedActivationCache` emulated activation quantization with a module
-`forward_pre_hook`, which on a packed-experts module sees only the module input
-— gate_up's. It now installs the same `F.linear` interception at eval, so each
-projection is quantized with its own calibrated scale, and the pre-hook stands
-down for packed plans so gate_up is not quantized twice. vLLM's
-`CompressedTensorsW4A4Nvfp4MoEMethod` registers **both**
-`w13_input_global_scale` and `w2_input_global_scale`, so the served runtime
-quantizes both: this closes a principle-8 execution-identity gap, and frontier
-KL values are **not comparable to pre-2026-08-20 runs**. Measured on
-Ornith-1.5-35B-A3B: card AQUA coverage 5.5% → 99.89% of quantizable mass, merge
-310→390 units (the 11 remaining are BF16 MTP sidecar), and the NVFP4 A/W ratio
-is median **0.67 on packed experts vs 5.77 on dense** — experts do not behave
-like the trunk.
-
-**The A-side belongs to the SERVING LANE, not to the format registry — and on
-this lane BOTH CB families execute their activation grids (corrected
-2026-08-18).** Whether choosing a format actually quantizes activations is a
-property of the runtime that will serve the artifact, so
-`activation_dloss_table` refuses the format registry's word for it and resolves
-the executed set from the lane spec. On `nvfp4_cb` gridbook executes both:
-`FP8_CB_*` is W8A8 — `gridbook/linear.py` hands quantized `xq` with per-token
-dynamic scales to `native_cutlass_scaled_mm`, and `moe.py` declares
-`_FP8_GROUPED_CONTRACT = "fp8_per_token_dynamic"` — and `NVFP4_CB_*` rounds
-activations onto the E2M1 group-16 grid before every GEMM (`linear.py`
-`fp4_act_qdq_or_codec`; `moe.py`'s three routed `fp4_act_qdq` sites;
-`codec.py` `fp4_group16_act_qdq`, which mirrors
-`format_registry._make_rtn("fp4_e2m1", 16)`). Gridbook's "exact native BF16
-bridge" is a **GEMM-schedule** statement, not an activation-precision one: the
-BF16 operand has already been rounded onto the E2M1 grid, and
-`nvfp4_activation_contract.bridge_contract` documents that every quality route
-consumes the exact native QDQ the decode path uses, differing only in GEMM
-schedule. A 2026-08-17 revision read "exact" as "activations left exact" and
-scoped the lane's executes to `["FP8_CB_*"]`; it was retracted the same day —
-the runtime was never ambiguous — and the spec, this section, and the tests
-were corrected on 2026-08-18. The shipped DSv4 92 GB body and the shipped
-Qwen3.8 13 GB artifact were priced with both A-sides and are correct as
-shipped. The stakes are measured, not argued: re-allocating the Qwen3.8 card
-under the stale entry moves **337 of 496 body units** (272 of them FP8_CB →
-NVFP4_CB family flips — the DP floods into the family whose real activation
-error the cost stopped seeing, reporting predicted_dloss 0.0486 vs the shipped
-0.0735 only because it prices less of reality), while the corrected entry
-re-allocates to the shipped `layer_config.json` **byte-for-byte**. Fresh cost cards consume this list **silently**
-(`dense_anchored_cb` resolves `lane_id="nvfp4_cb"` with no flag; any non-empty
-set means no refusal), which is why the value carries runtime call-site
-citations, and — per principle 14 — should graduate to a preflight equality
-assert once gridbook packages its per-scheme activation contracts in
-`runtime_contract.json` (it computes them today; it does not package them).
-Lanes declare `served_activation_quantization.executes` as **glob patterns
-over format names** (`lane_spec.LaneActivationContract`,
-`lane_specs/nvfp4_cb.json` — `["NVFP4_CB_*", "FP8_CB_*"]`), because rungs
-within a family are open-ended; enumerating rungs would under-declare silently
-the day one is added. `activation_dloss_table` **requires** the pattern set
-and refuses to fall back on the registry's W4A4 claim; a lane that declares an
-empty set refuses the merge outright rather than writing an all-zero A-side
-that is indistinguishable later from a real one. Pass
-`--lane-executes-all-activation-grids` for a lane that genuinely serves every
-activation grid.
-Name resolution goes through the **model profile**: the stage inverts
-`checkpoint_to_live_name` over the safetensors index, because a card's unit
-names come from the module tree the probe walked while a checkpoint may rename
-both the path and the leaf (DSv4-Flash stores
-`model.layers.N.mlp.experts.E.down_proj` as `layers.N.ffn.experts.E.w2`, which
-resolved **0 of 33,325** units under the previous path-only aliasing). The
-forward direction is not usable — `source_tensor_name` rewrites the path but
-not the leaf. Two failures that were previously silent now **refuse**: zero
-name resolution, and a merge that writes zero entries (the signature of a
-scalar-only card with no `g_sq_sum`). Both would otherwise emit an artifact
-with the right units and formats and an absent A-side, which
-`cost_entry_act_dloss` reads as 0.0 — i.e. free — making "unmeasured"
-indistinguishable from "costless" to the DP.
-On a **quantized-source** checkpoint the resolved tensor is not a dense weight
-(DSv4-Flash: MXFP4 nibble-packed routed experts, block-FP8 everything else,
-both with E8M0 `.scale` siblings), so `materialize_source_weight` dispatches on
-the streaming loader's own `_build_fp8_scale_inv_map` — declaration-driven,
-never shape-inferred — and reuses the loader's decoders
-(`dequantize_mxfp4_source`, `_dequant_fp8_block_weight`); the materialized W is
-bit-identical to the weights the loader installs for the probe. Dense
-checkpoints hit the map-empty passthrough and behave exactly as before; any
-tensor that cannot be materialized to the card's `(out, in)` **raises** rather
-than pricing a wrong-shaped or code-range W.
 The external runtime record pins Gridbook **0.9.1** at exact commit
 `227420f9821bab7089632ee914f0ba050f82b817`, with
 `gridbook.runtime-contract.v12` and the exact required feature map
@@ -23783,19 +23534,6 @@ render additional legal menu rungs for the active head even though the fixed ass
 only one; that is bounded cache/render overhead, not assignment or accounting drift
 (`fixed_head.py`, `allocator.py`, `run-pipeline.sh`, `export_native_compressed.py`).
 
-**One default in this section is not a shell default.** `--emit-marginals` /
-`PRISMAQUANT_PROBE_MARGINALS` is **ON by default in the probe module itself**
-(`incremental_probe._marginals_enabled`, `_env_flag(..., default=True)`), and
-`run-pipeline.sh` sets nothing — `grep -c MARGINAL prismaquant/run-pipeline.sh`
-→ 0. It is listed here anyway because it changes what every pipeline run writes
-into `probe.pkl` (§4.1, §4.8): five per-channel vectors per Linear, costing
-`(2·out + 3·in)·4` bytes. `--no-emit-marginals` restores byte-identical legacy
-output. The flag is *not* a grouping axis but a key-set axis, so it joins the
-precompute fingerprint, the per-shard reuse meta (`_expected_probe_shard_meta`)
-and the LPS-invariant linear cache's `_CONTENT_META_KEYS` (`5639a8b`): a
-flag-off shard is refused rather than pooled into a flag-on run, where it would
-otherwise contribute marginal-less entries that nothing downstream checks for.
-
 > **Archived 2026-09-25 (#1304).** The codebook modules this passage (through the scale-search paragraph) names are in `archive/gridbook_lane_2026-09-02/`, and `NVFP4_CB_K*` / `FP8_CB_K*` names refuse with `RetiredFormatError`. The text records the design as it shipped; nothing here is live.
 
 **`PRISMAQUANT_CB_LDLQ_SCOPE` is the authoritative LDLQ selector**; the older boolean
@@ -24375,9 +24113,6 @@ Removing the hook did not restore capture.
 A passing refusal-control test does not establish graph replay
 (`tests/test_packed_grouped_qdq_audit.py`, `test_gb10_qdq_rows_and_grouped_graph`,
 [GPU log](/mnt/shared/prismaquant-architecture-audit/20261017/e2effc2f3c/claude-resume/workers/probe-followups/r1-parity-v3-stdout.log)).
-The per-expert AQUA reader checks each sibling's configured rows and columns
-before concatenation (`aqua_activation_cost.packed_act_dloss_per_expert`).
-
 Fresh native baseline shards attach source evidence to measured cells.
 Shard reuse checks the same evidence form.
 Every baseline table passes source admission before reuse in every cost mode.
@@ -25142,13 +24877,7 @@ Three dense-specific differences are structural rather than cosmetic:
   before AQUA-AURA, when P5a priced only the weight-only branches. Revisit it when DSv4 is
   re-run with AQUA.)
 
-  The A-side reaches the rows through the separate `aqua_activation_cost` stage, merged
-  between pricing and the DP. It needs **no render** — `activation_dloss` reads the dense
-  `W[o,j]^2`, the card's `g_sq_sum` and the format's activation grid — so it layers onto a
-  production-rendered W-side with no rendering confound, and `--act-dir` makes its
-  `act_var` measured rather than modelled. The weight-only anchored payload is written and
-  kept, so the pre-AQUA allocation stays reproducible as the A/B arm; **AQUA-on-CB is a
-  candidate until that served KL/PPL A/B at matched bpp lands, not a result.**
+  The separate AQUA stage that added the A-side was deleted by #3457.
 
 The current menu is 37 rungs (NVFP4 K1..K25 plus FP8 K4..K48 step 4). On the known
 496-body-unit Qwen3.8 census that is **18,352** full-menu cells and 992 per-unit family
@@ -25938,144 +25667,13 @@ It reuses a bound result or attempts one KL evaluation, as specified in §4.3.
 A failed measurement leaves the report without measured KL
 (`pipeline.assignment_kl_measurement`, `run-pipeline.sh`, `AURA_ADDITIVITY_GATE`).
 
-### 4.8 The Sensitivity Card — probe once, price an arbitrary menu (2026-08-14)
+### 4.8 The Sensitivity Card — DELETED 2026-11-13
 
-Landed on `feat/aura-sensitivity-contract`. Read the status line first, because
-everything below is additive and unpromoted: **none of these modules is a
-pipeline stage**, `run-pipeline.sh` calls none of them, `COST_MODE` gains no
-value, and no shipped allocation goes through them. The one shipping default the
-work changes is probe-side (§3.3), which is why the section exists at all under
-§0's rule. Full design, including what is proven and what is not:
-`docs/design/sensitivity_card_contract.md`.
-
-**Why.** Probing a model is the expensive, model-specific half; choosing formats
-is the cheap, platform-specific half. Today they are fused — `probe.pkl` carries
-scalars that only become a cost next to a **rendered menu cache** built for one
-particular format list (§4.2), so a new menu means a new render, a probe cannot
-be shared because it is not sufficient on its own to price anything, and W4A4
-and W4A8 are literally the same candidate because the cost is weight-space only.
-
-**What the probe can now store.** The per-element diagonal weight Fisher
-`H[o,i] = Σ_t g[t,o]²·x[t,i]²` is already materialized per chunk as `chunk_h` at
-every accumulation site, and has never been storable: the unified-sweep path
-documents it as *"47k × 17 MB = 800 GB CPU, doesn't fit"*, which is why only
-`h_trace` and `h_w2_sum` survived. Its two **marginals** are storable, and are
-what a format-independent cost actually needs:
-
-```
-fisher_row[o] = Σ_i H[o,i]        fisher_col[i] = Σ_o H[o,i]
-```
-
-`out + in` floats instead of `out · in`, read off the `chunk_h` each site
-already forms, so no extra matmul (`sensitivity_probe.dense_marginal_chunk:2194-2222`).
-Three further vectors ride along because they are **not** recoverable from the
-weight-Fisher marginals: `act_sq_sum` (the imatrix, `diag(XᵀX)`), `g_sq_sum`
-(the **output**-space Fisher diagonal), and `act_absmax`. The merge rules differ
-per key and getting that wrong is the likely bug — sums add elementwise,
-`act_absmax` is a bound and merges by elementwise **maximum**
-(`_MARGINAL_MAX_KEYS:90`) — so one `merge_marginals` (`:143-161`) serves both the
-per-layer host flush and the cross-shard partial-stats merge and the two cannot
-drift apart on that rule. Sync discipline is preserved rather than re-litigated:
-the five vectors accumulate device-resident in fp32 and drain through one flat
-concatenation and one `.cpu()` per layer (`_marginal_accumulate:126-140`,
-`_marginal_flush:164-186`). A `.cpu()` inside the hook would put back the ~94k
-per-Linear syncs that `PRISMAQUANT_DEFERRED_FISHER_SYNC` removed.
-
-`sum(fisher_row) == sum(fisher_col) == h_trace_raw` is the wiring check, and it
-is free: a transposed axis, a dropped chunk or a wrong-shaped accumulator all
-break it. `SensitivityUnit.validate` (`sensitivity_card.py:245-288`) enforces it
-at `rtol=1e-3`, which catches the whole class of bug where one accumulator is
-normalized and another is not. Its *exactness* is site-dependent — §12 D30.
-
-**The card.** `sensitivity_card.py` — one compressed `.npz` with a JSON header,
-loaded `allow_pickle=False` (`:463-470`), because a shareable artifact must load
-without executing arbitrary objects. Per unit it carries shape, `n_params`, the
-**global** calibration token count (the one denominator of §4.1 — a per-expert
-routed count inverts importance weighting), the raw un-normalized scalars, and
-whichever of the five vectors exist. Three refusals are structural, not
-advisory:
-
-- **Calibration is identity.** `assert_compatible` (`:385-406`) refuses a
-  cross-calibration merge or comparison outright — the same rule a CB book gets
-  by hashing its imatrix into its book key (§9.2). Rebase the card, do not
-  compare across calibrations.
-- **Render basis is stamped, not assumed.** A shareable card is necessarily RTN:
-  compensated renders need per-Linear Hessians (~100 MB/Linear at 27B scale),
-  which are not shippable. That is load-bearing, not a footnote — RTN-vs-rendered
-  `dW` is immaterial at fp4 and decisive at fp8 (+36% served KL, §4.3), so a card
-  priced on one basis mis-ranks the other's 8-bit rungs, and mismatched bases
-  refuse to compare.
-- **Structure travels; policy does not.** The card records that q/k/v *are*
-  siblings, which experts are packed together, and each unit's source dtype
-  (`UnitTopology`, `:141-166`). It deliberately does **not** record that a
-  runtime *requires* siblings to share a format, or that packed experts need
-  vLLM canonical scheme names: those are §6.4 serving invariants, derived
-  downstream from whichever profile the author names (§8.1). Baking vLLM's
-  packing into a shareable file makes it wrong for llama.cpp, and wrong the day
-  vLLM changes.
-
-Card footprint against the full-`H` footprint of the same probe rows: 27B dense
-104.2 GB → 75.2 MB, 35B-A3B 8.2 GB → 17.4 MB, MiniMax-M2.7 at per-expert
-granularity 0.9 TB → 2.3 GB (`docs/design/sensitivity_card_contract.md` §3,
-which flags the per-expert case as the one where the card is not yet small —
-size tracks probe *rows*, not parameters).
-
-**Three cost tiers, one seam** (`format_cost_protocol.py`):
-
-| tier | weight term | status |
-|---|---|---|
-| `SCALAR` | `0.5 · h_trace · weight_mse · gain` | **exactly today's model** — same formula, same inputs |
-| `MARGINAL` | `0.5 · (row @ dW² @ col) / h_trace_raw / n_tokens` | rank-1 reconstruction of `H`; `SCALAR` is its rank-0 collapse |
-| `AQUA` | `MARGINAL` + an activation term | W4A4 and W4A8 stop being one candidate |
-
-`SCALAR` is not *equivalent to* `allocator_solver.predicted_dloss` (§4.1) — it is
-the identical expression, kept as a named one-liner (`weight_dloss_scalar:184-192`)
-so any divergence is a one-line diff rather than a hunt, and pinned by
-`tests/test_sensitivity_card.py::test_scalar_model_reproduces_allocator_solver`.
-A card carrying no vectors falls back to it (`weight_dloss_marginal:209-210`),
-which is what lets an existing `probe.pkl` convert to a card with no re-probe:
-degraded, not broken. `MARGINAL` is **exact** when `H` is genuinely rank-1
-(`test_marginal_model_matches_exact_fisher_on_rank1`, `rtol=1e-10`), which is the
-sharpest available check on the quadratic form and its normalization.
-
-**The solver seam is unchanged.** `sensitivity_card_allocate.candidates_from_card`
-(`:47-84`) emits exactly the `dict[name, list[Candidate]]` that
-`allocator_solver.solve_allocation` already consumes —
-`Candidate(fmt, bits_per_param, memory_bytes, predicted_dloss)`, §4.5 — so an
-arbitrary format menu enters as an arbitrary list of plugins rather than as a
-change to the DP. Only `DELTA_LOSS` may leave the module toward the solver
-(`CostComponents.assert_currency:172-178`), because only loss is additive across
-units. A unit with no legal format is dropped from **both** `stats` and
-`candidates` rather than handed over as an empty option list, which the DP would
-otherwise read as a free choice — the same failure shape as the unpriced packed
-member of §4.5.
-
-**AQUA-AURA, and why it needs its own sensitivity.** `h_trace` is a *weight-space*
-curvature. An activation-quantization error is an *input-side* perturbation
-`x → x + dx` that reaches the loss as `dy = W dx`. Multiplying an input-side
-error by a weight-space sensitivity is the currency error
-`activation_fair_pricing.py` exists to correct (§3.3 `ACTIVATION_FAIR_PRICING`),
-so `activation_dloss` (`:227-254`) routes through `g_sq_sum` — the output-space
-Fisher, the one term a weight-space `h_trace` structurally cannot supply — and
-never through `h_trace`. Three rules hold the line, each of them principle 2 in
-practice: an unmeasured A-side returns **`None`, never `0.0`**, so a missing
-measurement can never read as a free one; the `1/12` step variance is a property
-of a uniform grid, not a tuned constant (`uniform_act_quant_variance:257-281`);
-and there is **no speed/quality scalarization constant** — `speed_index` and
-`predicted_dloss` come back as separate axes, because choosing between them is a
-frontier selection (§4.6), and inventing a weighting would be exactly the
-heuristic-where-an-explicit-exists that is banned. `activation_fair_pricing.py`
-is left running and untouched: superseding it is a promotion decision on served
-evidence, not a drive-by refactor.
-
-**Status.** The tier that reproduces today's behaviour is exact and unit-tested;
-the two that do not are **screening surrogates with no served A/B**, and §2.5
-says a screen is never sold as a result. Do not describe `MARGINAL` or
-AQUA-AURA as validated, promoted, or default. What promotion would require is
-the ordinary §2.4 ladder: rank agreement against measured `output_mse` on a
-small model, allocation churn against a shipped `cost.pkl` inside the known ~3%
-noise, and — for AQUA — a served W4A4-vs-W4A8 A/B. §12 D30 carries the honest
-gaps.
+The card, its three cost tiers and the AQUA activation stage priced from the
+probe's Fisher marginals. #3448 removed that Fisher from the probe, so #3457
+deleted `sensitivity_card*.py`, `format_cost_protocol.py`,
+`format_cost_registry.py`, `aqua_activation_cost.py` and their tools. No
+pipeline stage called them. `git log` holds the design.
 
 ### 4.9 The continuous trellis rate surface — ARCHIVED 2026-09-02
 
@@ -27574,9 +27172,9 @@ class by the gates above. Gate:
 `tests/test_campaign_row_classes.py`.
 
 The passes that run *after* the rows merge are submitted through the same
-producer. `submit-joint`, `submit-aqua`, `submit-allocation` and
+producer. `submit-joint`, `submit-allocation` and
 `submit-export` build the read set with `experiments/glm_data_manifests.py`
-(`build_joint_pass_manifest`, `build_aqua_manifest`,
+(`build_joint_pass_manifest`,
 `build_allocation_manifest`,
 `build_export_manifest`), write it under `<output-root>/data-manifests/` --
 or under `--manifest-dir`, which a frozen output root needs -- and run the
@@ -32383,44 +31981,10 @@ hosted run (#962; `tests/test_ci_concurrency.py`). The test job is still not a
 required check on `main`, which is branch protection rather than the workflow.
 §12 D11.
 
-### 8.7 A fourth plug-in point: `FormatCostPlugin` (formats, not models)
+### 8.7 `FormatCostPlugin` — DELETED 2026-11-13
 
-The three registries above are the **model-support** contract and stay three.
-`format_cost_protocol.FormatCostPlugin` (`:284-300`) is a different axis: it is
-what a **format** must implement to be priced, and it exists only on the
-Sensitivity Card path (§4.8) — no production stage consumes it today.
-
-The whole protocol is one attribute and one method: a `FormatDescriptor`
-(storage bits, group size, passthrough requirement, the explicit
-`quantizes_activations` predicate, an optional `speed_index`) and
-`weight_error(unit, weight) -> [out, in]` squared error computed **from the
-weight alone** under the card's declared render basis. That is the point of the
-seam: adding a format is adding a plugin, not re-probing the model and not
-re-rendering a menu cache. The consumer already has the weights; what they
-cannot compute is the sensitivity, and that is `O(out + in)` in the card.
-
-Two properties keep it honest rather than merely convenient:
-
-- **Reference plugins call the real quantizers.** `format_cost_registry.RegistryFormatPlugin`
-  (`:78-160`) invokes `FormatSpec.quantize_dequantize` and
-  `activation_quantize_dequantize` directly, so the error a plugin reports is
-  produced by the same code that renders (§5.1). A plugin that re-implemented a
-  format's rounding would reintroduce precisely the rendering confound the
-  one-cache rule exists to prevent (§5.4). Passthrough formats return exactly
-  zero error rather than a measured epsilon, so float noise cannot decide a
-  passthrough-vs-quantized comparison; and `FormatDescriptor.is_legal_for`
-  (`:129-135`) refuses a passthrough on a mismatched source dtype, which is the
-  §6.4 passthrough-integrity invariant restated on this path.
-- **`act_quant_changes_input` has one definition.** The descriptor carries the
-  registry's predicate as explicit data (`descriptor_for:65`,
-  `format_registry.py:75-106`) rather than re-deriving it from an `act_bits`
-  width; consumers that re-derived it disagreed with the allocator's own gate
-  (§4.5, bit-exact re-encode), and
-  `tests/test_bit_exact_cost_pricing.py::test_activation_quant_predicate_has_one_definition`
-  pins the single definition. This is the
-  entire difference between `NVFP4` (W4A4) and `NVFP4A16` — two registry entries
-  with identical weight bits — which is what makes them a clean A-side isolation
-  menu.
+The format-cost plugin seam lived only on the Sensitivity Card path (§4.8)
+and was deleted with it (#3457).
 
 ### 8.8 The discovery walker: requirement discovery by traversal
 
@@ -32639,11 +32203,8 @@ shared by both probe backends):
   `_stats_indicates_packed_expert` read as a packed expert stack. TP note:
   identity/dispositions/byte totals are logical; a future rowwise shard cuts
   the plane's row axis and must not straddle a group boundary.
-- **Normalization.** Unchanged and global: rows stay raw token sums until
-  `finalize_fisher_stats` divides every row by the GLOBAL calibration token
-  count. Grouped operands are attention output projections — every group sees
-  every token — so the shared denominator is exact, not merely consistent;
-  `n_tokens_seen` counts tokens, not token-group pairs.
+- **Normalization.** Retired with the probe Fisher (#3448); `n_tokens_seen`
+  counts tokens, not token-group pairs.
 - **Dispatch.** Explicit declaration only: spec field
   `probe.grouped_module_class_names` (conformance-tested like every other
   spec field). A declared class whose instance lacks `n_groups` fails fast;
@@ -33673,13 +33234,13 @@ New with the 2026-07-30 merge:
 | D27 | **CLOSED 2026-08-01; import resolution hardened 2026-08-12; immutable-wheel parity added 2026-08-13.** The version skew was not benign enough to preserve: the vendored package, mirror, and sync test were deleted. PrismaQuant consumes one full-commit pin, verifies package version plus PEP 610 exact-VCS identity or an independently pinned release-wheel digest, launches from a neutral directory in Python safe-path mode, rejects an import outside the selected distribution root (including CWD/`PYTHONPATH` shadows), and fingerprints that import origin plus the complete RECORD-bound source closure for every pinned serve. | `prismaquant/gridbook_runtime/gridbook_runtime_pin.json`; `prismaquant/gridbook_runtime/gridbook_runtime.sh`; `tools/serve_fingerprint.py`; `tests/test_serve_fingerprint_descendants.py` | ~~LOW~~ closed | — |
 | D28 | **Serve-time fast-kernel enforcement has no caller.** `require_fast_kernels(model)` — which reads the model profile's kernel requirements and hard-fails at startup when a required fast kernel (`causal-conv1d`, `flash-linear-attention`, …) is not importable — lost its only caller when `polish_from_assignment` was archived on **2026-05-15**, and was itself walled 2026-07-30 (R19) as an orphan. It is the only mechanized piece of **core principle 9's** "routed to a *performant* kernel (not a slow fallback)" gate, so that gate is **manual today**: nothing in the build or serve path refuses a checkpoint whose arch would silently fall back to the slow PyTorch implementation. The mechanism is written and tested — only the call site is missing. | `archive/orphans_2026-07-30/prismaquant/_fast_kernel_guard.py` + `tests/test_fast_kernel_guard.py`; sole historical caller `archive/polish_2026-05-15/prismaquant/polish_from_assignment.py:202` | LOW | Move the guard back and call it from `validate_native_export` / the serve launcher, keyed on the resolved profile — or, if serve-time enforcement belongs to the lane scripts, say so in §7 and delete the row. |
 | D29 | **The FP8-CB row scale is not bit-reproducible across CPU architectures.** It is the scalar argmin of a scale sweep whose objective reduces over every column of the row, and that reduction reorders differently on x86 than on aarch64: on the fixed `test_cbl_scope_identity` fixture the packed index bytes -- the payload that actually ships -- are **identical** on both, while the single float32 scale differs in the low bits. Found 2026-08-11 when a byte-identity test recorded on the aarch64 build box failed on x86 CI. Consequence for the provenance gate (§5): artifact byte-reproducibility is a **within-platform** guarantee, not a cross-platform one; a rebuild on a different architecture may differ in scale bytes without differing in indices. Artifacts are built on the Spark, so nothing shipped is affected. The test now pins the packed plane by exact digest everywhere and the scale by value within float32's own worst-case reordering bound (n·2^-23), keeping the exact digest assertion on the recording platform. | `tests/test_cbl_scope_identity.py::test_unset_scopes_pin_76666bd_stamp_and_rendered_bytes`; `nvfp4_cb_formats._sweep_encode_moment` | LOW | Decide whether cross-architecture byte reproducibility is a goal at all. If it is, the sweep objective needs a fixed reduction order; if it is not (the likely answer -- artifacts are Spark-built), say so in §5 so a future reader does not read a cross-platform promise into the provenance gate. |
-| D30 | **The Sensitivity Card's non-scalar tiers are screening surrogates, and its probe wiring has two soft spots** (added 2026-08-14, §4.8). Four honest gaps, none of them closed: (1) **No served A/B.** The `MARGINAL` tier and AQUA-AURA have never been measured on exact full-vocab vLLM KL-vs-BF16 or direct WikiText PPL. `SCALAR` is a byte-identical reproduction of today's model and carries no such debt; the other two must not be cited as results (§2.5). (2) **The rank-1 reconstruction's error is unquantified on real layers.** `H = Σ_t outer(g_t², x_t²)` is exactly rank-1 only when one token dominates; `outer(row, col)/h_trace_raw` is provably exact in that case (`rtol=1e-10`) and an approximation of unknown magnitude everywhere else. Nothing has compared it against a materialized `H` on a real Linear. (3) **The marginal identity is exact only at the two streaming sites.** `sum(fisher_row) == sum(fisher_col) == h_trace_raw` holds by construction where `h_trace_raw` is literally `chunk_h.sum()` in fp32 (`incremental_probe.py:2480`, `:2751`). On the **resident** path `h_trace_raw` comes from the bf16 outer-product-norm identity `(gy2_sq.sum(1) · x2_sq.sum(1)).sum()` (`:1667-1668`) while the marginals reduce the fp32 `chunk_h`, so the two agree mathematically but not bitwise; `SensitivityUnit.validate`'s `rtol=1e-3` is what absorbs that, and nothing measures the actual spread. (4) **One accumulation site is dead on the shipping path and therefore untested.** The batched MoE block-flush hook (`:2276-2362`) fires only for blocks whose immediate children are per-expert containers exposing the profile's projection names as `nn.Linear` — the *unpacked*-expert layout. The shipping recipe's MoE models do not take it, and `tests/test_probe_marginals.py` covers the helpers and the two streaming sites but not that branch, so its marginal emission has never executed. A transposed axis or a wrong merge rule there would surface first on a new unpacked-expert architecture, which is exactly the class of silent-garbage failure §8.5 L3 is about. | §4.8; `prismaquant/sensitivity_card.py`, `format_cost_protocol.py`, `sensitivity_card_allocate.py`; `incremental_probe.py:98-171,1667-1672,2276-2360,2501-2520,2735-2751`; `tests/test_sensitivity_card.py`, `tests/test_probe_marginals.py`; `docs/design/sensitivity_card_contract.md` §8 | MED | (1)-(2) run the rank-agreement check against measured `output_mse` on Qwen3-0.6B and an allocation-churn check against a shipped `cost.pkl` before any tier but `SCALAR` is proposed for a default; (3) record the resident-vs-streaming identity spread on one real probe, or tighten the resident path to reduce `chunk_h` for both; (4) cover the MoE block flush with a synthetic unpacked-expert fixture, or state that the branch is retired. |
+| D30 | **Closed by #3457: the Sensitivity Card, its cost tiers and AQUA are deleted.** (Was: **The Sensitivity Card's non-scalar tiers are screening surrogates, and its probe wiring has two soft spots**) (added 2026-08-14). The probe no longer writes the Fisher marginals they read (#3448). | §4.8 | — | None. |
 | D31 | **Shipcard replay binds recorded evidence to the serving pin at HEAD** (added 2026-08-18). Every gate slot records the runtime that actually gated it (serve-manifest `gridbook_distribution`, endpoint-contract stack), but the replay compares those records against `load_gridbook_serving_runtime_pin()` at HEAD — so the 0.8.9 pin bump made the already-published DSv4 flagship unpublishable for a docs-only README update: six slot refusals, all "is not the tracked pin", on evidence that exactly matches the pin that was tracked when it was measured. Worked around honestly for the 0.8.9 card update by running the publisher from a worktree at `0266662` (the pre-bump commit; publisher and verifier code there are byte-identical to HEAD — the bump commit `6a883bc` touched pin data and docs only — so this verifies the card against the pin that gated it, with zero tool divergence). Recurs on every serving-pin bump for every historical artifact. | `prismaquant/shipcard.py:1225,2374,2521`; `tools/publish_artifact.py` dry-run refusal 2026-08-18 | MED | Decision for Robert: accept a declarative superseded-pins record in `gridbook_serving_runtime_pin.py` (version/commit/wheel of prior released pins; replay accepts recorded == current OR recorded ∈ superseded, and the verdict names which) — keeps fail-closed against unreviewed runtimes without rotting history — or rule that docs updates to historical artifacts always re-run the publisher at the artifact's pin era. |
 | D32 | **Closed by #3448: the probe computes no Fisher.** (Was: **The Fisher probe is not bit-reproducible, and nothing in the tree said so**) (added 2026-08-20). Two runs of `incremental_probe` with byte-identical calibration, the same commit and the same `--layers-per-shard` differ on **379/402 units**, median `|Δh_trace|/h_trace` **2.5e-4** (max 1.1e-2); `n_tokens_seen` and the per-expert Fisher *support* are bit-identical on every unit, so the forward and the routing are exactly deterministic and only the backward moves. Mechanism: 30 of Ornith-1.5-35B-A3B's 40 layers are Gated DeltaNet, whose `fla` Triton kernels reduce over chunks in a non-deterministic order. **Why it is debt rather than a bug:** the jitter is unbiased (signed mean +6.5e-5 against its own sd 5.7e-4) and three orders below the 23% cost CV that §9 records as producing 3% assignment churn and 0σ served — but a probe-side change gated on bit-identity refuses for reasons that have nothing to do with the change, and `--layers-per-shard auto` (sized from free RAM at launch) adds a second, *avoidable* source on top. **Consequence for provenance:** probe-derived artifacts (`cost_baseline.pkl`, `cost_aura.pkl`, `cost.pkl`, the sensitivity card) must be rebuilt together from one probe run rather than half-reused, or `cost.pkl`'s stamped provenance names a probe that produced only some of its numbers. | `incremental_probe.py`; `sensitivity_probe.py` `_accumulate_packed_per_token_fisher`; measured Ornith-1.5-35B-A3B 2026-08-20 | LOW | Gate probe changes on what is invariant (`n_tokens_seen`, per-expert support, an unbiased signed mean within a *measured* floor), never on bit-identity; pin `--layers-per-shard` for any A/B. |
 | D33 | **OPEN 2026-09-02, narrowed twice.** Tessera is priced and rendered by name (§5.7), has a *declared* lane (§9.4, `lane_specs/tessera.json`), a real serving runtime of its own (`tessera.serving`, `quant_method: "tessera"`), and since **2026-09-03** a real `EXPORT_CONTAINER=tessera` arm in `run-pipeline.sh` that plans and encodes through Tessera's OWN tools under `TESSERA_REPO` (`plan_from_layer_config.py`, `export_tessera_serving.py`). **The "no exporter codec" half is re-scoped, not closed**: this repository still writes no Tessera bytes and deliberately never will — a wire recipe with two homes is how the two halves of one format drift apart — so the debt is now *the boundary*, not *the absence*: the two Tessera scripts the arm names live in `experiments/`, which their own README calls drivers rather than a supported interface. **Producer eligibility is no longer what is missing**: since 2026-09-04 the pin names an exact Tessera commit plus the SHA-256 of the `runtime_contract.json` it packages (re-pinned 2026-09-05 to Tessera master's tip `ba582d4…`, contract v22, lane schema v9; v21 landed at `b8b1cb38…` in Tessera #313 and the release `e78959ed…` carried v20), and the packaged contract's dense `device_qualified` cells are ADMITTED under it — what the pin now withholds is any *other* Tessera, which is also what the driver's preflight refuses on. Two residues are the honest remainder of the eligibility half. **First**, the contract's two `routed_moe` cells are decided by their own published `evidence.smoke.status`, which this repository reads and does not second-guess — a measured serving property, not a structural ban here; v17–v20 published `repetitive` and the status-only predicate refused them; v21 and the pinned v22 publish `recorded`. **What that status rests on became checkable at lane schema v9**: RobTand/tessera#327 (P1) reported that v21's `recorded` rested on a repetition rule that lived only in a dated measurements file, derived and checked by nothing and satisfiable by an empty completion; v9 puts the rule, the instrument, the reference and the rows in `smoke.record`, and this reader re-derives status and attribution through Tessera's own functions and refuses a published value they do not derive (`lane_eligibility._parse_smoke_record`, `tests/test_tessera_lane_v9.py`). **Second**, three dense `decode` cells carry `evidence.grade: "route_only"` — a route with no KL at all — which is admitted today and is a promotion question for Rob rather than a gate this repository may tighten on its own. No ship gate has been run on the lane, and no runner exists to run one: the lane's seven declared gates are now RECORDED — `route.census` and `route.trace` (#575) name shipcard slots and the arm opens a lane-gated card (§7.1, §9.4, 2026-09-03) — so an un-run gate is an unfilled slot the publisher refuses on rather than a sentence nothing reads, but nothing spawns the container that would fill it. The `experiments/` boundary is likewise declared rather than fixed: both tools carry `stability: "unsupported_experiments"` and a `tracking_issue` on `lane_specs/tessera.json`, which makes the debt visible to a reader and a gate without promoting anything. Gridbook's Tessera lane (contract v14) is withdrawn and was never released. | `tessera_render.py` (`tessera_lane_admission`), `tessera_export_lane.py` (the arm's four gates), `run-pipeline.sh` (`EXPORT_CONTAINER=tessera`), `tessera_runtime/tessera_serving_runtime_pin.json` (commit + `contract_sha256`), `tessera_serving_runtime_pin.py` | Med | Moving the pin forward is ONE reviewed commit that edits the pin JSON and the reader's three pinned constants together, verified against a clean Tessera tree; the arm can build today at the pinned commit. Independently, and both still open under RobTand/prismaquant#119: promote the two named Tessera scripts from `experiments/` to a supported entry point so the boundary is an interface rather than a path — after which their `stability` becomes `supported` and the `tracking_issue` goes — and build the lane runner that executes a lane's declared gates in a fresh plugin container and fills the slots the card already opens. |
 | D34 | **RESOLVED 2026-09-25 (#1304; step 1 PR #1332, step 2 under #1328)** — was: the Gridbook lane was retired on 2026-09-02 but its format/cost/render plumbing was not. The lane, its pins, exporter, serving profiles, ship-gate slots, 73 test modules (1,691 node IDs) and 27 documents went to `archive/gridbook_lane_2026-09-02/` on 2026-09-02, and `EXPORT_CONTAINER=nvfp4_cb` `exit 2`s (§3.5, §9.2). The machinery that *priced and rendered* those rungs stayed, so a `FORMATS` menu could still name a `*_CB_*` rung and the DP could still price it; only the exporter and the `production-render-score` pairing guard stopped it, a *refusal*, not an *absence*. **How it closed.** Step 1 (#1332) moved the live helpers out of the lane's modules (`footprint.py`, `moe_imatrix.py`). Step 2 archived the 19 codebook modules, the lattice asset, 34 tools and scripts and 27 test modules into the same wall, and deleted the codebook branches inside the allocator, caches, cost stages, footprint, export and layer-config readers. `format_registry` no longer registers `NVFP4_CB_K*` / `FP8_CB_K*`; every persisted-name reader raises `RetiredFormatError` naming the archive (`tests/test_retired_codebook_refusals_1304.py`), and stock and Tessera allocations are byte-identical to the pre-excision commit (`tests/test_allocator_output_pin_1304.py`). **What is left.** `production_weight_cache._is_cb_format_name` and `validate_production_cache_cb_render_identity` were removed with their call sites under #1345: the cache now refuses a retired key through `schemas.refuse_retired_codebook_format` on lookup, prefetch and `assignment_keys`. The same change retired the RD ladder's `band_interpolated`/`mixed` cost stamps (`schemas.refuse_retired_ladder_cost_source`; the Tessera campaign's `tessera_campaign_interpolated` rows keep the interpolated branch) and `PRISMAQUANT_SKIP_PACKED_EXPERT_COST`, whose only setter was the CB pipeline. `mxfp4_widen.py` stays because it serves non-codebook rungs. `source_class_format_plan.py` and the `--format-plan` flag were archived under #1345: the plan builder's only producer was this lane's campaign. The `CB_*` stage-settings hash entries in `run-pipeline.sh` stay so no existing `WORK_DIR` rebuilds. The consequences below are capability losses, not debt, and outlive the excision. (i) `FP8_BLOCK_UE8M0_SOURCE` is now `ROUTE_STATUS_BLOCKED` — its only route was the plugin. (ii) `MXFP4_SOURCE` keeps a backed stock-Marlin route but has no writer and no serving profile, and `MXFP8_UE8M0_G32` is the same shape — never a compressed-tensors scheme, written only by the CB *streaming* exporter, which is archived. Both keep a live `FormatSpec` and a working render; neither has a writer. (iii) **The `serving_lanes` block of a serving-profile spec now has zero live declarations.** `serving_profile_specs/nvfp4_cb.json` was the only spec that ever declared one (verified against `d263f54`), so the per-lane structured `route_status` / `activation_contract` / `fused_mid_m` table that principle 9 reads is a parser with nothing left to parse; the native lane's route status has always come from the source-passthrough contracts instead. The parser and its `route_status_source` machinery are kept because that is the shape the Tessera lane must declare in. (iv) **The sample-parallel incremental probe is unavailable**: its `prepare-run-contract` minter and its per-worker source-census revalidation were both built on `prismaquant/rtx4090_artifact_census.py`, the strict-Ada FP8-CB campaign's closed Qwen3.8-27B layout. `incremental_probe.py --global-calibration-tensor` now refuses up front rather than admitting a pre-retirement contract with one leg of its identity replay missing (`docs/design/sample_parallel_probe.md` carries the banner). Reviving it means giving the census a lane-independent source of truth. Two production observations were surfaced by the removal, deferred at the time, and **both fixed 2026-09-03** (RobTand/tessera#20): `check_serving_shape` failed **open** on an unknown profile id — it caught `FileNotFoundError` and resolved silently to `research`, which permits every shape, while `serving_lane_route`/`serving_lane_catalog`/`check_serving_format` all fail **closed**. It now returns the same `profile_mismatch` refusal `check_serving_format` does; `profile_id=None` still resolves to `research`, which is the declared default and loads, so no legal call changed. And `activation_pricing_branches["unrecorded"]` is re-homed as its own profile-independent test in `tests/test_serving_lane_metadata.py` rather than left riding a deleted CB test. A fifth item is dead-but-kept rather than lost: `shipcard.py`'s `safetensors_content_receipt` trio has no live caller since the strict-RTX4090 publication gate retired, and is kept so receipts already on disk stay readable. `ROLE_COMPOSITE_FUSED_SOURCE_EXEMPT` still exempts `DeepseekV4Profile` from declaring a fused-sibling source, but the lane that justified the exemption is gone; discharging it is a producer-behaviour decision, not a removal. | `archive/gridbook_lane_2026-09-02/README.md`; `docs/measurements/gridbook-lane-retired-2026-09-02.md`; §9.2; `tests/test_retired_codebook_refusals_1304.py` | — | None for the excision. If a codebook rung is wanted again for the Tessera lane, port the parts worth keeping from the archive deliberately rather than restoring files. |
 | D35 | **A sampled expert stack has no priced A-side scale and no stack wire, and the research replay reader cannot read its rows** (added 2026-09-06, §4.10, RobTand/prismaquant#290). A stack-level Tessera cost row estimates the stack from a sample of its experts, so two per-expert facts have no scalar form on it. (i) `input_global_scale`: each expert carries its own calibrated static NVFP4 A scale, so a sampled stack has none, and `tessera_menu.priced_static_scales` therefore finds no value for a selected W4A4 stack -- `tessera_export_lane.require_priced_export_inputs` refuses it by name. That is the CORRECT refusal (a price with no bound scale is not exportable), and the fix belongs on the driver side: the calibration pass can compute a scale for every expert without encoding any of them, sampled or not. Until it does, W4A4 Tessera rungs on a sampled routed stack are priced but not exportable. (ii) `wire_bytes`: only a census has a full set of member wires, so a sampled stack is not in `wire_backed` and its per-member wire bytes live in the row's `sampled_experts` block. (iii) `tessera_anchored_surface.load_campaign_measurements`, the research replay reader, keys receipts per checkpoint unit and so refuses a stack payload at `unknown source unit`. It refuses loudly rather than mis-verifying, and it emits no allocator input, so nothing shippable depends on it -- but a replay of a sampled campaign is unavailable until the reader learns the stack-to-member indirection. | §4.10; `prismaquant/tessera_campaign.py` (`StackExpertSample`, `_stack_cost_rows`); `tessera_menu.priced_static_scales`; `tessera_export_lane.require_priced_export_inputs`; `tessera_anchored_surface.py:96` | MED | (i) have the campaign driver calibrate and carry a per-expert `input_global_scale` for the whole stack, then decide with Rob whether the exporter binds per expert or the serve takes a max-over-experts input scale (a fact about the Tessera plugin, so attested per principle 14, not assumed here); (ii)+(iii) teach the replay reader to resolve a stack row's receipts through its `sampled_experts.members` block, or state that sampled campaigns are not replayable. |
-| D36 | **The routed-stack probe reduction has a size source but not a weight source, and no planner emits a two-tier schedule** (added 2026-09-11, RobTand/prismaquant#495 parts 1-3). `--stack-sample-sizes counts` makes the PPS draw follow the census's routed-row counts, which is what #495 part 1 asked for, but `--stack-sample` still requires `--probe`: a `StackExpertSample` carries `h_trace`/`h_trace_per_expert` and `_validate_stack_sample` enforces that they sum to the multiplier the allocator applies, and there is no declared convention for a stack row whose weights are not Fisher. Writing counts into those fields would launder a routed-token proxy into the Fisher currency, which principle 2 and the study's own section 3.6 both refuse, so the report's "so it can run without a probe" is **not** delivered: it needs an explicit weight convention (uniform, or counts declared as such) that the cost row, the allocator's `predicted_dloss` branch and the HT estimator all agree on. Separately, `transfer_law_experts` is honoured by `selection_stack_samples` and `_stack_cost_rows`, but nothing writes it: the per-unit-class round-1 schedule (`round_one_rates`, §5 of the study) is #495 part 4/5 work and is not in this tree, so the two-tier path is reachable only from a hand-built sample. | `tools/dispatch_tessera_campaign.py` `sample_stack_groups`/`cmd_plan`; `prismaquant/tessera_campaign.py` `_validate_stack_sample`, `_stack_rate_evidence`, `_fit_stack_transfer_laws`; `tests/test_tessera_stack_sample_sizes.py` | MED | Declare a weight convention for a probeless stack row, then drop the `--probe` requirement under it; land #495 parts 4-5 to emit the schedule. |
+| D36 | **The routed-stack probe reduction has a size source but not a weight source, and no planner emits a two-tier schedule** (added 2026-09-11, RobTand/prismaquant#495 parts 1-3). Since #3457 the PPS draw follows only the census's routed-row counts, but `--stack-sample` still requires `--probe`: a `StackExpertSample` carries `h_trace`/`h_trace_per_expert` and `validate_stack_sample` enforces that they sum to the stack row's multiplier. Since #3448 the probe writes no `h_trace`, so the stack path runs only on a probe pickle written before #3448. A probeless stack row needs an explicit weight convention (uniform, or counts declared as such) that the cost row and the HT estimator agree on; writing counts into the Fisher fields would launder a proxy into the Fisher currency. Separately, `transfer_law_experts` is honoured by `selection_stack_samples` and `_stack_cost_rows`, but nothing writes it: the per-unit-class round-1 schedule (`round_one_rates`, §5 of the study) is #495 part 4/5 work and is not in this tree, so the two-tier path is reachable only from a hand-built sample. | `tools/dispatch_tessera_campaign.py` `sample_stack_groups`/`cmd_plan`; `prismaquant/tessera_campaign_table.py` `validate_stack_sample`, `_stack_rate_evidence`, `_fit_stack_transfer_laws`; `tests/test_tessera_stack_sample_sizes.py` | MED | Declare a weight convention for a probeless stack row (a decision for Rob), then drop the `--probe` requirement under it; land #495 parts 4-5 to emit the schedule. |
 | D37 | **A `measured_runtime_prices.v2` table cannot reach the allocator, because the native/full-engine transient charge boundary is not versioned** (added 2026-09-13, RobTand/prismaquant#237). `runtime_provenance.py:722-723` appends `"the native-row and full-engine transient charge boundary is not versioned, so no candidate activation or scratch term may be compared to a priced row"` **unconditionally**, so `admit_fixed_resources` cannot pass for any v2 table whatsoever. Since #560 the two gates carry two flags: `load_measured_runtime_table` still loads the table with `native_rows_admitted` set, `fixed_resources_admitted` stays false, `build_runtime_resources` passes on the native attestation, and the refusal is spent where the fixed charge is read (`measured_runtime_prices.admitted_fixed_resources`). The debt is unchanged in substance — no v2 table can price a device budget — but the 49-row native attestation is no longer discarded with it. The gap is no longer hypothetical: the first real table built from Tessera native receipts (`/mnt/shared/tessera-runs/receipts/frontier-qwen3-0.6b-20260913/table/qwen3-0.6b-layer0-all.json`, sha256 `9bbb283a2ea4…`, 49 rows over 7 Qwen3-0.6B layer-0 units) is **admitted by `admit_native_rows` (49 rows, refusal `None`)** and then refused by `admit_fixed_resources` with 143 distinct shapes / 21,468 parts, of which that line is one — and it would still be one even if every other cause were closed. Two further causes sit underneath it and are separately owed: the #399 a5 full-engine report's allocation ledger is not closed (20,734 + 370 unclassified allocations, 224 classified-but-uncharged, six open domains — a Tessera producer gap, RobTand/tessera#399), and that report was measured on other bytes than the table's (`stale model_sha256`, artifact `qwen3-0.6b-uniform-R1024-tpstamp`), so no invariant fixed charge is established across the seven artifacts the table prices. `FIXED_TERM_FIELDS`' own docstring already records the first as owed design work ("Set native/full-engine charge boundary"). **That admission was measured on the symbol-only spelling of `binding.operator_route`**: since #565 gave the field the route class rather than the GEMM symbol, that exact file no longer passes `admit_native_rows` — it is refused at `native row operator binding` — and re-emitting it from its own receipts through `native_receipt_table` is owed. Re-emission was believed mechanical — the same receipts, the same medians and bytes, one binding field spelled as the route it names — and that was true for the 63 minutes between `cbd5d31d78` and `ae0c908c1e` (authored 2026-09-13 14:37 and 15:40 -0400; both on `origin/main`). It is **false now** (measured 2026-09-17, RobTand/prismaquant#677, PB `fc4c2552ddba`): `require_panel_activation_attestation` refuses any panel that priced an activation residual without an `activation_quantizer_attestation`, 49 of 49 bound panels lack the field, and 42 of 49 refuse on consume. The original receipts cannot rescue it either, because `consume_native_receipt:364-365` binds `receipt["panel_sha256"]` to the panel object and stamping the attestation changes that digest. Re-emission therefore needs **new GPU producer measurement** — a panel re-freeze for all 49 cells under current `main` — not a CPU re-emit. The fp8 lane needs no Tessera *contract* change to do it: `require_attested_activation_oracle` (`native_operator_panel.py:151-192`) returns `unattested_dynamic_scale` for a derived-from-x scale and `require_panel_activation_attestation` (`:424`) accepts that stamp on a schema check, which is the lane D42(a) already records. **It did need one Tessera code change, and that sentence read as though it did not** (measured 2026-09-17, PB `096c6e8d627f`): Tessera's producer harness checks the frozen panel by exact field set, and `experiments/bench_native_operator.py` `validate_panel` still listed the seventeen fields the panel carried before `freeze_native_panel` began emitting `numerics_derivation` and `activation_quantizer_attestation` unconditionally (`native_operator_panel.py:346-347`). Every panel the current producer freezes was therefore refused inside `measure_prepared_operator`, before a cell was measured — early relative to the measurement, not to CUDA, since the CLI loads the tensors onto CUDA and prepares the operator first (Tessera `experiments/bench_native_operator.py:725-726`, ahead of the check at `:749`) — so the re-freeze could not run at all, on `master` or at the pinned producer `d403cc5a31`, and `git log --all -S` finds the field named in no revision of that file. RobTand/tessera#546 widens the tuple, accepting the two as a group so the qualification scripts beside it — which emit neither and have no honest source for a tolerance derivation — keep working (`master` 69 passed; the new tests against the unwidened validator 23 failed / 50 passed; with the change 73 passed, gb10, `pq-cu130-tessera-7dbbacbd`). `experiments/` is a sibling of `src/` and `encoder_source_sha256` seals only what lies beneath the installed `src/tessera/` (`cached_unit.py:96-103`), so this invalidates no producer seal -- but it is **necessary and not sufficient**, measured 2026-09-17. The freeze does not read `experiments/` from a checkout: it bind-mounts a frozen producer-source tree read-only and puts it on the path (`--volume .../identity-reseal-20260911/producer-source-d403cc5a31:/tessera:ro`, `--workdir /tessera`, `PYTHONPATH=/tessera`, per `native-r1/launch-command.json`). That tree is a plain copy with no `.git`; its copy of the file is byte-identical to `d403cc5a31` (sha256 `51324b7112...`) and still carries the seventeen-field tuple, so the merge does not reach it. The re-freeze additionally needs a **new** producer-source directory carrying the merged file -- never an edit of `producer-source-d403cc5a31`, which existing receipts cite as their producer identity. It is **not** patched: choosing a boundary is a contract decision about what a native row and a full-engine run each own, and defaulting one to make a gate pass is the band-aid principle 1 forbids. **Since #569 one consumer can run beside it without reading it.** `--measured-runtime-fixed-scope shape-only` (`measured_runtime_prices.shape_only_fixed_resources`, `:536`) splits the declared charge along the gate's own line: the four `FIXED_TERM_FIELDS` device terms and the off-step peak — what this refusal is *about* — are withheld and every consumer that would compare one to a budget is refused, while the three `UNOBSERVED_FIXED_FIELDS` the scope does read are re-checked with the gate's own `if value:` rule. It is available only to the prefill frontier sweep, refuses `--serve-device-budget-bytes`, withholds `device_memory_bytes` from the verdict and refuses a frontier point that carries one. **It closes none of this debt**: the byte terms stay refused, so the scope certifies no placement, and a device-budget solve — which is what GLM-5.3 placement needs — is exactly as blocked as before. **This refusal is no longer the first one** (measured 2026-09-17, PB `520ef95b1c68` scoped / `0c06c65fa611` unscoped): on the re-emitted table `scoped-sweep-20260913/qwen3-0.6b-layer0-all.json` (sha256 `d841ed57f555…`) the sweep stops earlier, at `require_panel_activation_attestation` (`native_operator_panel.py:425`, refusal `:441-449`, reached from `consume_native_receipt:389` and surfaced by `admit_native_rows` at `runtime_provenance.py:1247`) — 42 of 49 bound panels, 0 of 49 carrying the stamp, the seven that pass being the `TESSERA_BF16_K1` rows whose format does not quantise its input (PB `60ca5b6fddf6`). That is the same re-freeze this entry already owes, arriving one gate earlier than the charge boundary; the charge boundary is unchanged behind it. **Two tables share a name, and the older one is the trap.** `table/qwen3-0.6b-layer0-all.json` (sha256 `9bbb283a2ea4…`) carries `binding.operator_route: "torch.mm"`; `scoped-sweep-20260913/…` (sha256 `d841ed57f555…`) carries the #565 route-class spelling and clears `native row operator binding` on current `main`. A 2026-09-17 probe that reported that check as the first refusal was reading the stale file; the verdict is **stale recorded table, not a main-side regression**. **Line citations refreshed 2026-09-17** (the entry above cites where they were, not where they are): the unconditional append is `runtime_provenance.py:911-912`, `_fixed_resource_refusals` begins at `:746`, `admit_native_rows` at `:1173`. **What waits past all of it, measured**: the packaged contract the pin names (sha256 `db9ca4c0c457…`) attests three rungs, one per family, and the only real table prices exactly one of them, so a scoped menu is 1 of 16 and the DP gets no second value to trade — see D39 and RobTand/prismaquant#572. **[2026-09-19 pin correction: at the v32 pin (`3cb67d98…`) the three-rung count is stale — `TESSERA_BF16_K1`'s cells are withdrawn and `TESSERA_E2M1_K2` is cell-backed at the seven routed rungs 128..896; the D37/D39 blockers are unchanged because they are receipt-side, not pin-side.]** **Design proposed, not resolved (2026-09-18, RobTand/prismaquant#718, `docs/design/pact_transient_charge_boundary.md`)**: a versioned boundary (`prismaquant.transient_charge_boundary.v1`) pairing the native bound's own `composition` string with the partition schema and an ownership map, whose equality is an identity of ownership on the one measured assignment rather than a numeric equality between a native peak and a partition term; ownership derived from who allocated the bytes inside or outside a unit interval (the row's `activation_bytes` becomes a shape witness the DP stops adding); and one fixed charge scoped to the route-class set of the one mixed-artifact full-engine run #570's option A already requires, admitted only under a pinned KV capacity. The `:922-923` append and the `:799-805` multi-format refusal are unchanged by that PR; the code delta and its driver-mutating tests are listed in the doc's §6 and are owed separately. **Implemented 2026-09-18 (`flash/d37-charge-boundary-impl-20260918`; Rob: no preference; Fable consultation memo; coordinator's call).** The registry is `prismaquant/transient_charge_boundary.py` (`BOUNDARIES`, one entry, `prismaquant.transient_charge_boundary.v1`): it pairs the native bound's own `composition` string with the partition schema name, maps every transient term to one owner, charges a row's `resident_bytes` and `peak_scratch_bytes`, witnesses its `activation_bytes`, and records the device-budget decision as data, verbatim from the registry: `"device_budget": {"search_charges": "allocated_block_composition", "ship_gate_compares": "reserved_peak_bytes", "witness": "reservation_slack_bytes"}`. The unconditional sentence and the multi-format refusal are gone from `_fixed_resource_refusals`: `require_boundary` refuses by name a table that declares no boundary, an unregistered name, a partition of another schema, or a reference stamp that differs; under v1 the gate runs `boundary_identity_refusals` (containment, attribution, one escape per invocation equal to the row's `output_bytes`, cover over `allocator_block_bytes_observed`, resident excess named as a workspace), `route_class_coverage_refusals` (every priced `binding.operator_route` exercised by the run's selected rows; KV capacity pinned by `capacity_policy.values`) and `reservation_slack_refusals` (the report observes both allocator readings at one instant). `RuntimeContext.transient_charge_boundary` and `RuntimeResources.output_bytes` travel appear-only-when-set; `native_receipt_table.derive_context` stamps v1 when every bound observation's composition is the one v1 names. `solve_runtime_frontier(boundary=)` and `evaluate_measured_assignment(boundary=)` refuse a fixed device charge with no boundary and add no row activation under v1 (`row_activation_charged`, `row_activation_bytes_witness`). The consumer reads `tessera.full_engine_resource_report.v2` as an envelope (`REPORT_SCHEMAS`). **Measured on the 2026-09-18 report** (`/mnt/shared/tessera-runs/receipts/frontier-qwen3-0.6b-20260918-399/report-resources/report.json`, sha256 `fe8b7ca540de…`, schema v2, 112 units, three route classes): a table naming no boundary is refused by exactly that one sentence; a table naming v1 is admitted at the boundary, a 336-row three-format PACT menu clears route-class coverage, and what remains is named — the producer's own `worker_startup` refusal and 358 unclassified allocations; the v2 partition classifies 1,398 rows on `owner_views` rules (`census`, `history_order`, `site:plugin`, `site:vllm`, `site:image`) where this consumer's v1 recomputation classifies 480, a gap the consumer names once rather than as 17,957 disagreements; the four v1-owed observations are carried and recomputed from nothing; every `inside_unit` scratch allocation carries an empty `allocator_block_bytes_observed`, so the cover check refuses per invocation; no row carries `output_bytes` yet (no table has been re-emitted from receipts that record it); and no `reservation_slack` witness is observed. **So the debt narrows and does not close**: no fixed charge is admitted from any report, and the remaining causes are producer-side (`reservation_slack`, in-unit block extents, `output_bytes` on receipts, `PYTORCH_CUDA_ALLOC_CONF` in the configuration document) and consumer-side (membership recomputation from `owner_views`, the four owed observations). | `prismaquant/runtime_provenance.py` `_fixed_resource_refusals` (`:746-932`, the unconditional append at `:922-923`), `admit_native_rows` (`:1173`, the producer admission it surfaces at `:1258`), `FIXED_TERM_FIELDS`; `prismaquant/native_operator_panel.py` `require_panel_activation_attestation` (`:424`, refusal `:441-449`) and its call at `:389`; `prismaquant/measured_runtime_prices.py` `build_runtime_resources` (`:608-618`), `shape_only_fixed_resources` (`:536`); `prismaquant/allocator.py:2241` (the table loads before `--probe` is ever opened at `:2319`); `docs/measurements/prefill-frontier-qwen3-0.6b-2026-09-13.md` §4 | HIGH | The boundary is versioned and each transient term has an owner (v1). What is left: the consumer's v2 membership recomputation from `owner_views` and its recomputation of the four owed observations; on the producer, the reserved-extent witness, in-unit block extents, `output_bytes` on native receipts and the allocator configuration in the configuration document. Until those land, a v2 table prices operators and no device budget. |
 | D38 | **The GLM-5.3 serve runs a PATCHED runtime, and a patched runtime is not an attested one** (added 2026-09-13, RobTand/prismaquant#543). GLM-5.3-Flash cannot serve on the pinned image as shipped; the fix is five source edits in `flashinfer_mla_sparse_sm120.py` plus two GB10 hardening edits, now recorded at `prismaquant/serving_runtime_patches/glm53_nope_sm120/` and read by `serving_runtime_patch_set.py`. Three things are owed and none is patched here. **(a) Qualification.** The set is measured on a 4-layer stub of a 45-layer body, and the full body has never been served with it; the reader refuses the wider claim rather than making it. **(b) Numerical agreement: placed on the stub, open on a real body** (tessera#508, 2026-09-28). Tessera #581 traced the 0.67-nat eager-vs-graph figure to prompts above 2048 tokens, where the stock indexer top-k writes its selection in arrival order (`sampler.cu:267`), so eager itself is not repeat-exact there. Below that, a CUDA-graph serve leaves eager's outcomes only when vLLM's capture list pads a batch: the mHC TileLang op picks its split-K by token count, and a batch of 5 replayed at 8 moved logprobs by up to 0.98 nats. With every capture size from 1 to the largest, on the `glm53_kpool_tail_slot_mapping` image (the vLLM #57317 backport; the stock V2 runner's generic slot mapping reads past the kpool-tail block table and faults under graphs), the 4-layer stub's graph completions are eager outcomes, and Tessera's GLM53 NoPE gate reports per serve whether it runs eager's arithmetic. No KL number may be quoted from a graph serve of the 45-layer body until it is re-measured there. **(c) The principle-14 position.** A patched runtime's executed-activation-contract table is not the pinned runtime's, so the GLM lane's `executes` list would have to be re-derived against the derived image before any gate reads it; the manifest is therefore `attested: false` and hands no caller a route. Also open: the derived image exists only as a local docker image id on sparklina, so `derived_image` is `null` until it is pushed to a registry serving on port 80 (the digest grammar's repository charset has no `:`). | `prismaquant/serving_runtime_patch_set.py`; `prismaquant/serving_runtime_patches/glm53_nope_sm120/MANIFEST.json`; `prismaquant/serving_runtime_patches/glm53_kpool_tail_slot_mapping/MANIFEST.json`; `tests/test_serving_runtime_patch_set.py`; RobTand/prismaquant#543; RobTand/prismaquant#1614 | HIGH | Serve the 45-layer body on the derived image and re-run the eager-vs-graph comparison; push the image and record its registry digest; then decide, as a contract question for Rob and not a worker fix, whether a patched serving runtime can be attested at all, and if so what it publishes. |
 | D39 | **An fp4 table's rows bind to no full-engine bytes** (added 2026-09-13, RobTand/prismaquant#559; leg (a) closed 2026-09-13 by #566). Measured on one box in one session, nine cells over the three layer-0 MLP units at `TESSERA_E4M3_K1_R1006`, `TESSERA_BF16_K1_R1792` and `TESSERA_E2M1_K2_R896`, all nine `timing_admissible`. **Leg (a), CLOSED (#566):** `native_receipt_table.derive_context` required `identity_sha256(panel["runtime"])` to be equal across every bound panel, and the only field that differed across those nine panels was `runtime.native_libraries` -- the three fp4 panels carry the JIT-built `tessera_nvfp4_84439e84….so` (sha256 `7bfe7714dba8f16b…`) and the other six do not -- so the emitter refused with `native receipts were produced on more than one runtime` and no mixed-route table was emitted at all. A route's kernel is not a coordinate of the box: `native_libraries` is now the one runtime field a bound panel may differ in (`PER_ROUTE_RUNTIME_FIELD`, `:112`), with every other field still equal over the same canonical digest, the field sets still required to match, and a shared library path still required to carry the same bytes (`_require_one_runtime`, `:261`). The per-row binding was already the stronger one and is untouched (`runtime_provenance.py:760`). Re-emitted on the nine real receipts, the table now emits with 9 rows (sha256 `24cac16b1c9e3f57…`) and the refusal that stands is leg (b)'s. **Leg (b), OPEN (#570):** `runtime_provenance.py:407-421` requires every native production library to exist in the full-engine run at the same digest, and the #399 `engine-a5` run served a `TESSERA_FP8` artifact that never loaded that extension, so an fp4 table refuses at `load_runtime_relation` with `complete native production dependency coverage: evidence mismatch`, naming the unbound library. Satisfiable in principle -- the coverage rule is one-directional and the relation already models a full-engine superset -- but not by an engine run on a single-route-class artifact; #570 carries the two ways and their costs, including that the relation's `configuration` names the served artifact, so a new one means re-launching every native cell. The fp8/bf16 control table from the same session admits 6 rows, so neither refusal is a harness fault. Separately observed there and **fixed since, in #565**: a row's `binding.operator_route` was the GEMM symbol alone, so `TESSERA_FP8` and `TESSERA_NVFP4` rows were indistinguishable in that field although they run different kernels on differently packed operands. It now carries the route class -- the whole declared route, canonically spelled by `native_operator_panel.operator_route_identity`. **Leg (b)'s decision, 2026-09-17 (RobTand/prismaquant#570): option A, and B is refused as a design, not merely not taken.** The relation attests one *joint* observation: one engine process, under one configuration (image, `engine_args`, `environment`, served artifact), loaded a production library set, and every native cell's production libraries are a subset of it at equal bytes -- which is what makes a native operator timing a price for serving under that configuration. B ("covered by *some* full-engine run") does not leak through `common`: `common` (`_observe_run`, `:359-368`) is image, image identity, GPU, versions, arithmetic, package and contract digests, core manifest and plugin roster -- box-and-install coordinates equal across every run by construction, so it cannot tell two full-engine runs apart. It leaks through `configuration_sha256`, which is **not** in `common`: it is checked per run against the ONE relation `configuration` (`:259` for the full-engine record, `:303-307` for a native launcher's `selection`). A uniform artifact loads one route class's kernels, so B needs N configurations, one per served artifact, while a native cell is stamped against exactly one; a library covered by the full-engine run of a *different* configuration binds the cell's `(engine_args, environment, artifact)` to an engine that ran under another -- a pairing no process produced. The invariant that would make B safe ("covered by the full-engine run of the configuration the cell was launched under") collapses it into N independent single-configuration relations, and the *table* then still composes prices measured under an fp8 serve and an fp4 serve into a price for a mixed serve nobody ran. That composition is a claim about the runtime's loading behaviour with no published table behind it, and principle 14 refuses it. The JIT identity sharpens the point: `tessera.serving.ext._build_identity` keys the nvfp4 module on source, platform token, torch, CUDA, SOABI, compilers and ABI -- nothing the artifact contributes -- so a mixed serve is *expected* to build the same module name, and byte equality of that build is exactly what the relation checks and only a serve establishes; B would assert it, A observes it. **B's one advantage, reusing the 2026-09-13 cells, is zero for three independent reasons**: a new served artifact is a new configuration digest (`:307`); 0 of 49 panels carry `activation_quantizer_attestation` and stamping it changes `panel_sha256` (D37); and every 2026-09-13 receipt names `runtime_contract_sha256` `a688f8de…` (producer `d403cc5a31`) while the pin names `db9ca4c0…` (`4c384e6049`), so the receipts were produced on a runtime whose contract the current pin does not name. Under either option every cell is relaunched; A costs no contract surface and yields the mixed artifact the PACT axis needs anyway (three attested rungs = three route classes, #572). Pinned in code by `tests/test_runtime_provenance.py`: the one-full-engine-run shape A produces is admitted, a library the one run never loaded refuses by name, and a second full-engine run equal in every common coordinate is refused (`full-engine observation coverage`) rather than adopted as cover -- a guard that passes today and fails the day B lands. **Scope**: 3 attested rungs x 7 layer-0 units = **21 cells**, on one GPU (`_observe_run` equates every run's `gpu.uuid`), under one new configuration naming one mixed artifact whose layer 0 spans `TESSERA_E2M1_K2_R896`, `TESSERA_E4M3_K1_R1024` and `TESSERA_BF16_K1_R1792` with fused siblings (qkv, gate/up) in one family; the other 27 layers uniform at an attested rung. **Blocked, not merely unscheduled**, and the blocker moved: the re-freeze needs a producer-source tree carrying tessera#546's widened `validate_panel`, and **no post-#546 Tessera commit carries the pinned contract** (`9f93e144fb`, the #546 merge, gives `be06cb59…`; `master` `8068ea091` gives `80d58f1a…`; only `4c384e6049` gives `db9ca4c0…`), so the tree is either a real branch commit `4c384e6049` + #546's `experiments/` change, or a PQ re-pin forward; never a synthetic tree with no commit identity. **2026-09-19:

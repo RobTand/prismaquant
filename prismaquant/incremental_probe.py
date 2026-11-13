@@ -72,24 +72,6 @@ def _env_flag(name: str, *, default: bool) -> bool:
     return raw not in ("0", "", "false", "False", "FALSE", "no", "NO")
 
 
-# ---- Per-channel Fisher marginals -------------------------------------
-# The per-element diagonal H[o,i] = Σ_t g[t,o]²·x[t,i]² is unstorable at
-# scale (47k Linears × 17 MB ≈ 800 GB — the reason only two scalars
-# survive today). Its two MARGINALS are storable, and they are what a
-# per-channel sensitivity contract actually needs:
-#
-#   fisher_row[o] = Σ_i H[o,i]      fisher_col[i] = Σ_o H[o,i]
-#
-# plus the two pure factors (g_sq_sum, act_sq_sum) that let a consumer
-# separate "this output channel has hot gradients" from "this input
-# channel has hot activations", and act_absmax for clipping decisions.
-#
-# The row/col marginals are read off the `chunk_h` every accumulation
-# site already materializes, so they cost no extra matmul AND satisfy
-# sum(fisher_row) == sum(fisher_col) == chunk_h.sum() by construction —
-# that identity is the wiring check (tests/test_probe_marginals.py).
-
-
 def _read_proc_status_kb(*keys: str) -> dict[str, int]:
     """Read /proc/self/status for the given keys (e.g. 'VmHWM', 'VmRSS').
     Returns a dict of key -> kilobytes. Missing keys map to 0."""

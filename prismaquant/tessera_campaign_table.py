@@ -229,10 +229,9 @@ def stack_sample_from_probe(
     )
 
 
-#: ``float32`` machine epsilon.  The probe accumulates the packed row's
-#: ``h_trace`` and its ``h_trace_per_expert`` vector from the same raw sums and
-#: divides both by the same global token count
-#: (``sensitivity_probe.finalize_fisher_stats``), so the two agree exactly in
+#: ``float32`` machine epsilon.  The Fisher probe (retired by #3448) summed the
+#: packed row's ``h_trace`` and its ``h_trace_per_expert`` vector from the same
+#: raw sums and divided both by the same global token count, so the two agree in
 #: exact arithmetic.  They are stored at ``float32``, which is the only reason
 #: they differ at all, so the admissible discrepancy is a property of that
 #: dtype and of how many terms are summed -- not a tolerance anyone chose.
@@ -1208,17 +1207,11 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
     without replacement, with a take-all stratum.  Three parts, each of which
     is load-bearing:
 
-    **Proportional to what.** The stack total the allocator needs is
-    ``sum_e h_e * mse_e``.  ``h_e`` is free (the probe already has it) and
-    ``mse_e`` costs an encode, so drawing proportional to ``h_e`` leaves only
-    the spread of ``mse_e`` in the estimator's variance.  On LFM2.5 layer 18
-    the per-expert ``h_trace`` spans 9.6e4 to 7.7e6 (CV ~1.0) while the
-    cross-expert spread of ``mse`` at a fixed rung is CV 0.33-0.55, so this is
-    where the variance is. A uniform draw with the correct Horvitz-Thompson
-    weights remains unbiased, but carries the product's spread. The planner
-    requires Fisher weights and provides no uniform fallback.
+    **Proportional to what.** The caller passes the census's per-expert
+    routed-row counts. A uniform draw with the correct Horvitz-Thompson
+    weights is also unbiased, but it carries more variance.
 
-    **The take-all stratum.** With ``h`` this dispersed, ``n * h_i / sum(h)``
+    **The take-all stratum.** With dispersed sizes, ``n * h_i / sum(h)``
     exceeds one for the largest experts.  Clipping that to one would leave
     ``sum(pi) < n`` and bias the estimate low.  Instead those experts are
     taken with certainty, removed from the frame, and the rest re-solved --
@@ -1234,16 +1227,11 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
     is derived for randomized-order systematic sampling and is not justified
     under expert-index or ``h``-sorted order.
 
-    Determinism, and what the seed is deliberately NOT: the stream is keyed on
-    ``(seed, stack)`` only, never on ``h``.  The probe is not bit-reproducible
-    across runs, and systematic sampling is continuous in ``pi``, so a
-    re-probed ``h`` perturbs this draw slightly; hashing ``h`` into the seed
-    would instead redraw the whole stack on every re-probe.
+    Determinism: the stream is keyed on ``(seed, stack)`` only, never on
+    the sizes, so a small change of sizes perturbs the draw slightly instead
+    of redrawing the whole stack.
 
-    An expert with ``h_e == 0`` gets ``pi_e = 0`` and is never encoded, which
-    is exact rather than a rounding: under the campaign's Fisher convention a
-    token never routed to an expert contributes zero gradient, so its term in
-    the total is zero, not merely small.
+    An expert with size 0 gets ``pi_e = 0`` and is never encoded.
 
     Returns the whole draw, including everything a variance estimate needs:
     ``units``, ``inclusion_probability`` (over the full frame), ``certainty``,
@@ -1337,15 +1325,6 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
             "start": start, "random_draws": int(remaining)}
 
 
-#: The size sources a stack draw may be proportional to.  ``probe`` is the
-#: per-expert Fisher vector, which is what the estimator's variance argument
-#: rests on; ``counts`` is the census's per-expert routed-row count, which is
-#: the ONLY per-expert size available when no probe exists -- a routed-token
-#: proxy for ``h_trace`` and never a substitute for it (RobTand/prismaquant#495
-#: part 1, and the report's section 3.6 bullet on sizes).
-STACK_SAMPLE_SIZE_SOURCES = ("probe", "counts")
-
-
 #: The design a ``counts``-sized draw declares, so a reader of ``units.json``
 #: can tell which vector the inclusion probabilities are proportional to
 #: without re-deriving it.
@@ -1353,34 +1332,18 @@ STACK_SAMPLE_COUNTS_SUFFIX = "_counts"
 
 
 def _stack_draw_sizes(record: Mapping, sample: StackExpertSample) -> dict:
-    """The sizes a stack's draw was made proportional to.
-
-    A record that declares its own ``sizes`` replays on those; one that does
-    not is a probe-sized draw and replays on the Fisher vector, exactly as
-    every record written before #495 does.
-    """
+    """The census counts a stack's draw was made proportional to."""
     sizes = record.get("sizes")
-    if sizes is None:
-        return {str(e): h for e, h in enumerate(sample.h_trace_per_expert)}
-    if str(sizes.get("source")) not in STACK_SAMPLE_SIZE_SOURCES:
+    if sizes is None or str(sizes.get("source")) != "counts":
         raise StackSampleError(
-            f"{sample.packed_qname}: size source {sizes.get('source')!r} is "
-            f"not one of {list(STACK_SAMPLE_SIZE_SOURCES)}")
+            f"{sample.packed_qname}: the draw declares no census counts; a "
+            "draw proportional to the probe's h_trace is retired")
     values = sizes.get("values")
     if not isinstance(values, Mapping) or len(values) != sample.num_experts:
         raise StackSampleError(
             f"{sample.packed_qname}: a declared size vector must carry one "
             f"value per expert ({sample.num_experts})")
     return {str(e): float(values[str(e)]) for e in range(sample.num_experts)}
-
-
-def _stack_design(record: Mapping, draw: Mapping) -> str:
-    """The design name a draw carries, including which sizes it used."""
-    sizes = record.get("sizes")
-    method = str(draw["method"])
-    if sizes is None or str(sizes.get("source")) == "probe":
-        return method
-    return method + STACK_SAMPLE_COUNTS_SUFFIX
 
 
 def selection_stack_samples(selection: Mapping, profile) -> dict[str, StackExpertSample]:
@@ -1415,16 +1378,14 @@ def selection_stack_samples(selection: Mapping, profile) -> dict[str, StackExper
                 _stack_draw_sizes(record, sample),
                 len(sample.sampled_experts), seed=sample.seed, stack=name)
             if (record.get("draw") != replay
-                    or sample.design != _stack_design(record, replay)
+                    or sample.design != replay["method"] + STACK_SAMPLE_COUNTS_SUFFIX
                     or list(sample.sampled_experts) != sorted(int(e) for e in replay["units"])
                     or dict(sample.inclusion_prob) != {
                         int(e): p for e, p in replay["inclusion_probability"].items()}):
                 raise StackSampleError(f"{name}: packed draw receipt does not replay from probe and seed")
-            declared = record.get("sizes")
-            if declared is not None and str(declared.get("sha256")) != replay["size_sha256"]:
-                # The digest is what binds the DECLARED size vector to the one
-                # the draw was actually made proportional to; without it a
-                # record could name ``counts`` and carry a probe-sized draw.
+            if str(record["sizes"].get("sha256")) != replay["size_sha256"]:
+                # The digest binds the DECLARED size vector to the one the
+                # draw was actually made proportional to.
                 raise StackSampleError(
                     f"{name}: declared size digest does not match the draw's")
             if set(sample.inclusion_prob) != set(range(sample.num_experts)):
@@ -1980,232 +1941,6 @@ def verify_joint_campaign_scope(plan: dict, *, require_scope: str,
             f"{scope['selection_sha256']}). A diagnostic subset is its own "
             "evidence; submit the campaign-scoped plan for the campaign's score.")
     return scope
-
-
-def _joint_row_binds_cell(row: dict, name: str, fmt: str, *, label: str) -> bool:
-    """Whether this row is a joint A-side **for this cell**.
-
-    The predicate itself is the shared one
-    (:func:`prismaquant.joint_aura_rows.joint_row_binds_cell`) so that the
-    submission-time gate and the stage that computes coverage cannot drift; the
-    only thing added here is this tool's own refusal type and label.
-    """
-    from prismaquant.joint_aura_rows import joint_row_binds_cell
-
-    try:
-        return joint_row_binds_cell(row, name, fmt, where=label)
-    except ValueError as error:
-        raise ScopeRefused(str(error)) from error
-
-
-def bound_joint_cells(costs: dict, *, label: str) -> set:
-    """The ``(unit, format)`` cells whose own joint A-side is bound to them.
-
-    One walk, one answer, for both readers of "this artifact already carries an
-    activation term at this cell": the coverage roster below, and ``submit-aqua``
-    deciding whether a stage would add anything. A row that does not bind its own
-    key is a refusal here rather than a cell either reader may count, so the two
-    cannot disagree about which cells are covered.
-    """
-    bound: set = set()
-    for name, entry in costs.items():
-        if not isinstance(entry, dict):
-            continue
-        for fmt, row in entry.items():
-            if not isinstance(row, dict):
-                continue
-            if _joint_row_binds_cell(row, name, fmt, label=label):
-                bound.add((name, fmt))
-    return bound
-
-
-def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
-                         *, label: str = "aqua row",
-                         accept_joint_cells_outside_plan: bool = False,
-                         ) -> "tuple[dict, frozenset]":
-    """The exact ``(unit, format)`` roster AQUA is asked to price, from the plan.
-
-    Returns ``(record, cells)``. ``cells`` is the requested roster itself; the
-    record is the same thing as counts and a digest, so a submission can stamp
-    it without carrying hundreds of thousands of tuples in its summary.
-
-    The roster is the **plan's**, read from the cost table the plan binds at
-    ``inputs.merged_cost`` and re-checked against the sha256 it declares there.
-    That table is the campaign's own priced surface: the cells the allocation is
-    allowed to select from. ``--cost-in`` -- the weight-only or joint-merged
-    table the stage merges an A-side into -- has to reproduce it unit for unit.
-
-    Deriving the requested set from the artifact under test is the hole this
-    closes. The stage states its acceptance against the cells it is given, so a
-    table narrowed to the cells that already carry a price leaves the gate
-    holding a denominator that the narrowing moved: deleting one unit's cell
-    while another unit still carries that format leaves the unit roster exact
-    and the carried-format union exact, and if the remainder is joint-priced the
-    run reads as complete coverage while a planned cell has no A-side at all.
-    Binding to the plan's own table makes that case a refusal, and makes a cost
-    table edited after the plan was sealed a refusal of its own.
-
-    ``formats`` is the campaign's menu and has to be exactly the union of the
-    plan's cells. Naming a subset would move the denominator the same way: the
-    cells it left out are exactly the ones whose A-side would then go unchecked.
-
-    Extra cells are read the same way round. A cell the plan never priced that
-    is *not* already joint-priced would be priced by this stage, which makes the
-    gate stricter rather than narrower -- but it is still a row the campaign's
-    own table does not have, so it refuses.
-
-    A cell the plan never priced that already carries its own joint A-side is a
-    joint pass's addition. Being joint-priced is not by itself evidence that the
-    row belongs to *this* plan: the row is internally valid and its own cell is
-    the one it names, but nothing in it was compared with the plan's draw, its
-    capture or its candidate menu, so a pass over a wider roster would place
-    prices this campaign never priced beside the plan's own table and the
-    artifact would read as the plan's surface. It refuses, naming the re-seal
-    instead, unless the caller passes
-    ``accept_joint_cells_outside_plan`` -- which is how an operator reusing an
-    artifact sealed against an older roster keeps that reuse explicit and
-    recorded as unverified rather than silent. A row whose operator coordinate
-    is not the key it was found under is a refusal either way.
-    """
-    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-
-    census = _bound_json(plan, "census", label=label)
-    roster = census.get("unit_shapes")
-    if not isinstance(roster, dict) or not roster:
-        raise ScopeRefused(f"{label}: the plan's bound census carries no roster")
-    planned = _bound_pickle(
-        plan.get("inputs") or {}, "merged_cost", label=label,
-        where="joint plan inputs.merged_cost")
-    planned_costs = planned.get("costs")
-    if not isinstance(planned_costs, dict) or not planned_costs:
-        raise ScopeRefused(
-            f"{label}: the cost table the plan binds carries no 'costs' table, "
-            "so it does not say which cells the campaign priced")
-    costs = payload.get("costs")
-    if not isinstance(costs, dict) or not costs:
-        raise ScopeRefused(f"{label}: the cost artifact carries no 'costs' table")
-    # One walk, before anything is counted: every joint row has to be its own
-    # cell. A row that is not raises here, so no later reader sees a set with a
-    # row whose coordinate this function never checked.
-    bound_joints = bound_joint_cells(costs, label=f"{label} cost artifact")
-    # The unit roster is checked on BOTH tables against the plan's bound census.
-    # A unit the plan priced and the artifact lacks would leave the campaign
-    # short an A-side while reading as complete; a unit the artifact carries
-    # that the plan never priced is not the campaign's cell at all.
-    for what, table in (("the cost table the plan binds", planned_costs),
-                        ("the cost artifact", costs)):
-        missing = sorted(set(roster) - set(table))
-        extra = sorted(set(table) - set(roster))
-        if missing or extra:
-            raise ScopeRefused(
-                f"{label}: {what} is not the plan's roster -- "
-                f"{len(missing)} unit(s) the plan priced are absent (e.g. "
-                f"{missing[:3]}) and {len(extra)} unit(s) it never priced are "
-                f"carried (e.g. {extra[:3]}).")
-    wanted = [str(item) for item in formats]
-    if len(set(wanted)) != len(wanted) or not wanted:
-        raise ScopeRefused(f"{label}: --formats must name each format once")
-
-    cells: set = set()
-    planned_formats: set = set()
-    units_missing: list = []
-    missing_total = 0
-    units_extra: list = []
-    extra_total = 0
-    joint_extra = 0
-    for name in sorted(roster):
-        planned_entry = planned_costs[name]
-        if not isinstance(planned_entry, dict):
-            raise ScopeRefused(
-                f"{label}: the cost table the plan binds has no per-format row "
-                f"for {name}")
-        entry = costs[name]
-        if not isinstance(entry, dict):
-            raise ScopeRefused(f"{label}: {name} has no per-format row")
-        expected = {fmt for fmt, row in planned_entry.items()
-                    if isinstance(row, dict)}
-        carried = {fmt for fmt, row in entry.items() if isinstance(row, dict)}
-        planned_formats |= expected
-        # The requested roster is the plan's cells, so it is the same digest for
-        # the same plan whether or not a joint pass has since added rows of its
-        # own.
-        cells.update((name, fmt) for fmt in expected)
-        gone = sorted(expected - carried)
-        if gone:
-            missing_total += len(gone)
-            units_missing.append(
-                # An empty entry is named as such rather than by one of the
-                # cells it lost: it is the shape a truncating write or a
-                # dropped merge produces, and the unit is present exactly as
-                # the roster demands.
-                f"{name}@<entry empty>" if not carried else f"{name}@{gone[0]}")
-        outside = carried - expected
-        invented = []
-        outside_joints = []
-        for fmt in sorted(outside):
-            if (name, fmt) in bound_joints:
-                outside_joints.append(fmt)
-                joint_extra += 1
-            else:
-                invented.append(fmt)
-        if outside_joints and not accept_joint_cells_outside_plan:
-            joints = ", ".join(f"{name}@{fmt}" for fmt in outside_joints[:5])
-            raise ScopeRefused(
-                f"{label}: the cost artifact carries {len(outside_joints)} "
-                f"joint-priced cell(s) the plan's own cost table never priced "
-                f"(e.g. {joints}). A joint row is bound to the coordinate it "
-                "names and to nothing else -- it is not compared with this "
-                "plan's draw, capture or candidate menu -- so a pass over a "
-                "wider roster would place this campaign's table beside prices "
-                "it never priced. Seal a requested roster that names them, or "
-                "pass --accept-joint-cells-outside-plan to reuse the artifact "
-                "as unverified.")
-        if invented:
-            extra_total += len(invented)
-            units_extra.append(f"{name}@{invented[0]}")
-    if missing_total or extra_total:
-        # Bounded, like every other refusal here: a campaign has tens of
-        # thousands of units, and naming each one floods the log the operator
-        # has to read. The totals are the contract; the sample is what makes
-        # them checkable.
-        missing_units, extra_units = len(units_missing), len(units_extra)
-        units_missing, units_extra = units_missing[:5], units_extra[:5]
-        raise ScopeRefused(
-            f"{label}: the cost artifact is not the plan's priced surface -- it "
-            f"does not carry {missing_total} planned (unit, format) cell(s) "
-            f"across {missing_units} unit(s) (e.g. "
-            f"{', '.join(units_missing) or 'none'}) and carries {extra_total} "
-            f"cell(s) the plan's cost table never priced across "
-            f"{extra_units} unit(s) (e.g. "
-            f"{', '.join(units_extra) or 'none'}). The stage states its "
-            "acceptance against the requested cells, so an artifact that drops "
-            "one unit's cell while another unit still carries that format would "
-            "narrow the denominator instead of filling the hole.")
-    unnamed = sorted(planned_formats - set(wanted))
-    absent = sorted(set(wanted) - planned_formats)
-    if unnamed or absent:
-        raise ScopeRefused(
-            f"{label}: --formats {sorted(wanted)} is not the menu the plan "
-            f"prices -- the plan's cost table holds {unnamed} that are unnamed "
-            f"and none of {absent}. The requested set is the denominator the "
-            "coverage gate reads, so it is bound to the plan's cells rather "
-            "than narrowed to the ones that already have a price.")
-    record = {"requested_cells": len(cells),
-              "requested_units": len(roster),
-              "formats": sorted(wanted),
-              # Joint rows a joint pass added beyond the plan's own table. They
-              # are not part of the requested roster, and they are accepted only
-              # when the caller asked for that reuse explicitly: the flag is
-              # recorded here so an artifact holding cells this campaign never
-              # priced carries that fact into every receipt that stamps this
-              # record rather than reading as the plan's own surface.
-              "joint_cells_outside_plan": joint_extra,
-              "joint_cells_outside_plan_accepted_unverified": bool(
-                  joint_extra and accept_joint_cells_outside_plan),
-              "roster_sha256": canonical_json_sha256(
-                  {"units": sorted(roster), "cells": sorted(cells)},
-                  where=f"{label} requested roster")}
-    return record, frozenset(cells)
 
 
 def require_equal(field: str, values: dict) -> object:

@@ -91,8 +91,7 @@ one way and wider in another, and both belong on the artifact card:
     the blindness sits directly on the NVFP4-vs-source margin, which is the
     single margin this lane's whole allocation turns on.
 
-``aqua_activation_cost`` (the AQUA A-side) is the wired remedy and composes
-additively through ``cost_entry_act_dloss``; this module leaves ``act_dloss``
+No A-side coster exists in this tree. This module leaves ``act_dloss``
 absent rather than writing a zero, because "unmeasured" and "zero" are
 different claims and the former must stay visible.
 """
@@ -192,8 +191,7 @@ ACTIVATION_BLINDNESS_LIMITATION = (
     "is therefore activation-quantization-blind on the one margin it "
     "allocates over -- costed rung vs identity-activation source terminal. "
     "The A side is not zero; it is unmeasured, and act_dloss is left absent "
-    "rather than written as 0.0. AQUA (aqua_activation_cost) is the wired "
-    "remedy; a served A/B is the arbiter."
+    "rather than written as 0.0. A served A/B is the arbiter."
 )
 
 

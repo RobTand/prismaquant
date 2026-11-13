@@ -804,10 +804,10 @@ def test_no_call_site_swallows_the_dead_override_refusal():
 
     This is a structural pin as well as 18 behavioural ones above, because the
     rule is structural: a dead override must never be *answered*. It therefore
-    also covers the four sites whose enclosing function cannot be reached
+    also covers the sites whose enclosing function cannot be reached
     without a GPU, a loaded checkpoint or a built streaming context
-    (`aqua_activation_cost.py:661`, `build_rtn_cache.py:500`,
-    `sensitivity_probe.py:3592`, `streaming_production_cache.py:1776`) — and it
+    (`build_rtn_cache.py:500`, `sensitivity_probe.py:3592`,
+    `streaming_production_cache.py:1776`) — and it
     fails for a call site added next month, which no per-site test would.
 
     The allowed shapes are (a) `except DeadVendoredOverrideError: raise` ahead

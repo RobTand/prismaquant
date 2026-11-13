@@ -1,7 +1,6 @@
 {
   "seconds": 20,
   "slow": {
-    "tests/test_aqua_activation_cost.py::test_price_activation_only_follows_the_explicit_predicate[NVFP4-True]": 41,
     "tests/test_bit_exact_cost_pricing.py::test_registry_act_bits_declaration_matches_activation_callable": 47,
     "tests/test_col_weights_render_identity.py::test_col_weights_is_bit_identical_for_non_weighted_formats[MXFP4]": 43,
     "tests/test_exact_mckp.py::test_identity_with_the_unbounded_runtime_solver_on_a_glm53_prefix[20-edge-0.5]": 153,
@@ -90,13 +89,6 @@
     "tests/test_tessera_tp_loader_axes.py::test_a_refused_cut_axis_refuses_the_rung_at_tp2": 61
   },
   "evidence": {
-    "tests/test_aqua_activation_cost.py::test_price_activation_only_follows_the_explicit_predicate[NVFP4-True]": {
-      "seconds": 20.284,
-      "run": 41278311643,
-      "attempt": 1,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/9/junit.xml"
-    },
     "tests/test_bit_exact_cost_pricing.py::test_registry_act_bits_declaration_matches_activation_callable": {
       "seconds": 23.174,
       "run": 41287142037,

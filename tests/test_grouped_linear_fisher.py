@@ -6,8 +6,6 @@ DSv4's `attn.wo_a` is an `nn.Linear` subclass whose forward consumes its
   - the probe inventory prices a declared grouped class as one
     `grouped_linear` unit (its probe row is pinned in
     tests/test_body_fisher_sweep.py);
-  - `finalize_fisher_stats` divides the per-group decomposition by the same
-    GLOBAL calibration token count as its scalar;
   - dispatch is explicit (profile-declared classes only) and fails fast
     when a declared class lacks its group count.
 
@@ -26,7 +24,6 @@ from torch import nn
 
 from prismaquant.probe_inventory import build_probe_inventory
 from prismaquant.sensitivity_probe import grouped_linear_groups
-from prismaquant.probe_statistics import finalize_fisher_stats
 
 G, R, D, T = 2, 3, 4, 4
 
@@ -60,22 +57,6 @@ class _DeclaringProfile:
 class _SilentProfile:
     def probe_grouped_module_class_names(self):
         return ()
-
-
-def test_finalize_normalizes_the_per_group_decomposition():
-    """`h_trace_per_group_raw` is a [G] decomposition of h_trace_raw; it
-    must divide by the same global count as its scalar."""
-    stats = {"grouped": {
-        "h_trace_raw": 96.0, "h_w2_sum_raw": 24.0,
-        "h_trace_per_group_raw": [40.0, 56.0],
-        "n_tokens_seen": 4,
-    }}
-    finalize_fisher_stats(stats, global_tokens=4)
-    s = stats["grouped"]
-    assert s["h_trace"] == pytest.approx(24.0)
-    assert s["h_trace_norm_tokens"] == 4
-    assert s["h_trace_per_group"] == pytest.approx([10.0, 14.0])
-    assert sum(s["h_trace_per_group"]) == pytest.approx(s["h_trace"])
 
 
 def test_inventory_prices_a_declared_grouped_class_as_one_grouped_unit():
