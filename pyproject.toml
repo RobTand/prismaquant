@@ -79,6 +79,7 @@ prismaquant = [
     "kernels/*_qualification.json",
     "data/*.pt",
     "data/*.json",
+    "fla_configs/*/*.json",
     "model_profiles/specs/*.json",
     "serving_profile_specs/*.json",
     "serve_dispatch_tables/*.json",

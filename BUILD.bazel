@@ -8526,6 +8526,11 @@ filegroup(
 )
 
 filegroup(
+    name = "files/prismaquant/fla_configs",
+    srcs = glob(["prismaquant/fla_configs/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
+)
+
+filegroup(
     name = "files/prismaquant/kernels",
     srcs = glob(["prismaquant/kernels/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
 )
@@ -8598,6 +8603,11 @@ filegroup(
 filegroup(
     name = "files/tools/ci",
     srcs = glob(["tools/ci/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
+)
+
+filegroup(
+    name = "files/tools/flux",
+    srcs = glob(["tools/flux/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
 )
 
 filegroup(
@@ -8877,6 +8887,7 @@ pq_py_library(
     ],
     data = [
         ":files/prismaquant/data",
+        ":files/prismaquant/fla_configs",
         ":files/prismaquant/lane_specs",
         ":files/prismaquant/model_profiles/specs",
         ":files/prismaquant/serving_profile_specs",
@@ -8942,6 +8953,7 @@ pq_py_library(
         ":prismaquant/export_partition",
         ":prismaquant/file_identity",
         ":prismaquant/fixed_head",
+        ":prismaquant/fla_config_pin",
         ":prismaquant/flux_jobs",
         ":prismaquant/fp8_dynamic",
         ":prismaquant/gguf_formats",
@@ -9531,6 +9543,17 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "prismaquant/fla_config_pin",
+    srcs = [
+        "prismaquant/fla_config_pin.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
+    ],
+)
+
+pq_py_library(
     name = "prismaquant/flux_jobs",
     srcs = [
         "prismaquant/flux_jobs.py",
@@ -9841,6 +9864,7 @@ pq_py_library(
         ":prismaquant/calibration_data",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/digests",
+        ":prismaquant/fla_config_pin",
         ":prismaquant/gpu_guard",
         ":prismaquant/incremental_shards",
         ":prismaquant/io_spans",

@@ -1,0 +1,60 @@
+{
+ "autotune_entries": {
+  "22e321144ad36aaa2206bb3916a6e8e0": {
+   "autotune_key": [
+    128,
+    1,
+    true,
+    false,
+    true,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.float32"
+   ],
+   "config": {
+    "ir_override": null,
+    "kwargs": {
+     "BT": 32
+    },
+    "maxnreg": null,
+    "num_ctas": 1,
+    "num_stages": 3,
+    "num_warps": 8
+   }
+  },
+  "bb09d3d85f718f18fbed7c2f26c6dbed": {
+   "autotune_key": [
+    128,
+    24,
+    true,
+    false,
+    true,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.float32"
+   ],
+   "config": {
+    "ir_override": null,
+    "kwargs": {
+     "BT": 16
+    },
+    "maxnreg": null,
+    "num_ctas": 1,
+    "num_stages": 3,
+    "num_warps": 4
+   }
+  }
+ },
+ "kernel_name": "layer_norm_gated_bwd_kernel",
+ "triton_version": "3.6.0"
+}
