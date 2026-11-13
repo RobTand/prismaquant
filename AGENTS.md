@@ -133,8 +133,8 @@ references to another repository do not satisfy this check.
 12. **Keep `docs/ARCHITECTURE.md` current in the same commit.** A change to
     pipeline defaults, the stage graph, the format menu, the plugin contract,
     serving-lane defaults, or ship gates is incomplete until
-    `docs/ARCHITECTURE.md` (and its diagrams, if topology changed) reflects it
-    and its provenance block is re-stamped. `tests/test_docs_staleness.py` and
+    `docs/ARCHITECTURE.md` (and its diagrams, if topology changed) reflects it.
+    `tests/test_docs_staleness.py` and
     `tests/test_architecture_doc.py` enforce the mechanical subset. Dated
     results docs and handovers are append-only history, never a substitute.
 
