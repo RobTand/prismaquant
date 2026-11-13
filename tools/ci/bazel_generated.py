@@ -10,17 +10,17 @@ FIX = 'tools/bazel/generate.sh'
 
 
 def commands():
-    """Every derived-input check. The gate runs these on each head tree."""
+    """Every derived-input check. The hosted gate lane runs them on each head tree."""
     return [
         [sys.executable, 'tools/bazel/requirements.py', '--check'],
         [sys.executable, 'tools/bazel/build_files.py', '--check'],
     ]
 
 
-def check_generated(checks=None, root=ROOT):
+def check_generated():
     failures = []
-    for command in commands() if checks is None else checks:
-        result = subprocess.run(command, cwd=root, capture_output=True, text=True)
+    for command in commands():
+        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
         if result.returncode:
             failures.append(f'$ {shlex.join(map(str, command))}\n{result.stdout}{result.stderr}')
     if failures:
