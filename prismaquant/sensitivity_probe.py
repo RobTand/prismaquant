@@ -71,7 +71,6 @@ from . import probe_statistics
 import json
 import atexit
 import os
-import random
 import re
 import shutil
 from collections import defaultdict
@@ -1067,29 +1066,6 @@ def install_packed_expert_hooks(
     return meta
 
 
-def resolve_execution_device(model: nn.Module, requested_device: str) -> torch.device:
-    """Choose the device used for input ids / embeddings during probing.
-
-    When `device_map="auto"` is used for model load, the model can be sharded
-    across CPU and GPU. In that case we want to feed tokens to the device that
-    owns the input embedding weights rather than assuming a single global
-    `cuda`/`cpu` target.
-    """
-    try:
-        emb = model.get_input_embeddings()
-        if emb is not None and hasattr(emb, "weight"):
-            return emb.weight.device
-    except Exception:
-        pass
-    for p in model.parameters():
-        if p.device.type != "meta":
-            return p.device
-    return torch.device(requested_device)
-
-
-# ---------------------------------------------------------------------------
-# Model-agnostic MoE discovery
-# ---------------------------------------------------------------------------
 def discover_moe_structure(
     model: nn.Module,
     profile=None,
@@ -2661,66 +2637,3 @@ class FisherAccumulator:
         self._fwd_handles.clear()
         self._bwd_handles.clear()
         self._moe_block_handles.clear()
-
-
-# ---------------------------------------------------------------------------
-# Calibration data
-# ---------------------------------------------------------------------------
-
-
-def per_token_ce(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    shift_logits = logits[..., :-1, :].contiguous()
-    shift_labels = labels[..., 1:].contiguous()
-    ce = F.cross_entropy(
-        shift_logits.reshape(-1, shift_logits.size(-1)),
-        shift_labels.reshape(-1), reduction="none")
-    return ce.view(shift_labels.size())
-
-
-def load_probe_model_and_tokenizer(model_path: str,
-                                   requested_device: str,
-                                   dtype: torch.dtype,
-                                   device_map: str | None = None,
-                                   gradient_checkpointing: bool = True,
-                                   offload_folder: str | None = None):
-    from prismaquant.model_runtime import initialize_model_runtime
-    initialize_model_runtime()
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    staged = stage_text_only(model_path)
-    tokenizer = AutoTokenizer.from_pretrained(staged, trust_remote_code=True)
-    load_device_map = device_map if device_map is not None else requested_device
-
-    from_pretrained_kwargs = {
-        "torch_dtype": dtype,
-        "device_map": load_device_map,
-        "low_cpu_mem_usage": False,
-        "trust_remote_code": True,
-    }
-    if offload_folder is not None:
-        import os as _os
-        _os.makedirs(offload_folder, exist_ok=True)
-        from_pretrained_kwargs["offload_folder"] = offload_folder
-        from_pretrained_kwargs["offload_buffers"] = True
-        # low_cpu_mem_usage is forced True internally when device_map is set;
-        # disable the explicit override to let HF pick whatever's correct.
-        from_pretrained_kwargs.pop("low_cpu_mem_usage", None)
-    model = AutoModelForCausalLM.from_pretrained(staged, **from_pretrained_kwargs)
-    model.eval()
-
-    # Packed MoE experts (e.g. Qwen3.5/3.6's 3D `gate_up_proj` /
-    # `down_proj`) are sensed natively by FisherAccumulator via
-    # install_packed_expert_hooks. No unfuse step needed; auto_round is
-    # not a probe-time dependency.
-
-    exec_device = resolve_execution_device(model, requested_device)
-    print(f"[probe] execution device: {exec_device} "
-          f"(load device_map={load_device_map})", flush=True)
-
-    for p in model.parameters():
-        p.requires_grad_(False)
-    if gradient_checkpointing:
-        model.gradient_checkpointing_enable(
-            gradient_checkpointing_kwargs={"use_reentrant": False})
-
-    return staged, tokenizer, model, exec_device, load_device_map
