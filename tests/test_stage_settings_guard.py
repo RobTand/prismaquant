@@ -48,7 +48,7 @@ def _admission(artifact: Path, stage: str = "probe"):
 
 
 def _document(**settings):
-    return pipeline.stage_settings_document(settings)
+    return pipeline.stage_settings_document({"ACT_ROW_SELECTION": "rule", **settings})
 
 
 def _full_settings():
@@ -380,7 +380,7 @@ def test_legacy_flat_manifest_still_guards_its_stage(tmp_path):
     artifact.write_bytes(b"x")
     (tmp_path / "probe.pkl.settings.json").write_text(json.dumps({
         "MODEL_PATH": "m", "DATASET": "d", "NSAMPLES": "8", "SEQLEN": "512",
-        "CALIBRATION_MODALITY": "text-only",
+        "CALIBRATION_MODALITY": "text-only", "ACT_ROW_SELECTION": "rule",
     }))
     same = _document(MODEL_PATH="m", DATASET="d", NSAMPLES="8", SEQLEN="512",
                      CALIBRATION_MODALITY="text-only")

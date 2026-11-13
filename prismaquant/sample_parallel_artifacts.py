@@ -12,7 +12,10 @@ from pathlib import Path
 import numpy as np
 import torch
 from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, is_sha256hex
-from .probe_statistics import merge_marginals, finalize_fisher_stats
+from .probe_statistics import (
+    _FMIX32_C1, _FMIX32_C2, _U16_MASK, _U32_MASK, fmix32_tensor,
+    finalize_fisher_stats, merge_marginals,
+)
 
 SAMPLE_PARALLEL_META_FIELDS = (
     "sample_parallel",
@@ -47,14 +50,6 @@ ACTIVATION_PRIORITY_KEY_DOMAIN = (
 )
 
 ACTIVATION_PRIORITY_MAX_ROWS = 1 << 32
-
-_U16_MASK = (1 << 16) - 1
-
-_U32_MASK = (1 << 32) - 1
-
-_FMIX32_C1 = 0x85EBCA6B
-
-_FMIX32_C2 = 0xC2B2AE35
 
 _CALIBRATION_HASH_RE = re.compile(r"[0-9a-f]{32}")
 
@@ -140,27 +135,6 @@ def activation_row_priority_scalar(
     k0, k1 = activation_priority_key(global_calibration_hash, qname)
     return _fmix32_scalar(_fmix32_scalar(row ^ k0) ^ k1)
 
-def _mullo32_tensor(values: torch.Tensor, constant: int) -> torch.Tensor:
-    """Vectorized low uint32 product with all int64 intermediates < 2**49."""
-    low = torch.bitwise_and(values, _U16_MASK)
-    high = torch.bitwise_right_shift(values, 16)
-    return torch.bitwise_and(
-        low * int(constant)
-        + torch.bitwise_left_shift(
-            high * int(constant & _U16_MASK), 16,
-        ),
-        _U32_MASK,
-    )
-
-def _fmix32_tensor(values: torch.Tensor) -> torch.Tensor:
-    x = torch.bitwise_and(values, _U32_MASK)
-    x = torch.bitwise_xor(x, torch.bitwise_right_shift(x, 16))
-    x = _mullo32_tensor(x, _FMIX32_C1)
-    x = torch.bitwise_xor(x, torch.bitwise_right_shift(x, 13))
-    x = _mullo32_tensor(x, _FMIX32_C2)
-    x = torch.bitwise_xor(x, torch.bitwise_right_shift(x, 16))
-    return torch.bitwise_and(x, _U32_MASK)
-
 def activation_row_priorities(
     global_calibration_hash: str,
     qname: str,
@@ -176,8 +150,8 @@ def activation_row_priorities(
         raise ValueError("global activation rows must be a one-dimensional tensor")
     rows = global_rows.detach().to(dtype=torch.long)
     k0, k1 = activation_priority_key(global_calibration_hash, qname)
-    first = _fmix32_tensor(torch.bitwise_xor(rows, k0))
-    return _fmix32_tensor(torch.bitwise_xor(first, k1))
+    first = fmix32_tensor(torch.bitwise_xor(rows, k0))
+    return fmix32_tensor(torch.bitwise_xor(first, k1))
 
 __all__ = [
     "ACTIVATION_CACHE_SHARD_SCHEMA",
