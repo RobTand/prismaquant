@@ -1240,9 +1240,8 @@ class ModelProfile(ABC):
         multimodal weight map).
 
         This is a construction fact only. It says nothing about the run's
-        inputs and never materializes the visual tower: that stays a
-        caller declaration (`_build_streaming_context(..., multimodal=True)`,
-        `materialize_tensors_streaming`'s meta tower)."""
+        inputs and never materializes the visual tower, which stays on
+        meta."""
         return False
 
     def stage_text_only_promote_inner_model_type(self) -> bool:

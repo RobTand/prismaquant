@@ -213,8 +213,7 @@ def _build_weight_map(model_path: str, *,
     When `multimodal=True` the multimodal umbrella arch is used in the
     streaming skeleton (body at `model.language_model.layers.X.*`,
     visual at `model.visual.*`); no rename is applied and visual/audio
-    keys are preserved so `_materialize` can load them onto the visual
-    tower. MTP stays dropped — MTP has its own synthesis path.
+    keys are preserved. MTP stays dropped — MTP has its own synthesis path.
 
     ``live_name`` replaces the profile's rename: a source scope
     (``ModelProfile.source_scope``) maps its own out-of-body keys and drops
