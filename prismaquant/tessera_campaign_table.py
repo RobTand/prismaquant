@@ -229,10 +229,9 @@ def stack_sample_from_probe(
     )
 
 
-#: ``float32`` machine epsilon.  The probe accumulates the packed row's
-#: ``h_trace`` and its ``h_trace_per_expert`` vector from the same raw sums and
-#: divides both by the same global token count
-#: (``sensitivity_probe.finalize_fisher_stats``), so the two agree exactly in
+#: ``float32`` machine epsilon.  The Fisher probe (retired by #3448) summed the
+#: packed row's ``h_trace`` and its ``h_trace_per_expert`` vector from the same
+#: raw sums and divided both by the same global token count, so the two agree in
 #: exact arithmetic.  They are stored at ``float32``, which is the only reason
 #: they differ at all, so the admissible discrepancy is a property of that
 #: dtype and of how many terms are summed -- not a tolerance anyone chose.
@@ -1208,17 +1207,11 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
     without replacement, with a take-all stratum.  Three parts, each of which
     is load-bearing:
 
-    **Proportional to what.** The stack total the allocator needs is
-    ``sum_e h_e * mse_e``.  ``h_e`` is free (the probe already has it) and
-    ``mse_e`` costs an encode, so drawing proportional to ``h_e`` leaves only
-    the spread of ``mse_e`` in the estimator's variance.  On LFM2.5 layer 18
-    the per-expert ``h_trace`` spans 9.6e4 to 7.7e6 (CV ~1.0) while the
-    cross-expert spread of ``mse`` at a fixed rung is CV 0.33-0.55, so this is
-    where the variance is. A uniform draw with the correct Horvitz-Thompson
-    weights remains unbiased, but carries the product's spread. The planner
-    requires Fisher weights and provides no uniform fallback.
+    **Proportional to what.** The caller passes the census's per-expert
+    routed-row counts. A uniform draw with the correct Horvitz-Thompson
+    weights is also unbiased, but it carries more variance.
 
-    **The take-all stratum.** With ``h`` this dispersed, ``n * h_i / sum(h)``
+    **The take-all stratum.** With dispersed sizes, ``n * h_i / sum(h)``
     exceeds one for the largest experts.  Clipping that to one would leave
     ``sum(pi) < n`` and bias the estimate low.  Instead those experts are
     taken with certainty, removed from the frame, and the rest re-solved --
@@ -1234,16 +1227,11 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
     is derived for randomized-order systematic sampling and is not justified
     under expert-index or ``h``-sorted order.
 
-    Determinism, and what the seed is deliberately NOT: the stream is keyed on
-    ``(seed, stack)`` only, never on ``h``.  The probe is not bit-reproducible
-    across runs, and systematic sampling is continuous in ``pi``, so a
-    re-probed ``h`` perturbs this draw slightly; hashing ``h`` into the seed
-    would instead redraw the whole stack on every re-probe.
+    Determinism: the stream is keyed on ``(seed, stack)`` only, never on
+    the sizes, so a small change of sizes perturbs the draw slightly instead
+    of redrawing the whole stack.
 
-    An expert with ``h_e == 0`` gets ``pi_e = 0`` and is never encoded, which
-    is exact rather than a rounding: under the campaign's Fisher convention a
-    token never routed to an expert contributes zero gradient, so its term in
-    the total is zero, not merely small.
+    An expert with size 0 gets ``pi_e = 0`` and is never encoded.
 
     Returns the whole draw, including everything a variance estimate needs:
     ``units``, ``inclusion_probability`` (over the full frame), ``certainty``,
@@ -1337,15 +1325,6 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
             "start": start, "random_draws": int(remaining)}
 
 
-#: The size sources a stack draw may be proportional to.  ``probe`` is the
-#: per-expert Fisher vector, which is what the estimator's variance argument
-#: rests on; ``counts`` is the census's per-expert routed-row count, which is
-#: the ONLY per-expert size available when no probe exists -- a routed-token
-#: proxy for ``h_trace`` and never a substitute for it (RobTand/prismaquant#495
-#: part 1, and the report's section 3.6 bullet on sizes).
-STACK_SAMPLE_SIZE_SOURCES = ("probe", "counts")
-
-
 #: The design a ``counts``-sized draw declares, so a reader of ``units.json``
 #: can tell which vector the inclusion probabilities are proportional to
 #: without re-deriving it.
@@ -1353,34 +1332,18 @@ STACK_SAMPLE_COUNTS_SUFFIX = "_counts"
 
 
 def _stack_draw_sizes(record: Mapping, sample: StackExpertSample) -> dict:
-    """The sizes a stack's draw was made proportional to.
-
-    A record that declares its own ``sizes`` replays on those; one that does
-    not is a probe-sized draw and replays on the Fisher vector, exactly as
-    every record written before #495 does.
-    """
+    """The census counts a stack's draw was made proportional to."""
     sizes = record.get("sizes")
-    if sizes is None:
-        return {str(e): h for e, h in enumerate(sample.h_trace_per_expert)}
-    if str(sizes.get("source")) not in STACK_SAMPLE_SIZE_SOURCES:
+    if sizes is None or str(sizes.get("source")) != "counts":
         raise StackSampleError(
-            f"{sample.packed_qname}: size source {sizes.get('source')!r} is "
-            f"not one of {list(STACK_SAMPLE_SIZE_SOURCES)}")
+            f"{sample.packed_qname}: the draw declares no census counts; a "
+            "draw proportional to the probe's h_trace is retired")
     values = sizes.get("values")
     if not isinstance(values, Mapping) or len(values) != sample.num_experts:
         raise StackSampleError(
             f"{sample.packed_qname}: a declared size vector must carry one "
             f"value per expert ({sample.num_experts})")
     return {str(e): float(values[str(e)]) for e in range(sample.num_experts)}
-
-
-def _stack_design(record: Mapping, draw: Mapping) -> str:
-    """The design name a draw carries, including which sizes it used."""
-    sizes = record.get("sizes")
-    method = str(draw["method"])
-    if sizes is None or str(sizes.get("source")) == "probe":
-        return method
-    return method + STACK_SAMPLE_COUNTS_SUFFIX
 
 
 def selection_stack_samples(selection: Mapping, profile) -> dict[str, StackExpertSample]:
@@ -1415,16 +1378,14 @@ def selection_stack_samples(selection: Mapping, profile) -> dict[str, StackExper
                 _stack_draw_sizes(record, sample),
                 len(sample.sampled_experts), seed=sample.seed, stack=name)
             if (record.get("draw") != replay
-                    or sample.design != _stack_design(record, replay)
+                    or sample.design != replay["method"] + STACK_SAMPLE_COUNTS_SUFFIX
                     or list(sample.sampled_experts) != sorted(int(e) for e in replay["units"])
                     or dict(sample.inclusion_prob) != {
                         int(e): p for e, p in replay["inclusion_probability"].items()}):
                 raise StackSampleError(f"{name}: packed draw receipt does not replay from probe and seed")
-            declared = record.get("sizes")
-            if declared is not None and str(declared.get("sha256")) != replay["size_sha256"]:
-                # The digest is what binds the DECLARED size vector to the one
-                # the draw was actually made proportional to; without it a
-                # record could name ``counts`` and carry a probe-sized draw.
+            if str(record["sizes"].get("sha256")) != replay["size_sha256"]:
+                # The digest binds the DECLARED size vector to the one the
+                # draw was actually made proportional to.
                 raise StackSampleError(
                     f"{name}: declared size digest does not match the draw's")
             if set(sample.inclusion_prob) != set(range(sample.num_experts)):
