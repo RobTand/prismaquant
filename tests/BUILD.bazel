@@ -39353,7 +39353,6 @@ pq_py_test(
         "//:prismaquant/lane_shipcard",
         "//:prismaquant/pipeline",
         "//:prismaquant/prepriced_cost",
-        "//:prismaquant/production_render_cost",
         "//:tools/build_streamed_full_kl_teacher",
         "//:tools/dsv4_wikitext_inputs",
         "//:tools/full_kl_teacher_payload",
@@ -117832,11 +117831,6 @@ pq_py_test(
         "test_work_profile_digest_routing_1769.py",
         "test_workspace_netdata.py",
         "test_workspace_receipt_digest_routing_1826.py",
-    ],
-    args = [
-        "'--deselect=tests/test_tessera_calibration_cache.py::test_torn_during_read_fences_refuse_in_both_modes[validate_cached-0]'",
-        "'--deselect=tests/test_tessera_calibration_cache.py::test_torn_during_read_fences_refuse_in_both_modes[validate_cached-1]'",
-        "'--deselect=tests/test_tessera_calibration_cache.py::test_torn_during_read_fences_refuse_in_both_modes[validate_cached-None]'",
     ],
     timeout = "moderate",
 )

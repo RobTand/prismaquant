@@ -938,7 +938,6 @@ pq_py_library(
         "archive/gridbook_lane_2026-09-02/prismaquant/nvfp4_cb_formats.py",
     ],
     data = [
-        "archive/gridbook_lane_2026-09-02/prismaquant/data/nvfp4_cb_lattices.pt",
         "archive/gridbook_lane_2026-09-02/prismaquant/nvfp4_cb_formats.py",
     ],
     deps = [
@@ -1064,7 +1063,6 @@ pq_py_library(
         "archive/gridbook_lane_2026-09-02/prismaquant/validate_cb_endpoint.py",
     ],
     data = [
-        "archive/gridbook_lane_2026-09-02/prismaquant/data/nvfp4_cb_lattices.pt",
         "archive/gridbook_lane_2026-09-02/prismaquant/validate_cb_endpoint.py",
     ],
     deps = [
@@ -1096,7 +1094,6 @@ pq_py_library(
         "archive/gridbook_lane_2026-09-02/prismaquant/validate_dspark_target_draft.py",
     ],
     data = [
-        "archive/gridbook_lane_2026-09-02/prismaquant/data/nvfp4_cb_lattices.pt",
         "archive/gridbook_lane_2026-09-02/prismaquant/validate_dspark_target_draft.py",
     ],
 )
@@ -9850,6 +9847,9 @@ pq_py_library(
     name = "prismaquant/incremental_probe",
     srcs = [
         "prismaquant/incremental_probe.py",
+    ],
+    data = [
+        ":files/prismaquant/fla_configs",
     ],
     deps = [
         ":prismaquant/__init__",
