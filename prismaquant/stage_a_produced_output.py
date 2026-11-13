@@ -464,7 +464,8 @@ class BoundaryProducedPublication:
             return unlink_owned(reference.path, rows[0]['file_identity'])
 
     def origin_only_lifetimes(self):
-        return {key: read_bound_document(binding)['lifetime'] for key, binding in self._groups.items()}
+        with self._lock:
+            return {key: read_bound_document(binding)['lifetime'] for key, binding in self._groups.items()}
 
     def finalize(self, path, *, dependencies=(), checkpoint_exit=None):
         with self._lock:
