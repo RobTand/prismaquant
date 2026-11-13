@@ -31,6 +31,7 @@ SCANNER_SPEC.loader.exec_module(scanner)
 
 
 API = 'https://app.buildbuddy.io/api/v1/'
+REFUSAL_DETAIL = 'plan-refusal.json'
 PYTHON_RUNTIME_RELEASE = '20251014'
 PYTHON_RUNTIME_SHA256 = {
     'x86_64': '493c477b4a88bb1ea2f6c6f57fa0e88ffbe55d9e7b1405c4699f2d41c04eb154',
