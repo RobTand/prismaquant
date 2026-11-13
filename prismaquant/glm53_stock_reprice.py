@@ -550,31 +550,13 @@ def inventory_checks(
     identity = probe_census.get("probe") or {}
     units = probe_census.get("units") or {}
     packed = sum(1 for row in units.values() if row.get("is_packed"))
-    marginals = sum(1 for row in units.values() if row.get("has_marginals"))
-    missing_norm = [
-        name for name, row in units.items()
-        if row.get("has_h_trace_raw") and row.get("h_trace_norm_tokens") is None
-    ]
     checks.append(Check(
         "probe census", "PASS",
         f"n_stats={probe_census.get('n_stats')} packed={packed} "
-        f"marginals={marginals} calib_hash={meta.get('calib_hash')} "
+        f"calib_hash={meta.get('calib_hash')} "
         f"nsamples={meta.get('nsamples')} seqlen={meta.get('seqlen')} "
         f"host={identity.get('host')} sha256={str(identity.get('sha256'))[:16]}",
         str(identity.get("path") or ""),
-    ))
-    checks.append(Check(
-        "fisher renormalization stamp",
-        "PASS" if not missing_norm else "BLOCK",
-        (
-            "every row carrying h_trace_raw also carries "
-            "h_trace_norm_tokens, so probe_statistics.renormalize_probe_fisher "
-            "cannot SystemExit on a missing norm stamp"
-            if not missing_norm
-            else f"{len(missing_norm)} row(s) carry h_trace_raw with no "
-                 f"h_trace_norm_tokens, e.g. {missing_norm[:3]}"
-        ),
-        None,
     ))
 
     # -- ladders -----------------------------------------------------------

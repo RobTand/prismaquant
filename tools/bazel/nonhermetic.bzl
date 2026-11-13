@@ -228,10 +228,6 @@ NONHERMETIC = {
         tags = ["gpu"],
         reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
-    "//tests:test_row_chunked_qdq": struct(
-        tags = ["gpu"],
-        reason = "4 of its test functions (12 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
-    ),
     "//tests:test_rung_allowability": struct(
         tags = ["requires-network"],
         reason = "it fetches Tessera's rung_allowability.py from GitHub at a declared commit (cannot fetch declared dependency); hosted shards have a network.",

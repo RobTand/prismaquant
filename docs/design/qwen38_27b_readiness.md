@@ -99,5 +99,5 @@ Two standing constraints apply when picking rungs:
 One probe serves both variants. The 5.5 bpw and ~3.4 bpp builds are two
 **budgets** against the same Sensitivity Card and two different format menus —
 no re-probe, and no rendered menu cache per menu, because weight error is
-computed locally from `W` plus each format's own quantizer. See
-`sensitivity_card_contract.md`.
+computed locally from `W` plus each format's own quantizer. The card was
+deleted by #3457.

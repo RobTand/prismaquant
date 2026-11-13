@@ -2,8 +2,7 @@
 
 RobTand/prismaquant#163: ``lane_specs/compressed_tensors.json``'s
 ``served_activation_quantization.executes`` is the authority every A-side
-caller reaches (via ``aqua_activation_cost.resolve_executed_activation_formats``),
-but its derivation was prose citing call sites at line numbers. A refactor
+caller reaches, but its derivation was prose citing call sites at line numbers. A refactor
 that moves a cited line, or a scheme-table edit that adds/drops
 ``input_activations`` (MXFP4 is one field away from flipping), silently kept
 the old A-side price -- and a wrong value here lets a mispriced allocation

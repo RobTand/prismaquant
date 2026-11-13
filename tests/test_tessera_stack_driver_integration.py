@@ -33,7 +33,8 @@ def _plan(tmp_path, monkeypatch):
     probe.write_bytes(pickle.dumps({'stats': stats, 'meta': {'model': 'lfm'}}))
     groups = {'s:' + STEM: sorted(data['member_anchors'])}
     (tmp_path / 'census.json').write_text(json.dumps({
-        'model': 'lfm', 'layer_stride': 1, 'anchor_groups': groups}))
+        'model': 'lfm', 'layer_stride': 1, 'anchor_groups': groups,
+        'counts': {member: 1 for member in data['member_anchors']}}))
     spec = tmp_path / 'spec.json'
     spec.write_text(json.dumps({'model': 'lfm', 'cwd': str(tmp_path),
         'python': 'python', 'env': {}, 'campaign_argv': []}))
@@ -116,7 +117,8 @@ def test_campaign_main_consumes_persisted_draw_and_emits_packed_population(tmp_p
         probe_rows[name] = _packed_probe_row(shape[0], [1.0] * shape[0],
             packed_param=name.rsplit('.', 1)[-1], out_features=shape[1], in_features=shape[2])
         probe_rows[name]['_packed_experts_module'] = STACK
-    sampled = dispatch.sample_stack_groups(groups, probe_rows, profile=profile,
+    census = {'counts': {m: 1 for members in groups.values() for m in members}}
+    sampled = dispatch.sample_stack_groups(groups, probe_rows, census, profile=profile,
         stack_sample=2, seed=5, audit_rate=10)
     selection = {'schema': campaign_selection.UNITS_SCHEMA_V2, 'model': argv[1], 'layer_stride': 1,
         'groups': [{'key': key, 'members': members, **sampled.get(key, {})}

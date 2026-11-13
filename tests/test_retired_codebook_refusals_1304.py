@@ -185,13 +185,6 @@ def _serve_dispatch_family(name, _tmp_path):
     dispatch_family_for_format(name)
 
 
-def _aqua_activation_formats(name, _tmp_path):
-    from prismaquant.aqua_activation_cost import required_activation_formats
-
-    required_activation_formats(
-        [name], shape=(64, 256), device="cpu", executes_all=True, patterns=())
-
-
 READERS = [
     pytest.param(_registry, id="format_registry.get_format"),
     pytest.param(_layer_config_string, id="layer_config.canonicalize_format[str]"),
@@ -214,10 +207,6 @@ READERS = [
     pytest.param(
         _serve_dispatch_family,
         id="serve_dispatch_table.dispatch_family_for_format",
-    ),
-    pytest.param(
-        _aqua_activation_formats,
-        id="aqua_activation_cost.required_activation_formats",
     ),
     pytest.param(
         _footprint_assignment_bytes, id="footprint.assignment_artifact_bytes"

@@ -669,11 +669,9 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/anchored_cost",
-        ":prismaquant/aqua_activation_cost",
         ":prismaquant/build_production_cache",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/gpu_guard",
-        ":prismaquant/sensitivity_card",
         "@pq_pip//numpy",
         "@pq_pip//torch",
         "@pq_pip//transformers",
@@ -9101,23 +9099,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "prismaquant/aqua_activation_cost",
-    srcs = [
-        "prismaquant/aqua_activation_cost.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/format_cost_protocol",
-        ":prismaquant/format_cost_registry",
-        ":prismaquant/sensitivity_card",
-        "@pq_pip//numpy",
-        "@pq_pip//safetensors",
-        "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
     name = "prismaquant/artifact_collection_cycle",
     srcs = [
         "prismaquant/artifact_collection.py",
@@ -9558,34 +9539,6 @@ pq_py_library(
         ":prismaquant/digests",
         ":prismaquant/staged_launch",
         ":prismaquant/staged_manifest",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/format_cost_protocol",
-    srcs = [
-        "prismaquant/format_cost_protocol.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/sensitivity_card",
-        "@pq_pip//numpy",
-        "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/format_cost_registry",
-    srcs = [
-        "prismaquant/format_cost_registry.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/format_cost_protocol",
-        ":prismaquant/sensitivity_card",
-        "@pq_pip//numpy",
-        "@pq_pip//torch",
     ],
 )
 
@@ -10423,7 +10376,6 @@ pq_py_library(
         "prismaquant/probe_statistics.py",
     ],
     deps = [
-        "@pq_pip//numpy",
         "@pq_pip//torch",
     ],
 )
@@ -10653,50 +10605,6 @@ pq_py_library(
     name = "prismaquant/saturation_select",
     srcs = [
         "prismaquant/saturation_select.py",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/sensitivity_card",
-    srcs = [
-        "prismaquant/sensitivity_card.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/digests",
-        "@pq_pip//numpy",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/sensitivity_card_allocate",
-    srcs = [
-        "prismaquant/sensitivity_card_allocate.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/format_cost_protocol",
-        ":prismaquant/sensitivity_card",
-        "@pq_pip//numpy",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/sensitivity_card_build",
-    srcs = [
-        "prismaquant/sensitivity_card_build.py",
-    ],
-    data = [
-        "prismaquant/sensitivity_card_build.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/digests",
-        ":prismaquant/probe_statistics",
-        ":prismaquant/qnames",
-        ":prismaquant/sensitivity_card",
-        "@pq_pip//numpy",
     ],
 )
 
@@ -14050,32 +13958,6 @@ pq_py_library(
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/io_spans",
         ":prismaquant/memory_management",
-    ],
-)
-
-pq_py_library(
-    name = "tools/validate_card_zero_churn",
-    srcs = [
-        "tools/validate_card_zero_churn.py",
-    ],
-    data = [
-        "tools/validate_card_zero_churn.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/format_cost_protocol",
-        ":prismaquant/sensitivity_card_build",
-    ],
-)
-
-pq_py_library(
-    name = "tools/validate_probe_marginals",
-    srcs = [
-        "tools/validate_probe_marginals.py",
-    ],
-    deps = [
-        "@pq_pip//numpy",
     ],
 )
 

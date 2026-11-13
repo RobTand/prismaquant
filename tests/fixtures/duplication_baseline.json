@@ -354,8 +354,7 @@
    "prismaquant/emu_forward_kl.py",
    "prismaquant/expert_empirical_cost.py",
    "prismaquant/export_gguf.py",
-   "prismaquant/fisher_col_weights.py",
-   "prismaquant/sensitivity_card_build.py"
+   "prismaquant/fisher_col_weights.py"
   ],
   "_group_key": [
    "prismaquant/production_cache_stripes.py",
@@ -398,8 +397,7 @@
   "_load": [
    "tools/band_serial_handoff_live_pair.py",
    "tools/kl_ab.py",
-   "tools/stage_b_preparation_submission.py",
-   "tools/validate_probe_marginals.py"
+   "tools/stage_b_preparation_submission.py"
   ],
   "_load_costs": [
    "prismaquant/validate_assignments_kl.py",
@@ -539,10 +537,6 @@
   "_resolve_serve_image": [
    "tools/measure_vllm_full_kl.py",
    "tools/measure_vllm_wikitext_ppl.py"
-  ],
-  "_role_of": [
-   "prismaquant/glm53_stock_reprice.py",
-   "prismaquant/sensitivity_card_build.py"
   ],
   "_round_half_away": [
    "prismaquant/gguf_formats.py",

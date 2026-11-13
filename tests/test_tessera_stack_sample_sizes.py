@@ -1,26 +1,12 @@
-"""``--stack-sample-sizes``: which per-expert vector the PPS draw follows.
+"""A stack draw follows the census's per-expert routed-row counts.
 
-RobTand/prismaquant#495 part 1.  ``sample_stack_groups`` drew proportional to
-the probe's ``h_trace_per_expert``, and GLM-5.3-Flash has no probe carrying
-one -- so the sampling path was unreachable on the model it was written for
-and the campaign paid for a full census instead
-(``docs/results/glm_tessera_probe_reduction_regret_2026-09-10.md`` section 2,
-and section 3.6's bullet on sizes).  The census's per-expert routed-row counts
-are the only other per-expert size that exists.
-
-Two things are pinned:
-
-* the default is unchanged, and unchanged is demonstrated rather than
-  asserted: the test rebuilds the pre-change record from the campaign's own
-  primitives and compares the two serialisations byte for byte;
-* a ``counts`` draw says so.  ``counts`` is a routed-token proxy for
-  ``h_trace``, not ``h_trace``, so the record names the source, carries the
-  vector and its digest, and suffixes the design -- and the campaign's
-  rehydration refuses a record whose declared digest is not the digest of the
-  draw it carries.
+RobTand/prismaquant#495 part 1 and #3457. The probe no longer writes the
+per-expert Fisher vector, so the census counts are the only draw size. A
+draw says so: the record names the source, carries the vector and its digest,
+and suffixes the design. The campaign's rehydration refuses a record whose
+declared digest is not the digest of its draw, and a record with no counts.
 """
 from __future__ import annotations
-import json
 import sys
 from pathlib import Path
 
@@ -77,68 +63,17 @@ def _census():
     return {"counts": counts}
 
 
-def _expected_probe_record(campaign, *, n, seed, audit_rate):
-    """The record the pre-#495 code wrote, rebuilt from the same primitives.
-
-    This is the oracle for "the default is unchanged": it is the old function
-    body, minus the bookkeeping that surrounds it, so a byte comparison against
-    it is a regression check rather than a restatement of the new code.
-    """
-    frame = campaign.stack_sample_from_probe(
-        PACKED, _probe_rows(H)[PACKED], _profile(),
-        sampled_experts=range(EXPERTS),
-        inclusion_prob={e: 1.0 for e in range(EXPERTS)}, seed=seed,
-        design="census")
-    draw = campaign.draw_stack_sample(
-        {str(e): h for e, h in enumerate(frame.h_trace_per_expert)},
-        n, seed=seed, stack=PACKED)
-    audit = campaign.audit_subsample(draw["units"], rate=audit_rate, seed=seed,
-                                     stack=PACKED)
-    return {
-        "probe_row": {
-            "_packed_experts_module": frame.packed_experts_module,
-            "_packed_param": frame.packed_param,
-            "num_experts": frame.num_experts,
-            "h_trace": frame.stack_h_trace,
-            "h_trace_per_expert": list(frame.h_trace_per_expert),
-        },
-        "sampled_experts": sorted(int(e) for e in draw["units"]),
-        "inclusion_prob": dict(draw["inclusion_probability"]),
-        "seed": seed,
-        "design": draw["method"],
-        "draw": draw,
-        "audit_experts": sorted(int(e) for e in audit),
-    }
-
-
-def _sample(dispatch, **over):
-    kwargs = dict(profile=_profile(), stack_sample=3, seed=5, audit_rate=10)
-    kwargs.update(over)
+def _sample(dispatch, census=None):
     return dispatch.sample_stack_groups(
-        {f"s:{MODULE}": _members()}, _probe_rows(H), **kwargs)
-
-
-def test_the_default_draw_is_byte_for_byte_what_it_was():
-    """No ``sizes`` argument: the same record, serialised identically."""
-    dispatch = _dispatch()
-    entry = _sample(dispatch)[f"s:{MODULE}"]
-    record = entry["stack_samples"][PACKED]
-    expected = _expected_probe_record(campaign, n=3, seed=5, audit_rate=10)
-    assert json.dumps(record, sort_keys=True) == json.dumps(
-        expected, sort_keys=True)
-    # And spelling ``probe`` explicitly is the same run, not a second one.
-    explicit = _sample(dispatch, sizes="probe")[f"s:{MODULE}"]
-    assert json.dumps(explicit, sort_keys=True) == json.dumps(
-        entry, sort_keys=True)
-    # The absent-flag record carries no size declaration at all, which is what
-    # keeps a plan written today identical to the plans already on disk.
-    assert "sizes" not in record
+        {f"s:{MODULE}": _members()}, _probe_rows(H),
+        _census() if census is None else census,
+        profile=_profile(), stack_sample=3, seed=5, audit_rate=10)
 
 
 def test_a_counts_draw_follows_the_counts_and_declares_them():
     """The vector that drove the draw is named, carried and digested."""
     dispatch = _dispatch()
-    entry = _sample(dispatch, sizes="counts", census=_census())[f"s:{MODULE}"]
+    entry = _sample(dispatch)[f"s:{MODULE}"]
     record = entry["stack_samples"][PACKED]
     assert record["design"] == (record["draw"]["method"]
                                 + campaign.STACK_SAMPLE_COUNTS_SUFFIX)
@@ -149,17 +84,18 @@ def test_a_counts_draw_follows_the_counts_and_declares_them():
     assert sizes["values"] == {str(e): float(COUNTS_PER_EXPERT[e])
                                for e in range(EXPERTS)}
     # This fixture and seed distinguish a counts draw from a Fisher draw.
-    probe_draw = _sample(dispatch)[f"s:{MODULE}"]["stack_samples"][PACKED]
-    assert record["sampled_experts"] != probe_draw["sampled_experts"]
+    fisher = campaign.draw_stack_sample(
+        {str(e): h for e, h in enumerate(H)}, 3, seed=5, stack=PACKED)
+    assert record["sampled_experts"] != sorted(int(e) for e in fisher["units"])
     # The Fisher currency is untouched: the stack row still multiplies by the
-    # probe's own h_trace, whatever the draw was proportional to.
+    # probe's own h_trace.
     assert record["probe_row"]["h_trace_per_expert"] == [float(v) for v in H]
 
 
 def test_a_counts_draw_survives_the_campaign_rehydration():
     """``selection_stack_samples`` replays it on the declared sizes."""
     dispatch = _dispatch()
-    entry = _sample(dispatch, sizes="counts", census=_census())[f"s:{MODULE}"]
+    entry = _sample(dispatch)[f"s:{MODULE}"]
     selection = {"groups": [{"key": f"s:{MODULE}", "members": _members(), **entry}]}
     samples = campaign.selection_stack_samples(selection, _profile())
     sample = samples[PACKED]
@@ -171,7 +107,7 @@ def test_a_counts_draw_survives_the_campaign_rehydration():
 def test_a_record_whose_declared_digest_is_not_the_draws_is_refused():
     """The digest is what binds the named vector to the one actually used."""
     dispatch = _dispatch()
-    entry = _sample(dispatch, sizes="counts", census=_census())[f"s:{MODULE}"]
+    entry = _sample(dispatch)[f"s:{MODULE}"]
     record = dict(entry["stack_samples"][PACKED])
     record["sizes"] = {**record["sizes"], "sha256": "0" * 64}
     selection = {"groups": [{"key": f"s:{MODULE}", "members": _members(),
@@ -180,23 +116,22 @@ def test_a_record_whose_declared_digest_is_not_the_draws_is_refused():
         campaign.selection_stack_samples(selection, _profile())
 
 
-def test_counts_without_a_census_is_refused():
-    """A size source that names the census needs the census."""
-    dispatch = _dispatch()
-    with pytest.raises(RuntimeError, match="needs the census"):
-        _sample(dispatch, sizes="counts")
-
-
 def test_a_missing_expert_count_is_refused_rather_than_drawn_at_zero():
     """An absent count would give an expert inclusion probability zero."""
     dispatch = _dispatch()
     census = _census()
     census["counts"].pop(f"{MODULE}.3.w1")
     with pytest.raises(RuntimeError, match="no row count"):
-        _sample(dispatch, sizes="counts", census=census)
+        _sample(dispatch, census)
 
 
-def test_an_unknown_size_source_is_refused():
+def test_a_record_without_census_counts_is_refused():
+    """A draw proportional to the probe's h_trace is retired."""
     dispatch = _dispatch()
-    with pytest.raises(RuntimeError, match="not one of"):
-        _sample(dispatch, sizes="h_trace", census=_census())
+    entry = _sample(dispatch)[f"s:{MODULE}"]
+    record = dict(entry["stack_samples"][PACKED])
+    del record["sizes"]
+    selection = {"groups": [{"key": f"s:{MODULE}", "members": _members(),
+                             **{**entry, "stack_samples": {PACKED: record}}}]}
+    with pytest.raises(campaign.StackSampleError, match="no census counts"):
+        campaign.selection_stack_samples(selection, _profile())

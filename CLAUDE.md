@@ -123,8 +123,8 @@ unary cost* over `(Linear, format)`, solved by a multi-choice knapsack DP:
   objective. Two superseded conventions were reversed on purpose: an explicit
   ÷route_prob (removed in audit M4) and the per-routed-token division M4 kept as
   "the implicit ÷token-fraction" (removed in PR #14 — it inflated rarely-routed
-  unpacked-expert rows by global/routed, i.e. inverted importance weighting; see
-  `finalize_fisher_stats`).
+  unpacked-expert rows by global/routed, i.e. inverted importance weighting; the
+  normalizer `finalize_fisher_stats` was deleted by #3457).
 - **The selection.** Render the allocator's Pareto candidates, **measure real
   KL** on a **held-out** split, take the empirical Pareto frontier under
   η-dominance, and pick the shipping point. The bit-rate target is a **byte
