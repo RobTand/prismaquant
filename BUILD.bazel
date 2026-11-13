@@ -9851,6 +9851,9 @@ pq_py_library(
     srcs = [
         "prismaquant/incremental_probe.py",
     ],
+    data = [
+        ":files/prismaquant/fla_configs",
+    ],
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
