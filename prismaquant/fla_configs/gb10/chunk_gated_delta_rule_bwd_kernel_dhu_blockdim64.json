@@ -1,0 +1,35 @@
+{
+ "autotune_entries": {
+  "953d45e4f80bd4955bd949c0ad22d70c": {
+   "autotune_key": [
+    48,
+    48,
+    128,
+    128,
+    64,
+    true,
+    false,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.bfloat16"
+   ],
+   "config": {
+    "ir_override": null,
+    "kwargs": {
+     "BV": 32
+    },
+    "maxnreg": null,
+    "num_ctas": 1,
+    "num_stages": 1,
+    "num_warps": 4
+   }
+  }
+ },
+ "kernel_name": "chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64",
+ "triton_version": "3.6.0"
+}

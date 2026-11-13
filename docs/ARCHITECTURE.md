@@ -1,7 +1,7 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-13. The multimodal probe and the streaming visual-tower load (#3442) are removed;
-every visual Linear takes `VISUAL_FORMAT`.
+As of: 2026-11-13, Refs #3446. GPU stages load pinned fla kernel configs. The multimodal probe and the streaming
+visual-tower load (#3442) are removed; every visual Linear takes `VISUAL_FORMAT`.
 The probe selects act/ rows by a keyed rule, not a random draw (#3425).
 PrismaSnap and its SSH campaign runner are removed (#3382).
 The classic pipeline starts from the source checkpoint. Tessera callers retain the existing no-clobber byte writer.
@@ -23799,6 +23799,8 @@ PRISMAQUANT_CB_LDLQ / _SCOPE / _GATE, PRISMAQUANT_CB_MINCHAIN* — no shell
                      their code was archived on 2026-09-25 (#1304, debt D34
                      closed). They stay so existing WORK_DIR hashes hold.
 AURA_ADDITIVITY_GATE=measure  STOP_AFTER=<unset> (cost: exit 0 before [3/4], #3418)
+FLA_CACHE_MODE=strict  FLA_CONFIG_DIR=prismaquant/fla_configs/gb10 (pinned fla kernel configs;
+                     probe meta and AURA provenance record `fla_configs`, #3446)
 PRISMAQUANT_GGUF_IMATRIX=1  DEVICE=cuda  EXPORT_DEVICE=cuda
 ```
 
