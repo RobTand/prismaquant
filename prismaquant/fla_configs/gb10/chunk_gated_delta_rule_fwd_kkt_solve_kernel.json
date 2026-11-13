@@ -1,0 +1,28 @@
+{
+ "autotune_entries": {
+  "83f6b067db1006dfeff1a812496afdc8": {
+   "autotune_key": [
+    48,
+    48,
+    128,
+    16,
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16"
+   ],
+   "config": {
+    "ir_override": null,
+    "kwargs": {
+     "BK": 64
+    },
+    "maxnreg": null,
+    "num_ctas": 1,
+    "num_stages": 3,
+    "num_warps": 1
+   }
+  }
+ },
+ "kernel_name": "chunk_gated_delta_rule_fwd_kkt_solve_kernel",
+ "triton_version": "3.6.0"
+}
