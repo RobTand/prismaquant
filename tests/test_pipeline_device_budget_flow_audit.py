@@ -69,7 +69,7 @@ python3() {{
     env.update({
         "WORK_DIR": str(work), "MODEL_PATH": str(model),
         "PROBE_PATH": str(copied_probe), "COST_PATH": str(costs),
-        "SELECTION_MODE": "surrogate", "CALIBRATION_MODALITY": "text-only",
+        "SELECTION_MODE": "surrogate",
         "FORMATS": "NVFP4,FP8_E4M3", "TARGET_BITS": "16",
         "TARGET_PROFILE": "vllm_packed_moe", "TARGET_PROFILE_DEFAULT": "vllm_packed_moe",
         "TARGET_DISK_GB": repr((fp8_bytes + 10_000) / fixture.fp.GB),

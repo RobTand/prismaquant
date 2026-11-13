@@ -280,14 +280,14 @@ def test_native_baseline_sidecars_carry_only_checkpoint_evidence(tmp_path, monke
     producer_cli_inputs(monkeypatch)
     names = [next(name.removesuffix('.weight') for name in expected
                   if name.endswith('.self_attn.o_proj.weight')),
-             'mtp.layers.0.proj', 'model.visual.blocks.0.proj']
+             'mtp.layers.0.proj']
     raw = load_file(source / 'model.safetensors')
     raw.update({name + '.weight': torch.ones(4, 4, dtype=torch.bfloat16) for name in names[1:]})
     save_file(raw, source / 'model.safetensors')
     (source / 'model.safetensors.index.json').write_text(json.dumps({
         'weight_map': {name: 'model.safetensors' for name in raw}}))
     config = json.loads((source / 'config.json').read_text())
-    config.update(num_nextn_predict_layers=1, vision_config={'depth': 1})
+    config.update(num_nextn_predict_layers=1)
     (source / 'config.json').write_text(json.dumps(config))
     probe = tmp_path / 'sidecar-probe.pkl'
     probe.write_bytes(pickle.dumps({'stats': {name: {'h_trace': 1., 'n_params': 16}
@@ -307,7 +307,6 @@ def test_native_baseline_sidecars_carry_only_checkpoint_evidence(tmp_path, monke
         return None
 
     monkeypatch.setattr(baseline, '_run_mtp_cost_shard', sidecar)
-    monkeypatch.setattr(baseline, '_run_visual_cost_shard', sidecar)
     output = tmp_path / 'sidecar-cost.pkl'
     monkeypatch.setattr(sys, 'argv', ['incremental_measure_quant_cost', '--model', str(source),
         '--probe', str(probe), '--activation-cache-dir', str(activations),
