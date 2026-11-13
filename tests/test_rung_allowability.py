@@ -157,31 +157,6 @@ def test_metadata_only_reader_keeps_the_serving_pin(publication):
         print("D41 metadata-only producer:", json.dumps(producer.evidence, sort_keys=True))
 
 
-def test_allocator_cli_consumes_fixture_and_excludes_cheaper_unmeasured_rows(
-        publication, tmp_path, monkeypatch):
-    import pickle
-    from prismaquant import allocator
-    from test_tessera_scope_endpoints import _allocator_inputs, _cli_scope, _v5_contract
-    _v5_contract(monkeypatch)
-    monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "research")
-    argv = _allocator_inputs(tmp_path, f"{FAMILY}_R1024")
-    cost_path = Path(argv[argv.index("--costs") + 1])
-    payload = pickle.loads(cost_path.read_bytes())
-    names = [f"{FAMILY}_R{rung}" for rung in (1024, 1025, 1026, 1027)]
-    for rows in payload["costs"].values():
-        for name in names[1:]:
-            rows[name] = {**rows[names[0]], "weight_mse": 0.0, "output_mse": 0.0}
-    payload["formats"] = names
-    cost_path.write_bytes(pickle.dumps(payload))
-    argv[argv.index("--formats") + 1] = ",".join(names)
-    allocator.main([*argv, *_cli_scope(), "--no-fused-aggregation", "--no-packed-aggregation",
-                    *allowability_cli_args(publication)])
-    layer = json.loads((tmp_path / "layer.json").read_text())
-    from prismaquant.layer_config import load_assignment
-    assert set(load_assignment(tmp_path / "layer.json").values()) == {names[0]}
-    assert layer["__prismaquant__"]["tessera_menu"]["rung_allowability"][FAMILY]["table_version"] == 1
-
-
 def test_mtp_menu_uses_the_same_measured_rung_input(publication, monkeypatch):
     from prismaquant.glm_mtp_selection import select_mtp_rungs
     from test_glm_mtp_selection import _row, _probe, ROUTED, PARAMS, CONSTANTS

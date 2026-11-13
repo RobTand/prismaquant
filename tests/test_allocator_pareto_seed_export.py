@@ -231,7 +231,6 @@ def test_allocator_preserves_fixed_fp8_head_with_fixed_nvfp4_mtp(
     mtp = "mtp.layers.0.mlp.down_proj"
     stats = {
         name: {
-            "h_trace": 1.0,
             "n_params": 128 * 128,
             "in_features": 128,
             "out_features": 128,
@@ -240,13 +239,20 @@ def test_allocator_preserves_fixed_fp8_head_with_fixed_nvfp4_mtp(
     }
     costs = {
         body: {
-            # These two rows fit a non-trivial FP-family activation transfer
-            # (measured/weight-only = 4x).  The fixed terminal head below
-            # must retain its direct price of 3.0 rather than inherit it.
-            "FP8_E4M3": {
+            # The two FP8_E5M2 rows fit a non-trivial FP-family activation
+            # transfer (measured/weight-only = 4x); a row with no
+            # predicted_dloss is calibration evidence, never a price (#3448).
+            # The weight-only FP8_E4M3 body rows take it (0.5 -> 2.0). The
+            # fixed terminal head below must retain its direct price of 3.0
+            # rather than inherit it.
+            "FP8_E5M2": {
                 "weight_mse": 1.0,
                 "output_mse": 4.0,
                 "output_mse_measured": True,
+            },
+            "FP8_E4M3": {
+                "predicted_dloss": 0.5,
+                "output_mse_measured": False,
             },
             "BF16": {"predicted_dloss": 0.0},
         }
@@ -269,7 +275,7 @@ def test_allocator_preserves_fixed_fp8_head_with_fixed_nvfp4_mtp(
     with open(cost_path, "wb") as f:
         pickle.dump({
             "costs": costs,
-            "formats": ["NVFP4", "FP8_E4M3", "BF16"],
+            "formats": ["NVFP4", "FP8_E4M3", "FP8_E5M2", "BF16"],
         }, f)
 
     pareto_path = tmp_path / "pareto.csv"
@@ -288,7 +294,7 @@ def test_allocator_preserves_fixed_fp8_head_with_fixed_nvfp4_mtp(
             "--target-profile",
             "research",
             "--formats",
-            "FP8_E4M3,BF16",
+            "FP8_E4M3,FP8_E5M2,BF16",
             "--lm-head-format",
             "FP8_E4M3",
             "--mtp-format",

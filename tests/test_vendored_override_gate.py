@@ -341,7 +341,7 @@ def _dummy_shard_kwargs(tmp_path, **overrides):
     kwargs = dict(
         linear_include=".*", probe_stats={}, act_cache=None, specs=[],
         device="cpu", dtype=None, mode="unbatched", chunk_size=1,
-        h_detail=None, output_path=str(tmp_path / "shard.pkl"),
+        output_path=str(tmp_path / "shard.pkl"),
         model_name="m", probe_path="p",
     )
     kwargs.update(overrides)
@@ -509,20 +509,6 @@ def test_moe_router_discovery_does_not_swallow_the_refusal(monkeypatch):
     monkeypatch.setitem(vendored.OVERRIDE_ERRORS, "qwen3", "synthetic failure")
     with pytest.raises(DeadVendoredOverrideError):
         discover_moe_routers(_qwen3_model())
-
-
-def test_fisher_accumulator_does_not_swallow_the_refusal(monkeypatch):
-    """`sensitivity_probe.FisherAccumulator` answered `model_profile = None`.
-
-    Then declared a `DefaultProfile` name projection, which its own comment
-    calls "an explicit declaration, not a silent degrade" — true for an
-    unmatched architecture, false for a matched one on a dead path.
-    """
-    from prismaquant.sensitivity_probe import FisherAccumulator
-
-    monkeypatch.setitem(vendored.OVERRIDE_ERRORS, "qwen3", "synthetic failure")
-    with pytest.raises(DeadVendoredOverrideError):
-        FisherAccumulator(_qwen3_model(), [], {})
 
 
 def test_fp8_rewrite_bypass_does_not_swallow_the_refusal(tmp_path, monkeypatch):

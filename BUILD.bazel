@@ -1394,7 +1394,6 @@ pq_py_library(
         "archive/gridbook_lane_2026-09-02/tools/aura_cb_reprice_preflight.py",
         "archive/gridbook_lane_2026-09-02/tools/run_aura_cb_reprice.sh",
         "prismaquant/aura_cost.py",
-        "prismaquant/production_render_cost.py",
     ],
     deps = [
         ":archive/gridbook_lane_2026-09-02/tools/aura_cb_reprice_preflight",
@@ -2861,7 +2860,6 @@ pq_py_library(
         ":archive/gridbook_lane_2026-09-02/prismaquant/nvfp4_cb_footprint",
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/production_render_cost",
         "@pq_pip//pytest",
         "@pq_pip//torch",
     ],
@@ -3024,7 +3022,6 @@ pq_py_library(
         "prismaquant/aura_cost.py",
         "prismaquant/build_production_cache.py",
         "prismaquant/expert_empirical_cost.py",
-        "prismaquant/production_render_cost.py",
         "prismaquant/production_weight_cache.py",
         "prismaquant/run-pipeline.sh",
         "prismaquant/vendored/__init__.py",
@@ -4561,7 +4558,6 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/production_render_cost",
     ],
 )
 
@@ -8989,7 +8985,6 @@ pq_py_library(
         ":prismaquant/mount_facts",
         ":prismaquant/mx_formats",
         ":prismaquant/native_results",
-        ":prismaquant/probe_statistics",
         ":prismaquant/produced_output_spool",
         ":prismaquant/produced_stager",
         ":prismaquant/qnames",
@@ -9074,7 +9069,6 @@ pq_py_library(
         ":prismaquant/digests",
         ":prismaquant/fixed_head",
         ":prismaquant/pact_hull",
-        ":prismaquant/probe_statistics",
         ":prismaquant/research_cost_acceptance",
         ":prismaquant/saturation_select",
         ":prismaquant/serve_constraints",
@@ -9848,7 +9842,6 @@ pq_py_library(
         ":prismaquant/incremental_probe",
         ":prismaquant/incremental_shards",
         ":prismaquant/prepriced_cost",
-        ":prismaquant/probe_statistics",
         "@pq_pip//torch",
     ],
 )
@@ -9863,15 +9856,11 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/calibration_data",
         ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/digests",
         ":prismaquant/fla_config_pin",
         ":prismaquant/gpu_guard",
         ":prismaquant/incremental_shards",
         ":prismaquant/io_spans",
         ":prismaquant/probe_statistics",
-        ":prismaquant/sample_parallel_artifacts",
-        ":prismaquant/tokenizer_identity",
-        "@pq_pip//numpy",
         "@pq_pip//safetensors",
         "@pq_pip//torch",
         "@pq_pip//transformers",
@@ -10485,19 +10474,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "prismaquant/production_render_cost",
-    srcs = [
-        "prismaquant/production_render_cost.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/gpu_guard",
-        ":prismaquant/prepriced_cost",
-    ],
-)
-
-pq_py_library(
     name = "prismaquant/qnames",
     srcs = [
         "prismaquant/qnames.py",
@@ -10666,21 +10642,6 @@ pq_py_library(
         "prismaquant/row_dispersion.py",
     ],
     deps = [
-        "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/sample_parallel_artifacts",
-    srcs = [
-        "prismaquant/sample_parallel_artifacts.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
-        ":prismaquant/probe_statistics",
-        "@pq_pip//numpy",
         "@pq_pip//torch",
     ],
 )
@@ -11079,18 +11040,6 @@ pq_py_library(
     name = "prismaquant/tessera_campaign_selection",
     srcs = [
         "prismaquant/tessera_campaign_selection.py",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/tessera_census_stats",
-    srcs = [
-        "prismaquant/tessera_census_stats.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        "@pq_pip//numpy",
     ],
 )
 
@@ -12573,22 +12522,6 @@ pq_py_library(
     ],
     deps = [
         "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "tools/expand_probe_onto_tessera_census",
-    srcs = [
-        "tools/expand_probe_onto_tessera_census.py",
-    ],
-    data = [
-        "tools/expand_probe_onto_tessera_census.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cluster_campaign",
-        ":prismaquant/tessera_census_stats",
     ],
 )
 

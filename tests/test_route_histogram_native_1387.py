@@ -130,7 +130,7 @@ def _allocator_fixture(tmp_path):
         tensors[f"{n}.weight"] = ("BF16", (_OUT, _IN))
     _write_safetensors(model_dir / "model-00001.safetensors", tensors)
     stats = {
-        n: {"h_trace": 1.0 + 0.1 * i, "n_params": _OUT * _IN,
+        n: {"n_params": _OUT * _IN,
             "in_features": _IN, "out_features": _OUT}
         for i, n in enumerate(_NAMES)
     }
@@ -139,11 +139,13 @@ def _allocator_fixture(tmp_path):
         "costs": {
             n: {
                 "NVFP4": {"weight_mse": 1e-4, "output_mse": 4e-4,
-                          "output_mse_measured": True},
+                          "output_mse_measured": True,
+                          "predicted_dloss": 2e-4 * (1.0 + 0.1 * i)},
                 "FP8_E4M3": {"weight_mse": 1e-6, "output_mse": 2e-6,
-                             "output_mse_measured": True},
+                             "output_mse_measured": True,
+                             "predicted_dloss": 1e-6 * (1.0 + 0.1 * i)},
             }
-            for n in _NAMES
+            for i, n in enumerate(_NAMES)
         },
         "meta": {"formats": ["NVFP4", "FP8_E4M3"]},
     }

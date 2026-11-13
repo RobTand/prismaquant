@@ -13,17 +13,21 @@ from .allocator_solver import predicted_dloss
 from .schemas import refuse_retired_ladder_cost_source
 from .activation_fair_pricing import (APPLIED_MARKER_KEY, ActivationFairPricing,
     BRANCH_ACTIVATION_IDENTITY, BRANCH_BIT_EXACT, BRANCH_CALIBRATED,
-    BRANCH_INTERPOLATED_OUTPUT, BRANCH_MEASURED, BRANCH_SOURCE_PASSTHROUGH, BRANCH_UNCALIBRATED)
+    BRANCH_MEASURED, BRANCH_SOURCE_PASSTHROUGH, BRANCH_UNCALIBRATED)
+
+
+class UnpricedCostRow(ValueError):
+    """A cost row with no ``predicted_dloss``: the probe measures no Fisher
+    to price its ``weight_mse`` or ``output_mse`` (#3448)."""
 
 
 @dataclass(frozen=True)
 class CostPricingPolicy:
     ucb_z: float
-    fisher_output_mse: bool
 
     @classmethod
     def from_environment(cls):
-        return cls(_cost_ucb_z(), _fisher_output_mse_allocator_enabled())
+        return cls(_cost_ucb_z())
 
 
 @dataclass(frozen=True)
@@ -50,23 +54,20 @@ class _JointPrice:
 
 
 @dataclass(frozen=True)
-class _OutputPrice:
-    activation_branch: str
-
-
-@dataclass(frozen=True)
 class _WeightPrice:
     kind: Literal["aggregate", "anchored", "transferred"]
     activation_branch: str
     penalty: float = 1.0
 
 
-_PriceBasis = _FixedPrice | _JointPrice | _OutputPrice | _WeightPrice
+_PriceBasis = _FixedPrice | _JointPrice | _WeightPrice
 
 
 def _price_basis(stats_entry: dict, cost_entry: dict, format_name: str | None,
                  activation_pricing: ActivationFairPricing | None) -> _PriceBasis:
     from .rung_allowability import complete_scientific_price
+    # A row the retired RD ladder stamped refuses on every branch.
+    refuse_retired_ladder_cost_source(cost_entry)
     complete = complete_scientific_price(cost_entry, format_name=format_name)
     if complete is not None:
         branch = ("canonical_qualified_chord" if cost_entry.get("canonical_quality") is not None
@@ -79,9 +80,8 @@ def _price_basis(stats_entry: dict, cost_entry: dict, format_name: str | None,
     if cost_entry_is_bit_exact(cost_entry, format_name):
         return _FixedPrice(0.0, BRANCH_BIT_EXACT)
     if _has_measured_output_mse(stats_entry, cost_entry):
-        return _OutputPrice(BRANCH_MEASURED)
-    if _has_interpolated_output_mse(cost_entry):
-        return _OutputPrice(BRANCH_INTERPOLATED_OUTPUT)
+        # A measured row already carries its A side: no family transfer.
+        return _WeightPrice("aggregate", BRANCH_MEASURED)
     if cost_entry.get(APPLIED_MARKER_KEY) is True:
         return _WeightPrice("aggregate", BRANCH_CALIBRATED)
     if cost_entry_is_anchored_aura_supersurrogate(cost_entry):
@@ -105,8 +105,6 @@ def _basis_dloss(basis: _PriceBasis, stats_entry: dict, cost_entry: dict, *,
                 cost_entry["joint_operator_identity"]["format"] != format_name):
             raise ValueError("joint AURA row cannot price a different format")
         return cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=1.0, policy=policy)
-    if isinstance(basis, _OutputPrice):
-        return cost_entry_measured_activation_dloss(stats_entry, cost_entry, gain=gain, policy=policy)
     base = cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=gain, policy=policy)
     if basis.kind == "aggregate":
         return base
@@ -121,7 +119,7 @@ def _unknown_activation_zero(basis: _PriceBasis, stats_entry: dict, cost_entry: 
         return False
     if cost_entry_is_anchored_aura_supersurrogate(cost_entry):
         return False
-    if isinstance(basis, _OutputPrice) and basis.activation_branch == BRANCH_MEASURED:
+    if _has_measured_output_mse(stats_entry, cost_entry):
         return False
     if not _format_act_quant_changes_input(format_name):
         return False
@@ -130,11 +128,9 @@ def _unknown_activation_zero(basis: _PriceBasis, stats_entry: dict, cost_entry: 
             return False
     except (TypeError, ValueError):
         return False
-    try:
-        h_trace = float(stats_entry.get("h_trace", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        return False
-    return h_trace > 0.0
+    # Exempt only a row with no input energy: every format then prices at 0.0.
+    x2 = cost_entry.get("x2_per_probe")
+    return x2 is None or math.fsum(float(v) for v in x2) != 0.0
 
 
 def price_cell(stats_entry: dict, cost_entry: dict, *, format_name: str | None,
@@ -172,9 +168,7 @@ def _has_measured_output_mse(stats_entry: dict, cost_entry: dict) -> bool:
     because the routed expert forward was not reconstructed offline. That
     placeholder must not outrank the scalar predicted_dloss / weight_mse path.
 
-    This answers the PROVENANCE question — "was this number observed?" — and
-    is deliberately NOT the question pricing asks. See
-    ``_prices_from_output_mse``.
+    This answers the PROVENANCE question — "was this number observed?"
     """
     if "output_mse" not in cost_entry:
         return False
@@ -185,74 +179,6 @@ def _has_measured_output_mse(stats_entry: dict, cost_entry: dict) -> bool:
             and ("predicted_dloss" in cost_entry or "weight_mse" in cost_entry)):
         return False
     return True
-
-def _has_interpolated_output_mse(cost_entry: dict) -> bool:
-    """Whether this row carries a USABLE interpolated ``output_mse``.
-
-    An interpolated row (``cost_entry_is_band_interpolated``) is stamped
-    ``output_mse_measured=False`` and its ``output_mse`` is a fit over the
-    unit's own measured anchors rather than an observation. It is still an
-    output-space number, which is what makes it usable as a price.
-
-    Strict positivity is load-bearing, not a defensive nicety: a row at
-    exactly 0.0 carries no output-space information, and a 0.0 price would be
-    the DP's global optimum — precisely what
-    ``cost_entry_prices_unmeasured_activation_at_zero`` exists to catch. A
-    non-finite value is rejected for the same reason: it is not a price.
-    """
-    if not cost_entry_is_band_interpolated(cost_entry):
-        return False
-    try:
-        value = float(cost_entry.get("output_mse", 0.0))
-    except (TypeError, ValueError):
-        return False
-    return math.isfinite(value) and value > 0.0
-
-def _prices_from_output_mse(stats_entry: dict, cost_entry: dict) -> bool:
-    """Whether PRICING should read this row's ``output_mse``.
-
-    Deliberately a different question from ``_has_measured_output_mse``, and
-    the two must not be collapsed back together:
-
-      * *"Is this ``output_mse`` an observation?"* decides whether the row may
-        enter the P5a calibration SAMPLE
-        (``collect_activation_calibration_rows``). A band-interpolated row's
-        output_mse is derived from the family's own measured anchors, so
-        admitting it would fit the transfer constant partly on its own output
-        — circular. It stays out.
-      * *"Is this ``output_mse`` the best price available for this row?"*
-        decides which branch prices it. Here the answer for a band-interpolated
-        row is yes: its value is the tensor's OWN holdout-gated interpolation
-        in output space, while the alternative is its weight_mse scaled by a
-        family-wide geometric-mean constant. The row's own output-space number
-        beats a family aggregate — and, decisively, mixing the two bases
-        WITHIN one family reorders that family's rungs, which is the failure
-        ``activation_fair_pricing``'s design explicitly ruled out and which
-        shipped anyway (see that module's 2026-08-07 correction: NVFP4-CB
-        K13/K14/K17 priced 12x high on down_proj and 1.6x low on gate/up_proj,
-        because the family constant 112.5 spans a per-projection ratio range
-        of 9.4-320).
-
-    Nothing about the row's own claims changes: ``cost_source`` and
-    ``output_mse_measured`` keep their values and their meanings, the
-    candidate is stamped ``BRANCH_INTERPOLATED_OUTPUT`` rather than
-    ``BRANCH_MEASURED``, and ``cost_entry_is_band_interpolated`` /
-    ``drop_interpolated_candidates_dominated_by_measured`` keep full strength
-    as the provenance and noise-band guards. Only the number's USE changes.
-
-    Not gated on ``act_quant_changes_input``: the measured branch is not
-    gated either, and gating this one would re-create exactly the same
-    measured/weight-only basis mix inside an identity-activation family (at
-    penalty 1.0, but weight-space vs output-space all the same). No such row
-    exists: the RD-ladder sites that stamped ``band_interpolated`` served the
-    retired codebook lane (archived 2026-09-25, #1304), whose formats all
-    quantized activations — so this is a statement about the rule, not a live
-    code path.
-    """
-    return (
-        _has_measured_output_mse(stats_entry, cost_entry)
-        or _has_interpolated_output_mse(cost_entry)
-    )
 
 def cost_entry_is_bit_exact(
     cost_entry: dict,
@@ -409,15 +335,7 @@ def cost_entry_uses_measured_output_mse(
     cost_entry: dict,
     format_name: str | None = None,
 ) -> bool:
-    """Whether ``cost_entry_predicted_dloss`` will read a MEASURED
-    ``output_mse``.
-
-    Not the same as "will read ``output_mse``": the band-interpolated branch
-    (``_prices_from_output_mse``) reads it too, from a row whose value is a
-    ladder fit rather than an observation. This predicate keeps the narrower,
-    measurement-only meaning its name states — it is what callers asking "does
-    a real output-side observation back this row" want.
-    """
+    """Whether a real output-side observation backs this row."""
     if cost_entry_is_exact_by_construction(cost_entry, format_name):
         return False
     return _has_measured_output_mse(stats_entry, cost_entry)
@@ -436,61 +354,10 @@ def cost_entry_source(
     if cost_entry_is_bit_exact(cost_entry, format_name):
         return "bit_exact"
     if _has_measured_output_mse(stats_entry, cost_entry):
-        if (
-            policy.fisher_output_mse
-            and "fisher_output_mse" in cost_entry
-        ):
-            return "fisher_output_mse"
         return "output_mse"
     if "predicted_dloss" in cost_entry:
         return "predicted_dloss"
     return "weight_mse"
-
-def _fisher_output_mse_allocator_enabled() -> bool:
-    value = os.environ.get("PRISMAQUANT_FISHER_OUTPUT_MSE_ALLOCATOR")
-    if value is None:
-        return False
-    return value.strip().lower() not in {"", "0", "false", "no", "off"}
-
-def cost_entry_measured_activation_dloss(
-    stats_entry: dict,
-    cost_entry: dict,
-    *,
-    gain: float = 1.0,
-    policy: CostPricingPolicy | None = None,
-) -> float:
-    """The ACTIVATION-INCLUSIVE price of one row, or 0.0 when unmeasured.
-
-    Split out of ``cost_entry_predicted_dloss`` so the P5a calibration reads
-    exactly the number the measured branch would have priced — one
-    implementation of "what does the output_mse branch say", not a second
-    copy that can drift from the precedence chain it calibrates against.
-    ``measure_quant_cost`` applies ``activation_quantize_dequantize(X)``
-    before measuring ``output_mse``, which is why this branch — and only this
-    branch — carries the A side.
-
-    Both output-space provenances go through here — a measured row and a
-    band-interpolated one (whose fit interpolates between activation-inclusive
-    measured anchors, so it carries the A side too) — so gain, Fisher-variant
-    selection and the ½·h_trace algebra stay in one place. WHICH rows qualify
-    is ``_prices_from_output_mse``'s decision, not this function's; the
-    calibration still admits only measured ones.
-    """
-    policy = CostPricingPolicy.from_environment() if policy is None else policy
-    if (
-        policy.fisher_output_mse
-        and "fisher_output_mse" in cost_entry
-    ):
-        return predicted_dloss(
-            stats_entry["h_trace"],
-            float(cost_entry["fisher_output_mse"]),
-            gain=gain,
-        )
-    return predicted_dloss(
-        stats_entry["h_trace"],
-        float(cost_entry.get("output_mse", 0.0)),
-        gain=gain,
-    )
 
 def cost_entry_weight_only_dloss(
     stats_entry: dict,
@@ -519,11 +386,8 @@ def cost_entry_weight_only_dloss(
         if z > 0.0:
             base += z * float(cost_entry.get("predicted_dloss_stderr", 0.0))
         return base * float(gain)
-    return predicted_dloss(
-        stats_entry["h_trace"],
-        float(cost_entry.get("weight_mse", 0.0)),
-        gain=gain,
-    )
+    raise UnpricedCostRow("cost row has no predicted_dloss; the probe measures "
+                          "no Fisher to price it (#3448)")
 
 
 def cost_entry_is_anchored_aura_supersurrogate(cost_entry: dict) -> bool:
@@ -672,10 +536,8 @@ def cost_entry_act_dloss(cost_entry: dict) -> float:
     is a per-UNIT, mechanistic, already-output-space quantity. The current
     weight-only branches add this term before applying the family penalty.
 
-    It is added ONLY on the weight-only branches. The ``_prices_from_output_mse``
-    branch is already activation-inclusive by construction (the row's own
-    output-space measurement saw the activation path), and adding here would
-    double-count it. ``cost_entry_is_exact_by_construction`` returns 0.0 for a
+    It is added ONLY on the weight-only branches.
+    ``cost_entry_is_exact_by_construction`` returns 0.0 for a
     row whose activation path is an identity, so there is nothing to add there
     either; a lossless re-encode whose SERVED activations are 4-bit is excluded
     from the menu by ``cost_entry_prices_unmeasured_activation_at_zero`` rather

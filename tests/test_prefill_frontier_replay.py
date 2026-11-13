@@ -186,12 +186,12 @@ def test_tessera_families_and_rates_reach_export_intake(tmp_path, monkeypatch, f
 
     from lane_table_fixtures import down_convert_lane_table
     from test_allocator_measured_runtime_cli import _main_fixture
-    from test_allocator_tessera_priced_inputs import SCALE, _campaign_outputs, _stamp_rows
     from test_prefill_frontier_shape_only_scope import (
         _promote_to_v2,
         _stand_in_for_the_gates,
     )
-    from test_tessera_scope_endpoints import DENSE, IMAGE, _cli_scope
+    from test_tessera_scope_endpoints import (
+        DENSE, IMAGE, _campaign_outputs, _cli_scope, _stamp_rows)
 
     from prismaquant import tessera_menu, tessera_runtime_contract
 
@@ -226,7 +226,7 @@ def test_tessera_families_and_rates_reach_export_intake(tmp_path, monkeypatch, f
         "model_type": "qwen3_moe", "architectures": ["Qwen3MoeForCausalLM"]}))
     argv += ["--model-override", str(model), "--target-profile", "tessera_research_sm121",
              *_cli_scope()]
-    _stamp_rows(argv, fmt=fmt, capture_sha256=digest, scale=SCALE)
+    _stamp_rows(argv, fmt=fmt, capture_sha256=digest)
     table_path = tmp_path / "runtime.json"
     table = json.loads(table_path.read_text())
     table["cost_sha256"] = hashlib.sha256((tmp_path / "costs.pkl").read_bytes()).hexdigest()

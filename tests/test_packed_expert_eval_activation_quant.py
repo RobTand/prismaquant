@@ -26,9 +26,60 @@ from prismaquant.perturbed_x_cache import (
     _ParamPlan,
 )
 
-from test_packed_expert_per_token_fisher import _PackedWrap, _routed_batch
-
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+class ToyPackedExperts(nn.Module):
+    """Mirrors the transformers packed-experts pattern (Qwen3MoeExperts /
+    Qwen3NextExperts / Lfm2MoeExperts): 3D packed params consumed via
+    per-expert `nn.functional.linear(x_routed, packed[e])`."""
+
+    def __init__(self, num_experts: int, hidden: int, inter: int):
+        super().__init__()
+        self.num_experts = num_experts
+        self.gate_up_proj = nn.Parameter(
+            torch.randn(num_experts, 2 * inter, hidden))
+        self.down_proj = nn.Parameter(
+            torch.randn(num_experts, hidden, inter))
+        self.act_fn = F.silu
+
+    def forward(self, hidden_states, top_k_index, top_k_weights):
+        final = torch.zeros_like(hidden_states)
+        with torch.no_grad():
+            mask = F.one_hot(top_k_index,
+                             num_classes=self.num_experts).permute(2, 1, 0)
+            hit = torch.greater(mask.sum(dim=(-1, -2)), 0).nonzero()
+        for expert_idx in hit:
+            expert_idx = expert_idx[0]
+            top_k_pos, token_idx = torch.where(mask[expert_idx])
+            cur = hidden_states[token_idx]
+            gate, up = nn.functional.linear(
+                cur, self.gate_up_proj[expert_idx]).chunk(2, dim=-1)
+            h = self.act_fn(gate) * up
+            h = nn.functional.linear(h, self.down_proj[expert_idx])
+            h = h * top_k_weights[token_idx, top_k_pos, None]
+            final.index_add_(0, token_idx, h)
+        return final
+
+
+class _PackedWrap(nn.Module):
+    def __init__(self, num_experts=4, hidden=5, inter=6):
+        super().__init__()
+        self.experts = ToyPackedExperts(num_experts, hidden, inter)
+
+
+def _routed_batch(T, E, K, hidden, device, correlated=True, seed=0):
+    """Correlated tokens (strong shared component) + distinct top-K
+    routing, as real routers produce (`torch.topk` never repeats an
+    expert within a token)."""
+    g = torch.Generator(device="cpu").manual_seed(seed)
+    base = torch.randn(1, hidden, generator=g)
+    x = (base + 0.1 * torch.randn(T, hidden, generator=g)).to(device)
+    scores = torch.randn(T, E, generator=g).to(device)
+    w, idx = torch.topk(F.softmax(scores, dim=-1), K, dim=-1)
+    w = w / w.sum(-1, keepdim=True)
+    v = torch.randn(T, hidden, generator=g).to(device)
+    return x, idx, w, v
 
 HIDDEN, INTER, E = 5, 6, 4
 

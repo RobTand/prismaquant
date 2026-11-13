@@ -142,7 +142,6 @@ def test_allocator_narrows_the_pareto_set_under_a_budget():
 
 @pytest.mark.parametrize("module", [
     "incremental_measure_quant_cost",
-    "production_render_cost",
     "aura_cost",
     "expert_empirical_cost",
 ])
@@ -282,7 +281,6 @@ def test_export_prefetch_require_is_wired_on_the_native_lane():
     "incremental_probe",
     "incremental_measure_quant_cost",
     "aura_cost",
-    "production_render_cost",
     # `export_nvfp4_cb` and `export_nvfp4_cb_streaming` left this list on
     # 2026-09-02 with the Gridbook lane (archive/gridbook_lane_2026-09-02/).
     # They were two of the entry points the ladder invoked directly, which is

@@ -15,12 +15,10 @@ from prismaquant.incremental_measure_quant_cost import (
 )
 from prismaquant.measure_quant_cost import (
     ActivationIndex,
-    HDetailIndex,
     canonical_linear_name,
     measure_batched_gpu,
     measure_unbatched,
 )
-from prismaquant.sensitivity_probe import FisherAccumulator
 from prismaquant import format_registry as fr
 
 
@@ -157,9 +155,7 @@ class TestIncrementalMeasureQuantCost(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             act_dir = root / "act"
-            h_dir = root / "h"
             act_dir.mkdir()
-            h_dir.mkdir()
 
             for name in sorted(target_names):
                 safe = ActivationIndex._FNAME_SUB.sub("__", name) + ".pt"
@@ -171,21 +167,8 @@ class TestIncrementalMeasureQuantCost(unittest.TestCase):
                     },
                     act_dir / safe,
                 )
-                torch.save(
-                    {
-                        "H": torch.rand(4, 16),
-                        "g2_per_token": torch.linspace(0.25, 2.0, steps=7),
-                        "name": name,
-                        # Audit M9: incremental-style blobs must carry the
-                        # per-token unit marker; unmarked raw "H" blobs are
-                        # refused by HDetailIndex.h_diag_from_blob.
-                        "units": "per_token",
-                    },
-                    h_dir / safe,
-                )
 
             act_cache = ActivationIndex(act_dir, target_names)
-            h_detail = HDetailIndex(h_dir, target_names)
             unbatched = measure_unbatched(
                 model,
                 act_cache,
@@ -193,7 +176,6 @@ class TestIncrementalMeasureQuantCost(unittest.TestCase):
                 specs,
                 device="cpu",
                 dtype=torch.float32,
-                h_detail=h_detail,
             )
             batched = measure_batched_gpu(
                 model,
@@ -203,7 +185,6 @@ class TestIncrementalMeasureQuantCost(unittest.TestCase):
                 device="cpu",
                 dtype=torch.float32,
                 chunk_size=2,
-                h_detail=h_detail,
             )
 
         self.assertEqual(set(batched), target_names)
@@ -216,8 +197,6 @@ class TestIncrementalMeasureQuantCost(unittest.TestCase):
                     "weight_mse",
                     "output_mse",
                     "rel_output_mse",
-                    "predicted_dloss",
-                    "fisher_output_mse",
                 ):
                     self.assertAlmostEqual(
                         batched[name][fmt][field],
@@ -225,64 +204,6 @@ class TestIncrementalMeasureQuantCost(unittest.TestCase):
                         places=6,
                         msg=f"{name} {fmt} {field}",
                     )
-
-    def test_fisher_output_mse_uses_activation_row_indices(self):
-        model = nn.Module()
-        model.a = nn.Linear(2, 1, bias=False)
-        with torch.no_grad():
-            model.a.weight.copy_(torch.tensor([[1.0, 2.0]]))
-
-        target_names = {"a"}
-        spec = fr.get_format("FP8_E4M3")
-        X = torch.tensor(
-            [
-                [0.2, -0.3],
-                [3.0, 0.5],
-                [-0.7, 1.2],
-            ],
-            dtype=torch.float32,
-        )
-        row_indices = torch.tensor([5, 2, 9], dtype=torch.long)
-        g2 = torch.ones(10, dtype=torch.float32)
-        g2[2] = 10.0
-        g2[5] = 1.0
-        g2[9] = 4.0
-
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            act_dir = root / "act"
-            h_dir = root / "h"
-            act_dir.mkdir()
-            h_dir.mkdir()
-            safe = ActivationIndex._FNAME_SUB.sub("__", "a") + ".pt"
-            torch.save(
-                {"inputs": X, "row_indices": row_indices, "name": "a"},
-                act_dir / safe,
-            )
-            torch.save(
-                {"h_diag": torch.ones(1, 2), "g2_per_token": g2, "name": "a"},
-                h_dir / safe,
-            )
-
-            act_cache = ActivationIndex(act_dir, target_names)
-            h_detail = HDetailIndex(h_dir, target_names)
-            got = measure_unbatched(
-                model,
-                act_cache,
-                target_names,
-                [spec],
-                device="cpu",
-                dtype=torch.float32,
-                h_detail=h_detail,
-            )["a"][spec.name]
-
-        W = model.a.weight.detach()
-        W_hat = spec.quantize_dequantize(W.clone())
-        y_err_sq = (X @ W.T - spec.activation_quantize_dequantize(X.clone()) @ W_hat.T).pow(2)
-        weights = g2.index_select(0, row_indices)
-        weights = weights / weights.mean()
-        expected = float((y_err_sq * weights.unsqueeze(1)).mean().item())
-        self.assertAlmostEqual(got["fisher_output_mse"], expected, places=6)
 
     def test_production_render_path_uses_production_renderer(self):
         model = nn.Module()
@@ -321,7 +242,6 @@ class TestIncrementalMeasureQuantCost(unittest.TestCase):
                     dtype=torch.float32,
                     mode="unbatched",
                     chunk_size=1,
-                    h_detail=None,
                     log_prefix="[test]",
                     render_path="production",
                 )["a"][spec.name]
@@ -334,83 +254,6 @@ class TestIncrementalMeasureQuantCost(unittest.TestCase):
         self.assertTrue(calls[0][3]["static_act_order"])
         self.assertEqual(got["render_path"], "production")
         self.assertGreater(got["output_mse"], 0.0)
-
-    def test_fisher_accumulator_writes_mtp_h_detail_and_row_indices(self):
-        class TinyMtpWrapper(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mtp = nn.Module()
-                self.mtp.fc = nn.Linear(2, 1, bias=False)
-
-            def forward(self, x):
-                return self.mtp.fc(x)
-
-        torch.manual_seed(0)
-        model = TinyMtpWrapper()
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            act_dir = root / "act"
-            h_dir = root / "h"
-            acc = FisherAccumulator(
-                model,
-                ["mtp.fc"],
-                {},
-                act_cache_dir=act_dir,
-                input_rows=3,
-                h_detail_dir=h_dir,
-            )
-            try:
-                x = torch.tensor(
-                    [[[0.25, -0.5], [1.0, 0.75], [-0.125, 0.5]]],
-                    dtype=torch.float32,
-                    requires_grad=True,
-                )
-                loss = model(x).pow(2).sum()
-                loss.backward()
-                acc.finalize(tracker=None, global_tokens=3)
-            finally:
-                acc.remove_hooks()
-
-            safe = ActivationIndex._FNAME_SUB.sub("__", "mtp.fc") + ".pt"
-            act_payload = torch.load(act_dir / safe, map_location="cpu")
-            h_payload = torch.load(h_dir / safe, map_location="cpu")
-
-        self.assertEqual(act_payload["name"], "mtp.fc")
-        self.assertEqual(tuple(act_payload["inputs"].shape), (3, 2))
-        self.assertTrue(torch.equal(
-            act_payload["row_indices"],
-            torch.tensor([0, 1, 2], dtype=torch.long),
-        ))
-        self.assertEqual(h_payload["name"], "mtp.fc")
-        self.assertEqual(h_payload["kind"], "linear")
-        self.assertEqual(tuple(h_payload["h_diag"].shape), (1, 2))
-        self.assertEqual(tuple(h_payload["g2_per_token"].shape), (3,))
-        self.assertEqual(
-            acc.stats["mtp.fc"]["h_detail_path"],
-            safe,
-        )
-
-    def test_fisher_accumulator_skips_profile_pinned_head(self):
-        class TinyHead(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.head = nn.Linear(2, 2, bias=False)
-
-        class Profile:
-            def is_pinned_name(self, qname):
-                return qname == "head"
-
-        model = TinyHead()
-        acc = FisherAccumulator(
-            model,
-            ["head"],
-            {},
-            model_profile=Profile(),
-        )
-        try:
-            self.assertIn("head", acc._fisher_skip)
-        finally:
-            acc.remove_hooks()
 
 
 if __name__ == "__main__":

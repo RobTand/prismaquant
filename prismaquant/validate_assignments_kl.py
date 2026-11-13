@@ -224,20 +224,18 @@ def _assignment_cost_summary(
     from .per_row_pricing import price_row
     from .priced_cell import CostPricingPolicy, cost_entry_prices_unmeasured_activation_at_zero
 
-    policy = CostPricingPolicy(ucb_z=0.0, fisher_output_mse=False)
+    policy = CostPricingPolicy(ucb_z=0.0)
     prices: list[float] = []
     price_missing: list[str] = []
     sums = {
         "weight_mse": 0.0,
         "output_mse": 0.0,
-        "fisher_output_mse": 0.0,
         "rel_output_mse": 0.0,
         "predicted_dloss": 0.0,
     }
     counts = {
         "weight_mse": 0,
         "output_mse": 0,
-        "fisher_output_mse": 0,
         "rel_output_mse": 0,
         "predicted_dloss": 0,
     }
@@ -261,7 +259,7 @@ def _assignment_cost_summary(
                 price_missing.append(str(name))
             else:
                 prices.append(price)
-        except KeyError:
+        except (KeyError, ValueError):
             price_missing.append(str(name))
         if entry is None:
             missing.append(str(name))
@@ -291,8 +289,6 @@ def _assignment_cost_summary(
         "weight_mse_mean": means["weight_mse"],
         "output_mse_sum": float(sums["output_mse"]),
         "output_mse_mean": means["output_mse"],
-        "fisher_output_mse_sum": float(sums["fisher_output_mse"]),
-        "fisher_output_mse_mean": means["fisher_output_mse"],
         "rel_output_mse_sum": float(sums["rel_output_mse"]),
         "rel_output_mse_mean": means["rel_output_mse"],
         "predicted_dloss_sum": estimated_price,

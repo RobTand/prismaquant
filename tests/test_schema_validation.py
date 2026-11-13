@@ -14,7 +14,6 @@ def _probe_payload():
     return {
         "stats": {
             "model.layers.0.mlp.experts.gate_up_proj": {
-                "h_trace": 0.25,
                 "n_params": 64,
                 "in_features": 8,
                 "out_features": 8,
@@ -63,8 +62,8 @@ def test_valid_handoff_payloads_pass():
 
 def test_probe_payload_rejects_missing_required_stat_field():
     payload = _probe_payload()
-    del payload["stats"]["model.layers.0.mlp.experts.gate_up_proj"]["h_trace"]
-    with pytest.raises(SchemaValidationError, match="h_trace"):
+    del payload["stats"]["model.layers.0.mlp.experts.gate_up_proj"]["n_params"]
+    with pytest.raises(SchemaValidationError, match="n_params"):
         validate_probe_payload(payload, "probe.pkl")
 
 

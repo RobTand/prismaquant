@@ -81,14 +81,12 @@ def test_extrapolate_fills_skipped_rows_with_sampled_mean():
     sources = ["e.experts.0.down_proj", "e.experts.7.down_proj"]
     results = {
         sources[0]: {
-            "Q4_K": {"weight_mse": 1.0, "output_mse": 2.0,
-                     "predicted_dloss": 4.0},
+            "Q4_K": {"weight_mse": 1.0, "output_mse": 2.0},
             "IQ2_XXS": {"weight_mse": 3.0, "output_mse": 5.0,
-                        "predicted_dloss": 9.0, "output_mse_measured": False},
+                        "output_mse_measured": False},
         },
         sources[1]: {
-            "Q4_K": {"weight_mse": 3.0, "output_mse": 4.0,
-                     "predicted_dloss": 8.0},
+            "Q4_K": {"weight_mse": 3.0, "output_mse": 4.0},
             # IQ2_XXS errored on this expert: excluded from the mean.
             "IQ2_XXS": {"error": "quantize failed"},
         },
@@ -97,7 +95,6 @@ def test_extrapolate_fills_skipped_rows_with_sampled_mean():
     row = results["e.experts.3.down_proj"]
     assert row["Q4_K"]["weight_mse"] == pytest.approx(2.0)
     assert row["Q4_K"]["output_mse"] == pytest.approx(3.0)
-    assert row["Q4_K"]["predicted_dloss"] == pytest.approx(6.0)
     assert row["Q4_K"]["expert_cost_extrapolated"] is True
     # Only the non-error entry feeds IQ2_XXS; its unmeasured-output marker
     # propagates so downstream pricing knows the mean is weight-mse-derived.

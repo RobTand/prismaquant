@@ -112,8 +112,13 @@ def test_scalar_only_table_refuses_joint_path(joint_payload):
         "output_mse_measured": True, "cost_source": "tessera_campaign_measured",
         "currency": "output_mse_under_route_activation_contract"}}},
         "provenance": {"cost_mode": "production-render-score"}}
-    with pytest.raises(CostCurrencyError, match="joint acquisition"):
+    # The campaign's render-score stamp names no objective since #3448.
+    with pytest.raises(CostCurrencyError, match="names no objective"):
         joint_acquisition_from_cost_data(payload, {name: (4, 4)}, [FAMILY], max_new_points=1)
+    stock = {"costs": {name: {"NVFP4": {"predicted_dloss": 1.0}}},
+             "provenance": {"cost_mode": "aura"}}
+    with pytest.raises(CostCurrencyError, match="joint acquisition"):
+        joint_acquisition_from_cost_data(stock, {name: (4, 4)}, [FAMILY], max_new_points=1)
 
 
 @pytest.mark.parametrize("part", ["cached_rendered_weights", "activation_contracts"])

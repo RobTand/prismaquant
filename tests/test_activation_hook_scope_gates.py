@@ -3,16 +3,14 @@
 #130 stamped the hooked enumeration's sha256, its size, the rendered count
 and a ``render_narrowed`` flag because ``render_scope`` alone cannot tell a
 stripe from a whole build. The stamp was written and never read -- provenance
-nothing consumes is not a gate. These tests pin the three consumers:
+nothing consumes is not a gate. These tests pin the consumers (the render-cost consumer went with
+``COST_MODE=production-render-score``, #3448):
 
 1. ``union_production_cache`` refuses shards whose hook digests disagree
    (equal digests is the rule: each stripe hooks the whole enumeration and
    renders its slice, so binding per-shard digests into the identity would
    refuse every striped union);
-2. the cost/export pair is compared, not merely both recorded: the render-cost
-   payload carries the hook scope it was priced from and synthesis refuses a
-   baseline priced from a different rendering;
-3. the export fingerprint records which enumeration the shipped bytes were
+2. the export fingerprint records which enumeration the shipped bytes were
    rendered against.
 """
 from __future__ import annotations
@@ -241,60 +239,6 @@ def test_union_accepts_stripes_sharing_one_hook_digest(tmp_path):
         "3-qname union; a shard's slice count leaked into the bundle"
     )
     assert scope["render_narrowed"] is False
-
-
-def _cost_cache(*, digest: str):
-    return ProductionWeightCache(
-        weights={},
-        levers={"gptq": True},
-        metadata={"activation_hook_scope": _hook_scope(digest, rendered=2)},
-    )
-
-
-def _baseline_payload(*, digest: str | None) -> dict:
-    provenance: dict = {}
-    if digest is not None:
-        provenance["activation_hook_scope"] = _hook_scope(digest, rendered=2)
-    return {
-        "schema": "test.baseline_cost.v1",
-        "costs": {
-            "model.a": {"NVFP4": {
-                "predicted_dloss": 0.5,
-                "output_mse_measured": False,
-            }},
-        },
-        "formats": ["NVFP4"],
-        "provenance": provenance,
-        "meta": {},
-    }
-
-
-def test_render_cost_payload_carries_the_hook_scope_it_was_priced_from():
-    """Consumer 2a: the priced contract records its rendering."""
-    from prismaquant.production_render_cost import (
-        synthesize_production_render_cost_payload,
-    )
-
-    payload = synthesize_production_render_cost_payload(
-        _cost_cache(digest=HOOK_A),
-        _baseline_payload(digest=None),
-    )
-    scope = payload["provenance"].get("activation_hook_scope")
-    assert scope is not None, "cost payload dropped the hook scope"
-    assert scope["hooked_qnames_sha256"] == HOOK_A
-
-
-def test_render_cost_synthesis_refuses_a_differently_rendered_baseline():
-    """Consumer 2b: the priced and served contracts are compared, not filed."""
-    from prismaquant.production_render_cost import (
-        synthesize_production_render_cost_payload,
-    )
-
-    with pytest.raises(ValueError, match="hook digests differ"):
-        synthesize_production_render_cost_payload(
-            _cost_cache(digest=HOOK_A),
-            _baseline_payload(digest=HOOK_B),
-        )
 
 
 def test_export_fingerprint_records_which_enumeration_it_ships():

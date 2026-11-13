@@ -852,7 +852,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             source_binding=source_binding,
         )
         # R14: stamp the calibration identity onto the cache so every artifact
-        # derived from it (production_render_cost's cost table) can be checked
+        # derived from it can be checked
         # for disjointness against the selection split, instead of that
         # guarantee resting on the driver passing the right flag.
         if cache.metadata is None:

@@ -276,19 +276,6 @@
       "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
     },
     {
-      "file": "tools/expand_probe_onto_tessera_census.py",
-      "kind": "Package-dependent argument/help entry",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.expand_probe_onto_tessera_census",
-        "--help"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
-      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
-    },
-    {
       "file": "tools/measure_wire_rehash_readers.py",
       "kind": "Standard-library argument/help entry",
       "supported_probe": [

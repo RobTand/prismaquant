@@ -18,12 +18,10 @@ Two execution modes:
 
 Output format is identical between modes: a dict keyed by Linear name,
 each entry mapping format name to {weight_mse, output_mse,
-rel_output_mse}. When h-detail is supplied, entries may also include
-`predicted_dloss` and `fisher_output_mse`.
+rel_output_mse}.
 """
 from __future__ import annotations
 
-from . import probe_statistics
 
 
 import json
@@ -46,10 +44,6 @@ import torch.nn.functional as F
 from . import io_spans
 from . import routed_experts
 from . import format_registry as fr
-from .render_score import (
-    normalize_clipped_fisher_row_weights,
-    resolve_fisher_row_weight_clip,
-)
 from prismaquant.probe_inventory import (
     packed_expert_parent_for_projection as _packed_expert_parent_for_projection,
 )
@@ -182,8 +176,7 @@ def _extrapolate_expert_costs(
             if not entries:
                 continue
             out: dict[str, object] = {"expert_cost_extrapolated": True}
-            for key in ("weight_mse", "output_mse", "rel_output_mse",
-                        "predicted_dloss", "fisher_output_mse"):
+            for key in ("weight_mse", "output_mse", "rel_output_mse"):
                 vals = [float(e[key]) for e in entries if key in e]
                 if vals:
                     out[key] = sum(vals) / len(vals)
@@ -197,8 +190,6 @@ def _extrapolate_expert_costs(
 def _accumulate_result(bucket: dict, name: str, fmt: str,
                        weight_mse: float, output_mse: float,
                        rel_output_mse: float,
-                       predicted_dloss: float | None = None,
-                       fisher_output_mse: float | None = None,
                        output_mse_measured: bool = True,
                        n_activation_rows: int | None = None,
                        cost_source: str | None = None,
@@ -209,10 +200,6 @@ def _accumulate_result(bucket: dict, name: str, fmt: str,
         "_weight_mse_sum": 0.0,
         "_output_mse_sum": 0.0,
         "_rel_output_mse_sum": 0.0,
-        "_predicted_dloss_sum": 0.0,
-        "_predicted_dloss_count": 0,
-        "_fisher_output_mse_sum": 0.0,
-        "_fisher_output_mse_count": 0,
         "_output_mse_measured": True,
         "_n_activation_rows": None,
         "_cost_source": None,
@@ -241,12 +228,6 @@ def _accumulate_result(bucket: dict, name: str, fmt: str,
     acc["_weight_mse_sum"] += weight_mse
     acc["_output_mse_sum"] += output_mse
     acc["_rel_output_mse_sum"] += rel_output_mse
-    if predicted_dloss is not None:
-        acc["_predicted_dloss_sum"] += predicted_dloss
-        acc["_predicted_dloss_count"] += 1
-    if fisher_output_mse is not None:
-        acc["_fisher_output_mse_sum"] += fisher_output_mse
-        acc["_fisher_output_mse_count"] += 1
     acc["_output_mse_measured"] = bool(
         acc["_output_mse_measured"] and output_mse_measured
     )
@@ -261,10 +242,6 @@ def _finalize_results(bucket: dict[str, dict]) -> dict[str, dict]:
                 out[name][fmt] = acc
                 continue
             n = max(int(acc.pop("_count", 1)), 1)
-            dloss_n = int(acc.pop("_predicted_dloss_count", 0) or 0)
-            dloss_sum = acc.pop("_predicted_dloss_sum", 0.0)
-            fisher_n = int(acc.pop("_fisher_output_mse_count", 0) or 0)
-            fisher_sum = acc.pop("_fisher_output_mse_sum", 0.0)
             output_mse_measured = bool(acc.pop("_output_mse_measured", True))
             n_act_rows = acc.pop("_n_activation_rows", None)
             cost_source = acc.pop("_cost_source", None)
@@ -286,199 +263,8 @@ def _finalize_results(bucket: dict[str, dict]) -> dict[str, dict]:
                 # The allocator/provenance needs this to tell a well-covered
                 # expert from a one-token estimate.
                 entry["n_activation_rows"] = int(n_act_rows)
-            if dloss_n > 0:
-                # Full per-weight Δloss from the H-detail path. The
-                # allocator prefers this scalar over the scalar-proxy
-                # fallback when it's present.
-                entry["predicted_dloss"] = dloss_sum / dloss_n
-            if fisher_n > 0:
-                # Fisher row-weighted output reconstruction objective:
-                # local output MSE with rows weighted by end-loss
-                # gradient² from the probe's h-detail.
-                entry["fisher_output_mse"] = fisher_sum / fisher_n
             out[name][fmt] = entry
     return out
-
-
-class HDetailIndex:
-    """Disk-backed Fisher H-diagonal cache — the per-weight equivalent
-    of `ActivationIndex`.
-
-    Points at a directory where `sensitivity_probe.FisherAccumulator`
-    dumped per-Linear `[out, in]` tensors (and per-packed-expert
-    `[E, M]` tensors). `load(name)` returns the H diagonal tensor for
-    that Linear on demand.
-
-    ``expected_norm_tokens`` (from `h_detail_expected_norm_tokens`) turns
-    on the Fisher-denominator gate: every blob read must carry a
-    ``norm_tokens`` stamp equal to its row's scalar denominator
-    (`_check_blob_norm_tokens`). Omit it (default) for archived/diagnostic
-    readers that have no probe at hand."""
-
-    _FNAME_SUB = re.compile(r"[^A-Za-z0-9_-]")
-
-    def __init__(self, detail_dir: "Path", candidate_names,
-                 *, expected_norm_tokens: "dict[str, int] | None" = None):
-        self.detail_dir = detail_dir
-        self.expected_norm_tokens = dict(expected_norm_tokens or {})
-        self._paths: dict[str, Path] = {}
-        for name in candidate_names:
-            fname = self._FNAME_SUB.sub("__", name) + ".pt"
-            fp = detail_dir / fname
-            if fp.is_file():
-                self._paths[name] = fp
-        # Fail fast on one blob at construction rather than after hours of
-        # cost measurement: a stale h-detail dir is uniform, so the first
-        # checkable blob is representative. Sorted so the blob named in the
-        # error is the same on every run (candidate_names is often a set).
-        for name in sorted(self._paths):
-            if name in self.expected_norm_tokens:
-                self._check_blob_norm_tokens(name, torch.load(
-                    self._paths[name], map_location="cpu",
-                    weights_only=False))
-                break
-
-    def __contains__(self, name: str) -> bool:
-        return name in self._paths
-
-    def __len__(self) -> int:
-        return len(self._paths)
-
-    def _check_blob_norm_tokens(self, name: str, blob: dict) -> None:
-        """Refuse an h-detail blob not on its row's Fisher denominator.
-
-        A v3 (or unmarked) blob has no ``norm_tokens``: those writers
-        divided each row by its OWN token count, which for an unpacked
-        per-expert Linear is its ROUTED-token count rather than the
-        global calibration token count the scalar `h_trace` uses — so
-        such a blob is (global/routed)x hot, typically ~n_experts/top_k
-        (~32x on a 256-expert top-8 model). A v4 blob whose stamp simply
-        disagrees is an h-detail dir written at a different calibration
-        size. Either way the units are wrong for `predicted_dloss` and
-        the directory must be regenerated; this is the same hard-refusal
-        idiom as the packed_fisher_estimator gate in prepare_cost_context.
-
-        Deliberately NO env override, unlike that gate: h-detail is
-        optional, so dropping ``--h-detail-dir`` already gives a safe
-        escape (the cost step falls back to the scalar proxy) instead of
-        admitting known-mis-scaled units into the knapsack.
-        """
-        expected = self.expected_norm_tokens.get(name)
-        if not expected:
-            return
-        found = int(blob.get("norm_tokens", 0) or 0)
-        if found == int(expected):
-            return
-        version = int(blob.get("h_detail_version", 0) or 0)
-        if found > 0:
-            why = (f"blob norm_tokens={found} != this row's Fisher "
-                   f"denominator {expected} (h-detail directory written at "
-                   "a different calibration size than the probe)")
-        else:
-            why = (f"blob carries no norm_tokens stamp (h_detail_version="
-                   f"{version or 'unmarked'}, pre-v4): that writer divided "
-                   "each row by its OWN token count — per-ROUTED-token for "
-                   "unpacked per-expert Linears, not the global calibration "
-                   f"token count ({expected}) the scalar h_trace uses, so "
-                   "expert rows are (global/routed)x hot (typically "
-                   "~n_experts/top_k)")
-        raise SystemExit(
-            f"h-detail blob for {name!r} in {self.detail_dir}: {why}. "
-            "predicted_dloss built from it would price this row on a "
-            "different scale than the rest of the knapsack. Regenerate the "
-            f"h-detail directory with the current probe (delete "
-            f"{self.detail_dir} and re-run the probe with --h-detail-dir), "
-            "or drop --h-detail-dir to fall back to the scalar proxy.")
-
-    def load(self, name: str) -> torch.Tensor:
-        blob = torch.load(self._paths[name], map_location="cpu",
-                          weights_only=False)
-        self._check_blob_norm_tokens(name, blob)
-        return self.h_diag_from_blob(blob)
-
-    def load_blob(self, name: str) -> dict:
-        """Return the full saved dict (for callers that want g2_per_token,
-        kind, version, etc., not just h_diag)."""
-        blob = torch.load(self._paths[name], map_location="cpu",
-                          weights_only=False)
-        self._check_blob_norm_tokens(name, blob)
-        return blob
-
-    @staticmethod
-    def h_diag_from_blob(blob: dict) -> torch.Tensor:
-        """Return the Fisher diagonal from an h-detail blob, in PER-TOKEN
-        units (v4: per GLOBAL calibration token).
-
-        Both writers (`sensitivity_probe.FisherAccumulator.finalize` and
-        `incremental_probe`) normalize by the GLOBAL calib token count —
-        the same denominator as the scalar ``h_trace`` — and stamp
-        ``units: "per_token"`` via `probe_statistics.h_detail_blob`
-        (audits M9 + the PR #14 global-denominator fix). Legacy blobs:
-
-          - v3 ``h_diag`` (or unmarked): still converted here — this
-            staticmethod is a pure units-tagged reader with no probe to
-            compare against. The DENOMINATOR gate lives in
-            `HDetailIndex._check_blob_norm_tokens`, which refuses any
-            blob lacking a ``norm_tokens`` stamp matching its row's
-            scalar denominator (v3 blobs for UNPACKED per-expert Linears
-            divided by the row's ROUTED token count, (global/routed)×
-            hotter than the v4/scalar scale; pre-v3 sensitivity blobs for
-            those rows additionally divided by route_prob, audit M4).
-            Reads that go through `HDetailIndex.load`/`load_blob` are
-            therefore gated; a bare `h_diag_from_blob(blob)` call is not.
-          - raw ``H``: the old incremental writer's token-SUMMED
-            accumulator — ~n_tokens× hot for this consumer. Refuse
-            rather than silently mis-scale predicted_dloss; regenerate
-            the h-detail directory with the current probe.
-        """
-        units = blob.get("units")
-        if units is not None and units != "per_token":
-            raise ValueError(
-                f"h-detail blob {blob.get('name')!r} has unknown units "
-                f"{units!r}; this consumer requires 'per_token'.")
-        if "h_diag" in blob:
-            return blob["h_diag"]
-        if "H" in blob:
-            if units == "per_token":
-                return blob["H"]
-            raise ValueError(
-                f"h-detail blob {blob.get('name')!r} carries a raw "
-                "token-summed 'H' tensor with no units marker (legacy "
-                "incremental_probe writer). Its scale is ~n_tokens× off "
-                "for predicted_dloss; regenerate the h-detail directory "
-                "with the current probe instead of consuming it.")
-        raise KeyError("h-detail blob has neither 'h_diag' nor 'H'")
-
-
-def _normalize_fisher_output_mse_row_weights(
-    row_weights: torch.Tensor | None,
-    row_indices: torch.Tensor | None,
-    n_rows: int,
-    device: torch.device,
-) -> torch.Tensor | None:
-    """Return non-negative per-row Fisher weights normalized to mean 1.
-
-    The index-select preamble is local to the cost probe; the
-    normalise-then-clip rule itself lives in
-    render_score.normalize_clipped_fisher_row_weights so the cost paths
-    cannot drift (issue #159).
-    """
-    if row_weights is None or row_indices is None or n_rows <= 0:
-        return None
-    try:
-        source = row_weights.detach().reshape(-1).to(device=device, dtype=torch.float32)
-        idx = row_indices.detach().reshape(-1).to(device=device, dtype=torch.long)
-    except Exception:
-        return None
-    if idx.numel() < n_rows or source.numel() <= 0:
-        return None
-    idx = idx[:n_rows]
-    if int(idx.min().item()) < 0 or int(idx.max().item()) >= int(source.numel()):
-        return None
-    rw = source.index_select(0, idx)
-    return normalize_clipped_fisher_row_weights(
-        rw, resolve_fisher_row_weight_clip(), require_positive_mean=True
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -823,14 +609,9 @@ def _load_live_model(model_path: str, device: str, dtype: torch.dtype,
 def measure_unbatched(model: nn.Module, act_cache: "ActivationIndex",
                      target_names: set[str], specs: list[fr.FormatSpec],
                      device: str, dtype: torch.dtype,
-                     h_detail: "HDetailIndex | None" = None,
                      profile=None) -> dict:
     """One-Linear-at-a-time measurement. Simple, safe, slow on small ops
     running through unified memory but robust when batching isn't an option.
-
-    When `h_detail` is provided, also emits full per-weight Δloss
-    `0.5 · <H_full, (W - W_hat)²>` and a Fisher row-weighted
-    `fisher_output_mse` from `g2_per_token` when those tensors are present.
     """
     accum: dict[str, dict[str, dict]] = {}
     processed = 0
@@ -845,40 +626,21 @@ def measure_unbatched(model: nn.Module, act_cache: "ActivationIndex",
         if canonical_name not in act_cache:
             continue
         W = mod.weight.detach()
-        X_cpu, row_indices = act_cache.load_with_row_indices(canonical_name)
+        X_cpu = act_cache.load(canonical_name)
         X = X_cpu.to(W.dtype).to(W.device)
         # Grouped-BMM operand (wo_a shape): the joint-output screen below
         # models consumption as y = X @ W.T over the whole stored plane,
         # which is not how a grouped operand is contracted (row (g,r) only
         # ever meets group g's input slice). Scoring it dense would inflate
         # the output term ~G-fold with cross-group error that no token ever
-        # sees — a fake measurement. Ship weight_mse + predicted_dloss and
-        # stamp the output side honestly unmeasured instead.
+        # sees — a fake measurement. Ship weight_mse and stamp the output
+        # side honestly unmeasured instead.
         num_groups = grouped_linear_groups(mod, profile)
         y_ref = None
         ref_energy = 0.0
         if num_groups is None:
             y_ref = X @ W.T
             ref_energy = float(y_ref.float().pow(2).mean().item())
-        # Per-weight H diagonal and per-token g² weights if available.
-        # Shape of H matches W; g² aligns with rows of X.
-        h_full = None
-        gq_rows = None
-        if h_detail is not None and canonical_name in h_detail:
-            blob = h_detail.load_blob(canonical_name)
-            try:
-                h_full = HDetailIndex.h_diag_from_blob(blob).to(W.device).float()
-                if h_full.shape != W.shape:
-                    h_full = None  # shape mismatch → fall back to scalar only
-            except Exception:
-                h_full = None
-            gq_rows = _normalize_fisher_output_mse_row_weights(
-                blob.get("g2_per_token") if isinstance(blob, dict) else None,
-                row_indices,
-                int(X.shape[0]),
-                W.device,
-            )
-
         gguf_qw = None
         if any(_cost_render_uses_imatrix(s) for s in specs):
             # Shared activation imatrix (per-input-column mean-sq act). Same
@@ -905,20 +667,12 @@ def measure_unbatched(model: nn.Module, act_cache: "ActivationIndex",
                 output_mse = 0.0
                 rel_mse = 0.0
                 output_mse_measured = False
-                fisher_output_mse = None
                 if y_ref is not None:
                     y_q = X_hat @ W_hat.T
                     y_err_sq = (y_ref - y_q).float().pow(2)
                     output_mse = float(y_err_sq.mean().item())
                     rel_mse = output_mse / max(ref_energy, 1e-12)
                     output_mse_measured = True
-                    if gq_rows is not None:
-                        fisher_output_mse = float(
-                            (y_err_sq * gq_rows.unsqueeze(1)).mean().item()
-                        )
-                predicted_dloss = None
-                if h_full is not None:
-                    predicted_dloss = float(0.5 * (h_full * err.pow(2)).sum().item())
                 _accumulate_result(
                     accum,
                     canonical_name,
@@ -926,9 +680,7 @@ def measure_unbatched(model: nn.Module, act_cache: "ActivationIndex",
                     weight_mse,
                     output_mse,
                     output_mse / max(ref_energy, 1e-12),
-                    predicted_dloss=predicted_dloss,
                     output_mse_measured=output_mse_measured,
-                    fisher_output_mse=fisher_output_mse,
                 )
             except Exception as e:
                 accum.setdefault(canonical_name, {})[spec.name] = {"error": str(e)}
@@ -982,7 +734,6 @@ def _measure_packed_experts(
     dtype: torch.dtype,
     accum: dict,
     act_cache: "ActivationIndex | None" = None,
-    h_detail: "HDetailIndex | None" = None,
     profile=None,
 ) -> None:
     """Measure per-format cost for each packed-expert tensor.
@@ -993,13 +744,6 @@ def _measure_packed_experts(
     packed-MoE forward and records the same output_mse objective that
     dense Linears use. If the router or activation cache is unavailable,
     the entry is marked unmeasured so the allocator falls back explicitly.
-
-    When `h_detail` is provided, we also emit a per-weight Δloss based
-    on the packed H diagonal stored with per-expert per-output-channel
-    resolution (`[E, M]`). That resolution is coarser than the Linear
-    path's `[out, in]` — full `[E, M, N]` for 35B packed experts would
-    need 160+ GB — but it still captures the expert × channel structure
-    that the scalar trace loses.
     """
     dev = torch.device(device)
     entries = routed_experts.enumerate_packed_experts(model, target_names, profile)
@@ -1074,15 +818,6 @@ def _measure_packed_experts(
                 gate_up = None
                 down = None
 
-        # Per-(expert, out-channel) Fisher row-sum h_em, shape [E, M]
-        # (= Σ_n grad² over in-features; see the Δloss derivation below).
-        # Weighted elementwise against per-row mean err² to yield one
-        # Δloss scalar per (layer, format).
-        h_em = None
-        if h_detail is not None and full_name in h_detail:
-            h = h_detail.load(full_name).to(dev).float()
-            if h.shape == (w.size(0), w.size(1)):
-                h_em = h
         packed_gguf_qw = None
         if any(_cost_render_uses_imatrix(s) for s in specs):
             # Pooled imatrix from the experts-module input snapshot: exact
@@ -1144,37 +879,6 @@ def _measure_packed_experts(
                     if not use_sample else None
                 )
                 weight_mse = float(err.pow(2).mean().item())
-                dloss_val = None
-                if h_em is not None:
-                    # h_em[e,m] = Σ_n g[e,m,n]² — the per-row SUM over
-                    # in-features of the per-weight gradient² (see
-                    # sensitivity_probe channel_accumulator). The exact
-                    # per-weight Fisher-OBS loss is 0.5·Σ_{e,m,n} g²·err²
-                    # (a sum-of-products), matching the dense path at
-                    # line 464 / 1120. With only the row-summed h_em and
-                    # per-weight err², the mean-field estimate (g² ≈ const
-                    # across n within a row) is
-                    #   0.5·Σ_{e,m} h_em · mean_n(err²),
-                    # which is on the SAME scale as the dense 0.5·Σ g²·err².
-                    # Do NOT multiply by N here: h_em is already summed over
-                    # n, so an extra ×N would make this a product-of-sums
-                    # (Σ_n g²)(Σ_n err²) and inflate packed-expert Δloss ~N×
-                    # relative to dense Linears, over-promoting experts in
-                    # the allocator (N = in-features ≈ 1.5k–4k).
-                    per_ch_mse = err.pow(2).mean(dim=-1)   # [E or S, M]
-                    if use_sample:
-                        # Unbiased estimate of the full-stack sum from the
-                        # stratified sample.
-                        scale = float(w.shape[0]) / float(w_in.shape[0])
-                        dloss_val = float(
-                            0.5 * (h_em[s_idx] * per_ch_mse).sum().item()
-                            * scale
-                        )
-                    else:
-                        dloss_val = float(
-                            0.5 * (h_em * per_ch_mse).sum().item()
-                        )
-                    del per_ch_mse
                 output_mse = 0.0
                 rel_mse = 0.0
                 output_mse_measured = False
@@ -1214,7 +918,6 @@ def _measure_packed_experts(
                     fallback += 1
                 _accumulate_result(accum, full_name, spec.name,
                                    weight_mse, output_mse, rel_mse,
-                                   predicted_dloss=dloss_val,
                                    output_mse_measured=output_mse_measured,
                                    weight_mse_per_expert=(
                                        per_expert_weight_mse
@@ -1237,8 +940,6 @@ def _measure_packed_experts(
             del gate_up
         if down is not None:
             del down
-        if h_em is not None:
-            del h_em
         if dev.type == "cuda":
             torch.cuda.empty_cache()
     if measured or fallback:
@@ -1603,21 +1304,19 @@ def measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
                        target_names: set[str], specs: list[fr.FormatSpec],
                        device: str, dtype: torch.dtype,
                        chunk_size: int = 256,
-                       h_detail: "HDetailIndex | None" = None,
                        profile=None) -> dict:
     """Measure batched costs, closing all read-ahead streams on every exit."""
     with ExitStack() as streams:
         return _measure_batched_gpu(
             model, act_cache, target_names, specs, device, dtype,
-            chunk_size, h_detail, profile, streams=streams,
+            chunk_size, profile, streams=streams,
         )
 
 
 def _measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
                         target_names: set[str], specs: list[fr.FormatSpec],
                         device: str, dtype: torch.dtype,
-                        chunk_size: int, h_detail: "HDetailIndex | None",
-                        profile, *, streams: ExitStack) -> dict:
+                        chunk_size: int, profile, *, streams: ExitStack) -> dict:
     """Batched GPU measurement.
 
     Groups Linears by shape, then within each group processes `chunk_size`
@@ -1629,10 +1328,6 @@ def _measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
     (shape 2048×512) at BF16, one chunk of 256 = 256 MB weights; 256×256
     rows × 2048 = 128 MB activations; 3 formats × (W, Ŵ, Y_ref, Y_q) peak
     ~2 GB. Safe at chunk_size=256 on any GPU with 4+ GB free.
-
-    When `h_detail` is provided, also emits full per-weight Δloss
-    `0.5 · <H_full, (W - W_hat)²>` and a Fisher row-weighted
-    `fisher_output_mse` from `g2_per_token` when those tensors are present.
     """
     dev = torch.device(device)
     # Stratified per-expert subsample (PRISMAQUANT_EXPERT_COST_SAMPLE) for
@@ -1709,7 +1404,6 @@ def _measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
             else:
                 act_items_cpu = [act_cache.load_with_row_indices(n) for n in names]
             acts_cpu = [item[0] for item in act_items_cpu]
-            row_indices_cpu = [item[1] for item in act_items_cpu]
             # Per-item row usage. The chunk USED to be truncated to
             # min(rows) over its members, which on a MoE layer is set by the
             # single least-routed expert in the chunk: from DSv4-Flash layer 3
@@ -1743,10 +1437,6 @@ def _measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
             for _r, idxs in row_buckets.items():
                 for _p, _i in enumerate(idxs):
                     slot_in_bucket[_i] = _p
-            row_indices_cpu = [
-                (idx[:rows_used[i]] if isinstance(idx, torch.Tensor) else None)
-                for i, idx in enumerate(row_indices_cpu)
-            ]
             gguf_qw = None
             if any(_cost_render_uses_imatrix(s) for s in specs):
                 # Per-item imatrix, computed with the IDENTICAL op on the
@@ -1770,54 +1460,6 @@ def _measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
             for r, yb in y_ref_by_rows.items():
                 ref_energy[row_buckets[r]] = yb.float().pow(2).mean(dim=(1, 2))
 
-            # Per-item H full tensor stacked across the chunk, for the
-            # per-weight Δloss computation. Missing items get None.
-            h_stacked = None
-            gq_per_item = None
-            if h_detail is not None:
-                h_items = []
-                gq_items = []
-                all_have_h = True
-                all_have_gq = True
-                for idx_nm, nm in enumerate(names):
-                    if nm in h_detail:
-                        blob = h_detail.load_blob(nm)
-                        try:
-                            h = HDetailIndex.h_diag_from_blob(blob)
-                        except Exception:
-                            h = None
-                        if h is not None and h.shape == (W.size(1), W.size(2)):
-                            h_items.append(h.to(dev).float())
-                        else:
-                            all_have_h = False
-                        gq = (
-                            blob.get("g2_per_token")
-                            if isinstance(blob, dict)
-                            else None
-                        )
-                        gq_rows = _normalize_fisher_output_mse_row_weights(
-                            gq,
-                            row_indices_cpu[idx_nm],
-                            rows_used[idx_nm],
-                            dev,
-                        )
-                        if gq_rows is not None:
-                            gq_items.append(gq_rows)
-                        else:
-                            all_have_gq = False
-                            gq_items.append(None)
-                    else:
-                        all_have_h = False
-                        all_have_gq = False
-                        gq_items.append(None)
-                if all_have_h and len(h_items) == N:
-                    h_stacked = torch.stack(h_items, dim=0)   # (N, out, in)
-                if all_have_gq and len(gq_items) == N:
-                    # Ragged now (rows differ per item), so keep it per item
-                    # and stack inside each row bucket.
-                    gq_per_item = list(gq_items)
-                del h_items, gq_items
-
             def _measure_spec_into_accum(spec, idx=None):
                 """One spec's batched measure for the whole chunk (idx=None)
                 or an index-subset. Identical math either way."""
@@ -1830,8 +1472,6 @@ def _measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
                     ref_e = ref_energy if idx is None else ref_energy[idx]
                     gqw = gguf_qw if (gguf_qw is None or idx is None) \
                         else gguf_qw[idx]
-                    hs = h_stacked if (h_stacked is None or idx is None) \
-                        else h_stacked[idx]
                     n_sub = Ws.size(0)
                     W_hat = _batched_quantize(
                         spec, Ws,
@@ -1847,9 +1487,6 @@ def _measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
                     # their output slots ship zeroed + stamped unmeasured.
                     output_mse = torch.zeros(n_sub, dtype=torch.float32,
                                              device=dev)
-                    fisher_output_mse = (
-                        torch.zeros(n_sub, dtype=torch.float32, device=dev)
-                        if gq_per_item is not None else None)
                     for r, members in row_buckets.items():
                         cs = [c for c in members
                               if c in slot_of and not grouped_flags[c]]
@@ -1863,37 +1500,18 @@ def _measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
                         y_err_sq = (
                             y_ref_by_rows[r][bslots] - y_q).float().pow(2)
                         output_mse[wslots] = y_err_sq.mean(dim=(1, 2))
-                        if fisher_output_mse is not None:
-                            gqb = torch.stack([gq_per_item[c] for c in cs],
-                                              dim=0)
-                            fisher_output_mse[wslots] = (
-                                y_err_sq * gqb.unsqueeze(2)).mean(dim=(1, 2))
                         del X_hat, y_q, y_err_sq
                     rel_mse = output_mse / ref_e.clamp_min(1e-12)
-                    # Per-item predicted Δloss from full per-weight
-                    # Fisher. shape (n_sub,).
-                    dloss_per = None
-                    if hs is not None:
-                        dloss_per = 0.5 * (hs * err.pow(2)).sum(dim=(1, 2))
                     # Move all scalar metrics back to the host in one shot.
                     # Calling `.item()` per Linear forces a CUDA sync for
                     # each row and turns the batched path back into
                     # serialized work.
-                    metric_cols = [weight_mse, output_mse, rel_mse]
-                    if fisher_output_mse is not None:
-                        metric_cols.append(fisher_output_mse)
                     metrics = torch.stack(
-                        metric_cols, dim=1).detach().cpu().tolist()
-                    if dloss_per is not None:
-                        dloss_values = dloss_per.detach().cpu().tolist()
-                    else:
-                        dloss_values = [None] * n_sub
+                        [weight_mse, output_mse, rel_mse], dim=1).detach().cpu().tolist()
 
                     # Unpack per-item into results dict after the single sync.
-                    for item_i, (name, row, dloss_val, cpos) in enumerate(zip(
-                            sub_names, metrics, dloss_values, sel)):
-                        w_mse, out_mse, rel = row[:3]
-                        fisher_val = row[3] if len(row) > 3 else None
+                    for item_i, (name, row, cpos) in enumerate(zip(sub_names, metrics, sel)):
+                        w_mse, out_mse, rel = row
                         _accumulate_result(
                             accum,
                             name,
@@ -1901,23 +1519,12 @@ def _measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
                             float(w_mse),
                             float(out_mse),
                             float(rel),
-                            predicted_dloss=(
-                                float(dloss_val)
-                                if dloss_val is not None
-                                else None
-                            ),
                             output_mse_measured=not grouped_flags[item_i],
-                            fisher_output_mse=(
-                                float(fisher_val)
-                                if (fisher_val is not None
-                                    and not grouped_flags[item_i])
-                                else None
-                            ),
                             n_activation_rows=rows_used[cpos],
                         )
                     del W_hat, err
                     del weight_mse, output_mse, rel_mse
-                    del metrics, dloss_values
+                    del metrics
                 except Exception as e:
                     # FAIL LOUD. This used to swallow everything into a silent
                     # per-chunk {"error": ...}, which is fail-open: one OOM or
@@ -1949,11 +1556,6 @@ def _measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
                 _measure_spec_into_accum(spec)
 
             del W, X_by_rows, y_ref_by_rows, ref_energy
-            if h_stacked is not None:
-                del h_stacked
-            if gq_per_item is not None:
-                del gq_per_item
-            del row_indices_cpu
             if act_stream is not None:
                 act_stream.release()
             chunk_rows_used.extend(rows_used)
@@ -2004,30 +1606,6 @@ def prepare_cost_context(probe_path: str,
         probe = pickle.load(f)
     stats = probe["stats"]
     print(f"[cost] loaded probe stats for {len(stats)} Linears")
-
-    # Refuse pre-fix packed-expert probes: before the 2026-07-02 M3 fix the
-    # packed h_trace was sum-then-square (5-50x cross-token-covariance
-    # inflation, calibration-length dependent). Version-stamped pickles are
-    # required whenever packed-expert entries are present, so a stale
-    # probe.pkl reused via skip-if-exists cannot silently drive allocations.
-    has_packed = any(
-        isinstance(m, dict) and m.get("_packed_experts_module")
-        for m in stats.values()
-    )
-    estimator = (probe.get("meta") or {}).get("packed_fisher_estimator")
-    if has_packed and estimator != "per_token_v2":
-        if os.environ.get(
-                "PRISMAQUANT_ALLOW_SUMSQ_PACKED_FISHER", "0") != "1":
-            raise SystemExit(
-                f"probe {probe_path} contains packed-expert entries but no "
-                f"packed_fisher_estimator=per_token_v2 marker (found: "
-                f"{estimator!r}) — it predates the 2026-07-02 per-token "
-                "packed-Fisher fix and its expert h_trace values are "
-                "sum-then-square inflated (5-50x). Regenerate the probe, or "
-                "set PRISMAQUANT_ALLOW_SUMSQ_PACKED_FISHER=1 to accept the "
-                "biased legacy estimator.")
-        print("[cost] WARNING: accepting pre-fix sum-then-square packed "
-              "Fisher probe (PRISMAQUANT_ALLOW_SUMSQ_PACKED_FISHER=1)")
 
     cache = Path(activation_cache_dir)
     if not cache.exists():
@@ -2091,9 +1669,7 @@ def run_cost_pass(model: nn.Module,
                   dtype: torch.dtype,
                   mode: str,
                   chunk_size: int,
-                  output_path: str,
-                  h_detail_dir: str | None = None,
-                  probe: dict | None = None):
+                  output_path: str):
     chosen_mode = mode
     if chosen_mode == "auto":
         chosen_mode = "batched" if device.startswith("cuda") else "unbatched"
@@ -2111,31 +1687,14 @@ def run_cost_pass(model: nn.Module,
     except Exception:
         model_profile = None
 
-    h_detail: "HDetailIndex | None" = None
-    if h_detail_dir:
-        detail_path = Path(h_detail_dir)
-        if detail_path.exists():
-            h_detail = HDetailIndex(
-                detail_path, target_names,
-                expected_norm_tokens=probe_statistics.h_detail_expected_norm_tokens(probe))
-            print(f"[cost] h-detail cache: {len(h_detail)} / {len(target_names)} "
-                  "Linears have h-detail → using per-weight Δloss and "
-                  "Fisher row-weighted output MSE when available",
-                  flush=True)
-        else:
-            print(f"[cost] WARN: h-detail dir {detail_path} not found; "
-                  "falling back to scalar proxy", flush=True)
-
     if chosen_mode == "batched":
         results = measure_batched_gpu(model, act_cache, target_names, specs,
                                       device, dtype,
                                       chunk_size=chunk_size,
-                                      h_detail=h_detail,
                                       profile=model_profile)
     else:
         results = measure_unbatched(model, act_cache, target_names, specs,
                                     device, dtype,
-                                    h_detail=h_detail,
                                     profile=model_profile)
 
     # Packed-expert tensors aren't visible to the nn.Linear-based path.
@@ -2144,7 +1703,6 @@ def run_cost_pass(model: nn.Module,
     packed_accum: dict[str, dict] = {}
     _measure_packed_experts(model, target_names, specs, device, dtype,
                             packed_accum, act_cache=act_cache,
-                            h_detail=h_detail,
                             profile=model_profile)
     if packed_accum:
         results.update(_finalize_results(packed_accum))
@@ -2169,7 +1727,6 @@ def run_cost_pass(model: nn.Module,
                 "n_linears": len(results),
                 "missing_activations": missing_act,
                 "mode": chosen_mode,
-                "h_detail_dir": str(Path(h_detail_dir)) if h_detail_dir else None,
             },
         }, f)
     print(f"[cost] wrote {out_path} ({len(results)} Linears)")

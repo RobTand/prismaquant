@@ -24,7 +24,6 @@ These tests pin three things:
   invent a topology it was not given).
 """
 from __future__ import annotations
-from prismaquant import priced_cell
 from prismaquant import tessera_campaign_table as campaign
 
 import argparse
@@ -32,7 +31,6 @@ import json
 import math
 import random
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -232,27 +230,6 @@ def test_stack_row_prices_exactly_what_the_expanded_experts_would():
     assert row["cost_source"] == "tessera_campaign_measured"
     assert row["currency"] == campaign.CURRENCY
     assert "predicted_dloss" not in row and "weight_mse" not in row
-
-
-def test_the_allocator_takes_the_output_mse_branch_for_a_stack_row():
-    """Pricing must go through ``_prices_from_output_mse``, not weight-only."""
-    from prismaquant import allocator_candidates as ac
-    from prismaquant.allocator_solver import predicted_dloss
-
-    h = [3.0, 1.0, 4.0, 2.0]
-    anchors = {
-        f"{STEM}.{e}.{role}": {"TESSERA_E2M1_K1": [
-            _anchor(f"{STEM}.{e}.{role}", "TESSERA_E2M1_K1",
-                    "TESSERA_E2M1_K1_R256", 256, 0.01 * (e + 1))]}
-        for e in range(4) for role in ("w1", "w3")}
-    probe = _packed_probe_row(4, h)
-    sample = _sample(probe)
-    payload = _payload(anchors, {sample.packed_qname: sample})
-    row = payload["costs"][f"{STEM}.gate_up_proj"]["TESSERA_E2M1_K1_R256"]
-
-    assert priced_cell._prices_from_output_mse(probe, row) is True
-    assert priced_cell.cost_entry_predicted_dloss(probe, row) == pytest.approx(
-        predicted_dloss(probe["h_trace"], row["output_mse"]), rel=1e-12)
 
 
 # ---------------------------------------------------------------------------

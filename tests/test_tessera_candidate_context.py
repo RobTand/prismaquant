@@ -125,45 +125,6 @@ def _fixture_specs(monkeypatch, *names):
     return specs
 
 
-def test_candidates_resolve_same_format_separately_for_dense_and_routed_units(monkeypatch):
-    spec, = _fixture_specs(monkeypatch, _FORMAT)
-    contexts = _contexts()
-    stats, costs = _tables(contexts)
-    calls, lanes = _record_resolver(monkeypatch)
-    monkeypatch.setattr(
-        tm, "route_admission",
-        lambda *args, **kwargs: SimpleNamespace(
-            requires_serving_context=False, admits=lambda mode: True),
-    )
-    # This test isolates route threading; shape legality and wire accounting
-    # have their own proof harnesses and are not facts inferred by this mock.
-    monkeypatch.setattr(
-        ac, "check_stats_format_applicability",
-        lambda *args, **kwargs: ac.FormatApplicability(True),
-    )
-    monkeypatch.setattr(
-        ac, "serialized_candidate_payload",
-        lambda *args, **kwargs: (32768, None, None),
-    )
-    monkeypatch.setattr(
-        ac, "reduce_continuous_menu",
-        lambda candidates, *args, **kwargs: candidates,
-    )
-
-    candidates = ac.build_candidates(
-        stats, costs, [spec],
-        target_profile=_PROFILE,
-        context_by_unit=contexts,
-    ).candidates
-
-    assert set(candidates) == set(contexts)
-    for name, context in contexts.items():
-        assert len(candidates[name]) == 1
-        assert candidates[name][0].serving_lane == lanes[context.structure]
-        assert stats[name]["_serving_lane_by_format"][_FORMAT] == lanes[context.structure]
-    assert Counter(calls) == Counter({context.key(): 1 for context in contexts.values()})
-
-
 def test_expanded_selection_resolves_and_caches_routes_by_explicit_unit_context(monkeypatch):
     contexts = _contexts()
     calls, lanes = _record_resolver(monkeypatch)
@@ -221,63 +182,6 @@ def test_selected_candidate_routes_survive_conflicting_same_format_provenance(mo
     assert report["activation_pricing_branches"] == {"measured_output_mse": len(assignment)}
 
 
-@pytest.mark.parametrize("mode", [tm.MENU_ATTESTED, tm.MENU_RESEARCH])
-@pytest.mark.parametrize("context", [None, _Context(structure="routed_moe")])
-def test_v5_unmatched_context_masks_only_the_attested_candidate(monkeypatch, mode, context):
-    specs = _fixture_specs(monkeypatch, _FORMAT, "BF16")
-    contexts = {} if context is None else {"unit.a": context}
-    stats, costs = _tables({"unit.a": context})
-    costs["unit.a"]["BF16"] = {"weight_mse": 0.0, "predicted_dloss": 0.0}
-    observed = []
-
-    def admit(name, *, serving_context=None, allowability=None, require_allowability=False):
-        assert allowability is None and not require_allowability
-        assert name == _FORMAT
-        observed.append(serving_context)
-        return SimpleNamespace(
-            requires_serving_context=True,
-            attested=False,
-            detail="context does not match any native cell",
-            admits=lambda selected_mode: selected_mode == tm.MENU_RESEARCH,
-        )
-
-    monkeypatch.setattr(tm, "menu_mode", lambda *args, **kwargs: mode)
-    monkeypatch.setattr(tm, "route_admission", admit)
-    monkeypatch.setattr(
-        ac, "serving_lane_route",
-        lambda profile, fmt, **kwargs: None if fmt == "BF16" else _lane("unattested"),
-    )
-    monkeypatch.setattr(
-        ac, "check_stats_format_applicability",
-        lambda *args, **kwargs: ac.FormatApplicability(True),
-    )
-    monkeypatch.setattr(
-        ac, "serialized_candidate_payload",
-        lambda *args, **kwargs: (32768, None, None),
-    )
-    monkeypatch.setattr(
-        ac, "reduce_continuous_menu",
-        lambda candidates, *args, **kwargs: candidates,
-    )
-    masks = []
-
-    candidates = ac.build_candidates(
-        stats, costs, specs, target_profile=_PROFILE,
-        context_by_unit=contexts, mask_records=masks,
-    ).candidates
-
-    assert observed == [context]
-    expected_formats = {"BF16", _FORMAT} if mode == tm.MENU_RESEARCH else {"BF16"}
-    assert {candidate.fmt for candidate in candidates["unit.a"]} == expected_formats
-    if mode == tm.MENU_ATTESTED:
-        assert len(masks) == 1
-        assert masks[0]["qname"] == "unit.a"
-        assert masks[0]["format"] == _FORMAT
-        assert "context" in masks[0]["detail"]
-    else:
-        assert masks == []
-
-
 def test_v5_scope_refusal_cannot_silently_remove_a_whole_unit(monkeypatch):
     specs = _fixture_specs(monkeypatch, _FORMAT)
     stats, costs = _tables({"unit.a": None})
@@ -328,33 +232,6 @@ def _legacy_scope_candidate_fixture(monkeypatch, *, context, mode, include_bf16=
         lambda candidates, *args, **kwargs: candidates,
     )
     return specs, stats, costs
-
-
-@pytest.mark.parametrize("mode", [tm.MENU_ATTESTED, tm.MENU_RESEARCH])
-@pytest.mark.parametrize("context", [None, _Context(structure="routed_moe")])
-def test_legacy_context_refusal_masks_only_explicit_attested_candidates(
-        monkeypatch, mode, context):
-    specs, stats, costs = _legacy_scope_candidate_fixture(
-        monkeypatch, context=context, mode=mode)
-    masks = []
-
-    candidates = ac.build_candidates(
-        stats, costs, specs, target_profile=_PROFILE,
-        context_by_unit={} if context is None else {"unit.a": context},
-        mask_records=masks,
-    ).candidates
-
-    refused = context is not None and mode == tm.MENU_ATTESTED
-    expected = {"BF16"} if refused else {"BF16", _FORMAT}
-    assert {candidate.fmt for candidate in candidates["unit.a"]} == expected
-    if refused:
-        assert len(masks) == 1
-        assert masks[0]["reason"] == "tessera_serving_context"
-        assert masks[0]["serving_context"] == context.as_dict()
-    else:
-        assert masks == []
-        candidate = next(c for c in candidates["unit.a"] if c.fmt == _FORMAT)
-        assert candidate.serving_lane.route_status == "unattested"
 
 
 def test_legacy_explicit_context_refusal_cannot_remove_the_final_unit_choice(monkeypatch):
