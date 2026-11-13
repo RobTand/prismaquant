@@ -36,9 +36,19 @@ def test_real_streamed_body_rows_match_end_to_end_fisher(
         parameter.requires_grad_(False)
     collector = FisherAccumulator(reference, tracked, {},
                                   hook_packed_experts=False, emit_dense_marginals=True)
+    # Body Linear inputs of the grad-enabled forward: the oracle for the act/
+    # rows that the no-grad phase-1 forward writes.
+    body_inputs = {}
+    input_hooks = [module.register_forward_hook(
+        lambda _m, inp, _o, _name=name: body_inputs.__setitem__(
+            _name, inp[0].detach().reshape(-1, inp[0].size(-1))))
+        for name, module in reference.named_modules()
+        if name.startswith("model.layers.") and isinstance(module, torch.nn.Linear)]
     try:
         inputs = reference.get_input_embeddings()(ids).detach().requires_grad_(True)
         hidden = reference.model(inputs_embeds=inputs, use_cache=False).last_hidden_state
+        for handle in input_hooks:
+            handle.remove()
         logits = reference.lm_head(hidden[:, :-1, :]).float()
         log_prob = torch.nn.functional.log_softmax(logits.reshape(-1, config.vocab_size), dim=-1)
         ce = -log_prob.gather(1, ids[:, 1:].reshape(-1, 1)).squeeze(1)
@@ -76,7 +86,13 @@ def test_real_streamed_body_rows_match_end_to_end_fisher(
             importance_weighting=importance_weighting, prefetch_lookahead=1,
             minimax_fast_moe=False, minimax_fast_moe_chunk_size=32,
             resident_include_union=".*", resident_exclude="(?!)",
-            activation_cache_dir=str(tmp_path / "activations"))
+            activation_cache_dir=str(tmp_path / "activations"),
+            activation_rows_limit=ids.numel())
+        assert len(body_inputs) == 14
+        for name, rows in body_inputs.items():
+            blob = torch.load(tmp_path / "activations" / (name.replace(".", "__") + ".pt"),
+                              weights_only=False)
+            torch.testing.assert_close(blob["inputs"], rows[blob["row_indices"]])
         output = tmp_path / "probe.pkl"
         probe._run_body_streaming_shard(context, calib=ids, linear_include=".*",
             linear_exclude="(?!)", importance_weighting=importance_weighting,
@@ -181,7 +197,7 @@ def test_act_cache_is_byte_identical_under_different_global_rng_states(
                 importance_weighting=True, prefetch_lookahead=1,
                 minimax_fast_moe=False, minimax_fast_moe_chunk_size=32,
                 resident_include_union=".*", resident_exclude="(?!)",
-                activation_cache_dir=str(act))
+                activation_cache_dir=str(act), activation_rows_limit=37)
             probe._run_body_streaming_shard(context, calib=ids, linear_include=".*",
                 linear_exclude="(?!)", importance_weighting=True,
                 activation_cache_dir=str(act), h_detail_dir=None,

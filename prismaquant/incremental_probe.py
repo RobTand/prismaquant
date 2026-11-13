@@ -1839,6 +1839,71 @@ def _scored_lm_head_logits(
     return lm_head(hidden[:, begin:begin + width, :]).float()
 
 
+class _ActRowCache:
+    """The act/ rows of one capture: keyed row selection and the files."""
+
+    def __init__(self, cache_dir: str, rows_limit: int):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.rows_limit = max(1, int(rows_limit))
+        self.snaps: dict[str, list[torch.Tensor]] = defaultdict(list)
+        self.indices: dict[str, list[torch.Tensor]] = defaultdict(list)
+        self.offsets: dict[str, int] = defaultdict(int)
+        self._pending: list = []
+        self._pool = None
+        # PRISMAQUANT_ACT_CACHE_ASYNC=0 keeps per-Linear writes synchronous.
+        if _env_flag("PRISMAQUANT_ACT_CACHE_ASYNC", default=True):
+            from concurrent.futures import ThreadPoolExecutor
+            self._pool = ThreadPoolExecutor(
+                max_workers=int(os.environ.get("PRISMAQUANT_ACT_CACHE_WORKERS", "4")),
+                thread_name_prefix="act-save",
+            )
+
+    def keep(self, name: str, x: torch.Tensor) -> None:
+        """Number each row of the call globally, then keep the keyed top-K."""
+        flat = x.detach().reshape(-1, x.size(-1))
+        base = self.offsets[name]
+        self.offsets[name] += int(flat.size(0))
+        rows = torch.arange(base, base + flat.size(0), device=flat.device)
+        probe_statistics.keep_act_rows(
+            self.snaps, self.indices, name, flat, rows, self.rows_limit)
+
+    def flush(self, snaps_by_name=None, indices_by_name=None) -> None:
+        """Write and drop each kept name: one host copy per Linear."""
+        snaps_by_name = self.snaps if snaps_by_name is None else snaps_by_name
+        indices_by_name = self.indices if indices_by_name is None else indices_by_name
+        # #43: PRISMAQUANT_ACT_CACHE_FP32 keeps activations at FP32
+        # for better Hessian numerical stability in the cost step.
+        cache_dtype = (torch.float32
+                       if os.environ.get("PRISMAQUANT_ACT_CACHE_FP32", "1") != "0"
+                       else torch.bfloat16)
+        for name in list(snaps_by_name.keys()):
+            snaps = snaps_by_name.pop(name)
+            if not snaps:
+                continue
+            X = torch.cat(snaps, dim=0).to("cpu", dtype=cache_dtype).contiguous()
+            payload = {"inputs": X, "name": name,
+                       "row_selection": probe_statistics.ACT_ROW_SELECTION}
+            index_parts = indices_by_name.pop(name, [])
+            if index_parts:
+                row_indices = torch.cat(index_parts, dim=0).to(
+                    "cpu", dtype=torch.long).contiguous()
+                if row_indices.numel() == X.shape[0]:
+                    payload["row_indices"] = row_indices
+            target = self.cache_dir / (re.sub(r"[^A-Za-z0-9_-]", "__", name) + ".pt")
+            if self._pool is not None:
+                self._pending.append(self._pool.submit(torch.save, payload, target))
+            else:
+                torch.save(payload, target)
+
+    def drain(self) -> None:
+        """Block until every background write has completed, so a later stage
+        sees a fully written act/ directory."""
+        for fut in self._pending:
+            fut.result()
+        self._pending.clear()
+
+
 def _compute_global_precompute(
     ctx: StreamingContext,
     *,
@@ -1850,6 +1915,7 @@ def _compute_global_precompute(
     resident_include_union: str,
     resident_exclude: str,
     activation_cache_dir: str | None,
+    activation_rows_limit: int,
 ) -> GlobalPrecompute:
     """Run Phase-1 (streaming forward, cache activations on CPU) and
     Phase-2 (chunked CE backward through lm_head). Install resident
@@ -1934,15 +2000,31 @@ def _compute_global_precompute(
         t_h2h_total += time.time() - t0
 
     _capture_act(hidden)
+    # Phase 1 writes the body act/ rows: the inputs of each probed body Linear
+    # and packed-experts module that a shard's scope matches (#3447).
+    act_rows = (_ActRowCache(activation_cache_dir, activation_rows_limit)
+                if activation_cache_dir else None)
+    body_scope = re.compile(resident_include_union)
+    act_units = [] if act_rows is None else [
+        unit.module_name for unit in probe_inventory.build_probe_inventory(
+            model, profile, linear_exclude=resident_exclude).priced_units
+        if unit.module_name.startswith(layers_prefix)
+        and body_scope.search(unit.module_name)]
     try:
         for L in range(num_layers):
             load_t0 = time.time()
             src = ctx.install(L)
             ctx.schedule_prefetch(L + prefetch_depth)
             load_s = time.time() - load_t0
+            act_hooks = [
+                model.get_submodule(name).register_forward_hook(
+                    lambda _m, inp, _out, _name=name: act_rows.keep(
+                        _name, inp[0] if isinstance(inp, tuple) else inp))
+                for name in act_units if name.startswith(f"{layers_prefix}{L}.")]
             if minimax_fast_moe:
+                # The fast path skips the per-expert Linears whose rows act/ keeps.
                 _set_minimax_fast_moe(
-                    layers[L], True,
+                    layers[L], act_rows is None,
                     chunk_size=minimax_fast_moe_chunk_size,
                     proj_names=tuple(_profile.unpacked_expert_projection_names()),
                     class_names=tuple(_profile.packed_expert_module_class_names()),
@@ -1958,6 +2040,10 @@ def _compute_global_precompute(
                     pass_state=pass_state,
                 )
             fwd_s = time.time() - fwd_t0
+            for handle in act_hooks:
+                handle.remove()
+            if act_rows is not None:
+                act_rows.flush()
             hidden = out
             _capture_act(hidden)
             ctx.unload(L)
@@ -1966,6 +2052,8 @@ def _compute_global_precompute(
                       f"load={load_s:.2f}s  fwd={fwd_s:.2f}s", flush=True)
     finally:
         phase1_tracker.remove_hooks()
+    if act_rows is not None:
+        act_rows.drain()
     # Snapshot the cross-layer shared state (e.g. Gemma4 shared_kv_states)
     # now that the full sequential forward is done — it holds the K/V the
     # KV-sharing layers reuse. Captured to CPU for the pickled precompute so
@@ -2867,95 +2955,9 @@ def _run_body_streaming_shard(
         if g2 is not None:
             merged_g2_per_token[fqn].append(g2.detach().to(torch.float32).cpu())
 
-    # Activation snap accumulators (populated during Phase-3 for body
-    # Linears; resident snaps were populated during Phase-2 hooks above).
-    activation_snaps: dict[str, list[torch.Tensor]] = defaultdict(list)
-    activation_row_indices: dict[str, list[torch.Tensor]] = defaultdict(list)
-    activation_token_offsets: dict[str, int] = defaultdict(int)
-    input_rows_limit = max(1, int(activation_rows_limit))
-
-    def _keep_act_snapshot(snaps, indices, name, x):
-        """Number each row of the call globally, then keep the keyed top-K."""
-        flat = x.detach().reshape(-1, x.size(-1))
-        base = activation_token_offsets[name]
-        activation_token_offsets[name] += int(flat.size(0))
-        rows = torch.arange(base, base + flat.size(0), device=flat.device)
-        probe_statistics.keep_act_rows(
-            snaps, indices, name, flat, rows, input_rows_limit)
-    cache_dir = Path(activation_cache_dir) if activation_cache_dir else None
-    if cache_dir is not None:
-        cache_dir.mkdir(parents=True, exist_ok=True)
-    act_fname_sub = re.compile(r"[^A-Za-z0-9_-]")
-
-    # PRISMAQUANT_ACT_CACHE_ASYNC=0 keeps per-Linear writes synchronous.
-    _act_async = _env_flag("PRISMAQUANT_ACT_CACHE_ASYNC", default=True)
-    _act_pool = None
-    _act_pending: list = []
-    if _act_async and cache_dir is not None:
-        from concurrent.futures import ThreadPoolExecutor
-        _act_pool = ThreadPoolExecutor(
-            max_workers=int(os.environ.get("PRISMAQUANT_ACT_CACHE_WORKERS", "4")),
-            thread_name_prefix="act-save",
-        )
-
-    def _act_save_one(path, payload):
-        torch.save(payload, path)
-
-    def flush_activation_snapshots(
-        snaps_by_name: dict[str, list[torch.Tensor]],
-        indices_by_name: dict[str, list[torch.Tensor]] | None = None,
-    ):
-        if cache_dir is None:
-            return
-        for name in list(snaps_by_name.keys()):
-            snaps = snaps_by_name.pop(name)
-            if not snaps:
-                continue
-            # Body snapshots are still on device (Fix C): one host copy
-            # per Linear here, never one per forward call.
-            # #43: PRISMAQUANT_ACT_CACHE_FP32 keeps activations at FP32
-            # for better Hessian numerical stability in the cost step.
-            # 2× storage cost; recommended when disk is plentiful.
-            cache_dtype = (
-                torch.float32
-                if os.environ.get("PRISMAQUANT_ACT_CACHE_FP32", "1") != "0"
-                else torch.bfloat16
-            )
-            X = torch.cat(snaps, dim=0).to(
-                "cpu", dtype=cache_dtype
-            ).contiguous()
-            row_indices = None
-            if indices_by_name is not None:
-                index_parts = indices_by_name.pop(name, [])
-                if index_parts:
-                    row_indices = torch.cat(index_parts, dim=0).to(
-                        "cpu", dtype=torch.long
-                    ).contiguous()
-            payload = {"inputs": X, "name": name,
-                       "row_selection": probe_statistics.ACT_ROW_SELECTION}
-            if row_indices is not None and row_indices.numel() == X.shape[0]:
-                payload["row_indices"] = row_indices
-            fname = act_fname_sub.sub("__", name) + ".pt"
-            target = cache_dir / fname
-            if _act_pool is not None:
-                fut = _act_pool.submit(_act_save_one, target, payload)
-                _act_pending.append(fut)
-            else:
-                torch.save(payload, target)
-
-    def drain_activation_writes():
-        """Block until all background activation-cache writes have
-        completed. Called at the end of the shard so the cost step sees
-        a fully-flushed activation directory."""
-        if _act_pool is None:
-            return
-        for fut in _act_pending:
-            fut.result()
-        _act_pending.clear()
-
+    act_rows = (_ActRowCache(activation_cache_dir, activation_rows_limit)
+                if activation_cache_dir else None)
     collect_h_full = h_detail_dir is not None
-    packed_act_snaps: dict[str, list[torch.Tensor]] = defaultdict(list)
-    packed_act_row_indices: dict[str, list[torch.Tensor]] = defaultdict(list)
 
     # Phase-3 reverse sweep runs only when this shard has body-scoped
     # Linears. Pure resident-scoped shards (e.g. `^lm_head$`) skip it —
@@ -3255,12 +3257,6 @@ def _run_body_streaming_shard(
                 def hook(module, inp, out):
                     x = inp[0] if isinstance(inp, tuple) else inp
                     saved_inputs[name] = x.detach()
-                    if cache_dir is not None:
-                        # Rows stay on device: flush_activation_snapshots
-                        # copies them to host once per Linear at the end
-                        # of the layer (v22 Fix C), with no sync per call.
-                        _keep_act_snapshot(
-                            activation_snaps, activation_row_indices, name, x)
                 return hook
 
             # v21 #1: deferred Fisher sync. PRISMAQUANT_DEFERRED_FISHER_SYNC=1
@@ -3524,35 +3520,11 @@ def _run_body_streaming_shard(
                 profile=_shard_profile,
             ) if layer_in_scope else {}
             layer_prefix = f"{layers_prefix}{L}."
-            layer_packed_handles: list = []
-            packed_input_modules: set[str] = set()
             for key, md in packed_meta.items():
                 full_key = f"{layer_prefix}{key}"
                 experts_qname_rel = md["_packed_experts_module"]
                 md["_packed_experts_module"] = f"{layer_prefix}{experts_qname_rel}"
                 acc_stats[full_key] = md
-                packed_input_modules.add(experts_qname_rel)
-            if cache_dir is not None:
-                # Capture activations for the packed-experts module so the
-                # allocator can use the same input cache as nn.Linear entries.
-                for experts_qname_rel in sorted(packed_input_modules):
-                    try:
-                        experts_mod = layers[L].get_submodule(experts_qname_rel)
-                    except AttributeError:
-                        experts_mod = None
-                    if experts_mod is not None:
-                        experts_full = f"{layer_prefix}{experts_qname_rel}"
-
-                        def _exp_fwd(_mod, inp, _out, _q=experts_full):
-                            x = inp[0] if isinstance(inp, tuple) else inp
-                            if isinstance(x, torch.Tensor):
-                                _keep_act_snapshot(
-                                    packed_act_snaps, packed_act_row_indices,
-                                    _q, x)
-
-                        layer_packed_handles.append(
-                            experts_mod.register_forward_hook(_exp_fwd))
-
             # Forward + backward for this layer with the full batch.
             x_in = activations_cpu[L].to(device).to(dtype).detach().requires_grad_(True)
             bwd_t0 = time.time()
@@ -3769,8 +3741,6 @@ def _run_body_streaming_shard(
 
             for h in handles:
                 h.remove()
-            for h in layer_packed_handles:
-                h.remove()
             for h in moe_block_handles:
                 h.remove()
             for fqn, s in acc_stats.items():
@@ -3850,17 +3820,6 @@ def _run_body_streaming_shard(
                                       full_key, kind="packed"),
                         detail_dir / fname)
                 packed_full_acc.clear()
-            # Body layer FQNs are unique within the shard, so activation
-            # snapshots can be flushed as soon as that layer has run.
-            # Holding every target expert's sampled inputs until shard
-            # finalization adds several GB of avoidable host pressure on
-            # MiniMax's 256-expert layers.
-            flush_activation_snapshots(
-                activation_snaps,
-                activation_row_indices,
-            )
-            flush_activation_snapshots(packed_act_snaps, packed_act_row_indices)
-
             phase_pressure_trim_bytes += int(ctx.unload(L))
             # The `del` drops all per-layer refs; CPython ref counting
             # reclaims them synchronously. The per-layer gc + empty_cache
@@ -3940,17 +3899,10 @@ def _run_body_streaming_shard(
                 detail_dir / fname,
             )
 
-    # Flush activation snapshots.
-    if cache_dir is not None:
-        flush_activation_snapshots(
-            activation_snaps,
-            activation_row_indices,
-        )
-        flush_activation_snapshots(packed_act_snaps, packed_act_row_indices)
-        flush_activation_snapshots(resident_act_snaps, resident_act_row_indices)
-        # v22 Fix C: block until any async writes have completed so the
-        # cost step sees a fully-flushed activation cache directory.
-        drain_activation_writes()
+    # Phase 1 wrote the body act/ rows; phase 2 kept the resident ones.
+    if act_rows is not None:
+        act_rows.flush(resident_act_snaps, resident_act_row_indices)
+        act_rows.drain()
 
     routing = _shard_routing_payload(all_tracked, inc, vars(precomputed))
 
@@ -4760,6 +4712,9 @@ def main():
     )
 
     precompute_meta["probe_reuse_inputs"] = dict(args.probe_reuse_inputs)
+    # Phase 1 writes act/, so a cache built for other act/ rows is not reused.
+    precompute_meta["act_rows"] = [args.activation_cache_dir, int(args.activation_rows_limit),
+                                   probe_statistics.ACT_ROW_SELECTION]
 
     def _ensure_precompute() -> GlobalPrecompute:
         """Load Phase-1/Phase-2 artifacts from the on-disk cache if the
@@ -4792,6 +4747,7 @@ def main():
             resident_include_union=resident_include_union,
             resident_exclude=linear_exclude,
             activation_cache_dir=args.activation_cache_dir,
+            activation_rows_limit=args.activation_rows_limit,
         )
         _save_precompute_cache(
             precompute_cache_path, precomputed, precompute_meta)
