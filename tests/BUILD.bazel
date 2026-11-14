@@ -526,10 +526,6 @@ pq_py_test(
         ":conftest",
         ":g3job/conftest",
     ],
-    tags = [
-        "gate-issue-3181",
-        "manual",
-    ],
     timeout = "moderate",
 )
 
@@ -6305,7 +6301,6 @@ pq_py_library(
     ],
     data = [
         "//:tools/ci/bazel_parity.py",
-        "g3job/test_g3.py",
         "test_band_serial_batched_regime.py",
         "test_band_serial_scratch_plane.py",
         "test_bazel_parity.py",

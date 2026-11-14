@@ -2,15 +2,6 @@
   "schema": "prismaquant.gate_quarantine.v1",
   "entries": [
     {
-      "target": "tests/g3job/test_g3.py",
-      "issue": 3181,
-      "reason": "FileNotFoundError: missing /mnt/shared/tessera-pins",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 15
-      }
-    },
-    {
       "target": "tests/test_campaign_acquisition_d32.py::test_actual_cli_plans_acquisition_after_producer_refresh",
       "issue": 3183,
       "reason": "FileNotFoundError: missing /mnt/shared/pq2253-acquisition-cli-*",

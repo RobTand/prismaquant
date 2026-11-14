@@ -68,7 +68,6 @@ def test_the_population_comes_from_the_gate_selector_without_reading_imports():
     plan = bazel_parity.population(ROOT)
     paths = {row['path'] for row in plan['selected']}
     assert 'tests/test_bazel_parity.py' in paths
-    assert 'tests/g3job/test_g3.py' not in paths  # quarantined whole file (#3181)
 
 
 def junit(path, cases):
