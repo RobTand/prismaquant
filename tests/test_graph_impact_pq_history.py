@@ -178,6 +178,8 @@ def test_baseline_write_keeps_no_edge_identities(repo, capsys):
 def test_scc_below_baseline_keeps_gains_against_base(repo, capsys, base_scc, head_scc):
     graphs = {size: pq.core.measure({}, {('a', 'b')} | ({('b', 'a')} if size == 2 else set()))
               for size in (1, 2)}
+    for graph in graphs.values():
+        graph['duplication'] = pq.duplication_inventory.scan(repo)
     before, after = graphs[base_scc], graphs[head_scc]
     path = repo / pq.BASELINE
     config = pq.core.baseline_record(before)
@@ -236,3 +238,30 @@ def test_workflow_supplies_exact_base_for_authenticated_batches_only():
                      "user.login == 'mergify[bot]'", 'user.id == 37929162', "'batch'", "'pr'"):
         assert required in mode
     assert 'gate-canary' not in mode
+
+
+@pytest.mark.parametrize('remaining', [1, 2])
+def test_duplication_shrink_and_return_without_fixture_edit(repo, capsys, remaining):
+    body = ('import hashlib\ndef shared(rows):\n    total = 0\n    for row in rows:\n'
+            '        if row.ready:\n            total += row.size\n'
+            '        else:\n            total -= row.size\n'
+            '    return hashlib.sha256(str(total).encode()).hexdigest()\n')
+    for index in range(remaining + 1):
+        put(repo, f'prismaquant/copy_{index}.py', body)
+    fixture = 'tests/fixtures/ceiling.json'
+    ceiling = json.dumps(pq.duplication_inventory.scan(repo))
+    put(repo, fixture, ceiling)
+    original = freeze(repo)
+    removed = repo / f'prismaquant/copy_{remaining}.py'
+    removed.unlink()
+    (repo / 'tests/moved').mkdir()
+    git(repo, 'mv', 'tests/test_a.py', 'tests/moved/test_a.py')
+    base = commit(repo, 'remove copy and move test')
+    code, output = check(repo, original, capsys)
+    assert code == 0, output
+    removed.write_text(body)
+    code, output = check(repo, base, capsys)
+    assert code == 1, output
+    for kind in ('near_duplicates', 'same_name_helpers', 'primitive_digest_sites'):
+        assert f'new {kind} against the base commit' in output
+    assert (repo / fixture).read_text() == ceiling

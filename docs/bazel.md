@@ -111,6 +111,11 @@ base graph with the head graph, without stored edge lists. New source files
 inherit a package when their existing-test consumers fit a peer's base consumers.
 The separate allowlist holds reasoned exceptions.
 
+Duplication gains need no fixture edit. The fixture is the absolute ceiling.
+The adapter also compares live base and head inventories with the current scanner.
+New pairs, same-name groups or members, and primitive digest sites fail.
+`tools/duplication_inventory.py --write-baseline` can record gains but is optional.
+
 The full check belongs in Bazel's runner-VM lane because attribution requires
 a git checkout and history. Without git, it reports `no base available` and
 still checks absolute figures, the count limit and every test's reach budget.

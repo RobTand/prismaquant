@@ -12139,6 +12139,7 @@ pq_py_library(
         ":tools/__init__",
         ":tools/ci/graph_impact",
         ":tools/ci/graph_impact_imports",
+        ":tools/duplication_inventory",
     ],
 )
 

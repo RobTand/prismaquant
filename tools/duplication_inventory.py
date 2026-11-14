@@ -1,41 +1,21 @@
-"""Find logically duplicated functionality by structure and by name (PQ #1295).
+"""Find duplicate function structures, helper names, and digest sites (PQ #1295).
 
-Clone-finding audits compare text, and duplicated functionality rarely
-repeats text: renamed helpers and re-typed loops look different line by
-line. This scanner compares structure and names instead:
+Near-duplicate bodies retain AST kinds, attribute names, and called names.
+They omit local names, literals, and docstrings. blake2b hashes 6-token
+shingles. Seeded MinHash proposes cross-file pairs. Exact Jaccard similarity
+must reach ``THRESHOLD``. Same-name groups contain module-level functions.
+Primitive sites are raw ``hashlib`` calls and literal ``sort_keys=True`` JSON
+encodings, with import aliases resolved. Sites in ``DIGEST_OWNERS`` are exempt.
 
-- **Near-duplicates.** Each function's body becomes a sequence of AST node
-  kinds, keeping attribute names and called names and dropping local
-  identifiers, literals and docstrings. The sequence is cut into 6-token
-  shingles and hashed with blake2b, so the result does not depend on the
-  process's hash seed. Pairs of functions in different files whose Jaccard
-  similarity is at least ``THRESHOLD`` are reported. MinHash with seeded
-  salts proposes candidates, and each candidate's Jaccard is then computed
-  exactly.
-- **Same-name helpers.** A module-level function name defined in more than
-  one module.
-- **Primitive digest sites** (PQ #1508). Raw ``hashlib`` constructor calls
-  and literal ``sort_keys=True`` JSON encodings, counted per enclosing
-  scope with import aliases resolved -- the same static method as the
-  round-2 count snapshots. Sites inside :data:`DIGEST_OWNERS` are the
-  sanctioned homes and are not ratcheted; a new site anywhere else fails
-  the gate, and removing one lowers the baseline.
+``tests/test_duplication_baseline.py`` enforces the absolute ceiling in
+``tests/fixtures/duplication_baseline.json``. Shrink needs no fixture edit.
+The PQ graph-impact adapter also refuses growth against the live base.
+``--write-baseline`` can record gains and retains ``must_differ`` reasons
+for pairs that still exist (PQ #1302).
 
-``tests/test_duplication_baseline.py`` holds the live result against
-``tests/fixtures/duplication_baseline.json``, which only shrinks.
-``--write-baseline`` rewrites the baseline after a consolidation removes
-entries.
-
-``--coverage-report PATH`` instead audits every Git-tracked path. It lists
-non-Python and excluded paths, analyzes the remaining Python files, and
-includes same-file pairs. These are candidates for semantic reading, not
-proof of equivalent behavior or complete semantic coverage. The default
-gate's population, exclusions and baseline remain unchanged.
-
-A pair that must stay two implementations is recorded in the baseline's
-``must_differ`` list with its reason (PQ #1302): for example, an independent
-reference oracle, or a sealed module whose bytes are bound into receipts.
-``--write-baseline`` keeps those records for pairs that still exist.
+``--coverage-report PATH`` audits every Git-tracked path, records exclusions,
+and includes same-file pairs. Matches need semantic review. The report does
+not prove equivalent behavior or change the default gate's population.
 """
 from __future__ import annotations
 
@@ -50,12 +30,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCANNED = ("prismaquant", "tools")
-#: ``serving_runtime_patches`` holds image-side build scripts: they run inside a
-#: pinned serving image, where ``prismaquant`` is not importable, so they cannot
-#: reuse the digest owners or any other helper here, and their bytes are bound
-#: to the built image's digest by the patch set's MANIFEST.json, so they cannot
-#: be consolidated without rebuilding the image (the ``must_differ`` reason,
-#: PQ #1302, applied to a whole directory of sealed build inputs).
+# Image-side patch scripts cannot import PQ owners. MANIFEST.json binds their
+# bytes to the pinned image. Consolidation requires an image rebuild (PQ #1302).
 EXCLUDED_PARTS = {"vendored", "archive", "__pycache__", "serving_runtime_patches"}
 BASELINE = ROOT / "tests" / "fixtures" / "duplication_baseline.json"
 THRESHOLD = 0.9
@@ -66,9 +42,6 @@ _K, _BANDS = 64, 16
 # CLI entry points are expected once per script, not duplication.
 ENTRY_POINTS = frozenset({"main", "_main", "parse_args", "_parse_args",
                           "build_parser", "_build_parser", "cli"})
-#: The sanctioned owners of digest recipes. A new primitive ``hashlib`` or
-#: sorted-JSON site inside one of these files is expected -- that is where
-#: consolidation moves sites to -- so only sites OUTSIDE them are ratcheted.
 # The hash-checked stdlib core is shared byte-identically across four repos.
 # Its helper names cannot depend on PQ owners. Structure and digest scanning
 # still cover this exact file; adjacent adapters retain every check.
@@ -303,6 +276,18 @@ def scan(root: Path = ROOT) -> dict:
     live = _scan_paths(root, list(_files(root)), include_same_file=False)
     del live["functions"]
     return live
+
+
+def growth(before: dict, after: dict) -> dict:
+    """Return new pairs, helper members, and digest sites."""
+    def entries(report):
+        return {
+            "near_duplicates": set(map(tuple, report["near_duplicates"])),
+            "same_name_helpers": {(name, path) for name, paths in report["same_name_helpers"].items() for path in paths},
+            "primitive_digest_sites": set(report["primitive_digest_sites"]),
+        }
+    previous = entries(before)
+    return {key: sorted(values - previous[key]) for key, values in entries(after).items() if values - previous[key]}
 
 
 def coverage_report(root: Path = ROOT) -> dict:
