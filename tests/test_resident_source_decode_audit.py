@@ -1,7 +1,9 @@
 """Real resident source delivery uses the published decoder and memory guard."""
 from __future__ import annotations
 
+import importlib
 import os
+import sys
 
 import pytest
 import torch
@@ -110,6 +112,13 @@ def test_real_prefetch_failure_shuts_down_existing_pool(tmp_path, monkeypatch, t
     assert contexts
     assert all(parameter.is_meta for _, parameter in
                contexts[0].model.named_parameters(remove_duplicate=False))
+
+
+def test_helper_reload_does_not_load_glm_parity_module(monkeypatch):
+    parity = "test_glm5_next_streamed_forward_parity"
+    monkeypatch.delitem(sys.modules, parity, raising=False)
+    importlib.reload(sys.modules[_source.__module__])
+    assert parity not in sys.modules, "the helper module must load the GLM parity module only inside _source"
 
 
 def test_resident_requires_existing_memory_guard_before_loading(tmp_path):
