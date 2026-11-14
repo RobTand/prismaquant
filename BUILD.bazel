@@ -10944,19 +10944,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "prismaquant/tessera_census_union",
-    srcs = [
-        "prismaquant/tessera_census_union.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
     name = "prismaquant/tessera_hessian",
     srcs = [
         "prismaquant/tessera_hessian.py",
@@ -11587,23 +11574,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
-    name = "tools/build_tessera_census_cache",
-    srcs = [
-        "tools/build_tessera_census_cache.py",
-    ],
-    data = [
-        "tools/build_tessera_census_cache.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cluster_campaign",
-        ":prismaquant/digests",
-        "@pq_pip//tessera_quant",
     ],
 )
 
@@ -13519,21 +13489,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/seal_tessera_census_identity",
-    srcs = [
-        "tools/seal_tessera_census_identity.py",
-    ],
-    data = [
-        "tools/seal_tessera_census_identity.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cluster_campaign",
-    ],
-)
-
-pq_py_library(
     name = "tools/smoke_graph_memory",
     srcs = [
         "tools/smoke_graph_memory.py",
@@ -13838,20 +13793,6 @@ pq_py_library(
         ":tools/__init__",
         ":tools/tp2_budget_plan",
         "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "tools/union_tessera_census_tables",
-    srcs = [
-        "tools/union_tessera_census_tables.py",
-    ],
-    data = [
-        "tools/union_tessera_census_tables.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/tessera_census_union",
     ],
 )
 
