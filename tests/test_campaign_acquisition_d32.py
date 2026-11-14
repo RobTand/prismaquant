@@ -3,19 +3,12 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import os
-from pathlib import Path
-import shutil
-import subprocess
-import sys
-import tempfile
 
 import pytest
 
 from prismaquant import tessera_campaign_table as campaign_table
 from test_campaign_acquisition_pb_handoff import (
     handoff, real_joint_run, plan, records, dispatch, load_joint_campaign_acquisition,
-    build_handoff, manifests,
 )
 
 
@@ -49,29 +42,20 @@ def test_loader_stamps_only_recorded_producer_identity(handoff, monkeypatch, cap
         load_joint_campaign_acquisition(binding)
 
 
-def test_actual_cli_plans_acquisition_after_producer_refresh(real_joint_run, monkeypatch):
-    # The unpatched subprocess owner requires real mounted input bytes. Keep
-    # only a failing fixture; a successful CLI run removes its private root.
-    shared_root = Path(tempfile.mkdtemp(prefix="pq2253-acquisition-cli-",
-                                       dir=manifests.SHARED_MOUNT))
-    handoff = build_handoff(shared_root, monkeypatch, real_joint_run)
+def test_actual_cli_plans_acquisition_after_producer_refresh(handoff, monkeypatch, capsys):
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     binding = rewrite_request(handoff, lambda document:
         document["producer_source_state"].update(export_sha256="0" * 64))
     spec = json.loads(handoff.spec.read_text())
     spec["campaign_argv"][-1] = binding["sha256"]
     handoff.spec.write_text(json.dumps(spec))
-    root = Path(dispatch.__file__).resolve().parents[1]
-    completed = subprocess.run([sys.executable, str(root / "tools/dispatch_tessera_campaign.py"),
-        "plan", "--spec", str(handoff.spec), "--workspace", str(handoff.workspace)],
-        cwd=handoff.root, env=dict(os.environ), capture_output=True, text=True)
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert "[DEV-MODE]" in completed.stdout
+    monkeypatch.chdir(handoff.root)
+    assert dispatch.main(["plan", "--spec", str(handoff.spec), "--workspace", str(handoff.workspace)]) == 0
+    assert "[DEV-MODE]" in capsys.readouterr().out
     planned = json.loads((handoff.workspace / "plan.json").read_text())
     assert planned["acquisition"]["binding"] == binding
     assert len(planned["rows"]) == 2
     assert len(planned["acquisition"]["deferred_groups"]) == 1
-    shutil.rmtree(shared_root)
 
 
 @pytest.mark.parametrize("relocate_cost", [False, True])

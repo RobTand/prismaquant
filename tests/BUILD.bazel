@@ -11250,9 +11250,6 @@ pq_py_test(
         "//:prismaquant/validation_harness.py",
         "//:prismaquant/vendored/transformers_deepseek_v4/modular_deepseek_v4.py",
     ],
-    args = [
-        "--deselect=tests/test_campaign_acquisition_d32.py::test_actual_cli_plans_acquisition_after_producer_refresh",
-    ],
     timeout = "moderate",
 )
 
@@ -11263,13 +11260,11 @@ pq_py_library(
     ],
     data = [
         "//:prismaquant/tessera_acquisition_inputs.py",
-        "//:tools/dispatch_tessera_campaign.py",
     ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/tessera_acquisition_inputs",
-        "//:tools/dispatch_tessera_campaign",
         ":test_campaign_acquisition_pb_handoff_lib",
         ":test_no_new_seals_lib",
         "@pq_pip//pytest",
