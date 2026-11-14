@@ -158,15 +158,14 @@ def check(before, after, baseline_path, allowlist_path, *, changed_tests=(), wri
         print(reminder, flush=True)
     errors = core.baseline_errors(baseline, previous)
     errors += core.allowlist_errors(allowlist, base_allowlist if base_allowlist is not None else allowlist)
-    # Frozen core 75aff74a accepts edge groups in its policy input. Supply only
-    # live history, and keep its stored-gain check restricted to numeric limits.
+    # Supply live edge history to the frozen core.
     policy = {**baseline, 'edge_groups': (before if before is not None else after)['edge_groups']}
     errors += core.compare(before, after, policy, changed_tests=changed_tests, allowlist=allowlist,
                            record_gains=True, test_packages=after['test_packages'],
                            base_package_max_reach=core.package_max_reach(before) if before else {},
                            edge_diff=core.diff_edges(before, after) if before else None)
-    if not write_baseline:
-        errors += core.stale_entries(after, baseline)
+    if before is not None and after['scc_max'] > before['scc_max']:
+        errors.append(f'scc_max rose from {before["scc_max"]} to {after["scc_max"]} against the base commit')
     if errors:
         if write_baseline:
             print('refusing to record a loss:', file=sys.stderr)

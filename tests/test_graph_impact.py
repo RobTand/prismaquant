@@ -105,17 +105,6 @@ def test_unrelated_added_edge_is_not_blamed_for_cycle_growth():
     assert 'b -> a' in error and 'x -> y' not in error
 
 
-def test_missing_gain_fails_and_recording_tightens_budget():
-    before = measure({'t': {'a', 'b'}}, {('a', 'b'), ('b', 'a')}, {'a': 1, 'b': 1})
-    after = measure({'t': {'a'}}, loc={'a': 1, 'b': 1})
-    previous = baseline(before)
-    assert any('scc_max fell' in error for error in impact.stale_entries(after, previous))
-    record = impact.baseline_record(after, previous)
-    assert record['figures']['u_pct'] == 50
-    assert record['figures']['scc_max'] == 1
-    assert record['reach_budget'] == 1
-
-
 def test_baseline_and_allowlist_only_shrink():
     previous = baseline(measure())
     current = {**previous, 'reach_budget': 10}

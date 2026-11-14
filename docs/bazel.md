@@ -102,20 +102,14 @@ and git materialization outside the shared core. Its bitsets project that
 existing graph onto source files; they do not invent narrower import rules.
 The bridge prints the shortest path through conftests to the farthest hub.
 
-The old `import_fanout` CLI forwards to this check. Its original evidence
-parser supplies the migrated figures in the same baseline, preserving each
-recorded minimum. There is one baseline and one live gate test. Writing the
-baseline refuses structural losses and keeps every recorded numeric minimum.
-SCC gains must be recorded in the same PR; U and edge-count gains are
-recorded on explicit baseline writes. New-edge checks use only the aligned
-base graph and the head graph. No stored edge list judges whether an edge is new. New source files inherit a package when
-their existing-test consumers fit an existing peer's base consumers; that
-ordinary package growth is reported in the summary instead of failed. A committed baseline holds
-`schema`, `figures`, `tolerances`, `reach_budget`, `test_to_test`,
-`test_to_test_count`, and `test_to_test_strict_by`. Reasoned exceptions remain
-in the separate allowlist. Neither baseline reads nor writes retain edge identities;
-`import_fanout_baseline.json` is removed. The frozen core receives transient
-edge groups from the live base graph through the PQ adapter.
+The old `import_fanout` CLI forwards to this check and supplies its original
+evidence. SCC gains need no baseline edit. The head's `scc_max` must not exceed
+the live merge base or batch base value, or the absolute baseline ceiling.
+Without a base, only the absolute ceiling applies. Explicit baseline writes
+record gains and refuse structural losses. New-edge checks compare the aligned
+base graph with the head graph, without stored edge lists. New source files
+inherit a package when their existing-test consumers fit a peer's base consumers.
+The separate allowlist holds reasoned exceptions.
 
 The full check belongs in Bazel's runner-VM lane because attribution requires
 a git checkout and history. Without git, it reports `no base available` and
