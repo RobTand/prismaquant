@@ -11,8 +11,8 @@ from prismaquant import cost_stage_checkpoint as journal
 from prismaquant import expert_empirical_cost as expert
 
 
-@pytest.mark.parametrize("driver", ["window", "forked"])
-def test_expert_driver_resumes_its_own_published_payload(tmp_path, monkeypatch, driver):
+def test_expert_driver_resumes_its_own_published_payload(tmp_path, monkeypatch):
+    driver = "forked"
     qname = "model.layers.0.mlp.experts"
     member = qname + ".down_proj"
     state = {
@@ -40,7 +40,7 @@ def test_expert_driver_resumes_its_own_published_payload(tmp_path, monkeypatch, 
 
     def checkpoint_identity(**kwargs):
         assert kwargs["identity_extra"].get("eval_driver") == (
-            "forked-stream/1" if driver == "forked" else None)
+            "forked-units/1")
         return identity
 
     monkeypatch.setattr(expert, "_expert_checkpoint_identity", checkpoint_identity)
@@ -53,11 +53,10 @@ def test_expert_driver_resumes_its_own_published_payload(tmp_path, monkeypatch, 
         num_layers=1, layer_index_for_qname=lambda name: 0,
         capture_boundaries=refuse_recompute,
     )
-    measure = (expert.measure_expert_unit_costs_forked if driver == "forked"
-               else expert.measure_expert_unit_costs_streamed)
+    measure = expert.measure_expert_unit_costs_forked
     actual = measure(
         runner, profile, torch.tensor([[1, 2], [2, 3]]), ["NVFP4", "BF16"],
-        checkpoint_dir=directory, resume=True,
+        boundaries={}, checkpoint_dir=directory, resume=True,
         model_identity={"fixture": "identity seam is isolated"}, progress=False,
     )
     assert actual == (state["stats"], state["costs"], state["unit_kls"])
