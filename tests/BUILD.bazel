@@ -581,10 +581,6 @@ pq_py_test(
         ":conftest",
         ":g3job/conftest",
     ],
-    args = [
-        "'--deselect=tests/g3job/test_g3_launch_read_plan.py::test_launch_plan_preserves_phases_and_checks_its_own_digest[False]'",
-        "'--deselect=tests/g3job/test_g3_launch_read_plan.py::test_launch_plan_preserves_phases_and_checks_its_own_digest[True]'",
-    ],
     timeout = "moderate",
 )
 
@@ -25264,9 +25260,6 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    args = [
-        "--deselect=tests/test_checkpoint_staged_readset_1366.py::test_claim_digest_and_pb_decoder_are_used",
-    ],
     timeout = "moderate",
 )
 
@@ -32097,15 +32090,6 @@ pq_py_test(
     library = ":test_dsv4_fixture_isolation_lib",
     deps = [
         ":conftest",
-    ],
-    args = [
-        "'--deselect=tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[compressor-layout-1984-1985]'",
-        "'--deselect=tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[grouped-fisher-1959]'",
-        "'--deselect=tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[model-walk-1957-1958]'",
-        "'--deselect=tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[model-walk-export-gate-2276]'",
-        "'--deselect=tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[model-walk-fake-trace-2594]'",
-        "'--deselect=tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[nested-rotary-2279]'",
-        "'--deselect=tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[rope-axis-1990-1992]'",
     ],
     timeout = "moderate",
 )
@@ -68476,13 +68460,6 @@ pq_py_test(
     deps = [
         ":conftest",
     ],
-    args = [
-        "--deselect=tests/test_layer_streaming_mxfp4_isolation.py::test_full_mxfp4_file_after_native_dsv4_import",
-        "--deselect=tests/test_layer_streaming_mxfp4_isolation.py::test_non_expert_fp8_grid_after_native_dsv4_import",
-        "--deselect=tests/test_layer_streaming_mxfp4_isolation.py::test_shared_expert_scope_after_native_dsv4_import",
-        "--deselect=tests/test_layer_streaming_mxfp4_isolation.py::test_undeclared_checkpoint_after_native_dsv4_import",
-        "--deselect=tests/test_layer_streaming_mxfp4_isolation.py::test_undeclared_int8_group16_after_native_dsv4_import",
-    ],
     timeout = "moderate",
 )
 
@@ -79588,11 +79565,6 @@ pq_py_test(
         "test_work_profile_digest_routing_1769.py",
         "test_workspace_netdata.py",
         "test_workspace_receipt_digest_routing_1826.py",
-    ],
-    args = [
-        "--deselect=tests/test_original_cuda_control_artifacts.py::test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports",
-        "--deselect=tests/test_original_cuda_control_artifacts.py::test_publication_binds_all_actual_node_sidecars",
-        "--deselect=tests/test_original_cuda_control_artifacts.py::test_retained_artifact_refuses_replaced_granted_bytes",
     ],
     timeout = "moderate",
 )
