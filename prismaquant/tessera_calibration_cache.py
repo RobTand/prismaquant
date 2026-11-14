@@ -314,11 +314,9 @@ def streamed_identity_proof_digests(root, cache_path, source_files=None, *, live
     roster), and the six-field stat predicate against ``live_stat(name)``, the
     stat of the object the caller will read. A capture owner adopts through
     it (``CaptureSourceAuthentication.adopt_streamed_identity_cache``, with
-    its held descriptors' stats) and the campaign planner refuses through it
-    (``dispatch_tessera_campaign``, with a fresh ``os.stat``, PQ #1654), so a
-    proof the planner binds is one the row adopts unless the source changes
-    in between. Without ``source_files`` the shards are checked against the
-    checkpoint index alone. Returns ``({shard name: sha256}, proof sha256)``.
+    its held descriptors' stats). Without ``source_files``, the function checks
+    the shards against the checkpoint index alone.
+    Returns ``({shard name: sha256}, proof sha256)``.
     """
     from .streamed_model_identity import (
         _local_checkpoint_shards,

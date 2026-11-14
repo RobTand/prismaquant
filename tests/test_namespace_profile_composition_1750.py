@@ -7,8 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_tessera_campaign_namespace_1986 import arguments, replace_fixture_request, owned_native_admission
-from tools import dispatch_tessera_campaign as dispatch
+from tests.test_tessera_campaign_namespace_1986 import arguments, replace_fixture_request, owned_native_admission, _publish_fixture
 from tools import pq_admitted_profile as profiler
 from tools import pq_profile_artifact as profile_contract
 from tools import tessera_campaign_namespace as namespace
@@ -44,15 +43,15 @@ def profiled_arguments(tmp_path):
 def test_composed_request_is_prepared_before_binding(tmp_path):
     kwargs = profiled_arguments(tmp_path)
     before = copy.deepcopy(kwargs["requests"])
-    rows = dispatch.prepare_namespace_requests(**kwargs)
-    assert rows == dispatch.prepare_namespace_requests(**kwargs)
+    rows = namespace.prepare_namespace_requests(**kwargs)
+    assert rows == namespace.prepare_namespace_requests(**kwargs)
     assert kwargs["requests"] == before
     assert "tools.pq_profile_child" in rows[0]["argv"]
     namespace.validate_namespace_request(rows[0])
 
 
 def test_post_binding_wrapper_still_refuses_actual_request_change(tmp_path):
-    row = dispatch.prepare_namespace_requests(**arguments(tmp_path))[0]
+    row = namespace.prepare_namespace_requests(**arguments(tmp_path))[0]
     row["argv"] = profiler.profiled_row_command(row["argv"],
         destination=str(tmp_path / "foreign-profile"), profiler_executable="/readonly/py-spy")
     with pytest.raises(RuntimeError):
@@ -64,8 +63,8 @@ def profile(row):
 
 
 def publish_profile_row(tmp_path):
-    row = dispatch.prepare_namespace_requests(**profiled_arguments(tmp_path))[0]
-    dispatch.publish_namespace_requests([row])
+    row = namespace.prepare_namespace_requests(**profiled_arguments(tmp_path))[0]
+    _publish_fixture([row])
     return row
 
 
@@ -126,8 +125,8 @@ def real_source_row(tmp_path):
     row = kwargs["requests"][0]
     row["cwd"] = str(checkout)
     replace_fixture_request(kwargs, row)
-    row = dispatch.prepare_namespace_requests(**kwargs)[0]
-    dispatch.publish_namespace_requests([row])
+    row = namespace.prepare_namespace_requests(**kwargs)[0]
+    _publish_fixture([row])
     return checkout, commit, row
 
 
@@ -173,7 +172,7 @@ def test_unsupported_initial_instrumentation_refuses_before_publication(tmp_path
     row["argv"][4] = json.dumps(spec)
     replace_fixture_request(kwargs, row)
     with pytest.raises(RuntimeError):
-        dispatch.prepare_namespace_requests(**kwargs)
+        namespace.prepare_namespace_requests(**kwargs)
     assert not (tmp_path / "new").exists()
 
 
@@ -204,7 +203,7 @@ def test_host_local_metadata_needs_declared_writable_identity_coverage(tmp_path,
     row["argv"][4] = json.dumps(spec)
     replace_fixture_request(kwargs, row)
     with pytest.raises(RuntimeError, match="writable identity"):
-        dispatch.prepare_namespace_requests(**kwargs)
+        namespace.prepare_namespace_requests(**kwargs)
 
 
 @pytest.mark.parametrize("destination", ["observations", "profile_local"])
@@ -229,7 +228,7 @@ def test_declared_profiler_cannot_overlap_owned_writable_space(tmp_path):
     row["argv"][4] = json.dumps(spec)
     replace_fixture_request(kwargs, row)
     with pytest.raises(RuntimeError, match="input.*overlap"):
-        dispatch.prepare_namespace_requests(**kwargs)
+        namespace.prepare_namespace_requests(**kwargs)
 
 
 def test_host_runs_sealed_wrapper_and_observes_campaign_output(tmp_path, monkeypatch):
@@ -276,7 +275,7 @@ def test_broad_writable_identity_mount_can_cover_owned_metadata(tmp_path):
     spec["container"]["mounts"] = [{"source": parent, "target": parent, "readonly": False}]
     row["argv"][4] = json.dumps(spec)
     replace_fixture_request(kwargs, row)
-    namespace.validate_namespace_request(dispatch.prepare_namespace_requests(**kwargs)[0])
+    namespace.validate_namespace_request(namespace.prepare_namespace_requests(**kwargs)[0])
 
 
 @pytest.mark.parametrize("schema", ["known", "unknown"])

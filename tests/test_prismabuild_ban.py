@@ -48,7 +48,6 @@ REFUSAL_TOKENS = {
         "'PRISMABUILD_LOCAL_SCRATCH_IO'", "'PRISMABUILD_LOCAL_SCRATCH_PAIRS'",
         '"PRISMABUILD_PRODUCED_SPOOL_ROOT"', '"PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"',
         '"PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT"', '"PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"'),
-    "tests/test_tessera_native_rows.py": ("'PRISMABUILD_ACTION_KEY'",),
     "tests/test_flux_jobs.py": ("'PB_ACTION_KEY'",),
     "tests/g3job/test_g3_submit.py": ('"pbrun"',),
 }

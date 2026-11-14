@@ -16,7 +16,6 @@ from prismaquant.tessera_row_stream import (
     MEMORY_PLANS, ROW_HEAD_LOAD_ALL, ROW_HEAD_STREAM,
     checkpoint_present,
 )
-from tools import dispatch_tessera_campaign as dispatch
 
 GIB = 1024 ** 3
 CAP_BYTES = 69 * GIB
@@ -130,26 +129,3 @@ def test_runtime_and_planner_keep_the_stream_plan_for_checkpoint_resume(
     demand = campaign_rows.row_memory_demand(spec, members, census, selected_source=True)
     assert demand["plan_bytes"] == runtime_bytes
     assert demand["mem_gb"] <= 69
-
-
-@pytest.mark.parametrize("extra,words", [
-    (["--row-head", "load-all"], "--row-head"),
-    (["--seed-checkpoint", "/external-seed"], "--seed-checkpoint"),
-    (["--max-rounds", "2"], "--max-rounds"),
-])
-def test_genuine_load_all_dependencies_are_refused_before_submission(
-        tmp_path, geometry, extra, words):
-    spec, census = geometry
-    argv = list(spec["campaign_argv"])
-    if extra[0] in argv:
-        argv[argv.index(extra[0]) + 1] = extra[1]
-    else:
-        argv.extend(extra)
-    assert words in campaign_rows.row_head_dependency(argv)
-    selection = tmp_path / "units.json"
-    selection.write_text(json.dumps({"schema": "prismaquant.tessera_campaign_units.v1",
-                                    "groups": [{"key": "s:stack", "members": sorted(census["counts"])}]}))
-    row = dict(argv=["python", "-m", "prismaquant.tessera_campaign", *argv,
-                     "--units", str(selection)], demand=dict(mem_gb=69))
-    with pytest.raises(dispatch.DemandRefused, match="above.*GPU box declares"):
-        dispatch.verify_row_demand(spec, census, row, box_memory_gb=104)

@@ -187,8 +187,7 @@ def _campaign_identity(tmp_path, inputs):
 
 
 def _expected_scope(inputs, identity):
-    """The scope the dispatcher stamps on a campaign-scoped submission
-    (``dispatch_tessera_campaign.cmd_submit_joint``)."""
+    """Build the campaign scope from the original plan and identity."""
     from prismaquant.tessera_campaign_table import (joint_campaign_scope)
     plan = json.loads(Path(inputs['original_plan']['path']).read_bytes())
     return {**joint_campaign_scope(plan), 'campaign_identity_sha256': identity['sha256']}

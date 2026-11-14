@@ -57,7 +57,6 @@ def test_merge_checkpoint_unions_a_dense_row_and_a_routed_row(tmp_path):
     ``family_restriction`` to be equal refuses every census that fans dense
     and routed units onto separate rows (RobTand/prismaquant#487).
     """
-    import dispatch_tessera_campaign as dispatch
 
     rows = {"row-0000": str(_restricted_row(tmp_path, "row-0000", "a", "dense")),
             "row-0001": str(_restricted_row(tmp_path, "row-0001", "b", "routed_moe"))}
@@ -70,7 +69,6 @@ def test_merge_checkpoint_unions_a_dense_row_and_a_routed_row(tmp_path):
 
 def test_merge_checkpoint_refuses_a_conflicting_restricted_structure(tmp_path):
     """The union is not an overwrite: one unit, two structures, is a refusal."""
-    import dispatch_tessera_campaign as dispatch
 
     first = _restricted_row(tmp_path, "row-0000", "a", "dense")
     second = _restricted_row(tmp_path, "row-0001", "b", "routed_moe")
@@ -85,7 +83,6 @@ def test_merge_checkpoint_refuses_a_conflicting_restricted_structure(tmp_path):
 
 def test_merge_checkpoint_refuses_a_restricted_row_beside_an_unrestricted_one(tmp_path):
     """A restriction the other row never carried is a different campaign."""
-    import dispatch_tessera_campaign as dispatch
 
     rows = {"row-0000": str(_restricted_row(tmp_path, "row-0000", "a", "dense")),
             "row-0001": str(_restricted_row(tmp_path, "row-0001", "b", None,
@@ -96,7 +93,6 @@ def test_merge_checkpoint_refuses_a_restricted_row_beside_an_unrestricted_one(tm
 
 def test_merge_checkpoint_refuses_two_policies(tmp_path):
     """Policy is the campaign-wide half and still has to be equal."""
-    import dispatch_tessera_campaign as dispatch
 
     other = {**POLICY, "dense": ["TESSERA_E4M3_K1"]}
     rows = {"row-0000": str(_restricted_row(tmp_path, "row-0000", "a", "dense")),
@@ -114,7 +110,6 @@ def test_merge_checkpoint_refuses_two_policies(tmp_path):
     ("schema", "another-schema"),
 ])
 def test_merge_refuses_a_shard_the_journal_itself_refuses(tmp_path, field, value):
-    import dispatch_tessera_campaign as dispatch
 
     row, _, shard = _journal(tmp_path)
     envelope = pickle.loads(shard.read_bytes())
@@ -127,7 +122,6 @@ def test_merge_refuses_a_shard_the_journal_itself_refuses(tmp_path, field, value
 
 
 def test_merge_refuses_a_manifest_with_a_wrong_identity_digest(tmp_path):
-    import dispatch_tessera_campaign as dispatch
 
     row, manifest, _ = _journal(tmp_path)
     value = json.loads(manifest.read_text())
@@ -138,7 +132,6 @@ def test_merge_refuses_a_manifest_with_a_wrong_identity_digest(tmp_path):
 
 
 def test_merge_refuses_a_manifest_that_drops_an_identity_unit(tmp_path):
-    import dispatch_tessera_campaign as dispatch
 
     row, manifest, _ = _journal(tmp_path)
     value = json.loads(manifest.read_text())
@@ -149,7 +142,6 @@ def test_merge_refuses_a_manifest_that_drops_an_identity_unit(tmp_path):
 
 
 def test_valid_merged_journal_resumes_through_the_owned_reader(tmp_path):
-    import dispatch_tessera_campaign as dispatch
     from prismaquant.cost_stage_checkpoint import prepare_journal
 
     row, _, _ = _journal(tmp_path)
@@ -175,7 +167,6 @@ def test_refusal_order_does_not_depend_on_anchor_insertion_order():
 
 
 def test_merge_accepts_stack_incomplete_rung_refusal_without_family():
-    import dispatch_tessera_campaign as dispatch
     from test_tessera_campaign_fanout import _payloads
 
     payloads = _payloads()
@@ -187,7 +178,6 @@ def test_merge_accepts_stack_incomplete_rung_refusal_without_family():
 
 
 def test_merge_carries_the_union_of_identity_migration_records(tmp_path):
-    import dispatch_tessera_campaign as dispatch
     from test_tessera_campaign_fanout import _payloads
 
     record = {"schema": "prismaquant.identity_migration.v1", "proof_bundle_sha256": "p" * 64,

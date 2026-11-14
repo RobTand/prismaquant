@@ -1,7 +1,6 @@
 """The fanout must execute the sealed source in its declared rootless Podman runtime."""
 import importlib
 import json
-import re
 import os
 from pathlib import Path
 import subprocess
@@ -12,7 +11,6 @@ import pytest
 from prismaquant import tessera_campaign_rows as campaign_rows
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-import dispatch_tessera_campaign as dispatch
 
 from container_admission import ADMISSION, CIDFILE, stub_launch, with_admission
 from container_inspection_fixture import inspection

@@ -1,45 +1,13 @@
 """Partition handoffs use real reference/journal owners, without GPU claims."""
 
 from prismaquant import tessera_campaign_wire as campaign_wire
-from prismaquant import tessera_campaign_selection as campaign_selection
 from prismaquant import tessera_campaign_table as campaign_table
 from types import SimpleNamespace
 
-import pytest
 
 from prismaquant import cost_stage_checkpoint as journal
-from prismaquant import tessera_calibration_cache as cache
 from prismaquant import tessera_campaign as campaign
-from prismaquant import tessera_export_lane as export
-from tools import dispatch_tessera_campaign as dispatch
 from test_tessera_campaign_expert_partitions import roster, selection
-from test_tessera_hessian_reference_handoff import handoff, rows as reference_rows
-
-
-def test_partition_reference_union_uses_priced_subset_not_full_group(handoff, monkeypatch):
-    import torch
-
-    fixture = handoff
-    dirs, payloads = reference_rows(fixture)
-    names = sorted(fixture["H"])
-    # Isolate the reference-roster boundary: producer/chunk validation is
-    # separately exercised against real carried producer records.
-    for index, name in enumerate(names):
-        payloads[name]["provenance"]["unit_selection"] = {
-            "schema": campaign_selection.UNITS_SCHEMA_V3,
-            "groups": [{"key": "s:fixture", "members": names,
-                "partition": {"schema": campaign_selection.EXPERT_PARTITION_SCHEMA,
-                    "experts_per_row": 1, "index": index, "count": len(names),
-                    "rate_q256": 768, "members": [name]}}]}
-    monkeypatch.setattr(torch, "load", lambda *a, **k: pytest.fail("eager reference H read"))
-    path, _, digest = dispatch.merge_export_inputs(dirs, payloads,
-        out_cache=fixture["tmp"] / "partition-merged", identity=fixture["calibration"],
-        policy="fixture", static_scales={}, census=fixture["census"])
-    assert digest == export.hessian_capture_sha256(
-        fixture["H"], {**fixture["calibration"], "hessian_role": "fit"})
-    with cache.open_hessian_reference(path) as owner:
-        assert set(owner) == set(names)
-        assert owner.receipt()["loaded_entries"] == 0
 
 
 def test_partition_journal_union_matches_actual_whole_unit_identity(tmp_path, monkeypatch):

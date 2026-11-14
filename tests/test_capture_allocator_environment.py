@@ -5,7 +5,7 @@ import pytest
 
 from prismaquant import tessera_campaign_rows as campaign_rows
 
-from test_tessera_campaign_container import dispatch, spec
+from test_tessera_campaign_container import spec
 
 
 @pytest.mark.parametrize('container', [False, True])

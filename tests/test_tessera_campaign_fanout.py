@@ -23,47 +23,9 @@ import pytest
 
 from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant import tessera_campaign_wire as campaign_wire
-from prismaquant import tessera_campaign_selection as campaign_selection
 from prismaquant import tessera_campaign_table as campaign_table
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
-
-
-def test_standalone_planner_without_pythonpath(tmp_path):
-    import os
-    import subprocess
-
-    root = pathlib.Path(__file__).resolve().parents[1]
-    model = tmp_path / "model"
-    model.mkdir()
-    spec = tmp_path / "spec.json"
-    spec.write_text(json.dumps({
-        "model": str(model), "campaign_argv": [], "cwd": str(root),
-        "python": sys.executable, "env": {},
-    }))
-    workspace = tmp_path / "campaign"
-    workspace.mkdir()
-    (workspace / "census.json").write_text(json.dumps({
-        "model": str(model), "anchor_groups": {"u:linear": ["linear"]},
-        "layer_stride": 1, "unit_shapes": {"linear": [8, 8]},
-    }))
-    env = dict(os.environ)
-    env.pop("PYTHONPATH", None)
-    completed = subprocess.run([
-        sys.executable, str(root / "tools/dispatch_tessera_campaign.py"),
-        "plan", "--spec", str(spec), "--workspace", str(workspace),
-    ], cwd=tmp_path, env=env, text=True, capture_output=True)
-    # The planner resolves both ``prismaquant`` and the data-manifest producer
-    # in ``experiments/`` without PYTHONPATH, derives the row, and then
-    # refuses it: this model directory holds no shard, so the row reads
-    # nothing PrismaBuild could warm, and a plan that cannot say what its
-    # rows read publishes none of them.  The rows a real model plans are
-    # covered in-process by ``tests/test_campaign_plan_publishes_data_manifests.py``.
-    output = completed.stdout + completed.stderr
-    assert completed.returncode != 0, output
-    assert "ModuleNotFoundError" not in output and "ImportError" not in output
-    assert "entries must be a non-empty array" in output, output
-    assert not (workspace / "manifest.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -629,38 +591,6 @@ def test_a_seed_links_only_the_wire_bytes_its_adopter_will_price(tmp_path, malfo
         ["OFF", "ON"]
 
 
-def test_rows_per_box_is_checked_against_the_box_and_never_shrinks_a_demand():
-    """N concurrent rows is a fit question, not a knob.
-
-    PrismaBuild admits on the row's declared demand, so the only way to make a
-    box hold more rows is to make a row hold less. Declaring a smaller demand
-    than the row holds would reserve less than it uses. A row too wide for the
-    box is declined, and its demand travels with it unchanged.
-    """
-    import dispatch_tessera_campaign as dispatch
-
-    demands = {"row-0000": 40, "row-0001": 36}
-    assert dispatch.partition_rows_by_fit(demands, 2, 80) == (
-        ["row-0000", "row-0001"], [])
-    # Unchecked rather than assumed when the spec declares no box.
-    assert dispatch.partition_rows_by_fit({"row-0000": 40}, 4, None) == (
-        ["row-0000"], [])
-    # The wide row is declined at its own demand, not shrunk to fit.
-    admissible, declined = dispatch.partition_rows_by_fit(demands, 2, 79)
-    assert admissible == ["row-0001"]
-    assert [record["row_id"] for record in declined] == ["row-0000"]
-    assert declined[0]["mem_gb"] == 40
-    assert declined[0]["rows_per_box"] == 2
-    assert declined[0]["box_memory_gb"] == 79
-    assert declined[0]["reason"]
-    # Nothing fits, so there is nothing to submit and the widest demand and the
-    # box are named the way they always were.
-    with pytest.raises(RuntimeError, match="at most 2 of these rows"):
-        dispatch.partition_rows_by_fit(demands, 3, 80)
-    with pytest.raises(RuntimeError, match="at least 1"):
-        dispatch.partition_rows_by_fit({"row-0000": 40}, 0, 80)
-
-
 # ---------------------------------------------------------------------------
 # The admissible partition
 #
@@ -677,69 +607,6 @@ _NARROW_COLUMNS = 16384
 _WIDE_COLUMNS = 131072
 
 
-def _write_model(model, shapes):
-    """The shard the census names, with the tensors it says are in it.
-
-    ``submit`` derives each row's read set from the model the plan names, so a
-    campaign whose model directory is empty has nothing to declare and is
-    refused. A row that reads nothing is not a shape production has: a Tessera
-    row exists to encode weights it reads off these shards. The fixture writes
-    them, at the shapes the census states, so the rows it plans are rows the
-    submit path can price.
-    """
-    import struct
-
-    header, offset = {}, 0
-    for name in sorted(shapes):
-        rows, columns = shapes[name]
-        size = rows * columns * 2  # bf16
-        header[name + ".weight"] = {
-            "dtype": "BF16", "shape": [rows, columns],
-            "data_offsets": [offset, offset + size]}
-        offset += size
-    blob = json.dumps(header).encode()
-    shard = model / "model-00001-of-00001.safetensors"
-    shard.write_bytes(struct.pack("<Q", len(blob)) + blob + b"\0" * offset)
-    (model / "model.safetensors.index.json").write_text(json.dumps(
-        {"weight_map": {key: shard.name for key in header}}))
-
-
-@pytest.fixture
-def shared_mount(tmp_path, monkeypatch):
-    """The fixture's root is the mount every data manifest entry sits under.
-
-    ``plan`` derives each published row's read set, and the fleet warms only
-    the shared mount, so a planned row reading outside it is refused.
-    """
-    from prismaquant import campaign_data_manifests as glm_data_manifests
-    monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(tmp_path))
-    return tmp_path
-
-
-def _partition_workspace(tmp_path, *, wide=True, box_memory_gb=104):
-    """A census whose last anchor group is far wider than the others."""
-    model = tmp_path / "model"
-    model.mkdir()
-    groups = {"u:wide": ["wide"]} if not wide else {
-        "u:a": ["a"], "u:b": ["b"], "u:c": ["c"], "u:wide": ["wide"]}
-    shapes = {name: [8, _NARROW_COLUMNS] for names in groups.values()
-              for name in names}
-    shapes["wide"] = [8, _WIDE_COLUMNS]
-    _write_model(model, shapes)
-    workspace = tmp_path / "campaign"
-    workspace.mkdir()
-    (workspace / "census.json").write_text(json.dumps({
-        "model": str(model), "anchor_groups": groups, "layer_stride": 1,
-        "unit_shapes": shapes}))
-    spec = tmp_path / "spec.json"
-    payload = {"model": str(model), "campaign_argv": [], "cwd": str(tmp_path),
-               "python": "python3", "env": {}, "headroom_gb": 0}
-    if box_memory_gb is not None:
-        payload["box_memory_gb"] = box_memory_gb
-    spec.write_text(json.dumps(payload))
-    return spec, workspace
-
-
 def _plan_args(spec, workspace, **overrides):
     import types
 
@@ -749,117 +616,6 @@ def _plan_args(spec, workspace, **overrides):
                 probe=None, seed_checkpoint=None, seed_wire_dir=None)
     args.update(overrides)
     return types.SimpleNamespace(**args)
-
-
-def test_a_row_too_wide_for_the_box_is_declined_and_the_rest_are_planned(
-        tmp_path, capsys, shared_mount):
-    import dispatch_tessera_campaign as dispatch
-
-    spec, workspace = _partition_workspace(tmp_path)
-    assert dispatch.cmd_plan(_plan_args(spec, workspace)) == 0
-
-    # The manifest is what ``submit`` hands the fleet, so it holds the
-    # admissible rows and nothing else.
-    manifest = json.loads((workspace / "manifest.json").read_text())
-    assert [row["argv"][row["argv"].index("--units") + 1].split("/")[-1]
-            for row in manifest] == ["row-0000.json", "row-0001.json",
-                                     "row-0002.json"]
-    assert {row["demand"]["mem_gb"] for row in manifest} == {5}
-
-    plan = json.loads((workspace / "plan.json").read_text())
-    # The plan is what an auditor reads, so it keeps the whole layout: every
-    # planned row, admissible or not, with its own derived demand.
-    assert [entry["row_id"] for entry in plan["rows"]] == [
-        "row-0000", "row-0001", "row-0002", "row-0003"]
-    assert [entry["admissible"] for entry in plan["rows"]] == [
-        True, True, True, False]
-    assert plan["row_memory_gb"] == {"row-0000": 5, "row-0001": 5,
-                                     "row-0002": 5, "row-0003": 68}
-    declined = plan["inadmissible_rows"]
-    assert [record["row_id"] for record in declined] == ["row-0003"]
-    # The demand is recorded as derived, never rewritten to fit the box.
-    assert declined[0]["mem_gb"] == 68
-    assert declined[0]["rows_per_box"] == 2
-    assert declined[0]["box_memory_gb"] == 104
-    assert declined[0]["members"] == ["wide"]
-    assert declined[0]["reason"]
-
-    out = capsys.readouterr().out
-    assert "3 of 4 rows are admissible" in out
-    assert "1 declined" in out
-    assert "row-0003" in out and "68" in out and "104" in out
-
-
-def test_a_plan_whose_every_row_is_too_wide_refuses(tmp_path):
-    import dispatch_tessera_campaign as dispatch
-
-    spec, workspace = _partition_workspace(tmp_path, wide=False)
-    with pytest.raises(RuntimeError, match="68 GB"):
-        dispatch.cmd_plan(_plan_args(spec, workspace))
-    # Nothing to submit means nothing was written to submit.
-    assert not (workspace / "manifest.json").exists()
-
-
-def test_a_spec_with_no_box_budget_keeps_every_row(tmp_path, capsys, shared_mount):
-    import dispatch_tessera_campaign as dispatch
-
-    spec, workspace = _partition_workspace(tmp_path, box_memory_gb=None)
-    assert dispatch.cmd_plan(_plan_args(spec, workspace)) == 0
-    manifest = json.loads((workspace / "manifest.json").read_text())
-    assert len(manifest) == 4
-    plan = json.loads((workspace / "plan.json").read_text())
-    assert all(entry["admissible"] for entry in plan["rows"])
-    assert plan["inadmissible_rows"] == []
-    assert "the spec declares no box budget, so this is unchecked" in \
-        capsys.readouterr().out
-
-
-def test_failed_fit_replan_preserves_published_selection_bytes(tmp_path, shared_mount):
-    import dispatch_tessera_campaign as dispatch
-
-    spec, workspace = _partition_workspace(tmp_path)
-    assert dispatch.cmd_plan(_plan_args(spec, workspace, rows_per_box=1)) == 0
-    published = [workspace / 'manifest.json', workspace / 'plan.json',
-                 *sorted((workspace / 'units').glob('row-*.json')),
-                 *sorted((workspace / 'data-manifests').glob('*.json'))]
-    assert any(path.parent.name == 'data-manifests' for path in published)
-    before = {path: path.read_bytes() for path in published}
-
-    # The same census now bundles two groups into each selection. The large
-    # multiplier refuses every proposed row after its selection was derived.
-    # An existing manifest must keep pointing at its original member bytes.
-    with pytest.raises(RuntimeError, match='fits no planned row'):
-        dispatch.cmd_plan(_plan_args(spec, workspace, groups_per_row=2,
-                                     rows_per_box=1000))
-    assert {path: path.read_bytes() for path in published} == before
-
-
-def test_submit_hands_the_fleet_the_admissible_rows_only(
-        tmp_path, monkeypatch, shared_mount):
-    import types
-
-    import dispatch_tessera_campaign as dispatch
-
-    spec, workspace = _partition_workspace(tmp_path)
-    assert dispatch.cmd_plan(_plan_args(spec, workspace)) == 0
-
-    seen = []
-    def native_boundary(manifest, *, wait_s, receipts=None):
-        seen.append(pathlib.Path(manifest))
-        return 0
-    monkeypatch.setattr(dispatch, '_flux_campaign', native_boundary)
-    args = types.SimpleNamespace(workspace=workspace, wait_s=1)
-    assert dispatch.cmd_submit(args) == 0
-    assert len(seen) == 1
-    submitted = json.loads(seen[0].read_text())
-    assert [row["argv"][row["argv"].index("--units") + 1].split("/")[-1]
-            for row in submitted] == ["row-0000.json", "row-0001.json",
-                                      "row-0002.json"]
-    # And each of them carries the byte list the fleet needs to warm it.
-    for row in submitted:
-        manifest = json.loads(pathlib.Path(row["data_manifest"]).read_text())
-        assert manifest["entries"], "a submitted row declared no bytes"
-        assert manifest["total_bytes"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -1136,17 +892,3 @@ def test_units_with_no_admitted_rung_are_named_not_dropped(capsys):
     printed = capsys.readouterr().out
     assert "menu_sizes[b] = 0" in printed and "mode=readable" in printed
     assert report_empty_menus({"a": [object()]}, mode="research") == []
-
-
-def test_the_planner_and_the_campaign_agree_on_the_selection_schemas():
-    """``plan`` spells the schemas itself; this is what keeps that honest.
-
-    The planner must not import ``prismaquant.tessera_campaign`` -- that would
-    put torch on the critical path of a command that writes JSON -- so it
-    carries the two schema strings as literals. A mirror is only safe with a
-    test that fails when it drifts.
-    """
-    import dispatch_tessera_campaign as dispatch
-
-    assert dispatch.UNITS_SCHEMA == campaign_selection.UNITS_SCHEMA
-    assert dispatch.UNITS_SCHEMA_V2 == campaign_selection.UNITS_SCHEMA_V2

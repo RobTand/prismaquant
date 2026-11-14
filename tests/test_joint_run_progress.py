@@ -16,14 +16,12 @@ the writer called the helper:
   passed nothing", which is a window that never advances and never releases.
 """
 import json
-import os
 import sys
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-import dispatch_tessera_campaign as dispatch
 
 from prismaquant import joint_run_progress as jrp
 
@@ -305,24 +303,6 @@ def test_the_interval_must_be_finite_and_positive():
 # The read-set builders' use of ``layer_phase_name`` is held where they are
 # built: tests/test_glm_joint_data_manifest_at_submit.py (run and export)
 # replaces the function and requires the declared phases to follow it.
-
-
-def test_a_joint_run_submission_declares_the_manifest_s_own_phase_names():
-    manifest = {"annotations": {"phases": [
-        {"name": name} for name in run_phases(3)]}}
-    assert dispatch._declared_phase_names(manifest) == run_phases(3)
-
-
-def test_an_oversized_read_plan_is_refused_rather_than_truncated():
-    manifest = {"annotations": {"phases": [
-        {"name": f"layer-{index}"} for index in range(2049)]}}
-    with pytest.raises(RuntimeError, match="2048"):
-        dispatch._declared_phase_names(manifest)
-
-
-def test_the_run_command_declares_phases_at_all():
-    source = (REPO / "tools" / "dispatch_tessera_campaign.py").read_text()
-    assert 'command == "run":' in source and "_declared_phase_names(manifest)" in source
 
 
 # -- the durable boundary ----------------------------------------------------

@@ -17,7 +17,6 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from prismaquant import tessera_campaign_rows as campaign_rows
 from test_selected_source_authentication import selected_source_fixture
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
@@ -159,24 +158,3 @@ def test_the_proof_flags_go_together_and_only_on_a_selected_row(monkeypatch, tmp
     with pytest.raises(SystemExit):
         campaign.main(_proof_argv(plain, tmp_path / 'p.json', '0' * 64))
     assert 'requires selected streaming capture reuse' in capsys.readouterr().err
-
-
-def test_the_planner_binds_the_proof_by_digest_and_owns_the_flags(tmp_path):
-    import dispatch_tessera_campaign as dispatch
-    model = tmp_path / 'model'
-    model.mkdir()
-    from safetensors.torch import save_file
-    save_file({'w': torch.ones(2, 2)}, str(model / 'a.safetensors'))
-    (model / 'model.safetensors.index.json').write_text(
-        json.dumps({'weight_map': {'w': 'a.safetensors'}}))
-    proof, digest = _write_proof(model, tmp_path / 'source-identity.json')
-    assert dispatch._source_identity_cache_binding(proof, model) == dict(
-        path=str(proof.resolve()), sha256=digest)
-    assert dispatch._source_identity_cache_binding(None, model) is None
-    with pytest.raises(RuntimeError, match='does not bind source'):
-        dispatch._source_identity_cache_binding(proof, tmp_path / 'another-model')
-    spec = tmp_path / 'spec.json'
-    spec.write_text(json.dumps({'model': str(model), 'cwd': str(tmp_path), 'python': 'python3',
-        'env': {}, 'campaign_argv': ['--source-identity-cache', str(proof)]}))
-    with pytest.raises(RuntimeError, match='owns per row'):
-        campaign_rows.load_spec(spec)

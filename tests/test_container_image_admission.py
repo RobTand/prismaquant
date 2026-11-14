@@ -8,15 +8,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
-import types
 
 import pytest
 
 from prismaquant import campaign_container_spec as container_spec
 from prismaquant import tessera_campaign_rows as campaign_rows
-from prismaquant.joint_campaign_ledger import seal_quantum_record
 
-from stage_a_spool_spec import declared_stage_a_argv, stage_a_plan, with_spool
+from stage_a_spool_spec import with_spool
 
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tools"):
@@ -24,7 +22,6 @@ for _entry in (ROOT, ROOT / "tools"):
         sys.path.insert(0, str(_entry))
 
 import dispatch_joint_quanta as joint  # noqa: E402
-import dispatch_tessera_campaign as campaign  # noqa: E402
 
 IMAGE = "sha256:" + "a" * 64
 OTHER_IMAGE = "sha256:" + "b" * 64
@@ -56,37 +53,6 @@ def joint_spec(tmp_path, monkeypatch):
     return spec
 
 
-def _joint_campaign(tmp_path: Path) -> dict:
-    plan = tmp_path / "plan.json"
-    plan.write_text(json.dumps(stage_a_plan(
-        tmp_path, output_root=str(tmp_path / "campaign-root"))))
-    return {"plan_sha256": "1" * 64, "prepared_sha256": "2" * 64,
-            "read_manifest_sha256": "4" * 64,
-            "plan_path": str(plan), "prepared_path": "/fixture/prepared.json"}
-
-
-def _joint_manifest(tmp_path: Path, campaign: dict) -> Path:
-    """A minimal valid stage-A manifest for the campaign: the dispatcher's
-    manifest gate (PQ #835) refuses an absent one before the image
-    declaration is even reached."""
-    import hashlib
-    path = tmp_path / "adjoint.manifest"
-    path.write_text(json.dumps({
-        "schema": "prismaquant.prismabuild.data_manifest.v1",
-        "mount_prefix": "/mnt/shared",
-        "entries": [],
-        "entry_count": 0,
-        "total_bytes": 0,
-        "annotations": {
-            "phases": [{"name": "head", "bytes": 0, "cumulative_bytes": 0}],
-            "parent_manifest_sha256": campaign["read_manifest_sha256"],
-            "plan_sha256": campaign["plan_sha256"],
-            "prepared_sha256": campaign["prepared_sha256"],
-        },
-    }))
-    return path
-
-
 def _quantum_record(tmp_path: Path) -> Path:
     import hashlib
     record_path = tmp_path / "layer-001.json"
@@ -114,12 +80,6 @@ def _quantum_record(tmp_path: Path) -> Path:
     return record_path
 
 
-def test_stage_a_seals_the_image_in_the_spec(tmp_path, joint_spec):
-    argv = declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
-    embedded = _embedded_spec(argv)
-    assert embedded["container"]["image"] == IMAGE
-
-
 def test_quantum_seals_the_image_in_the_spec(tmp_path, joint_spec):
     record_path = _quantum_record(tmp_path)
     record = json.loads(record_path.read_text())
@@ -129,99 +89,8 @@ def test_quantum_seals_the_image_in_the_spec(tmp_path, joint_spec):
     assert embedded["container"]["image"] == IMAGE
 
 
-def test_the_declaration_comes_from_the_same_parse_as_the_sealed_spec(
-        tmp_path, monkeypatch, joint_spec):
-    """A second read of the spec file cannot race the sealed bytes.
-
-    The spec file answers with one image on the first read and another on the
-    second; a dispatcher that parses twice would seal one identity and declare
-    the other.  One parse means one read and one image.
-    """
-
-    first = with_spool({"container": {"image": IMAGE}, "env": {}})
-    second = with_spool({"container": {"image": OTHER_IMAGE}, "env": {}})
-    reads = {"spec": 0}
-    real_read_text = Path.read_text
-
-    def two_faced(self, *args, **kwargs):
-        if self == joint_spec:
-            reads["spec"] += 1
-            return json.dumps(first if reads["spec"] == 1 else second)
-        return real_read_text(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", two_faced)
-    argv = declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
-    embedded = _embedded_spec(argv)
-    assert reads["spec"] == 1
-    assert embedded["container"]["image"] == IMAGE
-
-
-def test_a_repository_manifest_digest_is_declared_exactly(tmp_path, monkeypatch):
-    spec = _write_spec(tmp_path / "spec.json", {"image": REPO_IMAGE})
-    monkeypatch.setattr(joint, "SPEC_PATH", spec)
-    argv = declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
-    assert _embedded_spec(argv)["container"]["image"] == REPO_IMAGE
-
-
-def test_an_archive_backed_spec_declares_no_image(tmp_path, monkeypatch):
-    """The archive supplies the image on any worker; PB must not pre-gate it."""
-
-    container = {"image": IMAGE, "content_sha256": CONTENT_SHA,
-                 "archive": {"path": "/mnt/shared/images/campaign.tar",
-                             "sha256": ARCHIVE_SHA}}
-    spec = _write_spec(tmp_path / "spec.json", container)
-    monkeypatch.setattr(joint, "SPEC_PATH", spec)
-    argv = declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
-    assert "container_images" not in argv
-    embedded = _embedded_spec(argv)
-    assert embedded["container"]["archive"] == container["archive"]
-    assert embedded["container"]["content_sha256"] == CONTENT_SHA
-
-
-def test_a_malformed_archive_is_refused_not_silently_undeclared(tmp_path, monkeypatch):
-    """A broken archive is not an excuse to skip the loader's contract."""
-
-    container = {"image": IMAGE, "content_sha256": CONTENT_SHA,
-                 "archive": {"path": "images/campaign.tar", "sha256": ARCHIVE_SHA}}
-    spec = _write_spec(tmp_path / "spec.json", container)
-    monkeypatch.setattr(joint, "SPEC_PATH", spec)
-    with pytest.raises(RuntimeError, match="archive"):
-        declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
-
-
-def test_the_dry_run_plan_seals_the_stage_a_image(tmp_path, joint_spec, capsys):
-    """End to end through the dispatcher's own plan output."""
-
-    plan = tmp_path / "plan.json"
-    plan.write_text(json.dumps(stage_a_plan(
-        tmp_path, output_root=str(tmp_path / "campaign-root"))))
-    records = tmp_path / "records"
-    records.mkdir()
-    record_path = _quantum_record(tmp_path)
-    record = json.loads(record_path.read_text())
-    record["campaign"] = {"plan_path": str(plan), "plan_sha256": "1" * 64,
-                          "prepared_path": "/fixture/prepared.json",
-                          "prepared_sha256": "2" * 64,
-                          "read_manifest_sha256": "4" * 64}
-    record["adjoint"] = {"receipt_sha256": None}
-    (records / record_path.name).write_text(json.dumps(seal_quantum_record(record)))
-    manifest = _joint_manifest(tmp_path, {"plan_sha256": "1" * 64,
-                                          "prepared_sha256": "2" * 64,
-                                          "read_manifest_sha256": "4" * 64})
-    from stage_a_spool_spec import write_declaration
-    code = joint.main(["--timeout-s", "3600", "--stage-a-produced-declaration", str(write_declaration(tmp_path)), "--records", str(records),
-                       "--output-root", str(tmp_path / "out"),
-                       "--adjoint-manifest", str(manifest),
-                       "--dry-run"])
-    assert code == 0
-    plan_out = json.loads(capsys.readouterr().out)
-    assert [row["kind"] for row in plan_out["rows"]] == ["stage-a"]
-    argv = plan_out["rows"][0]["row"]
-    assert _embedded_spec(argv)["container"]["image"] == IMAGE
-
-
 # ---------------------------------------------------------------------------
-# dispatch_tessera_campaign: generated rows carry the manifest field
+# Generated joint rows carry the manifest field
 # ---------------------------------------------------------------------------
 
 
@@ -295,45 +164,6 @@ def test_a_malformed_archive_row_is_refused_not_undeclared():
 # ---------------------------------------------------------------------------
 
 
-def _direct_args(tmp_path: Path, container: dict) -> types.SimpleNamespace:
-    spec = _write_spec(tmp_path / "spec.json", container)
-    return types.SimpleNamespace(
-        spec=spec,
-        demand="gpu=1,mem_gb=104", cpus=6, tag="sparky", priority=0,
-        timeout_s=None, container_arg=None, residency=None, head_grace_s=1800)
-
-
-def _direct_argv(tmp_path: Path, container: dict) -> list:
-    args = _direct_args(tmp_path, container)
-    spec = json.loads(Path(args.spec).read_text())
-    return campaign._native_action_row(args, manifest=tmp_path / "read.json",
-                                inner=["--resume"], container_spec=spec)
-
-
-def test_a_direct_submission_declares_the_resolved_spec_image(tmp_path):
-    row = _direct_argv(tmp_path, {"image": IMAGE})
-    embedded = _embedded_spec(row["argv"])
-    assert row["container_images"] == [embedded["container"]["image"]]
-
-
-def test_a_direct_submission_with_an_archive_declares_no_image(tmp_path):
-    container = {"image": IMAGE, "content_sha256": CONTENT_SHA,
-                 "archive": {"path": "/mnt/shared/images/campaign.tar",
-                             "sha256": ARCHIVE_SHA}}
-    row = _direct_argv(tmp_path, container)
-    assert "container_images" not in row
-    assert _embedded_spec(row["argv"])["container"]["archive"] == container["archive"]
-
-
-def test_a_direct_submission_without_a_container_declares_nothing(tmp_path):
-    """The opaque pre-container spec shape some callers still pass."""
-
-    args = _direct_args(tmp_path, {"image": IMAGE})
-    argv = campaign._native_action_row(args, manifest=tmp_path / "read.json",
-                                inner=["--resume"], container_spec={"image": "x"})
-    assert "container_images" not in argv
-
-
 # ---------------------------------------------------------------------------
 # the shared derivation
 # ---------------------------------------------------------------------------
@@ -379,20 +209,6 @@ def test_portable_admission_requires_inspected_image_identity():
     del spec["container"]["content_sha256"]
     with pytest.raises(RuntimeError, match="portable image admission"):
         container_spec.admission_image_reference(spec)
-
-
-def test_joint_and_direct_submission_keep_the_portable_reference(tmp_path):
-    spec = with_spool(_portable_spec())
-    path = tmp_path / "portable.json"
-    path.write_text(json.dumps(spec))
-    argv = joint._container_wrap(
-        path, ["python3", "-V"], progress=[("head", 1800)])
-    reference = spec["container_admission_reference"]
-    assert _embedded_spec(argv)["container_admission_reference"] == reference
-    args = _direct_args(tmp_path, spec["container"])
-    direct = campaign._native_action_row(args, manifest=tmp_path / "read.json",
-                                  inner=["--resume"], container_spec=spec)
-    assert direct["container_images"] == [reference]
 
 
 def test_explicit_archive_admission_keeps_the_joint_override_semantics():
