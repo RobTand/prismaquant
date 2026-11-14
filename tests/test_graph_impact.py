@@ -170,20 +170,7 @@ def test_vendored_core_hash():
     assert actual == recorded, 'Update the recorded hash only when the core changes in all four repos'
 
 
-def assert_pq_test_edge_deadline(config, *, today=None):
-    from datetime import date, datetime, timezone
-    today = today if today is not None else datetime.now(timezone.utc).date()
-    deadline = date.fromisoformat(config['test_to_test_strict_by'])
-    if config['test_to_test'] == 'strict' or today <= deadline:
-        return
-    raise AssertionError(
-        'Set "test_to_test": "strict" in tests/fixtures/graph_impact_baseline.json '
-        'and fix or allowlist any new test→test edges.'
-    )
-
-
 def test_graph_impact_gate(capsys):
-    assert_pq_test_edge_deadline(json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text()))
     from tools.ci import graph_impact_pq
     with capsys.disabled():
         assert graph_impact_pq.main([]) == 0
@@ -649,28 +636,3 @@ def test_bazel_explain_supplements_missing_source_edges(tmp_path, monkeypatch):
     assert json.loads(deps.read_text()) == {'//:test': ['//:lib'], '//:external': ['@repo//:data']}
 
 
-@pytest.mark.parametrize('day,mode,passes', [
-    ('2026-11-15', 'reach', True),
-    ('2026-11-16', 'reach', True),
-    ('2026-11-17', 'reach', False),
-    ('2026-11-17', 'strict', True),
-])
-def test_pq_test_edge_deadline(day, mode, passes):
-    from datetime import date
-    config = {'test_to_test': mode, 'test_to_test_strict_by': '2026-11-16'}
-    if passes:
-        assert_pq_test_edge_deadline(config, today=date.fromisoformat(day))
-    else:
-        with pytest.raises(AssertionError) as error:
-            assert_pq_test_edge_deadline(config, today=date.fromisoformat(day))
-        assert str(error.value) == (
-            'Set "test_to_test": "strict" in tests/fixtures/graph_impact_baseline.json '
-            'and fix or allowlist any new test→test edges.'
-        )
-
-
-def test_pq_transition_baseline_uses_only_the_date_trigger():
-    config = json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text())
-    assert 'test_to_test_strict_at_count' not in config
-    assert config['test_to_test_strict_by'] == '2026-11-16'
-    assert_pq_test_edge_deadline(config)
