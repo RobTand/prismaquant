@@ -600,10 +600,6 @@
    "tools/build_stagea_seed_package.py",
    "tools/build_stagea_split_package.py"
   ],
-  "canonical_bytes": [
-   "prismaquant/joint_layer_quanta.py",
-   "prismaquant/tessera_campaign_reseal.py"
-  ],
   "canonical_json_bytes": [
    "prismaquant/digests.py",
    "prismaquant/quality_prefill_contract.py",

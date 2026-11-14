@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-14, unused Tessera schedule, census-tool, and dispatcher removal. Placement requires one eligible online rank. Sources below describe the current implementation.
+As of: 2026-11-14, unused Tessera schedule, census-tool, dispatcher, and reseal-command removal. Placement requires one eligible online rank. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -2404,13 +2404,10 @@ staging. Two processes can no longer consume the same fixed `.tmp` inode.
 Digest, JSON and source-framing profiles use the existing byte owners; pin,
 manifest, scored-content and report bytes retain their inherited encodings.
 
-Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
-`tessera_campaign_reseal` owns proof assembly, strata and coverage checks,
-source-seal classification, plain checkpoint migration and verification.
-The executable parses argv and prints returned reports and row progress.
-Public operations receive explicit paths and selections, never argparse state.
-Package consumers import the proof owner directly. Proof requirements, wire
-identities, scored content and idempotent row semantics keep their prior gates.
+Re-stamped 2026-11-14: `tessera_campaign_reseal` reads existing source-seal proof bundles.
+`joint_catalog_extension` uses `unit_kind`, `format_family`, `load_bundle`, and `Refused`.
+The reader checks arm pins, arm files, encoder engagement, and declared strata.
+The unused migration, verification, and bundle-assembly commands are removed.
 
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
 `tessera_campaign_table` owns anchor/stack metadata, campaign payload construction,
@@ -5124,8 +5121,7 @@ be32-name/be64-content PrismaQuant source profile.
 optional labelled map and reports the selected framing without importing the
 Tessera serving runtime. Its private import memo uses the computed v2 digest
 so distinct actual file maps cannot alias through a legacy transcript.
-`tools/reseal_campaign_identity.py hash-tree` emits both encoder profiles;
-no migration command or qualified record is rewritten. Comparison selects v2
+Comparison selects v2
 when both sides advertise it, refuses malformed/unknown profiles or a v2
 mismatch even if v1 matches, and otherwise explicitly reports
 `legacy_framing`. Matching v2 does not require cross-side v1 equality.
@@ -5634,8 +5630,7 @@ identity quantum through `pbrun`, the GPU row behind it with `pbrun --after`).
 `tessera_campaign._campaign_checkpoint_identity` drops `source_identity_cache`
 and `source_identity_cache_sha256`, so the identity is byte-identical with and
 without them. **Migration:** checkpoints written by trees containing #1520
-carry those keys, so their identity changes; resume needs a restart or
-`tools/reseal_campaign_identity.py` `drop_settings`. No stored format, rendered
+carry those keys, so their identity changes. Resume requires a restart. No stored format, rendered
 byte, pipeline default or ship gate changes.
 
 Re-stamped 2026-09-28 (PQ #738, `claude/738-forward-capture-fanout`): a
@@ -15436,34 +15431,6 @@ and the compressed-tensors lane, which has no route telemetry. The
 `validate_native_export` claim in CLAUDE.md principle 14 is corrected: that
 script never performed this leg. Gate: `tests/test_tessera_route_trace_gate.py`,
 on the real m44e1 TP2 traces, shown failing before the fix.
-
-Re-stamped (2026-09-14, `claude/reseal-strata-covers-rows`) for **the reseal
-proof coverage rule** (#628). `tools/reseal_campaign_identity.py` rewrites the
-source pins of Tessera campaign rows under a proof bundle. A bundle now
-authorizes only rows whose strata it proved; before, it authorized any row
-once it met a fixed table, so a bundle with no routed E2M1 cell could rewrite
-routed `TESSERA_E2M1_K2` rows. The rule:
-
-- `identity_strata` (`:123`) derives each row's (kind, family) strata from its
-  sealed identity: routed or dense from the unit name through `unit_kind`
-  (`:100`), the same classifier `assemble_bundle` applies to proof cells
-  (`:367`), and the family of every menu format. `plan_row` refuses a shard
-  anchor or receipt outside the unit's sealed menu (`:586-589`).
-- `bundle_coverage` (`:137`) reads the bundle's `strata`. It refuses a bundle
-  without them, or one whose strata differ from its own cells.
-- `require_coverage` (`:461`) checks every row before `dry-run --proof`
-  (`:848`) or `migrate` (`:877`) plans or rewrites any of them, and names each
-  uncovered row and stratum. The migration record stamps `row_strata` and
-  `proof_strata`.
-- `REQUIRED_STRATA` (`:85`) stays the floor for assembling a bundle. It no
-  longer decides which rows a bundle may rewrite.
-
-The prefix arm in `experiments/reseal_identity_proof.py` refuses, before any
-encode, a prefix whose first `--limit-anchors` anchors reach no batch of a
-requested shape class (`require_prefix_classes`, `:167`). On a single-rate
-row, three batches per class put a 16-anchor prefix entirely in down_proj.
-No default, format menu, lane or sealed row moves. Gate:
-`tests/test_reseal_campaign_identity.py`.
 
 Re-stamped (2026-09-14, `claude/a4-routed-scale-guard-624`) for **the routed
 NVFP4 static activation-scale export guard** (#624). The campaign prices one
@@ -26763,26 +26730,9 @@ whole-scope claim is `False`) and `provenance.coverage` records
 population block is still rebuilt over the scope, so the unpriced units are
 counted there as before. Gate: `tests/test_tessera_campaign_merge_declared_coverage.py`.
 
-**A reseal proof bundle authorizes only the strata it proved** (2026-09-14,
-#628). `tools/reseal_campaign_identity.py dry-run --proof` and `migrate`
-derive each row's (kind, family) strata from its sealed identity
-(`identity_strata`). Before any row is planned or rewritten, they refuse when
-a row prices a stratum that has no passing cell in the bundle
-(`require_coverage`), and they name each such row and stratum.
-`REQUIRED_STRATA` is only the floor for `proof-bundle`. The rows after
-tessera#486 are the case this closes: `extension-e2m1-01` rows 0045-0052 are
-`routed:TESSERA_E2M1_K2` only, and 42 of the 132 `extension-r1024-02` rows
-are `routed:{TESSERA_BF16_K1, TESSERA_E2M1_K2, TESSERA_E4M3_K1}`. The 09-11
-bundle's routed cells cover none of those new strata. Gate:
-`tests/test_reseal_campaign_identity.py`.
-
-Bundle assembly and reuse also share the requested-setting-removal check
-(2026-10-17 architecture audit). Each bound arm must prove exactly the
-`drop_settings` supplied by the current migration. Reusing a no-drop bundle
-does not authorize a later request to remove settings. Catalog source adoption
-supplies only old/new pins and does not request removal; that existing caller
-remains distinct. This adds no new proof requirement for legacy empty-arm
-bundles and changes neither row bytes nor numerical qualification.
+The source-adoption reader checks each bundle's declared strata against its cells.
+Catalog source adoption supplies old and new pins without a setting-removal request.
+The reader retains that distinction and its existing proof checks.
 
 **Row classes: placement is a property of the class, not of the spec**
 (2026-09-13, #542). A spec may declare a `classes` block, and a class owns the
