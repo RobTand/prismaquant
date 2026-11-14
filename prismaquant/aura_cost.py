@@ -2448,10 +2448,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     require_cuda_hot_path("aura_cost", args.device)
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     from transformers import AutoTokenizer
-    from prismaquant.build_production_cache import _load_col_weights
+    from prismaquant.production_weight_cache import _load_col_weights
     from prismaquant.calibration_data import load_calibration, load_calibration_input, load_wikitext_calibration_windowed
     from prismaquant.cost_streaming import build_streamed_causal_lm
-    from prismaquant.measure_quant_cost import ActivationIndex
+    from prismaquant.activation_index import ActivationIndex
     from prismaquant.model_profiles import detect_profile
     from prismaquant.streamed_model_identity import (
         build_source_model_binding, build_streamed_model_identity,
