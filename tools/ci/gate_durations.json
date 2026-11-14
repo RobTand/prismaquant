@@ -21694,7 +21694,6 @@
     "tests/test_tool_imports_1304.py::test_tool_resolves_its_prismaquant_imports[tools/prismasnap.py]": 0.053,
     "tests/test_tool_imports_1304.py::test_tool_resolves_its_prismaquant_imports[tools/profile_produced_group_lookup.py]": 0.011,
     "tests/test_tool_imports_1304.py::test_tool_resolves_its_prismaquant_imports[tools/profile_stage_b_head.py]": 0.035,
-    "tests/test_tool_imports_1304.py::test_tool_resolves_its_prismaquant_imports[tools/prove_glm_source_adoption.py]": 0.008,
     "tests/test_tool_imports_1304.py::test_tool_resolves_its_prismaquant_imports[tools/provision_tessera_pin.py]": 0.116,
     "tests/test_tool_imports_1304.py::test_tool_resolves_its_prismaquant_imports[tools/publish_artifact.py]": 0.056,
     "tests/test_tool_imports_1304.py::test_tool_resolves_its_prismaquant_imports[tools/pwc_window_load_bench.py]": 0.042,

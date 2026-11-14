@@ -13354,20 +13354,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/prove_glm_source_adoption",
-    srcs = [
-        "tools/prove_glm_source_adoption.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
-        ":prismaquant/tessera_source_digest_adoption",
-        "@pq_pip//tessera_quant",
-    ],
-)
-
-pq_py_library(
     name = "tools/provision_tessera_pin",
     srcs = [
         "tools/provision_tessera_pin.py",
