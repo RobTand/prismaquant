@@ -11007,18 +11007,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "prismaquant/tessera_reduced_schedule",
-    srcs = [
-        "prismaquant/tessera_reduced_schedule.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
     name = "prismaquant/tessera_reuse_authority",
     srcs = [
         "prismaquant/tessera_reuse_authority.py",

@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-14, placement requires one eligible online rank. Sources below describe the current implementation.
+As of: 2026-11-14, unused Tessera schedule removal. Placement requires one eligible online rank. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -5198,20 +5198,6 @@ reader does not infer or declare a synthesis phase. Existing head checkpoint,
 current-byte verification, manifest bytes and worker limits remain unchanged.
 This CPU wiring is not NFS-throughput or GPU qualification.
 
-Re-stamped 2026-09-30 (PQ #1776, Refs #495, `sol/pq-tessera-5`):
-`plan_reduced_schedule_repair` replays explicit research input history under a
-fixed declared experiment and round cap. Prior receipt continuity, monotonic
-coverage, complete requested scalar rows and immutable observations are required
-before a supplied re-solved assignment can request its next missing cells.
-Fixed fields and prior rows are compared as canonical JSON bytes, so numeric
-retyping cannot bypass their identity. Replays are digest-bound and cap
-exhaustion fails closed. This wraps the existing planner/global greedy
-diagnostic; it does not solve, encode, dispatch, replace live measured rows,
-modify resumes, admit wires or establish convergence/quality.
-The [repair-history contract](design/tessera_reduced_schedule_repair.md) keeps
-actual execution and GPU acceptance separate. Pin, serving and defaults stay
-unchanged.
-
 Re-stamped 2026-09-30 (PQ #1786, Refs #1367, `sol/pq-stageb-3`):
 Stage B has an explicitly opt-in host publication path selected by the runtime
 execution setting `checkpoint_publication_budget_bytes`. Absent/zero retains
@@ -5370,18 +5356,6 @@ research accounting, and an explicit footprint recipe remains authoritative.
 Unattested served wires are refused by the existing resolver. Production
 rendering, producer accounting, encoded bytes, pin and ship gates are unchanged.
 This is CPU recipe/geometry consistency, not GPU or serving qualification.
-
-Re-stamped 2026-09-29 (PQ #1755, Refs #495, `sol/pq-tessera-3`):
-`python -m prismaquant.tessera_reduced_schedule` provides a research-only offline
-next-work transition from explicit stack evidence, current allocator winners,
-byte costs and a measured-cell ledger. The existing global regret gate selects
-missing winner cells on pass or the full declared band for all stacks on fail.
-Inputs/configuration are canonically digest-bound; mismatched rosters, incomplete
-base evidence and infeasible winners are refused. Scalar coverage never implies
-wire readiness. The gate retains its greedy diagnostic, not production-DP
-regret. [The contract](design/tessera_reduced_schedule.md) describes the boundary:
-no live campaign dispatch, encoding, repair/re-solve loop, exact-wire admission,
-GPU qualification, pin, serving numerics or production default changes.
 
 Re-stamped 2026-09-29 (PQ #1761, routed backfill admission regression):
 checkpoint presence does not require a load-all row head. The failed
