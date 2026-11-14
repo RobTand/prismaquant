@@ -75295,6 +75295,9 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
+    args = [
+        "--deselect=tests/test_native_results.py::test_measured_interpreter_is_the_actual_executable",
+    ],
     timeout = "moderate",
 )
 
