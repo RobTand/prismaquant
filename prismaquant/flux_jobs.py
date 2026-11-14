@@ -191,8 +191,8 @@ def _profile_identity(resources=None):
     online = _allocation_ids(online_raw) if online_raw else set()
     if not online <= ranks:
         raise ValueError('online ranks differ from live Flux R')
-    if eligible is not None and (not eligible or not eligible <= online):
-        raise ValueError('every eligible rank in live Flux R must be online')
+    if eligible is not None and not eligible & online:
+        raise ValueError('no eligible rank in live Flux R is online')
     overlay = _checked(['overlay', 'status', '--no-pretty', '--color=never'], uri=uri)
     states = {}
     for line in overlay.splitlines():
@@ -200,8 +200,6 @@ def _profile_identity(resources=None):
         if match is None or int(match[1]) in states:
             raise ValueError('ambiguous live Flux broker overlay')
         states[int(match[1])] = match[2]
-    if eligible is not None and any(states.get(rank) != 'full' for rank in eligible):
-        raise ValueError('every eligible Flux broker overlay must be full')
     if _checked(['getattr', 'broker.starttime'], uri=uri).strip() != start:
         raise ValueError('Flux instance changed during preflight')
     return {'profile': _PROFILE, 'config_sha256': bytes_sha256hex(config_raw.encode()),
