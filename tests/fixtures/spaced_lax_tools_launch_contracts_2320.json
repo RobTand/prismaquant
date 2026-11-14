@@ -263,19 +263,6 @@
       "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
     },
     {
-      "file": "tools/qualify_t4_overlay.py",
-      "kind": "Package-dependent argument/help entry",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.qualify_t4_overlay",
-        "--help"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
-      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
-    },
-    {
       "file": "tools/regenerate_joint_quanta.py",
       "kind": "Package-dependent argument/help entry",
       "supported_probe": [

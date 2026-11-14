@@ -19,8 +19,7 @@ pick() { for c in "$@"; do [ -x "$c" ] && { echo "$c"; return; }; done; }
 PYTHON="${PYTHON:-$(pick /home/rob/venvs/pq-cpu312/bin/python \
                          /home/rob/venvs/pq-cu130/bin/python \
                          /home/rob/dq-runs/venvs/prismaquant-cu130/bin/python)}"
-PYSPY="${PYSPY:-$(pick /home/rob/venvs/pb-cpu/bin/py-spy \
-                       /home/rob/venvs/pq-cu130/bin/py-spy \
+PYSPY="${PYSPY:-$(pick /home/rob/venvs/pq-cu130/bin/py-spy \
                        /home/rob/.local/bin/py-spy \
                        /home/rob/venvs/pq-release/bin/py-spy)}"
 echo "interpreter=$PYTHON pyspy=$PYSPY host=$(hostname) checkout=$CHECKOUT $(git -C "$CHECKOUT" rev-parse --short HEAD 2>/dev/null)"

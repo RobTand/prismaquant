@@ -2,8 +2,8 @@
 
 Each qualification result binds the digest of the catalog cell it qualified
 (``cell_sha256``). Rebuilding the catalog with journal anchors changed every
-cell's ``anchor`` and nothing else, and ``qualify_t4_overlay.py`` never reads
-the anchor, so the verdicts still hold. This tool proves that per cell and
+cell's ``anchor`` and nothing else. Qualification does not read the anchor,
+so the verdicts still hold. This tool proves that per cell and
 writes one rebinding document. It does not modify any result file.
 
 For each ``(qname, format)``, the new cell must equal the previous cell in every

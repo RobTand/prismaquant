@@ -13,10 +13,6 @@ from pathlib import PurePosixPath
 import re
 
 
-#: No PB name is a valid spec setting: the PB action, reader, queue, produced-spool and
-#: local-scratch charge contexts no longer exist, and a spec naming one promises a
-#: service that is gone.
-KEPT_PB_SPEC_ENV = ()
 #: The native staged-input names the launcher alone supplies (``staged_launch.launch`` exports
 #: the same five); a spec naming one is forged or conflicting, never a default.
 LAUNCHER_STAGED_ENV = ("PRISMAQUANT_STAGED_MANIFEST", "PRISMAQUANT_STAGED_MANIFEST_SHA256",
@@ -126,25 +122,6 @@ def container_memory_budget_gb(spec: dict) -> float | None:
     return float(raw)
 
 
-def refuse_retired_produced_env(env) -> None:
-    """Refuse the retired produced-output service names (the spool's bound is the launch-bound declaration's)."""
-    for name in env:
-        if name.startswith("PRISMABUILD_PRODUCED_"):
-            raise RuntimeError(
-                f"the {name} setting belongs to the retired produced-output service context; "
-                "the spool root and bound are the launch-bound declaration's, never environment")
-
-
-def refuse_retired_pb_env(env) -> None:
-    """Refuse every PB service setting a spec names, except the kept scratch wire."""
-    refuse_retired_produced_env(env)
-    for name in env:
-        if name.startswith("PRISMABUILD_") and name not in KEPT_PB_SPEC_ENV:
-            raise RuntimeError(
-                f"the {name} setting belongs to the retired PB action/reader/spool context; "
-                "the native launch supplies no such service, so a spec cannot name it")
-
-
 def validate_container(spec: dict, *, bounded: bool = False) -> None:
     """Check a container spec, with the bounded-capture env gate opt-in.
 
@@ -223,7 +200,6 @@ def validate_container(spec: dict, *, bounded: bool = False) -> None:
     for name in LAUNCHER_STAGED_ENV:
         if name in env:
             raise RuntimeError(f"the {name} setting is supplied by the launcher, not by a spec")
-    refuse_retired_pb_env(env)
     for name, expected in BOUNDED_CAPTURE_ENV.items():
         # Declaring it is optional -- the launcher supplies it -- but a spec may
         # not weaken it, and the refusal names the field so a reader of the spec
