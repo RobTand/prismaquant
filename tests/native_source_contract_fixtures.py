@@ -299,6 +299,8 @@ def producer_cpu_guard(tmp_path, monkeypatch, *, capacity=4 << 30):
     membership.write_text("0::/task\n")
     monkeypatch.setattr(memory, "_host_memory_info", lambda: (64 << 30, 128 << 30))
     monkeypatch.setattr(torch.cuda, "memory_reserved", lambda *args: 0)
+    monkeypatch.setenv("CACHE_HEADROOM_GB", "0")
+    monkeypatch.setenv("PREFETCH_MIN_AVAILABLE_GB", "0")
     return memory.CaptureMemoryGuard(torch.device("cpu"), cgroup_root=root, membership=membership)
 
 

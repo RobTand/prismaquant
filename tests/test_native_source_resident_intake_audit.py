@@ -241,6 +241,16 @@ def test_actual_resident_caller_receives_decoded_source(owned_root, monkeypatch,
     assert seen == [caller]
 
 
+def test_streamed_expert_caller_installs_on_low_memory_host(owned_root, monkeypatch):
+    # The streamed context must not read the real host memory. The fixture sets the headroom and the floor.
+    monkeypatch.setattr(streaming_model, "mem_available_bytes", lambda: 4 << 30)
+    try:
+        test_actual_resident_caller_receives_decoded_source(owned_root, monkeypatch, True, "expert-streamed-main")
+    except Exception as error:
+        assert "not resident after its required prefetch" not in str(error), str(error)
+        raise
+
+
 def test_native_rtn_main_refuses_existing_unqualified_output(owned_root, monkeypatch):
     from prismaquant import build_rtn_cache
 
