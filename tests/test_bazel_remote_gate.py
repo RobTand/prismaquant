@@ -46,21 +46,22 @@ def test_empty_refs_cannot_start_a_remote_gate():
 
 @pytest.mark.parametrize('status,success,code', [
     ('DISCONNECTED_INVOCATION_STATUS', None, None),
+    ('COMPLETE_INVOCATION_STATUS', True, 0),
     ('COMPLETE_INVOCATION_STATUS', False, 3),
     ('COMPLETE_INVOCATION_STATUS', False, 36),
 ])
-def test_failed_or_disconnected_runs_are_not_retried(status, success, code):
+def test_terminal_run_is_not_retried_and_completion_does_not_require_success(status, success, code):
+    record = {'invocationId': 'own-run', 'invocationStatus': status,
+              'success': success, 'bazelExitCode': code}
     class Client:
-        def __init__(self):
-            self.methods = []
         def call(self, method, body):
-            self.methods.append(method)
-            return {'invocation': [{'invocationId': 'own-run', 'invocationStatus': status,
-                                    'success': success, 'bazelExitCode': code}]}
-    client = Client()
-    with pytest.raises(remote.RemoteError):
-        remote.await_invocation(client, 'own-run', 100, clock=lambda: 1)
-    assert client.methods == ['GetInvocation']
+            assert method == 'GetInvocation' and body['selector']['invocation_id'] == 'own-run'
+            return {'invocation': [record]}
+    if status == 'DISCONNECTED_INVOCATION_STATUS':
+        with pytest.raises(remote.RemoteError, match='disconnected'):
+            remote.await_invocation(Client(), 'own-run', 100, clock=lambda: 1)
+    else:
+        assert remote.await_invocation(Client(), 'own-run', 100, clock=lambda: 1) == record
 
 
 def test_a_submission_acknowledgement_is_not_a_pass():
@@ -71,34 +72,18 @@ def test_a_submission_acknowledgement_is_not_a_pass():
         remote.await_invocation(Client(), 'ack-only', 0, clock=lambda: 1)
 
 
-def test_completed_run_returns_only_after_its_own_success():
-    record = {'invocationId': 'own-run', 'invocationStatus': 'COMPLETE_INVOCATION_STATUS',
-              'success': True, 'bazelExitCode': 0}
-    class Client:
-        def call(self, method, body):
-            assert body['selector']['invocation_id'] == 'own-run'
-            return {'invocation': [record]}
-    assert remote.await_invocation(Client(), 'own-run', 100, clock=lambda: 1) == record
-
-
-def test_public_api_nested_invocation_id_is_accepted():
-    record = {'id': {'invocationId': 'own-run'},
-              'invocationStatus': 'COMPLETE_INVOCATION_STATUS',
+@pytest.mark.parametrize('identity', ['own-run', 'foreign-run'])
+def test_public_api_nested_invocation_id_must_match(identity):
+    record = {'id': {'invocationId': identity}, 'invocationStatus': 'COMPLETE_INVOCATION_STATUS',
               'success': True, 'bazelExitCode': 0}
     class Client:
         def call(self, method, body):
             return {'invocation': [record]}
-    assert remote.await_invocation(Client(), 'own-run', 100, clock=lambda: 1) == record
-
-
-def test_public_api_nested_invocation_id_cannot_return_another_run():
-    class Client:
-        def call(self, method, body):
-            return {'invocation': [{'id': {'invocationId': 'foreign-run'},
-                'invocationStatus': 'COMPLETE_INVOCATION_STATUS',
-                'success': True, 'bazelExitCode': 0}]}
-    with pytest.raises(remote.RemoteError, match='wrong invocation'):
-        remote.await_invocation(Client(), 'own-run', 100, clock=lambda: 1)
+    if identity == 'own-run':
+        assert remote.await_invocation(Client(), 'own-run', 100, clock=lambda: 1) == record
+    else:
+        with pytest.raises(remote.RemoteError, match='wrong invocation'):
+            remote.await_invocation(Client(), 'own-run', 100, clock=lambda: 1)
 
 
 @pytest.mark.parametrize('raw', [None, b'not JSON', b'{}',
@@ -187,7 +172,7 @@ def test_incomplete_shard_stops_without_submitting_another_or_retrying(fault):
 
 
 @pytest.mark.parametrize('field,value', [('index', 1), ('architecture', 'arm64'),
-                                        ('targets', ['//tests:foreign'])])
+                                        ('targets', ['//tests:foreign']), ('base', 'd' * 40)])
 def test_shard_result_must_match_the_exact_requested_partition(field, value):
     class WrongPartition(ShardClient):
         def call(self, method, body, **kwargs):
@@ -198,7 +183,7 @@ def test_shard_result_must_match_the_exact_requested_partition(field, value):
                 return json.dumps(row).encode()
             return result
     client = WrongPartition()
-    with pytest.raises(remote.RemoteError, match='partition'):
+    with pytest.raises(remote.RemoteError, match='partition|base'):
         remote.submit_shards(client, shard_requests(), HEAD, clock=lambda: 1)
     assert client.calls.count('Run') == 1
 
@@ -310,22 +295,6 @@ def test_verified_shard_records_feed_the_exact_union_aggregator():
                                require_execution=True)
     assert summary['verdict'] == 'pass'
     assert summary['executed_test_actions'] == 2
-
-
-def test_same_head_receipt_from_another_base_is_refused():
-    class OtherBase(ShardClient):
-        def call(self, method, body, **kwargs):
-            result = super().call(method, body, **kwargs)
-            if method == 'GetFile':
-                row = json.loads(result)
-                row['base'] = 'd' * 40
-                return json.dumps(row).encode()
-            return result
-
-    client = OtherBase()
-    with pytest.raises(remote.RemoteError, match='base'):
-        remote.submit_shards(client, shard_requests(), HEAD, clock=lambda: 1)
-    assert client.calls.count('Run') == 1
 
 
 def controller_manifest(mode='pr', selection='fallback'):
@@ -515,9 +484,10 @@ def test_invalid_plan_cannot_start_test_shards_or_retry(fault):
     assert client.events == []
 
 
-@pytest.mark.parametrize('fault', [None, 'disconnected', 'leak', 'unscannable'])
+@pytest.mark.parametrize('fault', [None, 'fail', 'disconnected', 'deadline', 'missing',
+    'head', 'schema', 'partition', 'runner', 'leak', 'unscannable'])
 def test_controller_cli_publishes_scanned_results_and_scopes_only_after_own_proof(
-        tmp_path, monkeypatch, fault):
+        tmp_path, monkeypatch, capsys, fault):
     monkeypatch.setattr(remote.artifacts, 'require_scan_python', lambda: None)
     monkeypatch.setattr(remote.artifacts, 'scan_runtime_available', lambda: True)
     upload = tmp_path / 'upload'
@@ -526,36 +496,56 @@ def test_controller_cli_publishes_scanned_results_and_scopes_only_after_own_proo
     monkeypatch.setenv('BUILDBUDDY_API_KEY', 'controller-cli-secret-sentinel')
     monkeypatch.setenv('GITHUB_OUTPUT', str(output))
     monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(summary))
-    calls = []
+    run_gate = remote.run_gate
+    class Client(PlannedGateClient):
+        def call(self, method, body, **kwargs):
+            result = super().call(method, body, **kwargs)
+            if method == 'GetInvocation' and body['selector']['invocation_id'] != 'plan-parent':
+                record = result['invocation'][0]
+                record.update(success=fault not in ('fail', 'runner'),
+                              bazelExitCode=3 if fault in ('fail', 'runner') else 0)
+                if fault in ('disconnected', 'deadline'):
+                    record['invocationStatus'] = ('DISCONNECTED_INVOCATION_STATUS'
+                        if fault == 'disconnected' else 'PARTIAL_INVOCATION_STATUS')
+                if fault == 'missing':
+                    record['artifacts'] = []
+            if method == 'GetFile' and body['uri'].startswith('bytestream://parent-'):
+                row = json.loads(result)
+                if fault == 'fail':
+                    row.update(verdict='fail')
+                    row['run'].update(returncode=3, statuses={label: 'FAILED' for label in row['targets']})
+                if fault in ('head', 'schema', 'partition'):
+                    row['partition_sha256' if fault == 'partition' else fault] = 'wrong'
+                row['budget_warnings'] = (['controller-cli-secret-sentinel'] if fault == 'leak' else
+                    [{'nodeid': 'test_one', 'seconds': 2, 'budget_seconds': 1}])
+                result = json.dumps(row).encode()
+            return result
 
     def own_gate(client, args):
-        calls.append((client, args))
-        if fault == 'disconnected':
-            raise remote.RemoteError('remote run disconnected')
         if fault == 'unscannable':
             (upload / 'execution_log.binpb.zst').write_bytes(b'\x28\xb5\x2f\xfd')
-        return {'schema': remote.SCHEMA, 'mode': 'pr', 'base': BASE, 'head': HEAD,
-            'verdict': 'pass', 'selection': 'impacted', 'scopes': ['//tests'],
-            'all_scopes': False, 'hosted': [], 'hosted_arm64': [],
-            'reason': ['controller-cli-secret-sentinel'] if fault == 'leak' else [],
-            'budget_warnings': [{'nodeid': 'test_one', 'seconds': 2, 'budget_seconds': 1}]}
+        clock = iter(range(0, 100000, 4000) if fault == 'deadline' else [1] * 100).__next__
+        return run_gate(Client(controller_manifest()), args, clock=clock)
 
     monkeypatch.setattr(remote, 'run_gate', own_gate)
     code = remote.main(['pr', '--base', BASE, '--head', HEAD,
         '--branch', 'bbrun/cutover', '--output', str(upload)])
-    assert len(calls) == 1
-    if fault:
+    annotations = [line for line in capsys.readouterr().out.splitlines() if line.startswith('::error::')]
+    if fault not in (None, 'fail'):
         assert code == 75 and list(upload.iterdir()) == []
         assert not output.exists() and not summary.exists()
     else:
-        assert code == 0
+        assert code == (1 if fault == 'fail' else 0)
         assert {path.name for path in upload.iterdir()} == {'result.json'}
         result = json.loads((upload / 'result.json').read_text())
+        assert result['verdict'] == ('fail' if fault == 'fail' else 'pass')
         assert result['budget_warnings'] == [
-            {'nodeid': 'test_one', 'seconds': 2, 'budget_seconds': 1}]
+            {'nodeid': 'test_one', 'seconds': 2, 'budget_seconds': 1}] * 6
         assert output.read_text().splitlines() == [
-            'scopes=["//tests"]', 'all_scopes=false', 'scopes_ready=true']
-        assert 'Budget warnings: 1' in summary.read_text()
+            'scopes=["//tests"]', 'all_scopes=true', 'scopes_ready=true']
+        assert 'Bazel verdict: ' + result['verdict'] in summary.read_text()
+    assert annotations == ([f'::error::failed test //tests:test_{index}' for index in range(6)]
+                           if fault == 'fail' else [])
 
 
 @pytest.mark.parametrize('stage', ['await', 'fetch', 'validate'])

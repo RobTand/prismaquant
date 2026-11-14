@@ -78,7 +78,9 @@ and complete deselections are recorded separately from incomplete collection.
 
 ## Verdicts and retries
 
-Exit 0 is a pass, 1 is a test or static budget-policy failure, and 75 means no verdict.
+Exit 0 is a pass; exit 1 is a test or static budget-policy failure; exit 75 means no verdict.
+The Remote Bazel controller verifies completed shard results first and publishes `fail` through the existing aggregate with exit 1.
+It prints `::error::failed test <label>` for each failed label; disconnected runs, deadlines, and missing or invalid evidence return 75.
 The retry planner retries only missing or invalid verdicts, once, in another job.
 A test failure survives a later pass and is never retried. Lost runners and setup
 failures can retry. Every record binds the base SHA, head SHA, population version,
