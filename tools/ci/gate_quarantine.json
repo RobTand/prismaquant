@@ -11,39 +11,12 @@
       }
     },
     {
-      "target": "tests/g3job/test_g3_launch_read_plan.py::test_launch_plan_preserves_phases_and_checks_its_own_digest[False]",
-      "issue": 3182,
-      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 18
-      }
-    },
-    {
-      "target": "tests/g3job/test_g3_launch_read_plan.py::test_launch_plan_preserves_phases_and_checks_its_own_digest[True]",
-      "issue": 3182,
-      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 19
-      }
-    },
-    {
       "target": "tests/test_campaign_acquisition_d32.py::test_actual_cli_plans_acquisition_after_producer_refresh",
       "issue": 3183,
       "reason": "FileNotFoundError: missing /mnt/shared/pq2253-acquisition-cli-*",
       "evidence": {
         "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
         "legacy_line": 22
-      }
-    },
-    {
-      "target": "tests/test_checkpoint_staged_readset_1366.py::test_claim_digest_and_pb_decoder_are_used",
-      "issue": 3182,
-      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 25
       }
     },
     {
@@ -74,129 +47,12 @@
       }
     },
     {
-      "target": "tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[compressor-layout-1984-1985]",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 36
-      }
-    },
-    {
-      "target": "tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[grouped-fisher-1959]",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 37
-      }
-    },
-    {
-      "target": "tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[model-walk-1957-1958]",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 38
-      }
-    },
-    {
-      "target": "tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[model-walk-export-gate-2276]",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 39
-      }
-    },
-    {
-      "target": "tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[model-walk-fake-trace-2594]",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 40
-      }
-    },
-    {
-      "target": "tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[nested-rotary-2279]",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 41
-      }
-    },
-    {
-      "target": "tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[rope-axis-1990-1992]",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 42
-      }
-    },
-    {
-      "target": "tests/test_g3_manifest_validator_2699.py::test_g3_release_oracle_reaches_current_manifest_validator",
-      "issue": 3185,
-      "reason": "Failed: G3 manifest contract must be validated, not skipped: PrismaBuild runtime source is not ...",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 45
-      }
-    },
-    {
       "target": "tests/test_glm_attention_measurement.py::test_full_draw_attention_measurement_and_publication",
       "issue": 3186,
       "reason": "AssertionError: Tensor-likes are not close!",
       "evidence": {
         "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
         "legacy_line": 48
-      }
-    },
-    {
-      "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_full_mxfp4_file_after_native_dsv4_import",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 51
-      }
-    },
-    {
-      "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_non_expert_fp8_grid_after_native_dsv4_import",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 52
-      }
-    },
-    {
-      "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_shared_expert_scope_after_native_dsv4_import",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 53
-      }
-    },
-    {
-      "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_undeclared_checkpoint_after_native_dsv4_import",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 54
-      }
-    },
-    {
-      "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_undeclared_int8_group16_after_native_dsv4_import",
-      "issue": 2807,
-      "reason": "AssertionError: (child pytest run failed)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 55
       }
     },
     {
@@ -278,150 +134,6 @@
       "evidence": {
         "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
         "legacy_line": 70
-      }
-    },
-    {
-      "target": "tests/test_original_cuda_control_artifacts.py::test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports",
-      "issue": 3182,
-      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 73
-      }
-    },
-    {
-      "target": "tests/test_original_cuda_control_artifacts.py::test_publication_binds_all_actual_node_sidecars",
-      "issue": 3182,
-      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 74
-      }
-    },
-    {
-      "target": "tests/test_original_cuda_control_artifacts.py::test_retained_artifact_refuses_replaced_granted_bytes",
-      "issue": 3182,
-      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 75
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_absent_owned_cid_never_cleans_a_successor_by_name[auto_removed]",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 78
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_absent_owned_cid_never_cleans_a_successor_by_name[replaced_name]",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 79
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_cleanup_refuses_a_cid_with_changed_ownership[wrong_action]",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 80
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_cleanup_refuses_a_cid_with_changed_ownership[wrong_name]",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 81
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_cleanup_refuses_a_cid_with_changed_ownership[wrong_nonce]",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 82
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_existing_name_refuses_before_creation_and_remains_untouched",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 83
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_failed_creation_never_falls_back_to_name_cleanup[failed_create]",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 84
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_failed_creation_never_falls_back_to_name_cleanup[failed_owned_create]",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 85
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_failed_preflight_cannot_stop_or_remove_a_borrowed_name",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 86
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_failed_preflight_preserves_an_unrelated_named_container",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 87
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_failed_preflight_without_a_container_remains_an_observation",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 88
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_name_reused_after_preflight_is_not_borrowed_on_failed_create",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 89
-      }
-    },
-    {
-      "target": "tests/test_physical_host_foreign_container_audit.py::test_owned_creation_cleans_only_the_verified_cid",
-      "issue": 3189,
-      "reason": "AssertionError: fixture requires its real admitted PB owner",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 90
       }
     },
     {
