@@ -48,8 +48,6 @@ def test_a_changed_constraint_or_tessera_pin_is_drift(tmp_path):
     for name in requirements.SOURCES:
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_bytes((ROOT / name).read_bytes())
-    (tmp_path / 'tools').mkdir(exist_ok=True)
-    (tmp_path / 'tools/resolve_tessera_dev_pin.py').write_bytes((ROOT / 'tools/resolve_tessera_dev_pin.py').read_bytes())
     export = (ROOT / requirements.EXPORT.format('linux_x86_64')).read_text()
     assert requirements.problems(tmp_path, 'linux_x86_64', export) == []
     constraints = tmp_path / '.github/ci-constraints.txt'
@@ -162,13 +160,17 @@ def test_no_credential_reaches_a_test_on_any_lane(tmp_path):
     assert environment['PATH'] == '/usr/bin'
 
 
-def test_the_export_tracks_the_project_lock(tmp_path):
+@pytest.mark.parametrize('source', ['uv.lock', requirements.SOURCES[-1]])
+def test_the_export_tracks_lock_bytes_and_only_the_tessera_pin(tmp_path, source):
     for name in requirements.SOURCES:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes((ROOT / name).read_bytes())
     before = requirements.source_digest(tmp_path)
-    (tmp_path / 'uv.lock').write_text((ROOT / 'uv.lock').read_text() + '\n')
+    path = tmp_path / source
+    path.write_text(path.read_text() + '\n')
+    assert (requirements.source_digest(tmp_path) != before) == (source == 'uv.lock')
+    (tmp_path / requirements.SOURCES[-1]).write_text('TESSERA_DEV_PIN_COMMIT = "' + 'a' * 40 + '"\n')
     assert requirements.source_digest(tmp_path) != before
     assert not hasattr(requirements, 'SDK_PROVENANCE')
 
