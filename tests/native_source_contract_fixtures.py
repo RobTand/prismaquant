@@ -20,8 +20,6 @@ from prismaquant.streamed_model_identity import (
     build_source_model_binding, build_streamed_model_identity,
     source_model_decode_contract, validate_streamed_model_identity,
 )
-from test_glm5_next_streamed_forward_parity import _tiny_config, _build_model
-from tests.test_glm_campaign_streaming import write_original_layout_checkpoint
 
 CALIB_HASH = "feedbeef" * 4
 
@@ -111,6 +109,9 @@ def _expert_payload(probe):
 
 
 def _source(tmp_path, *, native=True):
+    from test_glm5_next_streamed_forward_parity import _tiny_config, _build_model
+    from tests.test_glm_campaign_streaming import write_original_layout_checkpoint
+
     config = _tiny_config()
     config.text_config.hidden_size = 128
     config.text_config.intermediate_size = 256
