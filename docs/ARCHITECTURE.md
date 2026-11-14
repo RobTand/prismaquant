@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-11, P-7 GPU admission and explicit dispatch walltimes. Sources below describe the current implementation.
+As of: 2026-11-14, placement requires one eligible online rank. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -57,9 +57,9 @@ stays unknown and never triggers another submit. Collection authenticates the
 saved launch and retains terminal status, eventlog, allocation, payload logs and
 scratch cleanup evidence in the same record directory.
 Saved pre-P-4F launches still load, but their old native argv cannot pass current launch validation or native verification.
-Stage preflight resolves the same instance and checks its health before creating
-state or manifests. An empty live configuration is hashed as evidence and is
-allowed; missing broker identity and offline ranks still refuse.
+Stage preflight checks instance identity and requires an eligible online rank.
+Other offline ranks and partial or degraded subtrees do not refuse submission.
+An empty live configuration is allowed. Missing broker identity refuses.
 
 As of: 2026-11-10, P-4 dependency separation, after D-fix `90ceda405`.
 Source: `prismaquant/contract_checks.py`, `prismaquant/io_buffers.py`,
