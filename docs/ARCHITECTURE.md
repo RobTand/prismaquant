@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-14, unused Tessera tools, schedule, and census tools removed. Placement requires one eligible online rank. Sources below describe the current implementation.
+As of: 2026-11-14, unused Tessera tools, schedule, census tools, and PrismaBuild mechanisms removed. Placement requires one eligible online rank. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -173,8 +173,7 @@ Source: `tools/prepare_stageb_after_capture.py`, `tests/test_prismabuild_ban.py`
 the progress-phase text elsewhere in this document describes the retired wrapper. The retired-queue diagnostics, recovery-request and class-evidence tools are deleted; the native-MoE launchers, pq87/pq183 A/B family, LFM mixed-serving drivers, docker launchers and their scenario tests moved to `archive/pq_experiments_2026-11-09/` (not executable). No numerical, GPU, serving or production qualification follows.
 
 As of: 2026-11-09, PB-zero closure in live PrismaQuant source, slice5.
-Source: `tests/test_prismabuild_ban.py`, `tests/test_prismabuild_boundary.py`, `prismaquant/shape_runtime_prices.py`, `prismaquant/recorded_cas_receipt.py`, `prismaquant/staged_lease.py`, based on `0bbf045a0`. The local-scratch charge wire is gone (a container spec naming a retired service setting is refused;
-nothing prices scratch at placement, a named limit). The shape-time checker receipt is v2: it embeds one `native_results` selection, whose authenticated launch source and argv must equal exactly one reviewed pin and whose published artifact must equal the observation bytes; v1 receipts refuse and
+Source: `tests/test_prismabuild_ban.py`, `tests/test_prismabuild_boundary.py`, `prismaquant/shape_runtime_prices.py`, `prismaquant/recorded_cas_receipt.py`, `prismaquant/staged_lease.py`, based on `0bbf045a0`. The local-scratch charge wire is gone. Placement does not price scratch. The shape-time checker receipt is v2: it embeds one `native_results` selection, whose authenticated launch source and argv must equal exactly one reviewed pin and whose published artifact must equal the observation bytes; v1 receipts refuse and
 the v1 config is archived under `experiments/measurements/`. Recorded CAS receipts are checked offline by `recorded_cas_receipt`. The `staged_lease` doorways are deleted; `tools/build_stagea_seed_package.py` refuses without a native data-manifest validator. `gate_evidence` has no pbtest `inventory` kind.
 A ban over live source (text mechanisms plus an AST import/dynamic-load scan, explicit history/definition exclusions, and a shrink-only 4C-14 file list) replaces the PB boundary allowlist and the import-leak guard.
 The `pbsdk` dependency group and every pin and manifest of the retired client (`pyproject.toml`, `uv.lock`, `tools/bazel/requirements*`, `pip_modules.json`, `MODULE.bazel`, the source-identity document and their test guards) are deleted in the slice's final commit; the hosted install in `.github/workflows/bazel-hosted.yml` must drop `--group pbsdk` in the same merge.
@@ -7068,12 +7067,7 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   (`resident_render_identity`, PQ #1348) compares the tensor's version
   counter with the one recorded at load, so a `torch` write in place fails
   the window before it commits. Bounded non-stream PWC loads (`prefetch`,
-  a lazy `get`) now request this same sealed-buffer decoder. The direct
-  `tools/qualify_t4_overlay.py` caller requests it too, through the existing
-  bounded reader so digest-less first qualification preserves its staging and
-  copy-time digest fences. It closes the descriptor on successful decoding and
-  on decoder failure; the returned private mapping owns the verified pages.
-  Wire verification and GPU finishing remain independent qualification gates.
+  a lazy `get`) now request this same sealed-buffer decoder.
   [The controlled CPU profile](results/2026-09-30_qualifier_sealed_cpu.md)
   records live shmem returning to zero on drop and anonymous temporary growth
   that remains; it does not attribute all retained memory to the decoder.
@@ -10542,8 +10536,7 @@ read-ahead failure. Every file stat fence now reads one identity,
 `residency_shard_reader` and `tessera_calibration_cache` are gone. The sealed
 overlay catalog projects its four persisted keys from it
 (`joint_catalog_extension.catalog_stat_fence`), byte-identical to the dict #1519
-sealed. The overlay catalog tools (`build_t4_overlay_catalog`,
-`qualify_t4_overlay`) read that projection instead of their own `stamp`; two
+sealed. `build_t4_overlay_catalog` reads that projection instead of its own `stamp`; two
 tensor-bit digests read one `tensor_digests.tensor_sha256`; and the Tessera
 fleet drivers (PQ #1547) share one `atomic_json` (the standard-library
 worker's). Gates: `tests/test_duplication_baseline.py`,

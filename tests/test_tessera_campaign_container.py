@@ -409,17 +409,12 @@ def test_no_launch_without_a_native_job(monkeypatch):
         runner.native_admission({})
 
 
-def test_pb_context_is_never_forwarded_and_a_spec_naming_it_refuses():
+def test_pb_context_is_never_forwarded():
     runner = _runner()
     retired = ('PRISMABUILD_ACTION_KEY', 'PRISMABUILD_ACTION_NONCE', 'PRISMABUILD_ACTION_SCOPE',
                'PRISMABUILD_READER_HELPER_ROOT', 'PRISMABUILD_QUEUE_ROOT',
                'PRISMABUILD_ACTION_PROGRESS_PATH', 'PRISMABUILD_ACTION_PROGRESS_TOKEN',
                'PRISMABUILD_LOCAL_SCRATCH_IO', 'PRISMABUILD_LOCAL_SCRATCH_PAIRS')
-    for name in retired:
-        data = spec()
-        data['env'][name] = 'x'
-        with pytest.raises(RuntimeError, match='retired PB action/reader/spool context'):
-            runner.validate_container(data)
     argv = runner.podman_command(spec(), ['python3'], cwd='/snapshot', admission=ADMISSION,
                                  cidfile=CIDFILE, image_id='sha256:x',
                                  environ={name: 'x' for name in retired})
@@ -712,16 +707,3 @@ def test_cotangent_scratch_preserves_sealed_local_path_identity(mode):
         with pytest.raises(RuntimeError, match="cotangent scratch"):
             runner.podman_command(declared, ["python3"], cwd="/worker/snapshot",
                 admission=ADMISSION, cidfile=CIDFILE, image_id="sha256:resolved", environ=env)
-
-
-@pytest.mark.parametrize("name", ["PRISMABUILD_PRODUCED_SPOOL_ROOT", "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES",
-                                  "PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT", "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"])
-def test_a_spec_naming_a_retired_spool_setting_refuses(name):
-    """The spool bound is the launch-bound declaration's; the retired names are refused, never forwarded."""
-    runner = importlib.import_module("tools.tessera_campaign_container")
-    declared = spec()
-    declared["env"][name] = "x"
-    with pytest.raises(RuntimeError, match="retired produced-output service context"):
-        runner.validate_container(declared)
-    assert not hasattr(runner, "produced_spool_environment")
-    assert not hasattr(runner, "PRODUCED_SPOOL_ENV")
