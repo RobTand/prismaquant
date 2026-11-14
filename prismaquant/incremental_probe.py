@@ -830,10 +830,8 @@ def main():
                          "available-memory floor, or 'auto' for two "
                          "estimated layers with an 8 GiB minimum.")
     ap.add_argument("--activation-rows-limit", type=int,
-                    default=int(os.environ.get("ACTIVATION_ROWS_LIMIT", "256")),
-                    help="Maximum sampled activation rows to keep per Linear "
-                         "for the cost stage. Lower values are useful for "
-                         "debug runs on very wide MoE checkpoints.")
+                    default=int(os.environ.get("ACTIVATION_ROWS_LIMIT", "512")),
+                    help="Maximum keyed activation rows per Linear for cost renders.")
     args = ap.parse_args()
 
     from prismaquant.gpu_guard import require_cuda_hot_path

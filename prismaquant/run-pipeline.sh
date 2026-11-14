@@ -172,7 +172,7 @@ fi
 if [[ "$EXPORT_CONTAINER" == "gguf" ]]; then
   : "${ACTIVATION_ROWS_LIMIT:=1024}"
 else
-  : "${ACTIVATION_ROWS_LIMIT:=256}"
+  : "${ACTIVATION_ROWS_LIMIT:=512}"
 fi
 # Calibration corpora live OUTSIDE the repo (they are built, not vendored) and
 # their location is one knob. It used to default to an absolute path under a
