@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-14, unused Tessera schedule and census-tool removal. Placement requires one eligible online rank. Sources below describe the current implementation.
+As of: 2026-11-14, unused Tessera tools, schedule, and census tools removed. Placement requires one eligible online rank. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -277,12 +277,11 @@ production qualification follows; proofs are in the migration evidence.
 
 As of: 2026-11-08, native private pin/bootstrap, slice4a.
 Source: `tools/{check_tessera_dev_install,provision_tessera_pin,
-accept_tessera_pin_provisioner,resolve_tessera_dev_pin}.py`, based on
+resolve_tessera_dev_pin}.py`, based on
 `84850aed9`. The install check derives expected package and contract bytes
 from the unchanged reviewed Git commit and measures the target interpreter's
 actual import owner and contents under isolated Python. Provenance alone
-cannot authorize execution. Private bootstrap uses explicit owned prefixes,
-and acceptance refuses preexisting work roots. Shared operator provisioning
+cannot authorize execution. Private bootstrap uses explicit owned prefixes. Shared operator provisioning
 remains an operator action. The PB pin resolver, reader pin aliases and
 original-CUDA dependency-pack entry are retired. Remaining PB test/build
 dependencies stay explicit until their callers migrate; the existing Bazel
@@ -3098,7 +3097,6 @@ plan without files or submissions. The fixed-count `dispatch_shards` driver
 and its dependency on a model-specific wrapper are removed. Full exports retain the existing
 preparation, encoding and complete-set assembly paths. The worker calls the
 supported `tessera.export_serving` package, not an experiment wrapper.
-The ladder probe retains its own historical configuration.
 
 Re-stamped 2026-10-07 (PQ #2417, R1): the worker imports the shared partition
 owner only for preparation. Standalone help and atomic publication require
@@ -6482,8 +6480,7 @@ activation policy. The Hessian reference readers take the canonical capture
 authority is `prismaquant/tessera_reuse_authority.py` (stdlib-only; the checks
 moved verbatim, and a 346-construction differential over Tessera's own
 fixtures matched every decision and reason string). `read_cached_unit_bundle`,
-`open_hessian_reference`, `tessera_hessian` and
-`tools/build_tessera_hessian_collection.py` pass it in process. Tessera's
+`open_hessian_reference` and `tessera_hessian` pass it in process. Tessera's
 export drivers take its path as `--producer-authority`, and the packaged
 contract **v40** (`d6768313…`, additive over v39) publishes which drivers do in
 `producer_interface.reuse_authority`. PQ reads that block, never asserts it:
@@ -10549,8 +10546,7 @@ sealed. The overlay catalog tools (`build_t4_overlay_catalog`,
 `qualify_t4_overlay`) read that projection instead of their own `stamp`; two
 tensor-bit digests read one `tensor_digests.tensor_sha256`; and the Tessera
 fleet drivers (PQ #1547) share one `atomic_json` (the standard-library
-worker's) and one `common.gb10_row`. The duplication baseline shrinks by two
-groups. Gates: `tests/test_duplication_baseline.py`,
+worker's). Gates: `tests/test_duplication_baseline.py`,
 `tests/test_file_identity.py`.
 
 Gates: `tests/test_io_site_freeze.py`, `tests/test_overlay_fence_pool_1519.py`,

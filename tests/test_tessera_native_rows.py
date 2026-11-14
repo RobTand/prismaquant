@@ -11,7 +11,7 @@ from unittest.mock import patch
 from prismaquant import flux_jobs as jobs
 from prismaquant import tessera_campaign_rows as rows
 from tools import dispatch_tessera_campaign as campaign
-from tools.tessera_fleet import common, status
+from tools.tessera_fleet import common
 
 
 class NativeRowsTests(unittest.TestCase):
@@ -122,14 +122,6 @@ class NativeRowsTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'scientific manifest'):
                 rows.require_native_success(state, 1, rows=[self.row(argv=['/bin/false'])])
 
-    def test_status_ignores_historical_pb_state(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            state = Path(temporary) / '.pb-state'
-            state.mkdir()
-            (state / 'export-submissions.json').write_text('{"rows":[{"action_key":"old"}]}')
-            with patch.object(status, 'collect_rows') as collect:
-                self.assertEqual(status.main(['--workspace', temporary]), status.EXIT_NOTHING)
-                collect.assert_not_called()
 
     def test_collect_rejects_placement_drift_before_reading_native_success(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -206,7 +198,7 @@ class NativeRowsTests(unittest.TestCase):
     def test_campaign_status_never_submits(self):
         with tempfile.TemporaryDirectory() as temporary:
             with patch.object(jobs, 'submit_job', side_effect=AssertionError('submit')):
-                self.assertEqual(campaign.main(['status', '--workspace', temporary]), status.EXIT_NOTHING)
+                self.assertEqual(campaign.main(['status', '--workspace', temporary]), common.EXIT_NOTHING)
 
     def test_stage_barrier_refuses_missing_rows_and_failed_payload(self):
         failure = {'status': 'failed', 'payload_exit': 7, 'query_error': None}

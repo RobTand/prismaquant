@@ -1,4 +1,4 @@
-"""The Tessera fleet drivers: whole-model dispatcher, per-shard dispatchers and status screen.
+"""The Tessera whole-model dispatcher and native status checks.
 
 They live in ``tools/tessera_fleet`` and reach the execution system only through its published
 submit and wait commands. These tests cover partitioning, input verification, the assembly barrier,
@@ -7,7 +7,6 @@ sealed workspace per dispatch.
 """
 from __future__ import annotations
 
-import argparse
 import json
 import os
 from pathlib import Path
@@ -19,15 +18,12 @@ from types import SimpleNamespace
 import pytest
 
 from prismaquant.export_partition import whole_layer_partitions
-from tools.tessera_fleet import common, dispatch_ladder, dispatch_model
+from tools.tessera_fleet import common, dispatch_model
 from tools.tessera_fleet import model_worker as model
-from tools.tessera_fleet import status
 
 PRODUCER = SimpleNamespace(
     BODY_LAYER=re.compile(r'^model\.layers\.(\d+)\.'),
     partition_owner=lambda name, count: int(name.split('.')[2]) % count if '.layers.' in name else 0)
-
-DISPATCHERS = (dispatch_ladder,)
 
 
 # --- the worker adapter, unchanged by the move --------------------------------
@@ -212,117 +208,19 @@ def test_a_new_dispatch_names_its_preparation_hosts(tmp_path, capsys):
     assert '--prepare-host is required' in capsys.readouterr().err
 
 
-# --- the per-shard dispatchers ------------------------------------------------
-
-@pytest.mark.parametrize('dispatcher', DISPATCHERS, ids=lambda d: d.__name__)
-@pytest.mark.parametrize('text', ['abc', '', '1-', '-3', '1,2', '1-2-3', '1 2',
-                                  '0', '121', '5-3', '0-4', '119-121'])
-def test_a_value_that_names_no_shard_of_this_run_is_refused(dispatcher, text):
-    with pytest.raises(argparse.ArgumentTypeError, match='within 1-120'):
-        common.shard_range(dispatcher.OF_SHARDS)(text)
-
-
-@pytest.mark.parametrize('text,expected', [('1', range(1, 2)), ('61', range(61, 62)),
-                                           ('1-120', range(1, 121)), ('7-9', range(7, 10))])
-def test_the_range_an_operator_means_is_what_the_loop_gets(text, expected):
-    assert common.shard_range(120)(text) == expected
-
-
-@pytest.mark.parametrize('dispatcher', DISPATCHERS, ids=lambda d: d.__name__)
-def test_a_bad_shards_value_is_a_usage_error(dispatcher, capsys):
-    with pytest.raises(SystemExit) as exc:
-        dispatcher.main(['--shards', 'abc', '--dry-run'])
-    assert exc.value.code == 2
-    assert 'within 1-120' in capsys.readouterr().err
-
-
-def _checkout(tmp_path):
-    checkout = tmp_path / 'checkout'
-    (checkout / 'tessera' / 'src' / 'tessera').mkdir(parents=True)
-    (checkout / 'tessera' / 'src' / 'tessera' / 'encode.py').write_text('ENCODER = 1\n')
-
-    (checkout / dispatch_ladder.WRAPPER).write_text('print("ladder")\n')
-    return checkout
-
-
-def _listing(root):
-    return {str(p.relative_to(root)): (p.stat().st_size, p.stat().st_mtime_ns)
-            for p in sorted(root.rglob('*'))}
-
-
-@pytest.mark.parametrize('dispatcher', DISPATCHERS, ids=lambda d: d.__name__)
-def test_a_dry_run_prints_rows_and_writes_nothing(dispatcher, tmp_path, capsys, monkeypatch):
-    checkout = _checkout(tmp_path)
-    before = _listing(tmp_path)
-    monkeypatch.setattr(common.campaign_rows, 'submit_rows', lambda *a, **k: pytest.fail('submitted'))
-    assert dispatcher.main(['--shards', '3-4', '--dry-run', '--checkout', str(checkout)]) == 0
-    rows = json.loads(capsys.readouterr().out)
-    assert _listing(tmp_path) == before
-    assert [row['argv'][row['argv'].index('--shard') + 1] for row in rows] == ['3', '4']
-    for row in rows:
-        # Relative to the sealed tree the action runs in, never the submitter's.
-        assert row['env']['PYTHONPATH'] == 'tessera/src'
-        assert row['tags'] == ['gb10'] and row['demand']['gpu'] == 1
-        assert not row['env']['TMPDIR'].startswith('/tmp')
-
-
-
-
-def test_two_ladder_dispatches_with_different_probes_are_separate_trees(tmp_path, monkeypatch):
-    checkout = _checkout(tmp_path)
-    monkeypatch.setattr(common, 'submit_detached',
-                        lambda rows, workspace, stage, *, wait_s: [{'action_key': 'a'}] * len(rows))
-    for index in range(2):
-        probe = tmp_path / f'probe-{index}.py'
-        probe.write_text(f'print({index})\n')
-        workspace = tmp_path / f'ws{index}'
-        common.stage_workspace(workspace, common.encoder_workspace_files(
-            checkout, probe, dispatch_ladder.WRAPPER), message='fixture source')
-        assert (workspace / common.SOURCE / dispatch_ladder.WRAPPER).read_text() == f'print({index})\n'
-        assert subprocess.check_output(['git', '-C', str(workspace / common.SOURCE),
-            'show', 'HEAD:' + dispatch_ladder.WRAPPER], text=True) == f'print({index})\n'
-    assert (checkout / dispatch_ladder.WRAPPER).read_text() == 'print("ladder")\n'
-
-
-def test_ladder_refuses_unshared_source_before_staging(tmp_path):
-    with pytest.raises(ValueError, match='payload source must be shared'):
-        dispatch_ladder.main(['--shards', '1', '--checkout', str(tmp_path), '--workspace', str(tmp_path / 'w')])
-    assert not (tmp_path / 'w').exists()
-
-
-# --- the status screen --------------------------------------------------------
-
-def test_status_with_nothing_recorded_says_so(tmp_path, capsys):
-    assert status.main(['--workspace', str(tmp_path)]) == status.EXIT_NOTHING
-
-
-def test_status_collects_the_saved_native_stage(tmp_path, capsys, monkeypatch):
-    state = common.stage_state(tmp_path, 'export')
-    common.atomic_json(state / 'manifest.json', {'rows': [{}, {}]})
-    queried = []
-    def collect(path, *, wait):
-        queried.append((path, wait))
-        return [{'status': 'succeeded'}, {'status': 'running'}]
-    monkeypatch.setattr(status, 'collect_rows', collect)
-    assert status.main(['--workspace', str(tmp_path)]) == status.EXIT_RUNNING
-    assert queried == [(state, False)]
-    assert 'export: 2 recorded, 1 running, 1 succeeded' in capsys.readouterr().out
-
-
 @pytest.mark.parametrize('statuses,expected', [
-    (['succeeded', 'succeeded'], status.EXIT_DONE),
-    (['succeeded', 'running'], status.EXIT_RUNNING),
-    (['failed', 'running'], status.EXIT_FAILED),
-    (['succeeded'], status.EXIT_FAILED),
+    (['succeeded', 'succeeded'], common.EXIT_DONE),
+    (['succeeded', 'running'], common.EXIT_RUNNING),
+    (['failed', 'running'], common.EXIT_FAILED),
+    (['succeeded'], common.EXIT_FAILED),
 ])
 def test_the_exit_status_is_the_worst_ending(statuses, expected):
-    assert status.exit_status([{'status': s} for s in statuses], 2) == expected
+    assert common.exit_status([{'status': s} for s in statuses], 2) == expected
 
 
 # --- nothing here reaches PrismaBuild internals -------------------------------
 
 @pytest.mark.parametrize('module', ['tessera_fleet.dispatch_model',
-                                    'tessera_fleet.dispatch_ladder', 'tessera_fleet.status',
                                     'tessera_fleet.model_worker', 'render_identity'])
 def test_help_runs_without_the_fleet(module):
     """``--help`` imports each driver the way an operator runs it, and exits 0."""
