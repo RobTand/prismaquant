@@ -23155,7 +23155,7 @@ Per-Linear checkpoints bind the source, activation rows, render settings, and fo
 `SELECTION_MODE=validated-surrogate` keeps its resident format-menu frontier cache in [4/4].
 That cache still uses its existing calibration forward. P2a does not change that path.
 AURA anchors use keyed rows, so equality with the earlier resident renders is not claimed.
-The 27B GPU comparison remains pending. Layer-range work units belong to P2b.
+The 512-row 27B comparison remains pending. Layer-range work units belong to P2b.
 
 The orchestrator is `prismaquant/run-pipeline.sh` — **not** the repo root; several older docs
 imply a root-level copy and there is none. One bash script, four numbered phases (probe → cost
@@ -23445,7 +23445,7 @@ FORMATS=NVFP4,FP8_DYNAMIC,BF16   TARGET_BITS=4.75
 PARETO_TARGETS=4.5,4.6,4.7,4.75,4.85,5.0,5.25,5.5,6.0,7.0,8.25
 NSAMPLES=32  SEQLEN=1024  DATASET=…/calibration/diverse-v1.jsonl
 EXPERT_GATE_DATASET=…/calibration/xdom-gate-v1.jsonl (cross-domain)
-ACTIVATION_ROWS_LIMIT=1024 on the GGUF/CB lanes else 256
+ACTIVATION_ROWS_LIMIT=1024 on GGUF, else 512
 COST_MODE=aura (R2 flip 2026-07-30; = COST_RENDER=cached-menu x
                 COST_OBJECTIVE=aura-adjoint) PRODUCTION_CACHE_PREFETCH=require
 TARGET_DISK_GB=<unset>  EXPORT_CONTAINER=compressed-tensors
