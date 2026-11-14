@@ -43458,9 +43458,6 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    args = [
-        "--deselect=tests/test_glm_attention_measurement.py::test_full_draw_attention_measurement_and_publication",
-    ],
     timeout = "moderate",
 )
 

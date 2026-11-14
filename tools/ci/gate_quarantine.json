@@ -47,15 +47,6 @@
       }
     },
     {
-      "target": "tests/test_glm_attention_measurement.py::test_full_draw_attention_measurement_and_publication",
-      "issue": 3186,
-      "reason": "AssertionError: Tensor-likes are not close!",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 48
-      }
-    },
-    {
       "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_full_mxfp4_file_after_native_dsv4_import",
       "issue": 2807,
       "reason": "AssertionError: (child pytest run failed)",

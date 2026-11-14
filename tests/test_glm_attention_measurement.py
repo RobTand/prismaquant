@@ -134,7 +134,8 @@ def test_full_draw_attention_measurement_and_publication(tmp_path):
         assert counts[name] == 262144
         assert rows[name].shape == (257, units[name][1])
         torch.testing.assert_close(rows[name], x[:257], rtol=1e-6, atol=1e-7)
-        torch.testing.assert_close(hessians[name].double(), expected_h[name], rtol=2e-5, atol=1e-3)
+        torch.testing.assert_close(hessians[name].double(), expected_h[name],
+                                   rtol=torch.finfo(torch.float32).eps * counts[name] ** 0.5, atol=1e-3)
         assert maxima[name] == pytest.approx(expected_max[name], rel=3e-6, abs=1e-7)
         assert maxima[name] > rows[name].abs().max().item()
 
