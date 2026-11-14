@@ -149,8 +149,3 @@ def test_graph_job_publishes_only_one_passing_test(cases, passes, tmp_path):
         env={**os.environ,'GITHUB_OUTPUT':str(output),'GATE_BASE':'a'*40,'GATE_HEAD':'b'*40})
     assert (run.returncode==0) is passes,run.stdout+run.stderr
     assert (output.read_text() if output.exists() else '')==('verdict=pass\n' if passes else '')
-
-
-def test_reusable_hosted_callers_grant_the_quarantine_issue_read_permission():
-    for name in ('gate.yml', 'ci.yml'):
-        assert workflows()[name]['permissions']['issues'] == 'read'

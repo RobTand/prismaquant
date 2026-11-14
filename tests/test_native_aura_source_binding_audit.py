@@ -98,6 +98,7 @@ def test_ordinary_aura_main_delivers_declared_values_before_measurement(
             '--dtype', dtype, '--dataset', 'synthetic-token-draw', '--formats', 'FP8_E4M3']
     if streaming:
         args.append('--streaming')
+        monkeypatch.setenv('PREFETCH_MIN_AVAILABLE_GB', '0')
     assert aura.main(args) == 0
     assert observed == [True]
 
@@ -174,6 +175,7 @@ def test_hub_native_aura_uses_resolved_original_source(tmp_path, monkeypatch, st
         '--device', 'cpu', '--dtype', 'bfloat16', '--dataset', 'synthetic-token-draw']
     if streaming:
         arguments += ['--streaming', '--checkpoint-dir', str(tmp_path / 'hub-journal')]
+        monkeypatch.setenv('PREFETCH_MIN_AVAILABLE_GB', '0')
     assert aura.main(arguments) == 0
     assert observed == [True]
 

@@ -192,6 +192,8 @@ def test_pra_remeasurement_is_a_one_shot_transition(mutation, monkeypatch):
     # under the PR-A analyzer transition, before later shrink-only records.
     current['figures']['scc_max'] = 174
     current['test_to_test_count'] = 889
+    current['analyzer_sha256'] = pq.PR_A_ANALYZERS[1]
+    monkeypatch.setattr(pq, 'file_sha256hex', lambda path: pq.PR_A_ANALYZERS[1])
     previous = deepcopy(current)
     previous.update(analyzer_sha256=pq.PR_A_ANALYZERS[0], test_to_test_count=875)
     previous['figures']['scc_max'] = 168
@@ -285,7 +287,7 @@ def test_pq_adapter_respects_generator_launch_and_conftest_rules(tmp_path):
 def test_pq_no_git_reports_no_base_and_enforces_absolute_budget(tmp_path, capsys):
     from tools.ci import graph_impact_pq as pq
     files = {'tests/test_a.py': 'import tools.hub\n', 'tools/hub.py': 'x = 1\n',
-             'tools/ci/gate_durations.json': '{"files": {}}', 'tools/ci/gate_quarantine.json': '{}',
+             'tools/ci/gate_durations.json': '{"files": {}}',
              'tests/fixtures/graph_impact_allowlist.json': '{}'}
     for name, text in files.items():
         path = tmp_path / name
@@ -305,11 +307,11 @@ def test_live_graph_check_belongs_to_dedicated_job():
     plan = gate_select.create_plan(ROOT, ['docs/ci_gate.md'],
                                   index={'tests/test_graph_impact.py': (set(), set()),
                                          'tests/test_unrelated.py': (set(), set())},
-                                  durations={'files': {}}, quarantine={})
+                                  durations={'files': {}})
     assert plan['selected'] == []
     plan = gate_select.create_plan(ROOT, ['tests/test_graph_impact.py'],
                                   index={'tests/test_graph_impact.py': (set(), set())},
-                                  durations={'files': {}}, quarantine={})
+                                  durations={'files': {}})
     assert plan['deselect'] == ['tests/test_graph_impact.py::test_graph_impact_gate']
 
 
@@ -423,11 +425,9 @@ def test_only_imports_of_test_modules_are_test_to_test(tmp_path):
 def test_the_population_is_the_gates_own(tmp_path):
     root = write_tree(tmp_path, {
         'tools/ci/gate_durations.json': json.dumps({'files': {}}),
-        'tools/ci/gate_quarantine.json': json.dumps({'cost_exclusions': [
-            {'target': 'tests/test_costly.py', 'issue': 7, 'reason': 'slow'}]}),
         'tests/test_plain.py': '', 'tests/test_costly.py': '', 'tests/helper.py': '',
     })
-    assert fanout.gate_population(root) == ['tests/test_plain.py']
+    assert fanout.gate_population(root) == ['tests/test_costly.py', 'tests/test_plain.py']
 
 
 
@@ -435,8 +435,7 @@ def test_pq_git_snapshot_identifies_changed_test_bodies(tmp_path, monkeypatch):
     import subprocess
     from tools.ci import graph_impact_pq as pq
     write_tree(tmp_path, {'tests/test_a.py': 'x = 1\n',
-                          'tools/ci/gate_durations.json': '{"files": {}}',
-                          'tools/ci/gate_quarantine.json': '{}'})
+                          'tools/ci/gate_durations.json': '{"files": {}}'})
     def git(*args):
         return subprocess.check_output(['git', *args], cwd=tmp_path, text=True).strip()
     git('init', '-q'); git('config', 'user.email', 'test@example.invalid'); git('config', 'user.name', 'Test')

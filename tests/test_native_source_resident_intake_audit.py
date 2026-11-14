@@ -166,6 +166,7 @@ def test_actual_resident_caller_receives_decoded_source(owned_root, monkeypatch,
                 arguments.extend(["--streaming", "--streaming-offload-dir", str(owned_root / "expert-offload")])
                 monkeypatch.setenv("PRISMAQUANT_EXPERT_EVAL_DRIVER", "window")
                 monkeypatch.setenv("PRISMAQUANT_PREFETCH_WORKERS", "1")
+                monkeypatch.setenv("PREFETCH_MIN_AVAILABLE_GB", "0")
             producer.main(arguments)
         elif caller == "validator-main":
             from prismaquant import validate_assignments_kl as validator

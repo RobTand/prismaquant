@@ -30,8 +30,7 @@ def project(root):
 
 
 def plan(root, changed, **options):
-    return select.create_plan(root, changed, durations={'files': {}},
-                              quarantine={'entries': []}, **options)
+    return select.create_plan(root, changed, durations={'files': {}}, **options)
 
 
 def selected(result):
@@ -65,24 +64,6 @@ def test_syntax_error_falls_back_to_full(tmp_path):
     root = project(tmp_path)
     (root / 'prismaquant/middle.py').write_text('not valid python !!!')
     assert selected(plan(root, ['prismaquant/owner.py'])) == selected(plan(root, [], mode='full'))
-
-
-def test_quarantine_ignores_files_and_deselects_nodes(tmp_path):
-    root = project(tmp_path)
-    quarantine = {'entries': [
-        {'target': 'tests/test_path.py', 'issue': 3200, 'reason': 'missing hosted dependency'},
-        {'target': 'tests/test_direct.py::test_bad', 'issue': 3201, 'reason': 'known failure'},
-    ]}
-    result = select.create_plan(root, [], mode='full', durations={'files': {}}, quarantine=quarantine)
-    assert 'tests/test_path.py' not in selected(result)
-    assert result['deselect'] == ['tests/test_direct.py::test_bad']
-
-
-@pytest.mark.parametrize('issue', [None, 0, True, 3180])
-def test_quarantine_requires_a_specific_owner(tmp_path, issue):
-    with pytest.raises(ValueError):
-        select.create_plan(project(tmp_path), [], mode='full', durations={'files': {}},
-            quarantine={'entries': [{'target': 'tests/test_direct.py', 'issue': issue, 'reason': 'failure'}]})
 
 
 def test_docs_only_can_select_nothing(tmp_path):

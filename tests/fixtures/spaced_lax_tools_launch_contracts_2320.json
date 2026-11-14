@@ -328,19 +328,6 @@
       "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
     },
     {
-      "file": "tools/prove_glm_source_adoption.py",
-      "kind": "Unconditional scientific metadata batch module; no argument parser",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.prove_glm_source_adoption"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Real PrismaQuant and Tessera imports; actual source/binding inputs in full execution",
-      "bounded_probe": "Parent-approved Python audit hook denies the actual named application input open and observes the exact path plus distinct denial exit, before any output publication. Both original and corrected source must reach it.",
-      "limit": "Bootstrap-to-input only, not producer, 120-header adoption or serializer output proof. Generic import errors are failures."
-    },
-    {
       "file": "tools/pwc_window_load_bench.py",
       "kind": "Standard-library argument/help entry",
       "supported_probe": [

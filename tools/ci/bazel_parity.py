@@ -41,7 +41,7 @@ def population(root=ROOT):
     tests = {path.relative_to(root).as_posix(): (set(), set()) for path in sorted((root / 'tests').rglob('*.py'))}
     read = lambda name: json.loads((root / 'tools/ci' / name).read_text())  # noqa: E731
     return gate_select.create_plan(root, [], durations=read('gate_durations.json'),
-                                   quarantine=read('gate_quarantine.json'), index=tests, mode='full')
+                                   index=tests, mode='full')
 
 
 def bazel_tests(query_lines):
@@ -66,7 +66,6 @@ def bazel_tests(query_lines):
 
 def compare_static(plan, bazel):
     expected = {row['path'] for row in plan['selected']}
-    deferred = {row['path'] for row in plan['deferred'] if '::' not in row['path']}
     problems = []
     for path, targets in sorted(bazel.items()):
         if len(targets) > 1:
@@ -75,8 +74,6 @@ def compare_static(plan, bazel):
     problems += [f'Bazel does not run {path}.' for path in sorted(expected) if path not in running]
     problems += [f'Bazel runs {path}, which the hosted gate does not.'
                  for path in sorted(running) if path not in expected]
-    problems += [f'{path} has no Bazel target; it must exist, tagged manual.'
-                 for path in sorted(deferred) if path not in bazel]
     for path in sorted(path for path in expected if path in running):
         wanted = sorted(node for node in plan['deselect'] if node.split('::', 1)[0] == path)
         if bazel[path][0][2] != wanted:

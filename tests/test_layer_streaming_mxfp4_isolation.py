@@ -1,5 +1,9 @@
 """MXFP4 CPU fixtures must not inherit a native DSv4 import (PQ #1977-1981)."""
 from test_own_process_isolation import _session
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import test_layer_streaming_mxfp4, test_streaming_text_only_wrapper_config
 
 _WRAPPER_REFUSAL = (
     "../test_streaming_text_only_wrapper_config.py::"
