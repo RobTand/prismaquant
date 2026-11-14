@@ -92,8 +92,8 @@ tooling attempts and their disposition; they are not counted as coverage.
 The initial local-placement submission was withdrawn from the ready queue
 before any execution and replaced by the explicit x86 tooling class.
 
-Checked-in stdout excerpts omit the trailing worker receipt JSON and trim
-line-end spaces. The receipt JSONs retain hashes and locations of the exact
+Issue #3484 removed the stdout excerpts from the tree; git history keeps
+them. The receipt JSONs retain hashes and locations of the exact
 original logs whose bytes were independently verified.
 
 ## Final integration and dependency pin
