@@ -1,10 +1,9 @@
-"""CI's concurrency cancels superseded PR runs only (#962).
+"""CI's concurrency cancels superseded PR runs only (#962), and main runs one at a time.
 
-Every push to main must get a complete hosted run: cancelling main's run when
-the next merge landed left no hosted run certifying any tree on a busy day. A
-shared group without ``cancel-in-progress`` is not enough either, because a
-concurrency group keeps only one pending run and cancels the rest, so a main
-run's group must be its own.
+A running main run is never cancelled, so a busy day still certifies trees
+(#962). Main shares one group: GitHub then runs one main run at a time and
+keeps only the newest pending one, so the newest commit always gets a run and
+overlapping full-population runs no longer overload the executor (mode B).
 
 The two expressions are evaluated here for each trigger with a small
 translation of GitHub's ``&&``/``||``/``==`` (which, like Python's
@@ -56,9 +55,8 @@ def test_a_new_pr_push_cancels_the_superseded_run_of_that_pr():
 
 
 @pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
-def test_a_main_run_is_never_cancelled_or_replaced_by_the_next_one(event):
+def test_main_runs_queue_in_one_group_and_a_running_one_is_never_cancelled(event):
     first = _run(event, "refs/heads/main", "1")
     second = _run(event, "refs/heads/main", "2")
     assert first["cancel"] is False and second["cancel"] is False
-    # Distinct groups: a shared group would still drop all but one pending run.
-    assert first["group"] != second["group"]
+    assert first["group"] == second["group"]
