@@ -9290,18 +9290,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "prismaquant/container_cache_peak",
-    srcs = [
-        "prismaquant/container_cache_peak.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/digests",
-        ":prismaquant/io_engine",
-    ],
-)
-
-pq_py_library(
     name = "prismaquant/container_runtime_identity",
     srcs = [
         "prismaquant/container_runtime_identity.py",
@@ -12820,50 +12808,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/boundary_control",
         ":tools/prismaquant_source_bootstrap",
-    ],
-)
-
-pq_py_library(
-    name = "tools/measure_container_cache_quantum_row",
-    srcs = [
-        "tools/measure_container_cache_quantum_row.py",
-    ],
-    data = [
-        "tools/measure_container_cache_quantum_row.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/container_cache_peak",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/digests",
-        ":prismaquant/io_spans",
-        ":prismaquant/joint_adjoint_slices",
-        ":prismaquant/joint_cost_stage_a",
-        ":prismaquant/joint_retained_window_plan",
-        ":tools/__init__",
-        ":tools/measure_container_cache_row",
-        "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "tools/measure_container_cache_row",
-    srcs = [
-        "tools/measure_container_cache_row.py",
-    ],
-    data = [
-        "tools/measure_container_cache_row.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/container_cache_peak",
-        ":prismaquant/digests",
-        ":prismaquant/glm_kda_capture_kernel",
-        ":prismaquant/io_spans",
-        "@pq_pip//torch",
-        "@pq_pip//transformers",
     ],
 )
 
