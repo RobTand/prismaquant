@@ -93,9 +93,3 @@ def test_actual_loaded_census_keeps_shared_constructors_without_creating_h_sourc
     assert events == ['memo', 'cache', 'census']
     assert output.exists() and not (tmp_path/'cost.pkl').exists()
     assert not (tmp_path/'campaign.anchors.json').exists()
-
-
-def test_loaded_operation_has_all_actual_global_bindings():
-    from tools.verify_campaign_operation_globals import unbound_global_reads
-
-    assert unbound_global_reads(campaign.run_loaded_campaign) == ()

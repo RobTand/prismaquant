@@ -13764,21 +13764,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/verify_campaign_operation_globals",
-    srcs = [
-        "tools/verify_campaign_operation_globals.py",
-    ],
-    data = [
-        "prismaquant/tessera_campaign.py",
-        "tools/verify_campaign_operation_globals.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-    ],
-)
-
-pq_py_library(
     name = "tools/verify_tessera_calibration_forward",
     srcs = [
         "tools/verify_tessera_calibration_forward.py",

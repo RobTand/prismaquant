@@ -3,7 +3,7 @@
   "scope": {
     "files": 32,
     "standard_library_help_modes": 10,
-    "scientific_package_help_modes": 21,
+    "scientific_package_help_modes": 20,
     "no_parser_batch_modules": 2
   },
   "source_reference": "99a578e071b; actual original import/argument/caller context, not an invented uniform contract",
