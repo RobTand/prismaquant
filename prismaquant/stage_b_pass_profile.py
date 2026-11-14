@@ -49,7 +49,18 @@ campaign row.
 * ``render=5`` -- the retained window whose probes are profiled, optionally
   ``:stack``, or ``none`` (default ``none``);
 * ``render_wait=1,render_warmup=1,render_active=1`` -- the render schedule,
-  in probes.
+  in probes;
+* ``memory_group=3`` -- the one capture group whose CUDA allocator history
+  is recorded (allocation stacks), or ``none`` (default ``none``). The
+  history runs only while that group runs. The session writes
+  ``.memory_snapshot.pickle`` and a ``memory`` entry in ``.timing.json``.
+  Its ``status`` is ``complete``, ``incomplete`` (the capture raised),
+  ``export_failed``, ``unsupported`` (no CUDA) or ``not_reached``. A group
+  beyond ``identity["capture_groups"]`` raises ``ValueError``. A session
+  without that count cannot check, and reports ``not_reached`` when the
+  pass ends before the group. Only capture sessions record it;
+* ``memory_entries=100000`` -- the most allocator events kept (maximum
+  1000000).
 
 A render-only row names ``capture=,windowed=none``, or the defaults also
 profile probe 1's capture and run its shadow.
@@ -81,7 +92,10 @@ _DEFAULTS = {
     "render_wait": "1",
     "render_warmup": "1",
     "render_active": "1",
+    "memory_group": "none",
+    "memory_entries": "100000",
 }
+MAX_MEMORY_ENTRIES = 1_000_000
 
 RENDER_OWNS_KERNEL_PROFILER = (
     "the render pass profile (PQ #1348) owns this window's torch.profiler")
@@ -108,6 +122,8 @@ class PassProfileRequest:
     render_wait: int = 1
     render_warmup: int = 1
     render_active: int = 1
+    memory_group: int | None = None
+    memory_entries: int = 100000
 
     def profiles_capture(self, probe: int) -> bool:
         return int(probe) in self.capture_probes
@@ -130,11 +146,19 @@ class PassProfileRequest:
             stack = self.render_stack
         else:
             raise ValueError(f"unknown pass profile kind {kind!r}")
+        memory_group = self.memory_group if kind == "capture" else None
+        groups = identity.get("capture_groups")
+        if memory_group is not None and groups is not None and memory_group >= groups:
+            # Only the quantum knows the pass length. A session without the
+            # count cannot check, and reports not_reached at its end.
+            raise ValueError(f"{SPEC_ENV}: memory_group={memory_group} is outside "
+                             f"the pass of {groups} capture groups")
         return PassProfileSession(
             self.out_dir, kind=kind, probe=None if probe is None else int(probe),
             schedule=schedule, with_stack=stack, identity=identity,
             stop_after=stop_after, window=None if window is None else int(window),
-            counters=counters)
+            counters=counters, memory_group=memory_group,
+            memory_entries=self.memory_entries)
 
 
 def _spec_int(spec, key, minimum=0):
@@ -164,6 +188,12 @@ def pass_profile_request(environ=None) -> PassProfileRequest | None:
             raise ValueError(f"{SPEC_ENV}: capture flag {flag!r} is not 'stack'")
         captures[int(probe)] = flag == "stack"
     windowed = None if spec["windowed"] in ("", "none") else int(spec["windowed"])
+    memory_group = None if spec["memory_group"] == "none" else _spec_int(
+        spec, "memory_group")
+    memory_entries = _spec_int(spec, "memory_entries", 1)
+    if memory_entries > MAX_MEMORY_ENTRIES:
+        raise ValueError(f"{SPEC_ENV}: memory_entries={memory_entries} is above "
+                         f"{MAX_MEMORY_ENTRIES}")
     render_window, render_stack = None, False
     if spec["render"] not in ("", "none"):
         window, _, flag = spec["render"].partition(":")
@@ -186,7 +216,8 @@ def pass_profile_request(environ=None) -> PassProfileRequest | None:
         render_window=render_window, render_stack=render_stack,
         render_wait=_spec_int(spec, "render_wait"),
         render_warmup=_spec_int(spec, "render_warmup"),
-        render_active=_spec_int(spec, "render_active", 1))
+        render_active=_spec_int(spec, "render_active", 1),
+        memory_group=memory_group, memory_entries=memory_entries)
 
 
 @dataclass
@@ -203,6 +234,10 @@ class PassProfileSession:
     window: int | None = None
     # A callable returning numeric counters; each unit records their deltas.
     counters: object = None
+    memory_group: int | None = None
+    memory_entries: int = 100000
+    _memory_status: str | None = None
+    _memory_on: bool = False
     units: list = field(default_factory=list)
     _unit_counters: dict | None = None
     _profiler: object = None
@@ -267,11 +302,38 @@ class PassProfileSession:
         except Exception as exc:
             self._errors.append(f"key_averages: {exc!r}")
 
+    def _memory_start(self) -> None:
+        import torch
+        from torch.cuda import memory
+
+        if not torch.cuda.is_available():
+            self._memory_status = "unsupported"
+            return
+        memory._record_memory_history(
+            "all", context="alloc", stacks="python", max_entries=self.memory_entries)
+        self._memory_on = True
+
+    def _memory_stop(self, status: str) -> None:
+        """Export the history, then stop it, even when the export fails."""
+        from torch.cuda import memory
+
+        self._memory_on = False
+        try:
+            memory._dump_snapshot(str(self.out_dir / f"{self.stem}.memory_snapshot.pickle"))
+        except Exception as exc:  # a lost snapshot is recorded, never fatal
+            status = "export_failed"
+            self._errors.append(f"memory snapshot: {exc!r}")
+        finally:
+            memory._record_memory_history(None)
+        self._memory_status = status
+
     def unit_begin(self) -> None:
         # A CPU annotation per unit, so the trace separates the units from
         # the gaps between them (the prefetch and staging waits).
         from torch.profiler import record_function
 
+        if self.memory_group is not None and self.memory_group == len(self.units):
+            self._memory_start()
         self._annotation = record_function(f"pq_stage_b_{self.kind}_unit")
         self._annotation.__enter__()
         self._unit_counters = dict(self.counters()) if self.counters is not None else None
@@ -288,6 +350,8 @@ class PassProfileSession:
         if self._annotation is not None:
             self._annotation.__exit__(None, None, None)
             self._annotation = None
+        if self._memory_on:
+            self._memory_stop("complete")
         start = self._unit_start if self._unit_start is not None else end
         index = len(self.units)
         wait, warmup, active = self.schedule
@@ -314,6 +378,8 @@ class PassProfileSession:
         if self._annotation is not None:  # a unit that raised
             self._annotation.__exit__(None, None, None)
             self._annotation = None
+        if self._memory_on:  # the group raised
+            self._memory_stop("incomplete")
         try:
             self._profiler.__exit__(None, None, None)
         except Exception as error:
@@ -344,6 +410,10 @@ class PassProfileSession:
             "traces": self._trace_paths, "errors": self._errors,
             "units": self.units,
         }
+        if self.memory_group is not None:
+            record["memory"] = {
+                "group": self.memory_group, "entries": self.memory_entries,
+                "status": self._memory_status or "not_reached"}
         (self.out_dir / f"{self.stem}.timing.json").write_text(
             json.dumps(record, indent=1, sort_keys=True, default=str) + "\n")
         return exc_type is ShadowPassDone
