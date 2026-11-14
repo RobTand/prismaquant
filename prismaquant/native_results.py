@@ -250,6 +250,19 @@ def _runtime_imports():
     return result
 
 
+def _mount_device(path):
+    """Return the superblock device that /proc/self/maps names for path.
+
+    stat() can give a different device, for example a btrfs subvolume."""
+    fd = os.open(path, os.O_PATH)
+    try:
+        mount = re.search(rb'^mnt_id:\s*(\d+)$', Path(f'/proc/self/fdinfo/{fd}').read_bytes(), re.M)[1]
+    finally:
+        os.close(fd)
+    mounts = (line.split() for line in Path('/proc/self/mountinfo').read_bytes().splitlines())
+    return tuple(int(v) for v in next(f[2] for f in mounts if f[0] == mount).split(b':'))
+
+
 def _runtime_libraries():
     """Bind Linux's actual file-backed implementation mappings, not ldd text."""
     with open('/proc/self/maps', 'rb') as handle:
@@ -274,8 +287,7 @@ def _runtime_libraries():
             raise ValueError('native runtime unsupported mapped implementation owner')
         path = _runtime_path(filename)
         info = os.stat(path)
-        major, minor = (int(v, 16) for v in device.split(':'))
-        if (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino) != (major, minor, int(inode)):
+        if (*_mount_device(path), info.st_ino) != (*(int(v, 16) for v in device.split(':')), int(inode)):
             raise ValueError(f'native runtime mapped library replaced: {path}')
         libraries[path] = file_stat_signature(info)
     if not libraries or len(libraries) > MAX_RUNTIME_ENTRIES:

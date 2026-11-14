@@ -445,7 +445,7 @@ def test_native_mapping_owner_parser_refuses_substitution(runtime_layout, monkey
     root = runtime_layout['root']
     library = root / 'support/libpython.so'
     known = library.stat()
-    device = f'{os.major(known.st_dev):02x}:{os.minor(known.st_dev):02x}'
+    device = '{:02x}:{:02x}'.format(*nr._mount_device(library))
     prefix = f'1000-2000 r-xp 00000000 {device} {known.st_ino} '
     mapping = prefix + str(library) + '\n'
     raw = mapping.encode()
