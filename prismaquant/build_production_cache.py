@@ -209,9 +209,10 @@ def _run_streaming(args, formats, levers, dtype) -> int:
     layer is materialized on demand through the streaming model.
     """
     from prismaquant.streaming_production_cache import (
+        _layer_index_of,
         fill_production_weight_cache_streaming,
     )
-    layer_config = args.render_layer_config or args.recache_layer_config
+    layer_config = args.render_layer_config
     if args.render_scope != "assignment":
         # The transient, score-only streamed format menu served only the
         # retired codebook lane (archived 2026-09-25, #1304).
@@ -292,6 +293,16 @@ def _run_streaming(args, formats, levers, dtype) -> int:
             )
             return 2
 
+    profile = detect_profile_with_warning(args.model, entrypoint="build-prod-cache/mtp")
+    if args.layer_range is not None:
+        start, stop = args.layer_range
+        prefix = profile.live_to_recipe_name(profile.body_layer_prefix() + ".")
+        include_qnames = [
+            name for name in (include_qnames if include_qnames is not None else render_assignment)
+            if ((index := _layer_index_of(name, prefix)) is None and start == 0)
+            or (index is not None and start <= index < stop)
+        ]
+
     skip_tokens = (
         list(args.skip_qnames) if args.skip_qnames is not None else None
     )
@@ -313,10 +324,7 @@ def _run_streaming(args, formats, levers, dtype) -> int:
         calibration_hash=calib_hash,
         max_act_rows=args.max_act_rows,
         include_qnames=include_qnames,
-    )
-    profile = detect_profile_with_warning(
-        args.model,
-        entrypoint="build-prod-cache/mtp",
+        layer_range=args.layer_range,
     )
     fill_profile_mtp_production_cache(
         cache,
@@ -535,26 +543,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "by staged production-render cost to render FP8_DYNAMIC only for "
         "the high-error NVFP4 tail.",
     )
-    p.add_argument(
-        "--recache-layer-config",
-        default=None,
-        help="Optional concrete layer_config.json assignment. When set, "
-        "after rendering the cache, replay calibration with those production "
-        "weights installed and re-fit activation_max_abs for export.",
-    )
-    p.add_argument(
-        "--recache-microbatch-size",
-        type=int,
-        default=1,
-        help="Calibration microbatch size for the production activation "
-        "re-cache replay.",
-    )
-    p.add_argument(
-        "--no-recache-activation-quant",
-        action="store_true",
-        help="During re-cache, install production weights but leave activation "
-        "quantization disabled in replay hooks.",
-    )
+    p.add_argument("--layer-range", type=lambda value: tuple(map(int, value.split(":"))),
+                   help="Render streamed layers [a, b). The first range also owns auxiliary entries.")
     p.add_argument(
         "--streaming",
         action="store_true",
@@ -584,6 +574,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "NVFP4/FP8/MX/BF16 renders are bit-identical with or without it.",
     )
     args = p.parse_args(argv)
+    if args.layer_range is not None and (
+        not args.streaming or len(args.layer_range) != 2
+        or not 0 <= args.layer_range[0] < args.layer_range[1]
+    ):
+        p.error("--layer-range requires --streaming and 0 <= a < b, written as a:b")
 
     # Opt-in deterministic CUDA path. The default lever ablations on small
     # models show ~2-4% per-Linear weight variance across re-runs of the
@@ -744,13 +739,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 flush=True,
             )
 
-        recache_assignment = (
-            _load_assignment(args.recache_layer_config)
-            if args.recache_layer_config else None
-        )
         render_assignment = None
         if args.render_scope == "assignment":
-            layer_config = args.render_layer_config or args.recache_layer_config
+            layer_config = args.render_layer_config
             if not layer_config:
                 print(
                     "[build-prod-cache] FAIL: --render-scope=assignment "
@@ -770,8 +761,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         render_formats = list(formats) + list(
             (render_assignment or {}).values()
-        ) + list(
-            (recache_assignment or {}).values()
         )
         col_weights = _load_col_weights(args.col_weights, render_formats)
         t0 = time.monotonic()
@@ -783,11 +772,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             levers=levers,
             max_act_rows=args.max_act_rows,
             cache_dir=args.cache_dir,
-            recache_pass=recache_assignment is not None,
-            recache_assignment=recache_assignment,
             recache_profile=profile,
-            recache_include_activation_quant=not args.no_recache_activation_quant,
-            recache_microbatch_size=args.recache_microbatch_size,
             col_weights=col_weights,
             source_binding=source_binding,
         )
@@ -810,7 +795,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             profile=profile,
             activation_cache_dir=args.activation_cache_dir,
             formats=formats,
-            render_assignment=(render_assignment or recache_assignment),
+            render_assignment=render_assignment,
             cache_dir=args.cache_dir,
             device=device,
             dtype=dtype,
@@ -823,7 +808,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # skips them; without this they would be RTN'd by omission at export
         # (a severe NVFP4 quality regression — banned). Requires a concrete
         # assignment (which format each expert gets).
-        expert_assignment = render_assignment or recache_assignment
+        expert_assignment = render_assignment
         expert_coverage: dict = {}
         if expert_assignment is not None:
             from prismaquant.production_weight_cache import (

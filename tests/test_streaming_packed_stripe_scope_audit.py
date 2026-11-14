@@ -45,7 +45,7 @@ def _fixture(tmp_path, monkeypatch, *, alias):
 
     monkeypatch.setattr(pwc, "render_production_weight", render)
 
-    def build(include_qnames):
+    def build(include_qnames, layer_range=None):
         return run_streaming_render(
             model,
             layers_prefix="model.layers.",
@@ -59,6 +59,7 @@ def _fixture(tmp_path, monkeypatch, *, alias):
             skip_tokens=(),
             device=torch.device("cpu"),
             include_qnames=include_qnames,
+            layer_range=layer_range,
             progress=False,
         )
 
@@ -110,3 +111,26 @@ def test_absent_include_list_preserves_complete_packed_assignment(tmp_path, monk
     assert set(cache.weights) == {(name, "FP8_E4M3") for name in live_names}
     assert set(rendered) == set(live_names)
     assert cache.metadata["requested_entries"] == len(live_names)
+
+
+@pytest.mark.parametrize("alias", [False, True])
+def test_layer_ranges_match_single_render(tmp_path, monkeypatch, alias):
+    _profile, _names, rendered, build = _fixture(tmp_path, monkeypatch, alias=alias)
+    expected = build(None)
+    rendered.clear()
+    units = [build(None, (layer, layer + 1)) for layer in (1, 0)]
+    assert set(units[0].weights).isdisjoint(units[1].weights)
+    assert set().union(*(cache.weights for cache in units)) == set(expected.weights)
+    for cache in units:
+        assert cache.metadata["requested_entries"] == len(cache)
+        for key in cache.weights:
+            assert torch.equal(cache.get(*key), expected.get(*key))
+            assert cache.activation_max_abs[key[0]] == expected.activation_max_abs[key[0]]
+
+
+@pytest.mark.parametrize("bounds", [(-1, 1), (1, 1), (0, 3)])
+def test_render_refuses_invalid_layer_range(tmp_path, monkeypatch, bounds):
+    _profile, _names, rendered, build = _fixture(tmp_path, monkeypatch, alias=False)
+    with pytest.raises(ValueError, match="invalid layer range"):
+        build(None, bounds)
+    assert not rendered

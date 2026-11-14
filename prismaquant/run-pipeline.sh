@@ -1852,10 +1852,11 @@ PY
       "ASSIGNMENT_DIGEST=$LC_DIGEST"
     if [[ ! -f "$PROD_CACHE_RECACHED" ]]; then
       if [[ ! -f "$PROD_CACHE_RAW" ]]; then
-        echo "[pipeline] [4/4] building production cache + re-fitting activation scales ..."
+        echo "[pipeline] [4/4] rendering streamed production cache ..."
         python3 -m prismaquant.build_production_cache \
+          --streaming \
           --model "$MODEL_PATH" \
-          --output "$PROD_CACHE_RECACHED" \
+          --output "$PROD_CACHE_RAW" \
           --formats "$CACHE_FORMATS" \
           --activation-cache-dir "${WORK_DIR}/act" \
           "${PRODUCTION_CACHE_PIN_ARGS[@]}" \
@@ -1869,29 +1870,25 @@ PY
           --cache-dir "$PROD_CACHE_DIR" \
           --render-scope "$PRODUCTION_CACHE_RENDER_SCOPE" \
           --render-layer-config "${WORK_DIR}/artifacts/layer_config.json" \
-          --recache-layer-config "${WORK_DIR}/artifacts/layer_config.json" \
-          --recache-microbatch-size "$PRODUCTION_RECACHE_MICROBATCH" \
-          ${EXPERT_GATE_DATASET:+--expert-gate-dataset "$EXPERT_GATE_DATASET"} \
           2>&1 | tee "${WORK_DIR}/logs/production_cache.log"
-      else
-        echo "[pipeline] [4/4] re-fitting production activation scales ..."
-        python3 -m prismaquant.production_recache \
-          --model "$MODEL_PATH" \
-          --layer-config "${WORK_DIR}/artifacts/layer_config.json" \
-          --production-weight-cache "$PROD_CACHE_RAW" \
-          --output "$PROD_CACHE_RECACHED" \
-          --cache-dir-override "$PROD_CACHE_DIR" \
-          --dataset "$DATASET" \
-          --n-calib-samples "$NSAMPLES" \
-          --calib-seqlen "$SEQLEN" \
-          --dtype bf16 \
-          --device "$DEVICE" \
-          --production-cache-lru-gb "$PRODUCTION_CACHE_LRU_GB" \
-          --production-cache-prefetch "$PRODUCTION_CACHE_PREFETCH" \
-          --production-cache-prefetch-workers "$PRODUCTION_CACHE_PREFETCH_WORKERS" \
-          --microbatch-size "$PRODUCTION_RECACHE_MICROBATCH" \
-          2>&1 | tee "${WORK_DIR}/logs/production_recache.log"
       fi
+      echo "[pipeline] [4/4] re-fitting production activation scales ..."
+      python3 -m prismaquant.production_recache \
+        --model "$MODEL_PATH" \
+        --layer-config "${WORK_DIR}/artifacts/layer_config.json" \
+        --production-weight-cache "$PROD_CACHE_RAW" \
+        --output "$PROD_CACHE_RECACHED" \
+        --cache-dir-override "$PROD_CACHE_DIR" \
+        --dataset "$DATASET" \
+        --n-calib-samples "$NSAMPLES" \
+        --calib-seqlen "$SEQLEN" \
+        --dtype bf16 \
+        --device "$DEVICE" \
+        --production-cache-lru-gb "$PRODUCTION_CACHE_LRU_GB" \
+        --production-cache-prefetch "$PRODUCTION_CACHE_PREFETCH" \
+        --production-cache-prefetch-workers "$PRODUCTION_CACHE_PREFETCH_WORKERS" \
+        --microbatch-size "$PRODUCTION_RECACHE_MICROBATCH" \
+        2>&1 | tee "${WORK_DIR}/logs/production_recache.log"
     else
       echo "[pipeline] [4/4] recached production cache exists, skipping"
     fi
