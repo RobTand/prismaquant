@@ -18,6 +18,7 @@ import mmap
 import os
 import threading
 import time
+import weakref
 
 import pytest
 import torch
@@ -1165,3 +1166,60 @@ def test_terminal_read_ahead_error_survives_reclaim_without_retry(where):
         assert stream._reads[1] == (1 if where == "reader" else 0)
         error = stream._errors[1]
         assert error is not None and error.__traceback__ is None
+
+
+class _Decoded:
+    """A decoded value that a weak reference can watch."""
+
+
+def test_paused_returns_only_after_the_worker_drops_the_decoded_value(tmp_path):
+    made = []
+
+    def decode(raw, receipt, staged):
+        value = _Decoded()
+        made.append(weakref.ref(value))
+        return value, {"staged": staged}
+
+    entries, _contents = _stream_files(tmp_path, groups=1, per_group=1, decoder=decode)
+    consumer = threading.current_thread()
+    published = threading.Event()
+    resume = threading.Event()
+    expired = []
+
+    class StopAfterPublish:
+        """The stream's condition. The worker stops after it publishes."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def __enter__(self):
+            return self._inner.__enter__()
+
+        def __exit__(self, *exc):
+            published_now = (threading.current_thread() is not consumer
+                             and stream._values[0] is not None)
+            self._inner.__exit__(*exc)
+            if published_now:
+                published.set()
+                if not resume.wait(30):
+                    expired.append(True)
+
+    budget = io_engine.FixedBudget(buffer_bytes=SIZE, headroom=1 << 30)
+    stream = io_engine.ReadStream(io_engine.ENGINE, entries, budget, None)
+    stream._cond = StopAfterPublish(stream._cond)
+    try:
+        with stream._cond:
+            stream._pump()
+        assert published.wait(30), "the worker never published"
+        with stream.paused():
+            # The stream's own slot may keep the value. The worker may not.
+            stream._values[0] = None
+            assert len(made) == 1
+            assert made[0]() is None, "the worker still holds the decoded value"
+            assert not expired, "the worker stop expired before the check"
+    finally:
+        resume.set()
+        stream.close()
