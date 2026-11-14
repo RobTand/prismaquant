@@ -32,6 +32,9 @@ data/
 # but the GGUF IQ codebook tables are a checked-in runtime asset
 !prismaquant/data/
 !prismaquant/data/iq_grids.pt
+!archive/gridbook_lane_2026-09-02/prismaquant/data/
+archive/gridbook_lane_2026-09-02/prismaquant/data/*
+!archive/gridbook_lane_2026-09-02/prismaquant/data/nvfp4_cb_lattices.pt
 propagated-cost
 paper/scripts/gemini_review_stderr.txt
 tmp/
