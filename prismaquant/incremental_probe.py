@@ -787,21 +787,6 @@ def _probe_mtp(ctx: StreamingContext, *, calib: torch.Tensor,
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-#: The retired worker mode refuses at the CLI boundary before model reads.
-#: Its complete execution snapshot is in archive/sample_parallel_probe_2026-10-15/.
-SAMPLE_PARALLEL_RETIRED = (
-    "sample-parallel probe is unavailable since 2026-09-02: its run contract "
-    "and per-worker source census were built on the strict-Ada FP8-CB "
-    "artifact census, archived with the Gridbook lane "
-    "(archive/gridbook_lane_2026-09-02/). Run without "
-    "--global-calibration-tensor/--sample-partition-index. Execution snapshot: "
-    "archive/sample_parallel_probe_2026-10-15/."
-)
-SAMPLE_PARALLEL_RETIRED_HELP = (
-    "Retired sample-parallel mode; see archive/sample_parallel_probe_2026-10-15/."
-)
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
@@ -814,8 +799,6 @@ def main():
                     help="Seed for the calibration text-subset shuffle and the "
                          "within-text window start. Default 42 reproduces "
                          "historical behavior.")
-    ap.add_argument("--global-calibration-tensor", default=None,
-                    help=SAMPLE_PARALLEL_RETIRED_HELP)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16")
     ap.add_argument("--output", required=True)
@@ -852,8 +835,6 @@ def main():
                          "for the cost stage. Lower values are useful for "
                          "debug runs on very wide MoE checkpoints.")
     args = ap.parse_args()
-    if args.global_calibration_tensor is not None:
-        raise SystemExit(SAMPLE_PARALLEL_RETIRED)
 
     from prismaquant.gpu_guard import require_cuda_hot_path
     require_cuda_hot_path("incremental_probe", args.device)
