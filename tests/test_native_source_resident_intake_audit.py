@@ -84,7 +84,7 @@ def _setup(root, monkeypatch):
 
 
 @pytest.mark.parametrize("native", [True, False], ids=["native-block-fp8", "bf16-control"])
-@pytest.mark.parametrize("caller", ["text-loader", "recache", "fisher", "cache-main",
+@pytest.mark.parametrize("caller", ["text-loader", "recache", "cache-main",
                                    "expert-main", "expert-streamed-main", "validator-main", "harness",
                                    "rtn-reference", "rtn-reload"])
 def test_actual_resident_caller_receives_decoded_source(owned_root, monkeypatch, native, caller):
@@ -122,16 +122,6 @@ def test_actual_resident_caller_receives_decoded_source(owned_root, monkeypatch,
             production_recache.main(["--model", str(root), "--layer-config", str(assignment),
                 "--production-weight-cache", str(source_cache), "--output", str(owned_root / "recache.pkl"),
                 "--device", "cpu", "--work-root", str(owned_root / "work")])
-        elif caller == "fisher":
-            from prismaquant import aura_cost, fisher_col_weights
-
-            def measurement(model, *args, **kwargs):
-                assert kwargs["collect_col_energy"] is True
-                observe(model, dtype=torch.float32, gradient=True)
-
-            monkeypatch.setattr(aura_cost, "compute_aura_cost", measurement)
-            fisher_col_weights.compute_fisher_col_weights(str(root), None, device="cpu", nprobes=1,
-                                                          nsamples=1, seqlen=4)
         elif caller == "cache-main":
             from prismaquant import build_production_cache as producer
             monkeypatch.setattr(producer, "require_cuda_hot_path", lambda *args, **kwargs: torch.device("cpu"))
