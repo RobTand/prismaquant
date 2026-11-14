@@ -9108,8 +9108,8 @@ collection.
 
 The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-09d6559d-tf516`
 carries transformers 5.16.1 and is otherwise the same interpreter. It exists
-on both Sparks. `prismaquant/tessera_runtime/README.md` has the recipe and the
-`pbtest` command for a PR that touches these modules. The full suite also
+on both Sparks. `prismaquant/tessera_runtime/README.md` has the recipe.
+Submit it as a Flux job (see the flux skill). The full suite also
 passes on it (12,040 tests), and no skip names transformers.
 
 Running the six exposed two failing tests. Under transformers 5.16,
@@ -25855,7 +25855,7 @@ flowchart LR
 
 Run `python -m prismaquant.tessera_materialization plan --request REQUEST
 --census CENSUS --workspace WORKSPACE --spec CAMPAIGN_SPEC`, submit its
-`WORKSPACE/manifest.json` through PrismaBuild's published `pbcampaign.py`, and
+`WORKSPACE/manifest.json` as a Flux job (see the flux skill), and
 run `python -m prismaquant.tessera_materialization finalize --plan
 WORKSPACE/plan.json` inside an admitted action. `final/result.json` names the
 final allocation, capture, scales and wire directory for the export leg.
@@ -27100,11 +27100,9 @@ producer. `submit-joint`, `submit-allocation` and
 (`build_joint_pass_manifest`,
 `build_allocation_manifest`,
 `build_export_manifest`), write it under `<output-root>/data-manifests/` --
-or under `--manifest-dir`, which a frozen output root needs -- and run the
-chain-style `pbrun` command with `--data-manifest` **before** `--detach`,
-since a `pbrun` option after the separator is an argument of the action
-instead. `--dry-run` prints the command and the manifest summary and submits
-nothing. Demand is an argument on every one of them, never a constant: the
+or under `--manifest-dir` for a frozen output root.
+Submit it as a Flux job (see the flux skill).
+`--dry-run` prints the command and the manifest summary and submits nothing. Demand is an argument on every one of them, never a constant: the
 numbers belong to the pass being submitted.
 
 The phase contract is what makes the joint manifest worth building. Each

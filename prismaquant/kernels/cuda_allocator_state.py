@@ -2,7 +2,7 @@
 
 Only compiled code is cached; effective settings are read on every call.
 No CUDA kernel, renderer, allocator setter or separate extension cache is used.
-Build this through PrismaBuild using the established extension build policy.
+Submit it as a Flux job (see the flux skill).
 """
 from functools import lru_cache
 from pathlib import Path

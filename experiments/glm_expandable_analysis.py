@@ -1,4 +1,4 @@
-"""Read retained workspace evidence; execute batch analysis through PrismaBuild."""
+"""Read retained workspace evidence. Submit it as a Flux job (see the flux skill)."""
 import argparse
 import collections
 import hashlib

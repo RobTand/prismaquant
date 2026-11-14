@@ -6,9 +6,7 @@ that path is a delta, so this tool measures both sides on the same staged
 bytes, in one admitted action, on one box, alternating the arms so a drift in
 the tier cannot land on one of them.
 
-Run it as a PrismaBuild action whose data manifest names the entries it reads
-(a staged-residency launch); the action's injected
-reader context is what the strict tier policy leases through. The driver:
+Submit it as a Flux job (see the flux skill). The driver:
 
 1. waits until every declared entry has landed on the tier, and lists the
    staged copies (a ``paths`` child);

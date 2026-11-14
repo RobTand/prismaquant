@@ -1,4 +1,4 @@
-"""CPU-only harness checks; execute through PrismaBuild."""
+"""CPU-only harness checks. Submit it as a Flux job (see the flux skill)."""
 import hashlib
 import json
 import os

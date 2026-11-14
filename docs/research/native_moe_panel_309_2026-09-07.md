@@ -66,7 +66,7 @@ requires these explicit fields:
 | `numerics` | Predeclared `atol` and `rtol`, frozen before native outputs |
 | `probe_request` | Source path/shards/config/auxiliary hashes plus `n_probes`, `seed_base`, `token_scope`, `temperature`, `distribution`, `normalization` |
 
-All preparation, tests and batch validation run through PrismaBuild. Actual
+Submit it as a Flux job (see the flux skill). Actual
 native memory and CUDA timing use the producer's separate observer lifecycle;
 performance claims require both in-process and both-host Netdata evidence.
 

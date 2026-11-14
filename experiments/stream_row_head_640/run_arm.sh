@@ -1,5 +1,5 @@
 #!/bin/bash
-# One row-0055 arm inside an admitted PrismaBuild GPU action on a GB10.
+# One row-0055 arm. Submit it as a Flux job (see the flux skill).
 #
 #   run_arm.sh ARM SOURCE OUT [-- campaign flags...]
 #

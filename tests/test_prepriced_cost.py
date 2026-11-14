@@ -1,4 +1,4 @@
-"""Read-only external cost intake; workloads run through PrismaBuild."""
+"""Read-only external cost intake. Submit it as a Flux job (see the flux skill)."""
 from __future__ import annotations
 
 import hashlib

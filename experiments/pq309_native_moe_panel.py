@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prepare/freeze/consume one complete routed panel from existing PQ artifacts.
 
-Execute preparation through PrismaBuild. This adapter neither renders new
+Submit it as a Flux job (see the flux skill). This adapter neither renders new
 weights nor operates the serving runtime. The caller supplies independently
 hashed canonical capture, original wire/PWC artifacts and a versioned plan.
 """
