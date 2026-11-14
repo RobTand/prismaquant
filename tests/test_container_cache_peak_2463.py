@@ -38,29 +38,20 @@ def _growth_workload(root: Path, total: int, chunk: int = 50000,
 
 @pytest.fixture
 def grow_then_shrink_sampler(tmp_path):
-    """Fold real disk inventories on a scripted, non-wall-clock timeline."""
-    cache = tmp_path / "cache"
-    cache.mkdir()
-    path = cache / "workload.bin"
-    payload = hashlib.shake_256(b"PQ #3055 grow then shrink").digest(600000)
-    samples = []
-    for index, size in enumerate((0, 200000, 600000, 100000, 0)):
-        if size:
-            path.write_bytes(payload[:size])
-        elif path.exists():
-            path.unlink()
-        phase = "initial" if index == 0 else "final" if index == 4 else "periodic"
-        samples.append({
-            "index": index,
-            "unix": index * 0.02,
-            "scan_duration_s": 0.0,
-            "phase": phase,
-            **peak_mod.scan_cache_bytes(cache),
-        })
-    sampler = peak_mod.CachePeakSampler(cache, interval_s=0.02)
+    """Fold scripted allocated bytes on a non-wall-clock timeline.
+
+    A live scan cannot script this timeline: ZFS reports ``st_blocks`` from
+    the last synced transaction group, so a file written before a scan can
+    show one block until the next sync.
+    """
+    phases = ("initial", "periodic", "periodic", "periodic", "final")
+    sizes = (512, 200704, 600576, 100352, 512)
+    sampler = peak_mod.CachePeakSampler(tmp_path, interval_s=0.02)
     sampler._out_path = tmp_path / "samples.jsonl"
-    sampler._out_path.write_text(
-        "".join(json.dumps(sample) + "\n" for sample in samples))
+    sampler._out_path.write_text("".join(
+        json.dumps({"index": index, "unix": index * 0.02, "scan_duration_s": 0.0,
+                    "phase": phase, "allocated_bytes": size, "errors": []}) + "\n"
+        for index, (phase, size) in enumerate(zip(phases, sizes))))
     sampler._collect()
     return sampler
 
@@ -77,8 +68,6 @@ def test_peak_exceeds_final_size_on_grow_then_shrink_workload(
     assert measurement["peak_allocated_bytes"] == (
         measurement["samples"][2]["allocated_bytes"])
     assert measurement["peak_allocated_bytes"] > measurement["final_allocated_bytes"]
-    assert not list(sampler.root.iterdir())
-    assert measurement["final_allocated_bytes"] == 512 * sampler.root.stat().st_blocks
     assert measurement["incomplete_scan"]
     assert not measurement["valid"]
 
@@ -109,9 +98,10 @@ def test_initial_inventory_is_captured_before_the_row_runs(tmp_path):
     initial = receipt["initial_state"]["totals"]
     assert initial["allocated_bytes"] == before["totals"]["allocated_bytes"]
     assert initial["files"] == before["totals"]["files"] == 1
-    # The warm file survives the row: the final inventory equals the
-    # initial one, and the peak exceeds both.
-    assert receipt["measurement"]["final_allocated_bytes"] == initial["allocated_bytes"]
+    # The warm file survives the row. Apparent bytes compare: ZFS can sync
+    # the warm file's blocks during the row, so allocated bytes can grow.
+    assert receipt["measurement"]["samples"][-1]["apparent_bytes"] == (
+        initial["apparent_bytes"])
     assert receipt["measurement"]["peak_allocated_bytes"] > initial["allocated_bytes"]
 
 
@@ -348,11 +338,9 @@ def test_hard_links_count_once(tmp_path):
     cache.mkdir()
     target = cache / "target.bin"
     target.write_bytes(b"\x5a" * 100000)
-    import os
     os.link(target, cache / "link.bin")
     totals = peak_mod.scan_cache_bytes(cache)
-    directory_bytes = 512 * cache.stat().st_blocks
-    assert totals["allocated_bytes"] - directory_bytes == 512 * target.stat().st_blocks
+    assert totals["apparent_bytes"] == 100000
     assert totals["files"] == 1
 
 
