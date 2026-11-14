@@ -9428,7 +9428,6 @@ pq_py_library(
         ":prismaquant/gpu_guard",
         ":prismaquant/io_spans",
         ":prismaquant/kl_fisher",
-        ":prismaquant/memory_management",
         ":prismaquant/model_runtime",
         ":prismaquant/tensor_digests",
         "@pq_pip//torch",

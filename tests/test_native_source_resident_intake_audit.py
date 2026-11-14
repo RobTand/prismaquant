@@ -85,7 +85,7 @@ def _setup(root, monkeypatch):
 
 @pytest.mark.parametrize("native", [True, False], ids=["native-block-fp8", "bf16-control"])
 @pytest.mark.parametrize("caller", ["text-loader", "recache", "fisher", "cache-main",
-                                   "expert-main", "expert-streamed-main", "validator-main", "harness",
+                                   "expert-streamed-main", "validator-main", "harness",
                                    "rtn-reference", "rtn-reload"])
 def test_actual_resident_caller_receives_decoded_source(owned_root, monkeypatch, native, caller):
     root, expected = _source(owned_root, native=native)
@@ -139,18 +139,8 @@ def test_actual_resident_caller_receives_decoded_source(owned_root, monkeypatch,
             monkeypatch.setattr(producer, "fill_production_weight_cache", lambda model, *args, **kwargs: observe(model))
             producer.main(["--model", str(root), "--output", str(owned_root / "cache.pkl"),
                            "--formats", "FP8_E4M3", "--n-calib-samples", "1", "--calib-seqlen", "4"])
-        elif caller in {"expert-main", "expert-streamed-main"}:
-            from transformers import AutoModelForCausalLM
+        elif caller == "expert-streamed-main":
             from prismaquant import expert_empirical_cost as producer
-            real_hf = AutoModelForCausalLM.from_pretrained
-
-            def cpu_hf(*args, **kwargs):
-                if kwargs.get("device_map") == "cpu":
-                    kwargs.pop("device_map")
-                return real_hf(*args, **kwargs)
-
-            monkeypatch.setattr(AutoModelForCausalLM, "from_pretrained", cpu_hf)
-            monkeypatch.setattr(producer, "measure_expert_unit_costs", lambda model, *args, **kwargs: observe(model))
 
             def streamed_measurement(runner, *args, **kwargs):
                 for layer in runner.context.source_layers:
@@ -158,13 +148,14 @@ def test_actual_resident_caller_receives_decoded_source(owned_root, monkeypatch,
                     runner.context.install(layer, require_prefetched=True, prefetch_following=False)
                 observe(runner.model)
 
-            monkeypatch.setattr(producer, "measure_expert_unit_costs_streamed", streamed_measurement)
+            monkeypatch.setattr(producer, "capture_expert_boundaries", streamed_measurement)
             arguments = ["--model", str(root), "--output", str(owned_root / "expert.pkl"),
                            "--device", "cpu", "--formats", "NVFP4,BF16",
                            "--n-calib-samples", "1", "--calib-seqlen", "4"]
             if caller == "expert-streamed-main":
-                arguments.extend(["--streaming", "--streaming-offload-dir", str(owned_root / "expert-offload")])
-                monkeypatch.setenv("PRISMAQUANT_EXPERT_EVAL_DRIVER", "window")
+                arguments.extend(["--capture-boundaries",
+                                  "--boundary-file", str(owned_root / "boundaries.pt"),
+                                  "--streaming-offload-dir", str(owned_root / "expert-offload")])
                 monkeypatch.setenv("PRISMAQUANT_PREFETCH_WORKERS", "1")
             producer.main(arguments)
         elif caller == "validator-main":
