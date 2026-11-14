@@ -25,7 +25,7 @@ def _arguments(tmp_path, source, driver):
             '--device', 'cpu', '--dataset', 'synthetic-token-draw',
             '--formats', 'FP8_E4M3,BF16', '--max-units', '1']
     if driver != 'resident':
-        args += ['--streaming', '--checkpoint-dir', str(tmp_path / 'journal')]
+        args += ['--checkpoint-dir', str(tmp_path / 'journal')]
     return args
 
 
@@ -34,15 +34,17 @@ def _setup(tmp_path, monkeypatch, driver, native=True):
     producer_cli_inputs(monkeypatch)
     guard = producer_cpu_guard(tmp_path, monkeypatch)
     monkeypatch.setattr(memory_management, 'CaptureMemoryGuard', lambda *_args: guard)
-    monkeypatch.setenv('PRISMAQUANT_EXPERT_EVAL_DRIVER', driver)
-    return source, _arguments(tmp_path, source, driver)
+    args = _arguments(tmp_path, source, driver)
+    if driver != 'resident':
+        args += ['--boundary-file', str(tmp_path / 'boundaries.pt')]
+        assert expert.main(args + ['--capture-boundaries']) == 0
+        args += ['--unit-format', 'FP8_E4M3', '--layer-range', '0:1']
+    return source, args
 
 
-@pytest.mark.parametrize('driver', ['resident', 'window', 'forked'])
+@pytest.mark.parametrize('driver', ['forked'])
 @pytest.mark.parametrize('native', [True, False], ids=['native', 'bf16'])
 def test_actual_expert_main_binds_only_fresh_rows(tmp_path, monkeypatch, driver, native):
-    if not native and driver == 'resident':
-        pytest.importorskip('accelerate', reason='the unchanged BF16 expert HF device_map needs accelerate')
     source, args = _setup(tmp_path, monkeypatch, driver, native)
     inherited = {'predicted_dloss': 0.375, 'cost_source': 'legacy-control'}
     base = {'costs': {'inherited': {'FP8_E4M3': inherited}}, 'stats': {}}
@@ -70,12 +72,12 @@ def test_actual_expert_main_binds_only_fresh_rows(tmp_path, monkeypatch, driver,
         validate_native_cost_source_for_model(payload, model=str(source), where='fresh expert cells')
 
 
-@pytest.mark.parametrize('driver', ['window', 'forked'])
+@pytest.mark.parametrize('driver', ['forked'])
 @pytest.mark.parametrize('mode', ['0', '1'], ids=['certified', 'dev'])
 def test_actual_expert_main_refuses_unbound_journal_before_measurement(
         tmp_path, monkeypatch, driver, mode):
-    source, args = _setup(tmp_path, monkeypatch, driver)
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    source, args = _setup(tmp_path, monkeypatch, driver)
     actual = journal.prepare_journal
 
     class StopAfterJournal(Exception):

@@ -224,20 +224,11 @@ def test_aura_streaming_also_streams_and_resumes_empirical_expert_tail():
     from prismaquant.pipeline import STAGE_SETTINGS_KEYS
 
     script = _run_pipeline_script()
-    expert_block = script.split("AURA_EXPERT_EXECUTION_ARGS=(", 1)[1].split(
-        "# [2b]", 1
-    )[0]
-    invocation = script.split(
-        "python3 -m prismaquant.expert_empirical_cost", 1
-    )[1].split('tee "${WORK_DIR}/logs/expert_empirical_cost.log"', 1)[0]
-
-    assert "--streaming" in expert_block
-    assert (
-        '--checkpoint-dir "${AURA_COST_CHECKPOINT_DIR%/}/'
-        'expert-empirical-cost"'
-    ) in expert_block
-    assert "--resume" in expert_block
-    assert "AURA_EXPERT_EXECUTION_ARGS" in invocation
+    invocation = script.split("# [2d] Hybrid finalize", 1)[1].split("# 3. Allocator", 1)[0]
+    for flag in ("--capture-boundaries", "--unit-format", "--layer-range", "--reduce-units", "--resume"):
+        assert flag in invocation
+    assert '--checkpoint-dir "$EXPERT_ROOT/${fmt}-${layer}"' in invocation
+    assert "AURA_EXPERT_EXECUTION_ARGS" not in invocation
     hybrid_sources = {
         source for _manifest, source in STAGE_SETTINGS_KEYS["aura-hybrid-cost"]
     }
