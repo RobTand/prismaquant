@@ -53,7 +53,7 @@ def run_request(args):
 
 def shard_request(args, architecture, index, manifest_uri, manifest_sha256,
                   partition_sha256, *, require_execution=False, selection='impacted'):
-    """One bounded runner drives self-hosted actions for exactly one partition."""
+    """One bounded runner drives remote actions for exactly one partition."""
     if (architecture not in ('amd64', 'arm64') or index < 0
             or selection not in ('impacted', 'irrelevant', 'fallback')):
         raise RemoteError('invalid shard partition')
