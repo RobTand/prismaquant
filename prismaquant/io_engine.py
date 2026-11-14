@@ -1028,7 +1028,7 @@ class ReadStream:
                 result = None
             elif error is None:
                 self._state[index] = _DONE
-                self._values[index] = result
+                self._values[index], result = result, None
                 self._held += entry.held_bytes
                 self._actual[index] = actual
                 self._held_actual += actual
@@ -1049,7 +1049,6 @@ class ReadStream:
             release = self._drained(group)
             self._pump()
             self._cond.notify_all()
-        result = None
         if release:
             self._unpin_quietly(group)
 

@@ -13,6 +13,10 @@
   retentions and census evidence unchanged. Qualification and limitations are
   recorded in `docs/audits/tensor_digest_token_2638_integration.md`.
 
+### Fixed
+- The read stream worker drops its decoded value before it publishes a completion (#3485, #3051).
+  `ReadStream.paused()` no longer returns while a worker still holds that value.
+
 ### Added
 - Reconcile shipcard's existing file-digest routes and descriptor retention (#2635, #1301).
   Reuse 40 original frozen outcomes and check current consumers against the original recipe.
