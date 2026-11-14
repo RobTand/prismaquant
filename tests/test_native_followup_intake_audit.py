@@ -127,7 +127,7 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
     monkeypatch.setattr(memory_management, 'CaptureMemoryGuard', lambda *_args: guard)
     binding = identity.build_source_model_binding(source, dtype=torch.bfloat16)
     names = sorted(name.removesuffix('.weight') for name in expected if name.endswith('.self_attn.o_proj.weight'))
-    backfill_name = names[0].replace('o_proj', 'q_proj')
+    backfill_name = 'lm_head'
     probe_names = [*names, backfill_name]
     probe = tmp_path / 'probe.pkl'
     stats = {name: {'n_params': expected[name + '.weight'].numel()} for name in probe_names}
@@ -144,17 +144,17 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
         '--work-dir', str(tmp_path / 'baseline-work'), '--output', str(base_path),
         '--device', 'cpu', '--dtype', 'bf16', '--mode', 'unbatched',
         '--formats', 'FP8_E4M3,BF16', '--cost-mode', 'aura', '--threads', '1',
-        '--no-include-mtp', '--no-include-visual', '--no-include-lm-head', '--no-watchdog'])
+        '--no-include-mtp', '--no-include-visual', '--no-watchdog'])
     baseline.main()
     base = pickle.loads(base_path.read_bytes())
     before = base_path.read_bytes()
-    assert set(probe_names) <= base['costs'].keys()
+    assert set(base['costs']) == {backfill_name}
     model = load_resident_source_model(str(source), device=torch.device('cpu'), dtype=torch.bfloat16,
         requires_grad=True, offload_folder=str(tmp_path / 'resident'), resource_check=guard.check,
         attn_implementation='eager')
     aura_payload = aura.compute_aura_cost(model, tokens, ['FP8_E4M3', 'BF16'],
         n_probes=1, n_linear_chunks=1, min_free_gib=0,
-        unit_filter=re.escape(names[0]) + '$', allow_packed_expert_omission=True,
+        unit_filter='(?:' + '|'.join(re.escape(name) for name in names) + ')$', allow_packed_expert_omission=True,
         profile=detect_profile(str(source)), checkpoint_identity_extra={'source_binding': binding})
     dense = {**aura_payload, 'costs': dict(aura_payload['costs'])}
     dense['provenance'].update(model=str(source), cost_mode='aura')
@@ -167,9 +167,9 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
         '--streaming', '--checkpoint-dir', str(tmp_path / 'expert-journal'),
         '--merge-base', str(dense_path), '--backfill-base', str(base_path), '--cost-mode', 'aura']) == 0
     payload = pickle.loads(output.read_bytes())
-    assert payload['costs'][names[0]] == aura_payload['costs'][names[0]]
-    for name in (names[1], backfill_name):
-        assert payload['costs'][name] == base['costs'][name]
+    for name in names:
+        assert payload['costs'][name] == aura_payload['costs'][name]
+    assert payload['costs'][backfill_name] == base['costs'][backfill_name]
     assert len(payload['costs']) > len(probe_names), 'include real empirical expert rows'
     result = _pipeline_reusable(output, source)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -186,8 +186,7 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
         intake.require_native_cost_source_binding(payload, binding, where='offline stock expert input')
 
 
-@pytest.mark.parametrize("layers_per_shard", ["1", "auto"])
-def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch, layers_per_shard):
+def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch):
     """Use real metadata, source delivery and measurement after Hub resolution."""
     import huggingface_hub
     from prismaquant import incremental_measure_quant_cost as baseline
@@ -218,7 +217,6 @@ def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch, laye
     monkeypatch.setattr(sys, 'argv', ['incremental_measure_quant_cost', '--model', hub_id,
         '--probe', str(probe), '--activation-cache-dir', str(activations),
         '--work-dir', str(tmp_path / 'hub-work'), '--output', str(output),
-        '--layers-per-shard', layers_per_shard,
         '--device', 'cpu', '--dtype', 'bf16', '--mode', 'unbatched', '--formats', 'FP8_E4M3',
         '--cost-mode', 'aura', '--threads', '1', '--no-include-mtp', '--no-include-visual',
         '--no-watchdog'])
@@ -226,7 +224,7 @@ def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch, laye
     assert snapshots == [hub_id]
     payload = pickle.loads(output.read_bytes())
     binding = identity.build_source_model_binding(source, dtype=torch.bfloat16)
-    assert set(payload['costs']) == set(names)
+    assert set(payload['costs']) == {'lm_head'}
     for rows in payload['costs'].values():
         for row in rows.values():
             assert row['source_binding'] == binding
@@ -307,11 +305,10 @@ def test_native_baseline_sidecars_carry_only_checkpoint_evidence(tmp_path, monke
         '--cost-mode', 'aura', '--threads', '1', '--no-include-lm-head', '--no-watchdog'])
     baseline.main()
     payload = pickle.loads(output.read_bytes())
-    assert set(payload['costs']) == set(names)
+    assert set(payload['costs']) == set(names[1:])
     full = identity.build_source_model_binding(source, dtype=torch.bfloat16)
     checkpoint_only = {key: value for key, value in full.items() if key != 'source_decode'}
     checkpoint_only['schema'] = identity.SOURCE_MODEL_BINDING_SCHEMA
-    assert payload['costs'][names[0]]['BF16']['source_binding'] == full
     for name in names[1:]:
         assert payload['costs'][name]['BF16']['source_binding'] == checkpoint_only
     intake.validate_native_cost_source_for_model(payload, model=str(source), where='current sidecars')
@@ -336,6 +333,6 @@ def test_native_baseline_sidecars_carry_only_checkpoint_evidence(tmp_path, monke
         with pytest.raises(ValueError, match='sidecar binding must exclude the text decoder claim'):
             intake.validate_native_cost_source_for_model(payload, model=str(source), where='false decode claim')
         row['source_binding'] = checkpoint_only
-    payload['costs'][names[0]]['BF16']['source_binding'] = checkpoint_only
+    payload['costs'][names[0]] = {'BF16': {'source_binding': checkpoint_only}}
     with pytest.raises(ValueError, match='legacy decoder identity cannot qualify native costs'):
         intake.validate_native_cost_source_for_model(payload, model=str(source), where='text control')

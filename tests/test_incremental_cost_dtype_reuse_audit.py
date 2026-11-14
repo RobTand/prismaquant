@@ -14,7 +14,7 @@ from prismaquant import gpu_guard
 from prismaquant import incremental_measure_quant_cost as owner
 
 
-QNAME = "model.layers.0.proj"
+QNAME = "lm_head"
 
 
 class _TinyContext:
@@ -23,26 +23,19 @@ class _TinyContext:
         self.model.config = SimpleNamespace(model_type="llama", architectures=["LlamaForCausalLM"])
         self.model.model = nn.Module()
         self.model.model.layers = nn.ModuleList([nn.Module()])
-        self.model.model.layers[0].proj = nn.Linear(16, 4, bias=False, dtype=dtype)
+        self.model.lm_head = nn.Linear(16, 4, bias=False, dtype=dtype)
         source = torch.arange(1, 65, dtype=torch.float32).reshape(4, 16).sin() * 0.31 + 0.137
         with torch.no_grad():
-            self.model.model.layers[0].proj.weight.copy_(source.to(dtype))
+            self.model.lm_head.weight.copy_(source.to(dtype))
         self.num_layers = 1
         self.layers_prefix = "model.layers."
         self.layer_cache = self
 
     def set_priority_layers(self, layers):
-        assert set(layers) <= {0}
+        assert not layers
 
     def configure_runtime_pressure_floor(self):
         pass
-
-    def install(self, layer):
-        assert layer == 0
-
-    def unload(self, layer):
-        assert layer == 0
-        return 0
 
     def shutdown(self):
         pass
@@ -63,7 +56,8 @@ def test_real_cost_main_reuses_only_matching_dtype(
     }))
     probe = tmp_path / "probe.pkl"
     with probe.open("wb") as file:
-        pickle.dump({"stats": {QNAME: {"h_trace": 1.0, "n_params": 64}}, "meta": {}}, file)
+        pickle.dump({"stats": {name: {"h_trace": 1.0, "n_params": 64}
+                               for name in (QNAME, "model.layers.0.proj")}, "meta": {}}, file)
     activations = tmp_path / "act"
     activations.mkdir()
     rows = torch.arange(1, 113, dtype=torch.float32).reshape(7, 16).cos() / 3
@@ -89,13 +83,14 @@ def test_real_cost_main_reuses_only_matching_dtype(
             "--work-dir", str(work), "--output", str(output),
             "--device", "cpu", "--dtype", dtype, "--mode", "unbatched",
             "--render-path", "registry", "--formats", "FP8_E4M3",
-            "--cost-mode", mode, "--layers-per-shard", "1", "--threads", "1",
-            "--no-include-mtp", "--no-include-visual", "--no-include-lm-head",
+            "--cost-mode", mode, "--threads", "1",
+            "--no-include-mtp", "--no-include-visual",
             "--no-watchdog",
         ])
         owner.main()
         with output.open("rb") as file:
             payload = pickle.load(file)
+        assert set(payload["costs"]) == {QNAME}
         record = payload["costs"][QNAME]["FP8_E4M3"]
         assert "error" not in record, record
         return record

@@ -1,30 +1,4 @@
-"""Hardware-adaptive memory sizing for the PrismaQuant pipeline.
-
-Two knobs the probe/cost passes care about:
-
-  1. `layers_per_shard` — how many decoder layers get their Fisher stats
-     accumulated in a single reverse sweep. Bigger shards = fewer sweeps
-     through the full model = faster probe, but each shard needs more
-     gradient + retained-activation memory.
-
-  2. `cache_headroom_gb` — safety margin subtracted from available RAM
-     when sizing the streaming layer cache. Lower headroom = bigger
-     cache = fewer evictions = fewer `torch.cuda.empty_cache()` stalls
-     on UMA hosts, but less slack for autograd spikes.
-
-Both defaults were historically tuned for a 35B-A3B MoE on a 128 GB
-Spark. Dense-27B / 122B-A10B / etc. want different values. This module
-derives them from the actual checkpoint + host at runtime.
-
-The heuristic is deliberately simple:
-
-    per_layer_bytes(shard) ≈ weight + activations + gradients
-    available = free_RAM - safety
-    reserved_for_cache = num_layers * per_layer_weight   # hold all layers ⇒ no evictions
-    layers_per_shard = (available - reserved_for_cache) / per_layer_bytes
-
-and clamped to [1, num_layers]. Explicit env overrides always win.
-"""
+"""Size streaming cache and capture memory from the source model and host."""
 from __future__ import annotations
 
 import json
@@ -41,20 +15,7 @@ DEFAULT_SAFETY_GB = 20.0     # slack above the committed estimate. NEVER rely on
                              # Linux configs.
 DEFAULT_ACT_MULT = 12        # multiplier in (N*T*hidden*dtype*K) per tracked
                              # layer. Captures backward transient scratch.
-# Prefetch-window size for the streaming tier of pick_layers_per_shard:
-# 4 concurrent prefetch reads + a completed-ahead margin of 4.
-STREAMING_CACHE_WINDOW_LAYERS = 8
-
 DEFAULT_DTYPE_BYTES = 2      # bf16
-# Observed on Qwen3.6-27B dense: gradient checkpointing retains activations
-# at ~sqrt(n_layers) boundaries, so the full autograd graph adds a
-# per-layer-mix overhead independent of how many layers are tracked. Plus
-# HF transformers wrappers, tokenizer caches, and Python heap contribute a
-# roughly model-independent floor. Empirically ~35 GB at nsamples=32,
-# seqlen=1024, hidden=5120. Scale by N*T*hidden so the term tracks
-# calibration size.
-DEFAULT_FULL_GRAPH_ACT_MULT = 48   # 64 layers × sqrt ≈ 8 × 6 (per-layer-mix overshoot)
-DEFAULT_FIXED_OVERHEAD_GB = 15.0   # HF transformers + tokenizer + Python heap floor
 
 
 # Bounded capture reuses one layer's physical CPU budget. Torch wheels may
@@ -1147,104 +1108,6 @@ def estimate_per_layer_bytes(
     return per_layer_weight, per_layer_active
 
 
-def pick_layers_per_shard(
-    model_path: str,
-    *,
-    nsamples: int,
-    seqlen: int,
-    dtype_bytes: int = DEFAULT_DTYPE_BYTES,
-    act_mult: int = DEFAULT_ACT_MULT,
-    safety_gb: float = DEFAULT_SAFETY_GB,
-    full_graph_act_mult: int = DEFAULT_FULL_GRAPH_ACT_MULT,
-    fixed_overhead_gb: float = DEFAULT_FIXED_OVERHEAD_GB,
-    available_ram_bytes: int | None = None,
-    hold_all_layers_in_cache: bool = True,
-    default: int = 2,
-) -> tuple[int, dict]:
-    """Pick LAYERS_PER_SHARD from host memory + model size.
-
-    Returns `(lps, diagnostics)` so callers can log the derivation.
-
-    `hold_all_layers_in_cache=True` reserves enough RAM for the layer
-    cache to fit every decoder layer (zero evictions → no empty_cache
-    stalls). If that leaves too little for shard work, it reserves the
-    streaming window of at most `STREAMING_CACHE_WINDOW_LAYERS` instead.
-    """
-    cfg_path = Path(model_path) / "config.json"
-    if not cfg_path.exists():
-        return default, {"reason": "no config.json", "lps": default}
-    with open(cfg_path) as f:
-        cfg = json.load(f)
-    n_layers = _num_layers(cfg)
-    hidden = _hidden_size(cfg)
-    if n_layers <= 0 or hidden <= 0:
-        return default, {"reason": "missing layer/hidden in config", "lps": default}
-
-    per_layer_weight, per_layer_active = estimate_per_layer_bytes(
-        model_path, n_layers, hidden, nsamples, seqlen,
-        dtype_bytes=dtype_bytes, act_mult=act_mult, act_width=_act_width(cfg),
-    )
-    avail = available_ram_bytes if available_ram_bytes is not None else _available_ram_bytes()
-    safety = int(safety_gb * 1024 ** 3)
-
-    if hold_all_layers_in_cache:
-        cache_reserve = n_layers * per_layer_weight
-    else:
-        # Streaming tier. LRU under a cyclic layer sweep yields ZERO
-        # reuse whenever the cache cannot hold the full cycle — a
-        # half-model reserve buys ~nothing (measured 9-11% hit rate on
-        # Laguna-117B) while starving shard width down to lps=1, which
-        # multiplies the number of full-model sweeps. Reserve only a
-        # prefetch window deep enough to overlap reads with compute
-        # (workers in flight + completed-ahead margin) and spend the
-        # rest of RAM on layers-per-shard: each extra layer per shard
-        # removes an entire model sweep from the phase-3 schedule.
-        cache_reserve = (
-            min(n_layers, STREAMING_CACHE_WINDOW_LAYERS) * per_layer_weight)
-
-    # Full-graph checkpointed activations: autograd retains activations
-    # at ~sqrt(n_layers) boundaries across ALL layers, not just tracked
-    # ones — this is fixed memory that any shard incurs. The probe's phase 1
-    # also holds one boundary activation per layer in host RAM. Both are
-    # hc_mult residual streams wide. Plus HF / tokenizer / Python overhead floor.
-    hc_mult = max(1, int((cfg.get("text_config") or cfg).get("hc_mult", 1)))
-    full_graph_act = (nsamples * seqlen * hidden * hc_mult * dtype_bytes
-                      * (full_graph_act_mult + n_layers + 1))
-    overhead = int(fixed_overhead_gb * 1024 ** 3)
-
-    shard_budget = avail - safety - cache_reserve - full_graph_act - overhead
-    # If the full cache leaves too little, reserve the streaming window.
-    if shard_budget < per_layer_active and hold_all_layers_in_cache:
-        return pick_layers_per_shard(
-            model_path, nsamples=nsamples, seqlen=seqlen,
-            dtype_bytes=dtype_bytes, act_mult=act_mult,
-            safety_gb=safety_gb,
-            full_graph_act_mult=full_graph_act_mult,
-            fixed_overhead_gb=fixed_overhead_gb,
-            available_ram_bytes=avail,
-            hold_all_layers_in_cache=False, default=default,
-        )
-    shard_budget = max(shard_budget, per_layer_active)  # never below 1 layer
-
-    lps = max(1, int(shard_budget // per_layer_active))
-    lps = min(lps, n_layers)
-
-    return lps, {
-        "lps": lps,
-        "n_layers": n_layers,
-        "hidden": hidden,
-        "per_layer_weight_gb": per_layer_weight / 1024 ** 3,
-        "per_layer_active_gb": per_layer_active / 1024 ** 3,
-        "full_graph_act_gb": full_graph_act / 1024 ** 3,
-        "fixed_overhead_gb": fixed_overhead_gb,
-        "available_gb": avail / 1024 ** 3,
-        "safety_gb": safety_gb,
-        "cache_reserve_gb": cache_reserve / 1024 ** 3,
-        "shard_budget_gb": shard_budget / 1024 ** 3,
-        "hold_all_layers": hold_all_layers_in_cache,
-    }
-
-
 def pick_cache_headroom_gb(
     model_path: str,
     *,
@@ -1283,72 +1146,3 @@ def pick_cache_headroom_gb(
         "safety_gb": safety_gb,
         "layers_per_shard": layers_per_shard,
     }
-
-
-def autoscale(
-    model_path: str,
-    *,
-    nsamples: int,
-    seqlen: int,
-    layers_per_shard_env: str | int | None = None,
-    cache_headroom_gb_env: str | float | None = None,
-    safety_gb: float = DEFAULT_SAFETY_GB,
-) -> tuple[int, float, dict]:
-    """Compute `(layers_per_shard, cache_headroom_gb)` from model + host.
-
-    Explicit env overrides win:
-      - `layers_per_shard_env` (int or stringified int) skips LPS autoscale
-      - `cache_headroom_gb_env` (float or stringified float) skips headroom autoscale
-
-    Use `"auto"` or `None` to request autoscale.
-    """
-    diag: dict = {}
-
-    # Parse LPS override
-    lps: int
-    if layers_per_shard_env in (None, "", "auto", "AUTO"):
-        lps, lps_diag = pick_layers_per_shard(
-            model_path, nsamples=nsamples, seqlen=seqlen, safety_gb=safety_gb,
-        )
-        diag["lps_autoscaled"] = lps_diag
-    else:
-        lps = int(layers_per_shard_env)
-        diag["lps_source"] = f"explicit={lps}"
-
-    # Parse headroom override
-    headroom: float
-    if cache_headroom_gb_env in (None, "", "auto", "AUTO"):
-        headroom, hr_diag = pick_cache_headroom_gb(
-            model_path, safety_gb=safety_gb,
-            layers_per_shard=lps, nsamples=nsamples, seqlen=seqlen,
-        )
-        diag["headroom_autoscaled"] = hr_diag
-    else:
-        headroom = float(cache_headroom_gb_env)
-        diag["headroom_source"] = f"explicit={headroom}"
-
-    return lps, headroom, diag
-
-
-if __name__ == "__main__":
-    # CLI usage: python -m prismaquant.autoscale <model_path> [--nsamples N --seqlen T]
-    import argparse
-    ap = argparse.ArgumentParser(description="Print autoscaled memory knobs.")
-    ap.add_argument("model_path")
-    ap.add_argument("--nsamples", type=int, default=int(os.environ.get("NSAMPLES", 32)))
-    ap.add_argument("--seqlen", type=int, default=int(os.environ.get("SEQLEN", 1024)))
-    ap.add_argument("--safety-gb", type=float, default=DEFAULT_SAFETY_GB)
-    ap.add_argument("--lps", default=os.environ.get("LAYERS_PER_SHARD"))
-    ap.add_argument("--headroom", default=os.environ.get("CACHE_HEADROOM_GB"))
-    args = ap.parse_args()
-
-    lps, hr, diag = autoscale(
-        args.model_path,
-        nsamples=args.nsamples, seqlen=args.seqlen,
-        layers_per_shard_env=args.lps,
-        cache_headroom_gb_env=args.headroom,
-        safety_gb=args.safety_gb,
-    )
-    print(f"LAYERS_PER_SHARD={lps}")
-    print(f"CACHE_HEADROOM_GB={hr:.1f}")
-    print(json.dumps(diag, indent=2))
