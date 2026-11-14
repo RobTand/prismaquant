@@ -33,11 +33,7 @@ Transformers forward source files, runtime selectors/configuration and a
 bitwise repeated-clean-forward null gate. It exports a short pricing Torch
 trace per dtype and hashes every durable output on completion.
 
-Submit from dl380g10 through published PrismaBuild; the launcher is only a
-child of that admitted action. CPU-only preflight uses `--anywhere`, CPU 2 and
-aggregate memory 8 GiB. The GPU numerical screen uses `--anywhere --exclusive
---gpu --cpus 4 --demand mem_gb=32 --gpu-memory-gb 32`; on GB10 that last 32 GiB
-is a subset cap within the shared physical reservation. The container
+Submit it as a Flux job (see the flux skill). The container
 CPU-accounted cap is 8 GiB. Native threads are 1. Astra approved this bounded
 screen after fresh fleet telemetry. Class-scoped measurement submission from
 x86 dl380 refuses because the submitter has no NVIDIA platform evidence;

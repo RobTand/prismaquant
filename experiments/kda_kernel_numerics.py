@@ -1,6 +1,6 @@
 """Compare the KDA capture kernel and the executed fallback with a float64 oracle (PQ #1199).
 
-Run inside the GLM derivative image, through PrismaBuild. Three
+Use the GLM derivative image. Submit it as a Flux job (see the flux skill). Three
 implementations see the same inputs:
 
 * ``fallback``: the image's own ``chunk_kimi_delta_attention``, reached

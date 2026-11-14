@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure the parallel cold-read ceiling of the dl380g10 raidz1 pool.
 
-Runs on dl380g10 through PrismaBuild. Each arm reads a disjoint prefix of a
+Submit it as a Flux job (see the flux skill). Each arm reads a disjoint prefix of a
 distinct already-priced expert row's capture files, straight off the local pool
 path (``/storage_pool/shared/...``), never the NFS loopback, so the number is a
 property of the pool and not of the NFS client.
