@@ -174,6 +174,20 @@ def test_baseline_write_keeps_no_edge_identities(repo, capsys):
     assert 'edge_groups' not in json.loads((repo / pq.BASELINE).read_text())
 
 
+@pytest.mark.parametrize('base_scc,head_scc', [(2, 1), (1, 2)])
+def test_scc_below_baseline_keeps_gains_against_base(repo, capsys, base_scc, head_scc):
+    graphs = {size: pq.core.measure({}, {('a', 'b')} | ({('b', 'a')} if size == 2 else set()))
+              for size in (1, 2)}
+    before, after = graphs[base_scc], graphs[head_scc]
+    path = repo / pq.BASELINE
+    config = pq.core.baseline_record(before)
+    config['figures']['scc_max'] = 3
+    put(repo, str(pq.BASELINE), json.dumps(config))
+    assert pq.check(before, after, path, repo / pq.ALLOWLIST) == int(head_scc > base_scc)
+    assert ('scc_max rose from 1 to 2 against the base commit' in capsys.readouterr().err) == (head_scc > base_scc)
+    assert json.loads(path.read_text()) == config
+
+
 def test_committed_baseline_contains_only_limits():
     config = json.loads((ROOT / pq.BASELINE).read_text())
     assert set(config) == {'schema', 'figures', 'tolerances', 'reach_budget', 'test_to_test',
