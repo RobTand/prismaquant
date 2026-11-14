@@ -12,13 +12,8 @@
 #
 # Add "queue" to queue and remove it to dequeue. After a failure, comment
 # "@mergifyio queue"; toggling the label does not reset a dequeued PR.
-# TL3 tests and reviews each change, posts its "TL3
-# approval" check on the reviewed head, then adds "tl3-queue". TL3 follows
-# Mergify's queue check on the PR head. The batch's full "gate" decides every
-# merge. The issue-link check stays:
-# TL3's branch names and "Refs #<issue>." bodies pass it. TL3 finds its rule's
-# check by name, so keep "Queue TL3-approved PRs".
-# TL3's App needs an explicit command allowance because installation does not
+# TL3b queues its pull requests with "queue" like every other pull request.
+# Its App needs an explicit command allowance because installation does not
 # grant a human collaborator's write permission.
 # Classic branch protection requires a pull request but no status checks.
 # Mergify injects classic required checks into both queue and merge
@@ -68,14 +63,8 @@ queue_rules:
     queue_conditions:
       - base = main
       - -draft
-      - or:
-          - and:
-              - label = queue
-              - check-success = linked issue
-          - and:
-              - label = tl3-queue
-              - check-success = @tl3-robtand/TL3 approval
-              - check-success = linked issue
+      - label = queue
+      - check-success = linked issue
     merge_conditions:
       - check-success = gate
     merge_method: merge
@@ -100,12 +89,3 @@ pull_request_rules:
       - -draft
     actions:
       queue:
-  - name: Queue TL3-approved PRs
-    conditions:
-      - base = main
-      - label = tl3-queue
-      - -draft
-      - check-success = @tl3-robtand/TL3 approval
-    actions:
-      queue:
-        name: default
