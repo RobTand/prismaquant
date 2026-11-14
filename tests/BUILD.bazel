@@ -74098,12 +74098,6 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    args = [
-        "'--deselect=tests/test_native_aura_source_binding_audit.py::test_hub_native_aura_uses_resolved_original_source[streamed-journal]'",
-        "'--deselect=tests/test_native_aura_source_binding_audit.py::test_ordinary_aura_main_delivers_declared_values_before_measurement[True-False-bfloat16]'",
-        "'--deselect=tests/test_native_aura_source_binding_audit.py::test_ordinary_aura_main_delivers_declared_values_before_measurement[True-False-float32]'",
-        "'--deselect=tests/test_native_aura_source_binding_audit.py::test_ordinary_aura_main_delivers_declared_values_before_measurement[True-True-bfloat16]'",
-    ],
     timeout = "moderate",
 )
 
@@ -75561,10 +75555,6 @@ pq_py_test(
         "//:tools/tessera_campaign_container",
         "//:tools/tessera_fleet/__init__",
         ":conftest",
-    ],
-    args = [
-        "'--deselect=tests/test_native_source_resident_intake_audit.py::test_actual_resident_caller_receives_decoded_source[expert-streamed-main-bf16-control]'",
-        "'--deselect=tests/test_native_source_resident_intake_audit.py::test_actual_resident_caller_receives_decoded_source[expert-streamed-main-native-block-fp8]'",
     ],
     timeout = "moderate",
 )

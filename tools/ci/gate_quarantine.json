@@ -128,60 +128,6 @@
       }
     },
     {
-      "target": "tests/test_native_aura_source_binding_audit.py::test_hub_native_aura_uses_resolved_original_source[streamed-journal]",
-      "issue": 3188,
-      "reason": "RuntimeError: streamed layer 0 is not resident after its required prefetch; refusing synchronous ...",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 63
-      }
-    },
-    {
-      "target": "tests/test_native_aura_source_binding_audit.py::test_ordinary_aura_main_delivers_declared_values_before_measurement[True-False-bfloat16]",
-      "issue": 3188,
-      "reason": "RuntimeError: streamed layer 0 is not resident after its required prefetch; refusing synchronous ...",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 64
-      }
-    },
-    {
-      "target": "tests/test_native_aura_source_binding_audit.py::test_ordinary_aura_main_delivers_declared_values_before_measurement[True-False-float32]",
-      "issue": 3188,
-      "reason": "RuntimeError: streamed layer 0 is not resident after its required prefetch; refusing synchronous ...",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 65
-      }
-    },
-    {
-      "target": "tests/test_native_aura_source_binding_audit.py::test_ordinary_aura_main_delivers_declared_values_before_measurement[True-True-bfloat16]",
-      "issue": 3188,
-      "reason": "RuntimeError: streamed layer 0 is not resident after its required prefetch; refusing synchronous ...",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 66
-      }
-    },
-    {
-      "target": "tests/test_native_source_resident_intake_audit.py::test_actual_resident_caller_receives_decoded_source[expert-streamed-main-bf16-control]",
-      "issue": 3188,
-      "reason": "RuntimeError: streamed layer 0 is not resident after its required prefetch; refusing synchronous ...",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 69
-      }
-    },
-    {
-      "target": "tests/test_native_source_resident_intake_audit.py::test_actual_resident_caller_receives_decoded_source[expert-streamed-main-native-block-fp8]",
-      "issue": 3188,
-      "reason": "RuntimeError: streamed layer 0 is not resident after its required prefetch; refusing synchronous ...",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 70
-      }
-    },
-    {
       "target": "tests/test_spaced_lax_tools_routing_1301.py::test_source_adoption_batch_reaches_only_its_actual_input_boundary",
       "issue": 3184,
       "reason": "AssertionError",
