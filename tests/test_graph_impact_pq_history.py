@@ -39,7 +39,6 @@ def repo(tmp_path, monkeypatch):
     put(tmp_path, 'tests/test_b.py', 'from prismaquant import owner\n' + '# distinct target padding\n' * 12)
     put(tmp_path, 'tests/conftest.py', '')
     put(tmp_path, 'tools/ci/gate_durations.json', '{"files": {}}')
-    put(tmp_path, 'tools/ci/gate_quarantine.json', '{}')
     put(tmp_path, str(pq.ALLOWLIST), '{}')
     commit(tmp_path, 'source')
     return tmp_path

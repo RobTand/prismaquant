@@ -14,7 +14,7 @@ import time
 import urllib.request
 import uuid
 
-from prismaquant.data_manifest_contract import SHARED_MOUNT
+SHARED_MOUNT = "/mnt/shared"
 
 
 def main():
