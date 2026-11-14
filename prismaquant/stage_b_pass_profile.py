@@ -58,7 +58,12 @@ campaign row.
   ``export_failed``, ``unsupported`` (no CUDA) or ``not_reached``. A group
   beyond ``identity["capture_groups"]`` raises ``ValueError``. A session
   without that count cannot check, and reports ``not_reached`` when the
-  pass ends before the group. Only capture sessions record it;
+  pass ends before the group. Only capture sessions record it. For the
+  statuses ``complete``, ``incomplete`` and ``export_failed``, the entry
+  also has ``device`` (``name``, ``capability``, ``torch``, ``cuda``),
+  ``allocated_bytes`` and ``reserved_bytes`` (each ``{"start", "end"}``,
+  read when the history starts and before the snapshot export). The
+  statuses ``unsupported`` and ``not_reached`` have none of them;
 * ``memory_entries=100000`` -- the most allocator events kept (maximum
   1000000).
 
@@ -238,6 +243,8 @@ class PassProfileSession:
     memory_entries: int = 100000
     _memory_status: str | None = None
     _memory_on: bool = False
+    # The device record and the byte reads of the group. Empty until it starts.
+    _memory_extra: dict = field(default_factory=dict)
     units: list = field(default_factory=list)
     _unit_counters: dict | None = None
     _profiler: object = None
@@ -312,12 +319,22 @@ class PassProfileSession:
         memory._record_memory_history(
             "all", context="alloc", stacks="python", max_entries=self.memory_entries)
         self._memory_on = True
+        self._memory_extra = {
+            "device": {
+                "name": torch.cuda.get_device_name(),
+                "capability": list(torch.cuda.get_device_capability()),
+                "torch": str(torch.__version__), "cuda": torch.version.cuda},
+            "allocated_bytes": {"start": torch.cuda.memory_allocated()},
+            "reserved_bytes": {"start": torch.cuda.memory_reserved()}}
 
     def _memory_stop(self, status: str) -> None:
         """Export the history, then stop it, even when the export fails."""
+        import torch
         from torch.cuda import memory
 
         self._memory_on = False
+        self._memory_extra["allocated_bytes"]["end"] = torch.cuda.memory_allocated()
+        self._memory_extra["reserved_bytes"]["end"] = torch.cuda.memory_reserved()
         try:
             memory._dump_snapshot(str(self.out_dir / f"{self.stem}.memory_snapshot.pickle"))
         except Exception as exc:  # a lost snapshot is recorded, never fatal
@@ -413,7 +430,8 @@ class PassProfileSession:
         if self.memory_group is not None:
             record["memory"] = {
                 "group": self.memory_group, "entries": self.memory_entries,
-                "status": self._memory_status or "not_reached"}
+                "status": self._memory_status or "not_reached",
+                **self._memory_extra}
         (self.out_dir / f"{self.stem}.timing.json").write_text(
             json.dumps(record, indent=1, sort_keys=True, default=str) + "\n")
         return exc_type is ShadowPassDone
