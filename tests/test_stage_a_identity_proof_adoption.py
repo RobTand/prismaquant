@@ -99,7 +99,8 @@ def test_a_shard_restamped_after_the_proof_refuses_adoption_and_hashes_fresh(
         assert 'names another object' in out
         assert 'payload reads use the current source-authentication policy' in out
         assert sorted(name for name, _ in state['hashed']) == [
-            'head.safetensors', 'selected.safetensors']
+            'head.safetensors', 'head.safetensors',
+            'selected.safetensors', 'selected.safetensors']
     else:
         assert state['hashed'] == []
 
@@ -112,7 +113,8 @@ def test_a_proof_file_that_differs_from_its_declared_digest_is_not_adopted(
     assert campaign.main(_proof_argv(argv, proof, '0' * 64)) == campaign.EXIT_EMPTY_MENU
     assert 'differs from its declared SHA256' in capsys.readouterr().out
     assert sorted(name for name, _ in state['hashed']) == [
-        'head.safetensors', 'selected.safetensors']
+        'head.safetensors', 'head.safetensors',
+        'selected.safetensors', 'selected.safetensors']
 
 
 def test_a_malformed_proof_is_refused_and_the_row_hashes_fresh(monkeypatch, tmp_path, capsys):
@@ -134,7 +136,8 @@ def test_a_malformed_proof_is_refused_and_the_row_hashes_fresh(monkeypatch, tmp_
     assert 'streamed source identity cache shard coverage differs' in out
     assert 'payload reads use the current source-authentication policy' in out
     assert sorted(name for name, _ in state['hashed']) == [
-        'head.safetensors', 'selected.safetensors']
+        'head.safetensors', 'head.safetensors',
+        'selected.safetensors', 'selected.safetensors']
 
 
 def test_a_content_edit_behind_a_restored_mtime_still_refuses_the_row(monkeypatch, tmp_path):
