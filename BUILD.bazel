@@ -8610,11 +8610,6 @@ filegroup(
 )
 
 filegroup(
-    name = "files/tools/pq282_equality",
-    srcs = glob(["tools/pq282_equality/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
-)
-
-filegroup(
     name = "files/tools/templates",
     srcs = glob(["tools/templates/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
 )
@@ -12901,51 +12896,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         "@pq_pip//tessera_quant",
         "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "tools/pq282_equality/equality_diff",
-    srcs = [
-        "tools/pq282_equality/equality_diff.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-    ],
-)
-
-pq_py_library(
-    name = "tools/pq282_equality/merge_and_diff",
-    srcs = [
-        "tools/pq282_equality/merge_and_diff.py",
-    ],
-    data = [
-        "tools/dispatch_tessera_campaign.py",
-        "tools/pq282_equality/equality_diff.py",
-    ],
-)
-
-pq_py_library(
-    name = "tools/pq282_equality/recheck_refusal_order",
-    srcs = [
-        "tools/pq282_equality/recheck_refusal_order.py",
-    ],
-    data = [
-        "tools/pq282_equality/equality_diff.py",
-        "tools/pq282_equality/recheck_refusal_order.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":tools/dispatch_tessera_campaign",
-    ],
-)
-
-pq_py_library(
-    name = "tools/pq282_equality/verify_pps",
-    srcs = [
-        "tools/pq282_equality/verify_pps.py",
     ],
 )
 
