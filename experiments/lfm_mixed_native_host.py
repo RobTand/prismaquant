@@ -14,6 +14,8 @@ import time
 import urllib.request
 import uuid
 
+from prismaquant.data_manifest_contract import SHARED_MOUNT
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -25,7 +27,7 @@ def main():
     parser.add_argument("--model", type=Path, required=True)
     args = parser.parse_args()
     for path in (args.source, args.model):
-        path.resolve().relative_to(Path("/mnt/shared"))
+        path.resolve().relative_to(SHARED_MOUNT)
     args.out.mkdir(parents=True, exist_ok=False)
     repo = Path(__file__).resolve().parents[1]
     raw = args.source_manifest.read_bytes()
@@ -75,7 +77,7 @@ def main():
                "--cidfile", str(cidfile), "--label", f"prismaquant.mixed-native={owner}",
                "--memory=16g", "--memory-swap=16g", "--cpus=4",
                f"--cpuset-cpus={','.join(map(str, record['cpu_affinity']))}", "--ipc=host",
-               "-v", f"{repo}:/pq:ro", "-v", "/mnt/shared:/mnt/shared:ro",
+               "-v", f"{repo}:/pq:ro", "-v", f"{SHARED_MOUNT}:{SHARED_MOUNT}:ro",
                "-v", f"{local_out}:/out", "-w", "/pq",
                "-e", f"PYTHONPATH={args.source}/src:/pq", "-e", "PYTHONDONTWRITEBYTECODE=1",
                "-e", "OMP_NUM_THREADS=1", "-e", "MKL_NUM_THREADS=1", "-e", "OPENBLAS_NUM_THREADS=1",

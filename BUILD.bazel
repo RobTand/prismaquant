@@ -7146,6 +7146,10 @@ pq_py_library(
         "experiments/lfm_mixed_native_host.py",
         "experiments/lfm_mixed_native_preflight.py",
     ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/data_manifest_contract",
+    ],
 )
 
 pq_py_library(

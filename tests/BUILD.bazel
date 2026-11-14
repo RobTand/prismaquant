@@ -68716,11 +68716,6 @@ pq_py_test(
         "//:experiments/lfm_mixed_native_preflight",
         ":conftest",
     ],
-    args = [
-        "--deselect=tests/test_lfm_native_launcher_affinity_audit.py::test_lfm_launcher_declares_admitted_affinity",
-        "--deselect=tests/test_lfm_native_launcher_affinity_audit.py::test_lfm_launcher_refuses_source_manifest_drift",
-        "--deselect=tests/test_lfm_native_launcher_affinity_audit.py::test_lfm_launcher_refuses_unresolved_image_digest",
-    ],
     timeout = "moderate",
 )
 

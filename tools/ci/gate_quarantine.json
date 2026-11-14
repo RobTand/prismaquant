@@ -92,33 +92,6 @@
       }
     },
     {
-      "target": "tests/test_lfm_native_launcher_affinity_audit.py::test_lfm_launcher_declares_admitted_affinity",
-      "issue": 3187,
-      "reason": "FileNotFoundError: missing /mnt/shared/pq-lfm-affinity-audit-*",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 58
-      }
-    },
-    {
-      "target": "tests/test_lfm_native_launcher_affinity_audit.py::test_lfm_launcher_refuses_source_manifest_drift",
-      "issue": 3187,
-      "reason": "FileNotFoundError: missing /mnt/shared/pq-lfm-affinity-audit-*",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 59
-      }
-    },
-    {
-      "target": "tests/test_lfm_native_launcher_affinity_audit.py::test_lfm_launcher_refuses_unresolved_image_digest",
-      "issue": 3187,
-      "reason": "FileNotFoundError: missing /mnt/shared/pq-lfm-affinity-audit-*",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 60
-      }
-    },
-    {
       "target": "tests/test_spaced_lax_tools_routing_1301.py::test_source_adoption_batch_reaches_only_its_actual_input_boundary",
       "issue": 3184,
       "reason": "AssertionError",
