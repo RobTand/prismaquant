@@ -1,7 +1,7 @@
 """Pure selection decisions for the Remote Bazel cutover gate."""
 from __future__ import annotations
 
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import argparse
 import contextlib
 import io
@@ -40,7 +40,6 @@ class SelectionError(RuntimeError):
 def fallback_files(paths):
     return sorted(path for path in paths if path in GATE_INPUTS
                   or path.startswith('tools/bazel/')
-                  or PurePosixPath(path).name in {'BUILD', 'BUILD.bazel'}
                   or path.endswith('.bzl'))
 
 
