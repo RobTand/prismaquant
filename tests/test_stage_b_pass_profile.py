@@ -1,4 +1,5 @@
 """PQ #1269: the Stage B pass profiler is off by default and bounded when on."""
+import itertools
 import json
 from pathlib import Path
 
@@ -148,12 +149,18 @@ def _memory_request(tmp_path, spec):
 
 
 class _MemorySpy:
-    """Stands in for the two CUDA allocator history calls."""
+    """Stands in for the two CUDA allocator history calls and the byte reads."""
 
     def __init__(self):
         self.calls = []
         self.on = False
         self.fail_dump = False
+        self.reset_reads()
+
+    def reset_reads(self):
+        # Each read gives the next value: the start read, then the end read.
+        self.allocated = itertools.count(10, 20)
+        self.reserved = itertools.count(100, 50)
 
     def record(self, enabled, **kwargs):
         self.calls.append(("record", enabled, kwargs))
@@ -171,6 +178,11 @@ def memory_spy(monkeypatch):
     spy = _MemorySpy()
     monkeypatch.setattr(torch.cuda.memory, "_record_memory_history", spy.record)
     monkeypatch.setattr(torch.cuda.memory, "_dump_snapshot", spy.dump)
+    # A CPU box has no device to read, so the four device reads are fixed.
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda *a, **k: "Fake GPU")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *a, **k: (12, 1))
+    monkeypatch.setattr(torch.cuda, "memory_allocated", lambda *a, **k: next(spy.allocated))
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda *a, **k: next(spy.reserved))
     return spy
 
 
@@ -321,6 +333,62 @@ def test_memory_group_that_the_pass_never_reaches_is_not_reached(
     _run_memory_groups(session, monkeypatch, memory_spy, groups=2)
     assert memory_spy.calls == []
     assert _memory_timing(tmp_path)["memory"]["status"] == "not_reached"
+
+
+def test_memory_entry_has_the_device_and_the_bytes_unless_unsupported_or_not_reached(
+        tmp_path, monkeypatch, memory_spy):
+    new_fields = ("device", "allocated_bytes", "reserved_bytes")
+    cases = [("complete", None, False), ("incomplete", 1, False), ("export_failed", None, True)]
+    for status, fail_in, fail_dump in cases:
+        out = tmp_path / status
+        session = _memory_request(out, "memory_group=1").session(
+            kind="capture", probe=1, identity={"capture_groups": 3})
+        memory_spy.reset_reads()
+        memory_spy.fail_dump = fail_dump
+        if fail_in is None:
+            _run_memory_groups(session, monkeypatch, memory_spy)
+        else:
+            with pytest.raises(RuntimeError, match="capture failed"):
+                _run_memory_groups(session, monkeypatch, memory_spy, fail_in=fail_in)
+        memory = json.loads((out / "quantum-p1-capture.timing.json").read_text())["memory"]
+        assert memory.get("device") is not None, status
+        assert memory["status"] == status
+        assert memory["device"] == {
+            "name": "Fake GPU", "capability": [12, 1],
+            "torch": str(torch.__version__), "cuda": torch.version.cuda}
+        assert memory["allocated_bytes"] == {"start": 10, "end": 30}
+        assert memory["reserved_bytes"] == {"start": 100, "end": 150}
+    # Without CUDA, or when the group is never reached, no new field appears.
+    for status, spec, cuda in [("unsupported", "memory_group=1", False),
+                               ("not_reached", "memory_group=5", True)]:
+        out = tmp_path / status
+        session = _memory_request(out, spec).session(kind="capture", probe=1, identity={})
+        _run_memory_groups(session, monkeypatch, memory_spy, cuda=cuda, groups=2)
+        memory = json.loads((out / "quantum-p1-capture.timing.json").read_text())["memory"]
+        assert memory["status"] == status
+        assert [name for name in new_fields if name in memory] == []
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA (allocator)")
+def test_cuda_memory_entry_has_the_device_and_the_group_bytes(tmp_path):
+    session = _memory_request(
+        tmp_path, "capture=0,wait=0,warmup=0,active=1,memory_group=1,memory_entries=8"
+    ).session(kind="capture", probe=0, identity={"quantum_id": "mem", "capture_groups": 3})
+    kept_bytes = 4 << 20
+    with session:
+        for index in range(3):
+            session.unit_begin()
+            if index == 1:
+                kept = torch.empty(kept_bytes // 4, device="cuda", dtype=torch.float32)
+            session.unit_end()
+            if index == 1:
+                del kept
+    memory = json.loads((tmp_path / "mem-p0-capture.timing.json").read_text())["memory"]
+    assert memory.get("device") is not None
+    assert memory["device"]["name"] == torch.cuda.get_device_name()
+    allocated, reserved = memory["allocated_bytes"], memory["reserved_bytes"]
+    assert allocated["end"] - allocated["start"] >= kept_bytes
+    assert reserved["end"] >= allocated["end"]
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA (allocator)")
