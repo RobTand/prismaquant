@@ -35,7 +35,8 @@
 
 set -euo pipefail
 
-: "${MODEL_PATH:?Set MODEL_PATH to the source HF model directory}"
+MODEL_PATH="$(realpath -e -- "${MODEL_PATH:?Set MODEL_PATH to the source HF model directory}")"
+export MODEL_PATH
 : "${WORK_DIR:?Set WORK_DIR to a writable directory for artifacts}"
 : "${FORMATS:=NVFP4,FP8_DYNAMIC,BF16}"
 
@@ -246,7 +247,6 @@ export FLA_CONFIG_DIR="${FLA_CONFIG_DIR:-$PIPELINE_SCRIPT_DIR/fla_configs/gb10}"
 # the pipeline spec and the allocator all see the same answer.
 # -----------------------------------------------------------------------
 if ! TARGET_PROFILE_RESOLVED="$(
-  PQ_MODEL_PATH="$MODEL_PATH" \
   PQ_EXPORT_CONTAINER="$EXPORT_CONTAINER" \
   PQ_TARGET_PROFILE="$TARGET_PROFILE" \
   PQ_TARGET_PROFILE_DEFAULT="$TARGET_PROFILE_DEFAULT" \
@@ -262,7 +262,7 @@ from prismaquant.serving_profiles import (
     resolve_target_profile,
 )
 
-profile = detect_profile(os.environ["PQ_MODEL_PATH"])
+profile = detect_profile(os.environ["MODEL_PATH"])
 resolved = resolve_target_profile(
     profile,
     os.environ.get("PQ_TARGET_PROFILE") or None,
@@ -471,7 +471,6 @@ PY
 # source/live alias of one structural head (e.g. DeepSeek's head/lm_head pair)
 # while leaving unrelated profile pins intact.
 if ! LM_HEAD_POLICY_TEXT="$(
-  PQ_MODEL_PATH="$MODEL_PATH" \
   PQ_ALLOW_PINNED="$ALLOW_PINNED" \
   PQ_LM_HEAD_FORMAT="$LM_HEAD_FORMAT" \
   PQ_BODY_FORMATS="$FORMATS" \
@@ -495,7 +494,7 @@ from prismaquant.tessera_serving_scope import (
     unit_structure_from_profile,
 )
 
-profile = detect_profile(os.environ["PQ_MODEL_PATH"])
+profile = detect_profile(os.environ["MODEL_PATH"])
 parser = argparse.ArgumentParser()
 parser.add_argument("--target-profile", default=None)
 add_serving_scope_arguments(parser)
