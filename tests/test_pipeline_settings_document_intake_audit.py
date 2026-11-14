@@ -83,13 +83,13 @@ def test_public_guard_refuses_malformed_current_request(tmp_path, damage):
 
 
 def test_public_guard_resolves_aliased_late_override(tmp_path):
-    stage = "aura-dw-cache"
+    stage = "aura-cost"
     settings = {source: "value" for _key, source in pipeline.STAGE_SETTINGS_KEYS[stage]
-                if source != "NSAMPLES"}
+                if source != "AURA_COST_NSAMPLES"}
     document = pipeline.stage_settings_document(settings)
-    assert document["unresolved"][stage] == ["NSAMPLES"]
+    assert document["unresolved"][stage] == ["AURA_COST_NSAMPLES"]
     code, _artifact, manifest = _check(
-        tmp_path, document, stage=stage, overrides=["NSAMPLES=8"])
+        tmp_path, document, stage=stage, overrides=["AURA_COST_NSAMPLES=8"])
     assert code == 0
     assert json.loads(manifest.read_text())["stages"][stage]["NS"] == "8"
 

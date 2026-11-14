@@ -1375,99 +1375,17 @@ if [[ "$COST_CACHE_COL_WEIGHTS_REQUIRED" == "1" ]]; then
 fi
 
 if [[ "$COST_MODE" == "aura" ]]; then
-  AURA_EXECUTION_ARGS=(
-    --hook-harvest
-    --gradient-checkpointing
-    --n-linear-chunks "$AURA_COST_LINEAR_CHUNKS"
-    --probe-microbatch "$AURA_COST_PROBE_MICROBATCH"
-  )
-  AURA_EXPERT_EXECUTION_ARGS=()
-  case "$AURA_COST_STREAMING" in
-    1|true|True|TRUE|yes|Yes|YES|on|On|ON)
-      AURA_COST_STREAMING=1
-      if [[ "$AURA_COST_CHECKPOINT_DIR" != /* ]]; then
-        echo "[pipeline] ERROR: AURA_COST_STREAMING=1 requires an absolute AURA_COST_CHECKPOINT_DIR" >&2
-        exit 2
-      fi
-      AURA_EXECUTION_ARGS=(
-        --streaming
-        --checkpoint-dir "$AURA_COST_CHECKPOINT_DIR"
-        --resume
-      )
-      # The two checkpoint schemas both own manifest.json, so the empirical
-      # routed-expert tail gets a deterministic child directory rather than
-      # colliding with the smooth AURA adjoint's root. expert_empirical_cost
-      # binds this resume to its own source/config/calibration identity.
-      AURA_EXPERT_EXECUTION_ARGS=(
-        --streaming
-        --checkpoint-dir "${AURA_COST_CHECKPOINT_DIR%/}/expert-empirical-cost"
-        --resume
-      )
-      ;;
-    0|false|False|FALSE|no|No|NO|off|Off|OFF)
-      AURA_COST_STREAMING=0
-      if [[ -n "$AURA_COST_CHECKPOINT_DIR" ]]; then
-        echo "[pipeline] ERROR: AURA_COST_CHECKPOINT_DIR requires AURA_COST_STREAMING=1" >&2
-        exit 2
-      fi
-      ;;
-    *)
-      echo "[pipeline] ERROR: AURA_COST_STREAMING must be 0 or 1" >&2
-      exit 2
-      ;;
-  esac
-  # [2b] Production-faithful dW cache for the AURA adjoint. Under
-  # SELECTION_MODE=validated-surrogate this IS the frontier cache (identical
-  # path + settings to stage [4/4], which then skip-if-exists): ONE
-  # format-menu cache supplies the cost's rendered dW, the frontier's
-  # measured bytes, and the exported bytes (principle #8) — the regen-27b
-  # prodcache_menu.pkl pattern.
-  AURA_CACHE_FORMATS="$(python3 - "$COST_FORMATS" <<'PY'
-import sys
-from prismaquant import format_registry as fr
-
-seen = []
-for raw in sys.argv[1].split(","):
-    name = raw.strip()
-    if not name:
-        continue
-    canon = fr.canonical_format_name(name)
-    if canon != "BF16" and canon not in seen:
-        seen.append(canon)
-print(",".join(seen))
-PY
-)"
-  if [[ -z "$AURA_CACHE_FORMATS" ]]; then
-    echo "[pipeline] ERROR: COST_MODE=aura has no non-BF16 formats in FORMATS" >&2
+  # [2c] renders anchors from keyed act/ rows. It has no [2b] cache.
+  # Validated-surrogate keeps its separate frontier cache in [4/4].
+  AURA_COST_STREAMING=1
+  AURA_COST_CHECKPOINT_DIR="${AURA_COST_CHECKPOINT_DIR:-${WORK_DIR}/artifacts/aura-checkpoints}"
+  if [[ "$AURA_COST_CHECKPOINT_DIR" != /* ]]; then
+    echo "[pipeline] ERROR: streamed AURA requires an absolute AURA_COST_CHECKPOINT_DIR" >&2
     exit 2
   fi
-  require_stage_settings "$PRODUCTION_RENDER_COST_CACHE_PATH" aura-dw-cache \
-    "AURA_CACHE_FORMATS=$AURA_CACHE_FORMATS"
-  # Only [2c] reads this cache; a final cost_aura.pkl (settings checked below) skips [2c] (#3418).
-  if [[ ! -f "$PRODUCTION_RENDER_COST_CACHE_PATH" && ! -f "$AURA_COST_RAW" ]]; then
-    echo "[pipeline] [2b/4] building format-menu production cache for AURA dW ..."
-    python3 -m prismaquant.build_production_cache \
-      --model "$MODEL_PATH" \
-      --output "$PRODUCTION_RENDER_COST_CACHE_PATH" \
-      --formats "$AURA_CACHE_FORMATS" \
-      --activation-cache-dir "${WORK_DIR}/act" \
-      "${PRODUCTION_CACHE_PIN_ARGS[@]}" \
-      --dataset "$DATASET" \
-      --n-calib-samples "$NSAMPLES" \
-      --calib-seqlen "$SEQLEN" \
-      --dtype bf16 \
-      --max-act-rows "$PRODUCTION_CACHE_MAX_ACT_ROWS" \
-      --enable "$PRODUCTION_CACHE_LEVERS" \
-      --disable "$PRODUCTION_CACHE_DISABLE_LEVERS" \
-      --cache-dir "$PRODUCTION_RENDER_COST_CACHE_DIR" \
-      --render-scope format-menu \
-      "${COST_CACHE_COL_WEIGHT_ARGS[@]+"${COST_CACHE_COL_WEIGHT_ARGS[@]}"}" \
-      $(if [[ "$SELECTION_MODE" == "validated-surrogate" ]]; then echo "--render-packed-experts"; fi) \
-      2>&1 | tee "${WORK_DIR}/logs/aura_dw_cache.log"
-  else
-    echo "[pipeline] [2b/4] AURA dW production cache or final AURA cost exists, skipping"
-  fi
-
+  STAGE_SETTINGS_ARGS+=(--setting "AURA_COST_STREAMING=1"
+                        --setting "AURA_COST_CHECKPOINT_DIR=$AURA_COST_CHECKPOINT_DIR")
+  python3 -m prismaquant.pipeline --write-stage-settings "$STAGE_SETTINGS_PATH" "${STAGE_SETTINGS_ARGS[@]}"
   # [2c] The AURA cost itself: KL-Fisher probes x production-rendered dW.
   # Profile-declared routed experts are deliberately omitted here (the smooth adjoint is
   # route-flip-blind on them) and costed empirically in [2d].
@@ -1479,17 +1397,22 @@ PY
       --cost-mode "$COST_MODE" \
       --output "$AURA_COST_RAW" \
       --formats "$COST_FORMATS" \
-      --production-cache "$PRODUCTION_RENDER_COST_CACHE_PATH" \
-      --require-production-cache \
+      --streaming --production-anchors \
+      --probe "$PROBE_PATH" \
+      --activation-cache-dir "${WORK_DIR}/act" \
+      "${PRODUCTION_CACHE_PIN_ARGS[@]}" \
+      --enable "$PRODUCTION_CACHE_LEVERS" \
+      --disable "$PRODUCTION_CACHE_DISABLE_LEVERS" \
+      --max-act-rows "$PRODUCTION_CACHE_MAX_ACT_ROWS" \
+      "${COST_CACHE_COL_WEIGHT_ARGS[@]+"${COST_CACHE_COL_WEIGHT_ARGS[@]}"}" \
+      --checkpoint-dir "$AURA_COST_CHECKPOINT_DIR" --resume \
       --n-probes "$AURA_COST_NPROBES" \
       --n-calib-samples "$AURA_COST_NSAMPLES" \
       --calib-seqlen "$AURA_COST_SEQLEN" \
       --calib-seed "$AURA_COST_CALIB_SEED" \
       --dtype "$AURA_COST_DTYPE" \
       --dataset "$DATASET" \
-      "${AURA_EXECUTION_ARGS[@]}" \
       --min-free-gib "$AURA_COST_MIN_FREE_GIB" \
-      --accurate-chunk-bytes \
       --allow-packed-expert-omission \
       "${LM_HEAD_AURA_ARGS[@]+"${LM_HEAD_AURA_ARGS[@]}"}" \
       2>&1 | tee "${WORK_DIR}/logs/aura_cost.log"

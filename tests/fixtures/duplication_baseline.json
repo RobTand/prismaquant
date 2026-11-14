@@ -261,10 +261,6 @@
    "prismaquant/glm_capture_compatibility.py",
    "prismaquant/native_operator_panel.py"
   ],
-  "_canon_fmt": [
-   "prismaquant/mtp_production_cache.py",
-   "prismaquant/streaming_production_cache.py"
-  ],
   "_canonical_bytes": [
    "prismaquant/artifact_collection.py",
    "prismaquant/dsv4_campaign_completion.py"
@@ -332,8 +328,7 @@
   "_git_commit": [
    "prismaquant/emu_forward_kl.py",
    "prismaquant/expert_empirical_cost.py",
-   "prismaquant/export_gguf.py",
-   "prismaquant/fisher_col_weights.py"
+   "prismaquant/export_gguf.py"
   ],
   "_group_key": [
    "prismaquant/production_cache_stripes.py",
@@ -407,7 +402,6 @@
   "_log": [
    "prismaquant/aura_cost.py",
    "prismaquant/expert_empirical_cost.py",
-   "prismaquant/fisher_col_weights.py",
    "prismaquant/glm53_stock_harvest.py"
   ],
   "_manifest": [

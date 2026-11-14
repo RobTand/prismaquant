@@ -290,40 +290,12 @@ def test_validated_frontier_materialization_enum_fires():
 # --------------------------------------------------------------------------
 
 
-def _aura_block() -> str:
-    return extract_block(
-        'case "$AURA_COST_STREAMING" in',
-        "AURA_COST_STREAMING=1 requires an absolute AURA_COST_CHECKPOINT_DIR",
-    )
-
-
-def _aura_status(streaming: str, checkpoint_dir: str) -> int:
-    return run_block(
-        _aura_block(),
-        {
-            "AURA_COST_STREAMING": streaming,
-            "AURA_COST_CHECKPOINT_DIR": checkpoint_dir,
-        },
-    )
-
-
-def test_aura_streaming_requires_absolute_checkpoint_dir_fires():
-    assert _aura_status("1", "") == FIRED
-    assert _aura_status("1", "relative/ckpt") == FIRED
-    assert _aura_status("true", "relative/ckpt") == FIRED
-    assert _aura_status("1", "/home/rob/dq-runs/ckpt") == PASSED
-
-
-def test_aura_checkpoint_dir_requires_streaming_fires():
-    assert _aura_status("0", "/home/rob/dq-runs/ckpt") == FIRED
-    assert _aura_status("off", "/home/rob/dq-runs/ckpt") == FIRED
-    assert _aura_status("0", "") == PASSED
-
-
-def test_aura_streaming_enum_fires():
-    assert _aura_status("2", "") == FIRED
-    assert _aura_status("", "") == FIRED
-    assert _aura_status("auto", "") == FIRED
+def test_aura_checkpoint_dir_requires_absolute_path():
+    block = extract_block(
+        'if [[ "$AURA_COST_CHECKPOINT_DIR" != /* ]]; then',
+        "streamed AURA requires an absolute AURA_COST_CHECKPOINT_DIR")
+    assert run_block(block, {"AURA_COST_CHECKPOINT_DIR": "relative/ckpt"}) == FIRED
+    assert run_block(block, {"AURA_COST_CHECKPOINT_DIR": "/home/rob/dq-runs/ckpt"}) == PASSED
 
 
 # --------------------------------------------------------------------------

@@ -118,3 +118,35 @@ def test_final_cost_binds_raw_cost_content(tmp_path):
     settings["AURA_RAW_DIGEST"] = "raw-after"
     code, messages = check_stage_settings(artifact, "aura-hybrid-cost", stage_settings_document(settings))
     assert code == 2, messages
+
+
+@pytest.mark.parametrize('selection', ['surrogate', 'validated-surrogate'])
+def test_pipeline_prices_streamed_anchors_without_a_menu_cache(tmp_path, selection):
+    work = tmp_path / 'work'
+    (work / 'logs').mkdir(parents=True)
+    block = section('  AURA_COST_STREAMING=1', '  # [2d] Hybrid finalize')
+    preamble = '''
+STAGE_SETTINGS_ARGS=()
+PRODUCTION_CACHE_PIN_ARGS=(--skip-qnames lm_head)
+COST_CACHE_COL_WEIGHT_ARGS=()
+LM_HEAD_AURA_ARGS=()
+require_stage_settings() { :; }
+'''
+    result = run_shell(tmp_path, preamble + block, {
+        'WORK_DIR': work, 'SELECTION_MODE': selection, 'AURA_COST_CHECKPOINT_DIR': '',
+        'STAGE_SETTINGS_PATH': tmp_path / 'settings.json', 'AURA_COST_RAW': tmp_path / 'cost.pkl',
+        'MODEL_PATH': '/fixture/model', 'COST_MODE': 'aura', 'COST_FORMATS': 'NVFP4,FP8_DYNAMIC,BF16',
+        'PROBE_PATH': '/fixture/probe.pkl', 'PRODUCTION_CACHE_LEVERS': 'gptq,static_act_order,joint_scale_opt',
+        'PRODUCTION_CACHE_DISABLE_LEVERS': '', 'PRODUCTION_CACHE_MAX_ACT_ROWS': '512',
+        'AURA_COST_NPROBES': '32', 'AURA_COST_NSAMPLES': '8', 'AURA_COST_SEQLEN': '128',
+        'AURA_COST_CALIB_SEED': '42', 'AURA_COST_DTYPE': 'auto', 'DATASET': '/fixture/calibration.jsonl',
+        'AURA_COST_MIN_FREE_GIB': '18',
+    })
+    assert result.returncode == 0, result.stdout + result.stderr
+    argv = shlex.split((tmp_path / 'calls.txt').read_text())
+    assert '--streaming' in argv and '--production-anchors' in argv
+    settings = json.loads((tmp_path / 'settings.json').read_text())
+    assert settings['artifacts']['aura-cost']['AURA_COST_STREAMING'] == '1'
+    assert '--production-cache' not in argv
+    assert argv[argv.index('--activation-cache-dir') + 1] == str(work / 'act')
+    assert argv[argv.index('--checkpoint-dir') + 1] == str(work / 'artifacts/aura-checkpoints')
