@@ -10891,19 +10891,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "prismaquant/tessera_selected_scales",
-    srcs = [
-        "prismaquant/tessera_selected_scales.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
     name = "prismaquant/tokenizer_identity",
     srcs = [
         "prismaquant/tokenizer_identity.py",
@@ -11894,22 +11881,6 @@ pq_py_library(
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/digests",
         "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "tools/compose_tessera_cached_units",
-    srcs = [
-        "tools/compose_tessera_cached_units.py",
-    ],
-    data = [
-        "tools/compose_tessera_cached_units.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
-        "@pq_pip//tessera_quant",
     ],
 )
 
