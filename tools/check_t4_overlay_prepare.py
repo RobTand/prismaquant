@@ -21,7 +21,6 @@ streamed source model or a full read of every render. This tool refuses any
 open under the plan's source model directory and declares no data manifest.
 """
 import argparse
-import hashlib
 import json
 import os
 import pickle
@@ -30,15 +29,12 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-
-def sha(raw):
-    return hashlib.sha256(raw).hexdigest()
+from prismaquant.digests import bytes_sha256hex  # noqa: E402
 
 
 def bound_json(binding):
     raw = Path(binding['path']).read_bytes()
-    assert sha(raw) == binding['sha256'], binding
+    assert bytes_sha256hex(raw) == binding['sha256'], binding
     return json.loads(raw)
 
 
@@ -116,7 +112,7 @@ def main():
                       's': round(time.monotonic() - started, 1)}), flush=True)
     completion = bound_json(inputs['extended_prepared'])
     raw = Path(completion['production_cache']['path']).read_bytes()
-    assert sha(raw) == completion['production_cache']['sha256'], 'qualified PWC'
+    assert bytes_sha256hex(raw) == completion['production_cache']['sha256'], 'qualified PWC'
     cache = pickle.loads(raw)
     del raw
     assert isinstance(cache, ProductionWeightCache)
@@ -134,7 +130,7 @@ def main():
         handle.write(raw)
         handle.flush()
         os.fsync(handle.fileno())
-    print(json.dumps({**result, 'result': {'path': str(out), 'sha256': sha(raw)}}), flush=True)
+    print(json.dumps({**result, 'result': {'path': str(out), 'sha256': bytes_sha256hex(raw)}}), flush=True)
 
 
 if __name__ == '__main__':
