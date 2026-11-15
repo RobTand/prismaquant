@@ -103,10 +103,7 @@ def _source_tensor_keys(model_path: str) -> set[str]:
         with open(idx_path) as f:
             return set(json.load(f).get("weight_map", {}))
     keys: set[str] = set()
-    try:
-        from safetensors import safe_open
-    except ModuleNotFoundError:  # pragma: no cover - safetensors is a hard dep
-        return keys
+    from safetensors import safe_open
     for name in sorted(os.listdir(src)):
         if not name.endswith(".safetensors"):
             continue
@@ -129,7 +126,7 @@ def source_has_lm_head_tensor(model_path: str, lm_head_name: str) -> bool:
     return False
 
 
-def lm_head_is_tied_alias(model_path: str, *, profile=None) -> bool:
+def lm_head_is_tied_alias(model_path: str, *, profile) -> bool:
     """True when this checkpoint's LM head is an alias of the embedding.
 
     The precise condition: the config declares `tie_word_embeddings` AND
@@ -144,9 +141,6 @@ def lm_head_is_tied_alias(model_path: str, *, profile=None) -> bool:
         return False
     if not config_declares_tied_embeddings(cfg):
         return False
-    if profile is None:
-        from .model_profiles import detect_profile
-        profile = detect_profile(model_path)
     return not source_has_lm_head_tensor(model_path, profile.lm_head_name())
 
 
