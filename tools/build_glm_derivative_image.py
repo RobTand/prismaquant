@@ -31,7 +31,7 @@ finally:
 ORIGINAL_IMAGE_CONTENT_SHA256 = _contract['ORIGINAL_IMAGE_CONTENT_SHA256']
 ORIGINAL_MODELING_SHA256 = _contract['ORIGINAL_MODELING_SHA256']
 CORRECTED_MODELING_SHA256 = _contract['CORRECTED_MODELING_SHA256']
-corrected_source, sha256 = _contract['corrected_source'], _contract['sha256']
+corrected_source, file_sha256hex = _contract['corrected_source'], _contract['file_sha256hex']
 
 
 def inspect_image(name):
@@ -147,7 +147,7 @@ print(json.dumps(dict(path=str(p),source=base64.b64encode(p.read_bytes()).decode
         original_archive_bytes=original_archive.stat().st_size,
         declared_archive_disk_bound_bytes=disk_bound, persistent_python_layer_bytes=len(added_layer),
         modeling_path=path, changed_payload_files=changed, original_image=before,
-        corrected_image=after, archive=dict(path=str(archive),sha256=sha256(archive)), image=image)
+        corrected_image=after, archive=dict(path=str(archive),sha256=file_sha256hex(archive)), image=image)
     (args.out/'result.json').write_text(json.dumps(result, indent=2)+'\n')
     if args.base_archive is None:
         original_archive.unlink()  # This attempt's copy is superseded by its checked derivative archive.

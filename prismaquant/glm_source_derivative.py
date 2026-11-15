@@ -41,10 +41,6 @@ def _require(ok, message):
         raise ValueError('GLM source derivative: ' + message)
 
 
-def sha256(path):
-    return file_sha256hex(path)
-
-
 def bound_json(binding, label):
     _require(isinstance(binding, dict) and set(binding) == {'path', 'sha256'}, label + ' requires path/SHA256')
     raw = Path(binding['path']).read_bytes()
@@ -331,7 +327,7 @@ def _reject_unbound_corrected_runtime(model):
             loaded = sys.modules.get(name)
             path = getattr(loaded, '__file__', None)
             _require(path is not None, 'actual GLM source module is unavailable')
-            if sha256(path) != CORRECTED_MODELING_SHA256:
+            if file_sha256hex(path) != CORRECTED_MODELING_SHA256:
                 reach[name] = frozenset()
             else:
                 try:
