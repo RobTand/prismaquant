@@ -2443,7 +2443,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         p.error("--calibration-input and --dataset are mutually exclusive")
     if args.include_lm_head:
         p.error("streamed AURA does not support --include-lm-head")
-    pin_fla_configs()
     from prismaquant.gpu_guard import require_cuda_hot_path
     require_cuda_hot_path("aura_cost", args.device)
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
