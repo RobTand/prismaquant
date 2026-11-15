@@ -1551,16 +1551,3 @@ def get_format(name: str) -> FormatSpec:
         raise KeyError(f"Unknown format '{name}'. Available: "
                        f"{sorted((*REGISTRY.keys(), *FORMAT_ALIASES.keys()))}")
     return REGISTRY[canonical]
-
-
-def nvfp4_activation_qdq_served(
-    x: torch.Tensor,
-    input_global_scale: float,
-) -> torch.Tensor:
-    """Compatibility import for the single-owner served W4A4 oracle."""
-
-    from prismaquant.nvfp4_activation_contract import (
-        nvfp4_activation_qdq_served as _owned_nvfp4_activation_qdq_served,
-    )
-
-    return _owned_nvfp4_activation_qdq_served(x, input_global_scale)
