@@ -60714,7 +60714,9 @@ pq_py_library(
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/build_production_cache",
         "//:prismaquant/calibration_data",
+        "@pq_pip//pytest",
         "@pq_pip//torch",
+        "@pq_pip//transformers",
     ],
 )
 
@@ -66418,7 +66420,6 @@ pq_py_test(
         "//:prismaquant/incremental_probe",
         "//:prismaquant/lane_shipcard",
         "//:prismaquant/prepriced_cost",
-        "//:prismaquant/production_recache",
         "//:tools/build_streamed_full_kl_teacher",
         "//:tools/dsv4_wikitext_inputs",
         "//:tools/full_kl_teacher_payload",
@@ -66459,6 +66460,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/pipeline",
+        "//:prismaquant/production_recache",
     ],
 )
 

@@ -1,15 +1,14 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-11-14 for P4a. Source: `streaming_production_cache.py`,
+Re-stamped 2026-11-15 for P4a. Source: `streaming_production_cache.py`,
 `build_production_cache.py`, and `run-pipeline.sh`.
-Recache renders use keyed probe rows, with a default limit of 512.
+The default pipeline keeps resident rendering and the expert gate, then runs separate activation re-fit.
+The probe default is 512 rows, as set by merged P2a. Streamed rendering is available through the existing CLI only.
 `build_production_cache --streaming --layer-range a:b` renders only those decoder layers.
 The range that starts at zero also owns the head and MTP entries.
-Each unit writes a separate `ProductionWeightCache` bundle for exact union and export.
-The single-job pipeline renders once, then runs `production_recache` to re-fit activation maxima.
 The combined resident render-and-re-fit path is removed. P4b will split the re-fit.
-The 27B shard equality proof is prepared, but its GPU rows have not run.
-At 600 GB, the cache estimate remains 1.1 TB. Packed storage at about 0.35 TB remains Q4.
+The 27B direct streamed CLI proof passed exact shard and histogram equality at d059eeee.
+Default promotion requires a served KL/PPL A/B and MoE expert gate support.
 
 <!-- flux-current-start -->
 ## Current execution: stock Flux
@@ -23128,7 +23127,7 @@ which is what the rows touched since are keyed on.
 | **4/4 A** | Frontier format-menu cache, including profile-synthesized MTP when the menu requests it | `build_production_cache … --render-scope format-menu --render-packed-experts --activation-cache-dir act/` | `artifacts/production_weight_cache_frontier_raw.pkl` + `…_frontier/` | settings-hash `frontier-cache`, including the resolved head policy | validated-surrogate; `exit 2` if `PRODUCTION_CACHE=0` |
 | **4/4 B** | Measured held-out KL per Pareto point | `prismaquant.validate_assignments_kl` (`1243-1248` per-point, `1272-1277` batched) | `artifacts/validated_frontier_kl.json` + `…_parts/*.json` (merged `1250-1269`) | settings-hash `frontier-kl-point` per point (`1294`) | validated-surrogate |
 | **4/4 C** | Frontier point selection | `prismaquant.select_validated_frontier` (`1281-1288`) | overwrites `artifacts/layer_config.json`; `layer_config_validated_assignment.json`; `validated_frontier_selection.json` | none | validated-surrogate |
-| **4/4 D** | Production cache build / recache for the selected assignment, including exact non-BF16 `mtp.*` renders synthesized through the profile from `act/` | `build_production_cache --streaming --activation-cache-dir act/`, then `production_recache`; direct builder calls receive the remaining profile pins | `production_weight_cache_frontier_<digest>_recached.pkl`, `production_weight_cache_recached.pkl` / `…_raw.pkl` and their shard directories | settings-hash `production-cache-recached`, `frontier-recache`, `production-cache-raw`, including the resolved head policy | `PRODUCTION_CACHE=1`; explicit quantized MTP fails closed without exact source/module/activation coverage |
+| **4/4 D** | Production cache build / recache for the selected assignment, including exact non-BF16 `mtp.*` renders synthesized through the profile from `act/` | resident `build_production_cache --expert-gate-dataset … --activation-cache-dir act/`, then `production_recache`; direct builder calls receive the remaining profile pins | `production_weight_cache_frontier_<digest>_recached.pkl`, `production_weight_cache_recached.pkl` / `…_raw.pkl` and their shard directories | settings-hash `production-cache-recached`, `frontier-recache`, `production-cache-raw`, including the resolved head policy | `PRODUCTION_CACHE=1`; explicit quantized MTP fails closed without exact source/module/activation coverage |
 | **4/4 D×N (manual)** | Exact multi-host cache striping and set union. Plan whole-layer/auxiliary qname groups, run independent allowlisted cache builds, manifest and verify each input stripe bundle, transfer the stripes to the final export filesystem, union there, then verify the published union; copied unions carrying fused NVFP4 witnesses refuse | `prismaquant.production_cache_stripes`; `build_production_cache --streaming --layer-range a:b` or `--include-qnames-file`; `prismaquant.union_production_cache {manifest,verify-shard,union,verify}` | `stripe-plan.json`, `stripe-NN.qnames.txt`, per-worker cache bundles, final `production_weight_cache.pkl` + content-addressed `weights/` + `union_manifest.json` | campaign identity binds source, calibration, full producer code, settings, render semantics, and assignment or stripe-plan coverage | operator workflow, not a `run-pipeline.sh` default; native materialized formats only (§5.4) |
 | **3c** | AURA additivity report — `residual = measured_end_KL − Σ predicted_dloss`, stamped into `cost.pkl` `provenance["additivity"]` (§4.3) | `prismaquant.aura_additivity_gate` (+ optional `validate_assignments_kl` under `AURA_ADDITIVITY_GATE=measure`) | `artifacts/aura_additivity.json`, `aura_additivity_kl.json` (measure only); `logs/aura_additivity*.log` | `assignment-kl` binding for reusable KL; non-blocking report | `COST_MODE=aura`, `AURA_ADDITIVITY_GATE≠0` |
 | **3d** | Discovery-walker export gate (§8.8) — meta-load + one fake forward against the profile's claim rules; refuses the run before ANY export lane on an unclaimed matmul-fed node / unresolved floating multiplicand / unknown walk-failure kind / decided-but-unpriced contradiction, decided from structured fields only. Override env excuses trace incompleteness ONLY (stamped); claims have no override | `prismaquant.model_walk` (`python3 -m prismaquant.model_walk`) | `artifacts/model_walk.json`; `logs/model_walk.log` | none — always runs; it is the gate | every lane; knobs `WALK_GATE_SEQLEN=8`, `PRISMAQUANT_WALK_GATE_OVERRIDE=<reason>` (a set `WALK_GATE_EXECUTION` refuses, #3415) |

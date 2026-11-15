@@ -1852,9 +1852,8 @@ PY
       "ASSIGNMENT_DIGEST=$LC_DIGEST"
     if [[ ! -f "$PROD_CACHE_RECACHED" ]]; then
       if [[ ! -f "$PROD_CACHE_RAW" ]]; then
-        echo "[pipeline] [4/4] rendering streamed production cache ..."
+        echo "[pipeline] [4/4] building resident production cache ..."
         python3 -m prismaquant.build_production_cache \
-          --streaming \
           --model "$MODEL_PATH" \
           --output "$PROD_CACHE_RAW" \
           --formats "$CACHE_FORMATS" \
@@ -1870,6 +1869,7 @@ PY
           --cache-dir "$PROD_CACHE_DIR" \
           --render-scope "$PRODUCTION_CACHE_RENDER_SCOPE" \
           --render-layer-config "${WORK_DIR}/artifacts/layer_config.json" \
+          ${EXPERT_GATE_DATASET:+--expert-gate-dataset "$EXPERT_GATE_DATASET"} \
           2>&1 | tee "${WORK_DIR}/logs/production_cache.log"
       fi
       echo "[pipeline] [4/4] re-fitting production activation scales ..."
