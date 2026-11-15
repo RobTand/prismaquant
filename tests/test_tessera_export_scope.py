@@ -301,7 +301,7 @@ def _run_head_policy(monkeypatch, capsys, *, body=FORMAT, head="BF16",
 
     monkeypatch.setattr(model_profiles, "detect_profile", lambda _: Qwen3Profile())
     for key, value in {
-        "PQ_MODEL_PATH": "fixture", "PQ_ALLOW_PINNED": "",
+        "MODEL_PATH": "fixture", "PQ_ALLOW_PINNED": "",
         "PQ_LM_HEAD_FORMAT": head, "PQ_BODY_FORMATS": body,
         "PQ_COST_PATH_OVERRIDE": cost_override,
     }.items():
