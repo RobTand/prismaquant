@@ -60,7 +60,7 @@ def _record(tmp_path, *, tag, metric, seqlen):
                 "artifact_dir": "/teacher", "serve_fingerprint": "f" * 64,
                 "spec_decode_detected": False, "git_commit": "e" * 40,
                 "prompt_top_k": 2, "n_positions": scored,
-                "dump_sha256": gold._sha256_file(teacher)},
+                "dump_sha256": gold.file_sha256hex(teacher)},
         })
     else:
         record.update({"split": "wikitext-2-raw-v1/test", "n_tokens_requested": 8,
