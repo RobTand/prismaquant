@@ -28,7 +28,7 @@ RTN.  ``tessera.serving.nvfp4_route`` reads the artifact's
 ``trellis_input_global_scale`` and calls vLLM's compiled ``scaled_fp4_quant``
 -- a static-global-scale operation whose per-16 block scales are stored as
 UE4M3 -- so an E2M1 rung here is scored through
-``format_registry.nvfp4_activation_qdq_served`` at the unit's own calibrated
+``nvfp4_activation_contract.nvfp4_activation_qdq_served`` at the unit's own calibrated
 ``input_global_scale`` (fused-sibling unified, the same joint the exporter's
 scale file carries).  NVFP4's registry callback is a dynamic FP32-scale RTN
 that never snaps through UE4M3 and rounds midpoints differently; pricing with
