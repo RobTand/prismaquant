@@ -40,7 +40,7 @@ assert "torch" not in sys.modules and "prismaquant" not in sys.modules
 path = Path(sys.argv[2])
 raw = path.read_bytes()
 build = json.loads(raw)
-assert scope["sha256"](path) == hashlib.sha256(raw).hexdigest()
+assert scope["file_sha256hex"](path) == hashlib.sha256(raw).hexdigest()
 binding = {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest()}
 assert contract["bound_json"](binding, "actual image build") == build
 assert scope["ORIGINAL_MODELING_SHA256"] == build["original_modeling_sha256"]
@@ -130,7 +130,7 @@ def test_corrected_module_cannot_silently_use_original_identity(tmp_path, monkey
     path.write_bytes(b'corrected source fixture')
     module.__file__ = str(path)
     monkeypatch.setitem(sys.modules, name, module)
-    monkeypatch.setattr(derivative, 'CORRECTED_MODELING_SHA256', derivative.sha256(path))
+    monkeypatch.setattr(derivative, 'CORRECTED_MODELING_SHA256', derivative.file_sha256hex(path))
     model = type('GlmFixture', (torch.nn.Module,), {'__module__': name})()
     with pytest.raises(ValueError, match='explicit derivative binding'):
         if entry == 'identity':

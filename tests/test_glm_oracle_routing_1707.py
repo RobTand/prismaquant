@@ -1,7 +1,7 @@
 """PQ #1707: GLM source oracle hashes delegate to digests owners.
 
 Routing: bound_json / corrected_source / original_source / _corrected_reach
-must call bytes_sha256hex; sha256(path) must call file_sha256hex. All
+must call bytes_sha256hex; the file hash must call file_sha256hex. All
 _require comparisons stay with identical refusal type/text. _observe shares
 the same one-line recipe (too environment-heavy to invoke: it reads the
 installed transformers tree); its row is pinned by the baseline tripwire.
@@ -22,7 +22,7 @@ def test_oracle_routes_to_owners(monkeypatch, tmp_path):
     file_calls = record_unary_calls(monkeypatch, gsl, "file_sha256hex")
     blob = tmp_path / "blob.bin"
     blob.write_bytes(b"\x00\x01glm-oracle")
-    assert gsl.sha256(blob) == file_sha256hex(blob)
+    assert gsl.file_sha256hex(blob) == file_sha256hex(blob)
     with pytest.raises(ValueError):
         gsl.bound_json({"path": str(blob), "sha256": "0" * 64}, "test")
     with pytest.raises(ValueError):
