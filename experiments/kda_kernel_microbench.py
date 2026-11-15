@@ -11,8 +11,8 @@ energy per step.
 ``stage_b_kda_capture_bench.py`` times the same call inside the decoder
 layer; this bench isolates the attention function, needs no model config and
 fits beside a running quantum when ``--no-fallback`` drops the fallback,
-whose FP32 intermediates take about 24 GB. Run it inside the GLM derivative
-image, through PrismaBuild.
+whose FP32 intermediates take about 24 GB. Use the GLM derivative
+image. Submit it as a Flux job (see the flux skill).
 """
 from __future__ import annotations
 

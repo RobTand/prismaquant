@@ -24,7 +24,6 @@ from tests import prismabuild_scan as scan
 # Exact token carve-outs for refusal fixtures and frozen evidence readers.
 # The rest of each file remains subject to the ban.
 REFUSAL_TOKENS = {
-    "prismaquant/campaign_container_spec.py": ('"PRISMABUILD_PRODUCED_"', '"PRISMABUILD_"'),
     "prismaquant/shipcard_slots.py": ('producer_id = matched[0].get("pb_action")',),
     "experiments/build_kda_kernel_qualification.py": ('"pb_action": key',),
     "tests/test_graph_shipcard_receipt.py": ('arm.pop("pb_action")', 'arm["pb_action"] = recorded_id if mismatch else "different-recorded-id"'),
@@ -32,9 +31,7 @@ REFUSAL_TOKENS = {
     "tests/test_pq1317_gpu_qualification_package.py": ('["pb_action"]',),
     "tests/test_bazel_inputs.py": ("'PRISMABUILD_'",),
     "tests/test_container_cache_charge_1091.py": ('"PRISMABUILD_"',),
-    "tests/test_dispatch_joint_quanta.py": ('"PRISMABUILD_"', "'PRISMABUILD_'",
-        '"PRISMABUILD_PRODUCED_SPOOL_ROOT"', '"PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"',
-        "'PRISMABUILD_LOCAL_SCRATCH_PAIRS'", "'PRISMABUILD_LOCAL_SCRATCH_IO'"),
+    "tests/test_dispatch_joint_quanta.py": ('"PRISMABUILD_"', "'PRISMABUILD_'"),
     "tests/test_forward_recovery_chain_tools.py": ("'pbrun'",),
     "tests/test_joint_run_progress.py": ('"PRISMABUILD_ACTION_PROGRESS_PHASES"',
         '"PRISMABUILD_ACTION_PROGRESS_PATH"', '"PRISMABUILD_ACTION_PROGRESS_TOKEN"'),
@@ -45,9 +42,7 @@ REFUSAL_TOKENS = {
         '"PRISMABUILD_ACTION_PROGRESS"', "'PRISMABUILD_ACTION_KEY'", "'PRISMABUILD_ACTION_NONCE'",
         "'PRISMABUILD_ACTION_SCOPE'", "'PRISMABUILD_READER_HELPER_ROOT'", "'PRISMABUILD_QUEUE_ROOT'",
         "'PRISMABUILD_ACTION_PROGRESS_PATH'", "'PRISMABUILD_ACTION_PROGRESS_TOKEN'",
-        "'PRISMABUILD_LOCAL_SCRATCH_IO'", "'PRISMABUILD_LOCAL_SCRATCH_PAIRS'",
-        '"PRISMABUILD_PRODUCED_SPOOL_ROOT"', '"PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"',
-        '"PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT"', '"PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"'),
+        "'PRISMABUILD_LOCAL_SCRATCH_IO'", "'PRISMABUILD_LOCAL_SCRATCH_PAIRS'"),
     "tests/test_tessera_native_rows.py": ("'PRISMABUILD_ACTION_KEY'",),
     "tests/test_flux_jobs.py": ("'PB_ACTION_KEY'",),
     "tests/g3job/test_g3_submit.py": ('"pbrun"',),

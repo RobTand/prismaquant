@@ -1434,14 +1434,7 @@ def main():
     sys.path.insert(0, str(PQ))
     sys.path.insert(0, str(PQ / "tools"))
     from experiments.glm_full_capture_profile import CaptureObserver
-    import experiments.workspace_netdata as wn
     from experiments.workspace_netdata import sample_netdata
-    # PB's mount-latency collector publishes no prismabuild.mount_* charts on either GB10 host
-    # (absent on sparky and sparklina, 2026-09-29 ~23:25Z; PB action 76fb0791 died on it before any
-    # work).  Sample every other required chart, keep the prismabuild.mount_* pattern so the charts
-    # are recorded if they return, and stamp the relaxation into the result.
-    relaxed = sorted(c for c in wn.REQUIRED_CHARTS if c.startswith("prismabuild.mount_"))
-    wn.REQUIRED_CHARTS = frozenset(c for c in wn.REQUIRED_CHARTS if c not in relaxed)
     out = Path(args.out)
     telemetry = out.parent / (out.name + ".telemetry")
     with CaptureObserver(telemetry, profile_layers=()) as observer:
@@ -1454,7 +1447,6 @@ def main():
         write_g3_record([sample_netdata(h) for h in ("sparky", "sparklina")], telemetry / "after.json")
     telem = {"dir": telemetry.name, "status": observer.result["status"],
              "errors": observer.result.get("errors"),
-             "required_charts_relaxed": relaxed,
              "files": {n: sha256_file(telemetry / n) for n in
                        ("netdata.jsonl", "python_sampler.jsonl", "result.json",
                         "before.json", "after.json") if (telemetry / n).exists()}}

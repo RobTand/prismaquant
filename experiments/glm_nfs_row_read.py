@@ -8,7 +8,7 @@ than at HDD speed. It reads the same files, in the same order
 nothing else -- no hashing, no tensor decode -- so the number is transport and
 cache, not the loader.
 
-Run it through PrismaBuild on a Spark. Pair every run with dl380g10's nfsd and
+Submit it as a Flux job (see the flux skill). Pair every run with dl380g10's nfsd and
 diskstats counters over the same window: high MB/s alone cannot distinguish an
 ARC hit from the client's own page cache, but nfsd read bytes ~ file bytes with
 HDD reads ~ 0 can.

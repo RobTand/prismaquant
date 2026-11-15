@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Make bounded full-domain acquisition requests from existing measured rows.
 
-Run through PrismaBuild. Explicit render-score and attested joint-AURA paths
+Submit it as a Flux job (see the flux skill). Explicit render-score and attested joint-AURA paths
 produce research measurement requests, not prices or an allocation. Joint raw
 signed/probe/operator evidence remains bound to its original run; scalar MSE
 is never converted into Fisher currency. Source inventory is metadata-only.

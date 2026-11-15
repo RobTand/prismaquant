@@ -12,7 +12,7 @@ def test_observer_keeps_exact_cuda_capture_and_original_batch_order(tmp_path, mo
         pytest.skip('native CUDA profiler qualification')
     # RobTand/prismaquant#634: the observer used to poll live Netdata on both
     # Sparks, so this test failed whenever a host's charts were missing
-    # (sparklina publishes no prismabuild.mount_* charts) even though the
+    # even though the
     # capture itself completed. The capture assertion must not depend on live
     # host state: sample from a canned fixture instead.
     from experiments import glm_full_capture_profile as module

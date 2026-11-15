@@ -12,7 +12,7 @@ BASE_CHARTS = (
     'system.cpu', 'system.load', 'system.ram', 'system.io',
     'system.cpu_some_pressure', 'system.memory_some_pressure', 'system.io_some_pressure',
     'mem.available', 'mem.reclaiming', 'mem.thp_details',
-    'nfs.rpc', 'nfs.proc4', 'prismabuild.mount_latency', 'prismabuild.mount_probe_state',
+    'nfs.rpc', 'nfs.proc4',
 )
 GPU_SUFFIXES = ('power_draw', 'clock_freq', 'frame_buffer_memory_usage',
                 'pcie_bandwidth_utilization')
@@ -43,14 +43,13 @@ def test_server_filter_retains_required_charts_and_unknown_gpu_uuid():
     assert 'nvidia_smi.*_power_draw' in query['filter'][0]
     assert 'new-unlisted-GPU-123' not in query['filter'][0]
     assert record['schema'] == 'prismaquant.workspace_netdata.v2'
-    assert record['scope'] == 'cpu_memory_nfs_mount_gpu_power_clocks_memory_pcie'
+    assert record['scope'] == 'cpu_memory_nfs_gpu_power_clocks_memory_pcie'
     assert set(record['metrics']) == set(payload())
     assert record['metrics']['system.cpu']['dimensions']['value'] == {'value': 7}
     assert record['response_bytes'] > 0
 
 
 @pytest.mark.parametrize('missing', ['system.cpu', 'system.memory_some_pressure', 'nfs.rpc',
-                                     'prismabuild.mount_latency',
                                      'nvidia_smi.gpu_new-unlisted-GPU-123_power_draw',
                                      'nvidia_smi.gpu_new-unlisted-GPU-123_clock_freq'])
 def test_missing_required_chart_refuses_evidence(missing):

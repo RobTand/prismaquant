@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic artifact preparation/consumption for one real native panel.
 
-Run GPU preparation through PrismaBuild. This uses the existing source/Hessian
+Submit it as a Flux job (see the flux skill). This uses the existing source/Hessian
 capture and one ProductionWeightCache entry; Tessera's separate producer owns
 native runtime preparation and measurement. No allocator prices are invented.
 """

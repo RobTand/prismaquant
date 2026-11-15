@@ -24,8 +24,8 @@ The sealed loader sites in `prismaquant/production_weight_cache.py` and `tools/q
 
 `docs/audits/digest_site_census_pq1301_2026-10-04.json` explicitly makes `refresh_2540` supersede earlier top-level fields. Earlier totals remain historical: original 485 gated scopes, 501 rows including 16 owner rows; later top-level 334 remaining scopes after recorded slices. These are not today's backlog. The refresh source `30b6231df000726beda55fb6706e641a5cb2ccb0` records **304 gated scopes and 420 individual calls**, with 320 scanned scopes including owner implementations. Its call families are 213 hashlib and 207 sorted-JSON; 16 owner calls are included. Its separate supplemental 275 calls and singleton contract cohorts are not extra gated scopes.
 
-Current committed `tests/fixtures/duplication_baseline.json` has 237 gated scopes.
-These include 120 hashlib scopes and 117 sorted-JSON scopes.
+Current committed `tests/fixtures/duplication_baseline.json` has 227 gated scopes.
+These include 116 hashlib scopes and 111 sorted-JSON scopes.
 The Tessera deletions remove unused scopes. Removed scopes do not prove completed digest migrations.
 `tools/duplication_inventory.py` recognizes selected hashlib and literal sort_keys forms.
 Its scope counts do not prove complete call or profile coverage.

@@ -50,7 +50,7 @@ else:
     )
     from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 
-from prismaquant.campaign_container_spec import admission_image_reference, refuse_retired_pb_env
+from prismaquant.campaign_container_spec import admission_image_reference
 from prismaquant import joint_quantum_row as quantum_row
 
 
@@ -1504,14 +1504,6 @@ def _slice_chain_batch_size(record: Mapping) -> int:
             f"{exc}") from exc
 
 
-def refuse_retired_service_environment(spec: Mapping) -> None:
-    """Reject retired PB service settings; spool bounds live in the launch-bound declaration."""
-    try:
-        refuse_retired_pb_env(spec.get("env", {}))
-    except RuntimeError as exc:
-        raise DispatchRefused(f"retired service environment; use a launch-bound declaration: {exc}") from exc
-
-
 #: The spec field that admits a container cache pinned to the overlay, with
 #: the reason (PQ #1129). A spec with no pin may not name one.
 OVERLAY_CACHE_REASON_FIELD = "overlay_cache_reason"
@@ -1628,7 +1620,6 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                 f"spill bound counts parts for {spill_bound['capture_batch']}; "
                 "regenerate the executable readsets with the spec's regime")
         spec["env"] = {**env, STAGE_B_SPILL_ENV[1]: str(int(spill_bound["reservation_bytes"]))}
-    refuse_retired_service_environment(spec)
     # Validate a declared workspace before publishing the row. These same
     # inlined spec bytes supply its explicit row environment below; no ambient
     # coordinator environment or second spec read participates.
@@ -2115,13 +2106,11 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         payload += ["--artifact-budget-bytes", str(artifact_budget_bytes)]
     progress = [(phase, HEAD_PROGRESS_GRACE_S if phase == "head"
                  else CHUNK_PROGRESS_GRACE_S) for phase in binding["phases"]]
-    # The native produced declaration owns spool bounds. Retired produced
-    # service environment settings are refused before publishing this row.
+    # The native produced declaration owns spool bounds.
     wrapped = _container_wrap(
         SPEC_PATH, payload, progress=progress,
         spool_max_bytes=stage_a_spool_window_bytes(campaign, batch_range))
     sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
-    refuse_retired_service_environment(sealed_spec)
     if produced_declaration is None:
         raise DispatchRefused("Stage A requires an explicit launch-bound produced declaration")
     return quantum_row.QuantumRow(

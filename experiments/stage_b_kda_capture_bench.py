@@ -30,7 +30,7 @@ a whole bound model.
 
 Outputs, under ``--out``: ``summary.json`` (wall, peak memory, kernel time by
 name, kernel launches, GPU-idle gaps, power) and one Chrome trace per arm.
-Run it inside the GLM derivative image, through PrismaBuild.
+Use the GLM derivative image. Submit it as a Flux job (see the flux skill).
 """
 from __future__ import annotations
 

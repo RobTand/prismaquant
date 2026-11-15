@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Explicit offline CPU authentication pass; submit through PrismaBuild.
+"""Explicit offline CPU authentication pass.
+
+Submit it as a Flux job (see the flux skill).
 
 This reads reference or candidate shard bodies once using the existing checkpoint mechanism.
 It never pairs historical hashes with newly invented mutation fingerprints.

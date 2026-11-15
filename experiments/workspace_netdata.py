@@ -10,12 +10,12 @@ import urllib.parse
 import urllib.request
 
 SCHEMA = 'prismaquant.workspace_netdata.v2'
-SCOPE = 'cpu_memory_nfs_mount_gpu_power_clocks_memory_pcie'
+SCOPE = 'cpu_memory_nfs_gpu_power_clocks_memory_pcie'
 CHART_PATTERNS = (
     'system.cpu', 'cpu.cpu*', 'system.load', 'system.ram', 'system.io',
     'system.*pressure*', 'mem.available', 'mem.swap*', 'mem.pgfaults',
     'mem.oom_kill', 'mem.kernel', 'mem.slab', 'mem.thp*', 'mem.reclaiming',
-    'mem.writeback', 'nfs.*', 'prismabuild.mount_*',
+    'mem.writeback', 'nfs.*',
     'nvidia_smi.*_power_draw', 'nvidia_smi.*_clock_freq',
     'nvidia_smi.*_temperature', 'nvidia_smi.*_frame_buffer_memory_usage',
     'nvidia_smi.*_bar1_memory_usage', 'nvidia_smi.*_pcie_bandwidth*',
@@ -24,7 +24,7 @@ REQUIRED_CHARTS = frozenset((
     'system.cpu', 'system.load', 'system.ram', 'system.io',
     'system.cpu_some_pressure', 'system.memory_some_pressure', 'system.io_some_pressure',
     'mem.available', 'mem.reclaiming', 'mem.thp_details',
-    'nfs.rpc', 'nfs.proc4', 'prismabuild.mount_latency', 'prismabuild.mount_probe_state',
+    'nfs.rpc', 'nfs.proc4',
 ))
 REQUIRED_GPU_SUFFIXES = ('clock_freq', 'frame_buffer_memory_usage',
                          'pcie_bandwidth_utilization')
