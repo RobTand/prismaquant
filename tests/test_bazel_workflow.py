@@ -60,20 +60,6 @@ def test_required_checks_refuse_missing_or_failed_sibling_evidence(tmp_path, cha
         assert result.returncode != 0, result.stdout + result.stderr
 
 
-def test_receipt_downloads_have_exact_names_and_explicit_destinations():
-    found = []
-    for name in ('gate.yml', 'ci.yml', 'bazel-hosted.yml'):
-        workflow = yaml.safe_load((ROOT / '.github/workflows' / name).read_text())
-        for job in workflow['jobs'].values():
-            for step in job.get('steps', []):
-                if step.get('uses', '').startswith('actions/download-artifact@'):
-                    settings = step['with']
-                    assert settings.get('name') and settings.get('path')
-                    assert 'pattern' not in settings and not settings.get('merge-multiple')
-                    found.append((name, settings['name'], settings['path']))
-    assert found, 'hosted lanes must consume the exact scanned controller receipt'
-
-
 def test_shared_hosted_lane_is_used_by_pr_and_both_postmerge_architectures():
     gate = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
     ci = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text())

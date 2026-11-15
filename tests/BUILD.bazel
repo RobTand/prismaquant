@@ -6237,7 +6237,9 @@ pq_py_library(
         "test_bazel_workflow.py",
     ],
     data = [
-        "//:files/.github/workflows",
+        "//:.github/workflows/bazel-hosted.yml",
+        "//:.github/workflows/ci.yml",
+        "//:.github/workflows/gate.yml",
         "test_bazel_workflow.py",
     ],
     deps = [
