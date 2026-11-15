@@ -32982,12 +32982,6 @@ build anchor preserves this binding and records pricing/input equality as
 verified; serving qualification remains false. Legacy per-unit declarations
 and refusal of unbound executed labels remain unchanged.
 
-`tessera_selected_scales.write_selected_scales` reads the immutable allocation once and writes
-only its selected priced static scales through `write_export_inputs` with
-`hessians=None`. It does not recompute per-expert maxima or alter retained H.
-The output receipt binds the assignment, serialized scale file and served
-policy. An existing output directory is refused before any write.
-
 ### Candidate extension Stage B resource and source namespaces
 
 An immutable `prismaquant.joint_stageb_resource_policy.v1` may replace only
