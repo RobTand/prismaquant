@@ -14,6 +14,7 @@ refuses to look at the stored total until it has its own.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import os
 from fractions import Fraction
@@ -532,13 +533,9 @@ def test_main_prints_the_counts_and_the_audit_verdict(capsys):
 # helpers
 # ---------------------------------------------------------------------------
 
-_CACHE: dict = {}
-
-
+@functools.cache
 def _inventory():
-    if "inventory" not in _CACHE:
-        _CACHE["inventory"] = domain.build_inventory()
-    return _CACHE["inventory"]
+    return domain.build_inventory()
 
 
 def _candidate(family, rate, structure):
