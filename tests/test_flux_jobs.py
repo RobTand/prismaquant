@@ -527,10 +527,7 @@ class FluxJobsTests(unittest.TestCase):
             self.assertEqual([row['rank'] for row in profile['rank_health'] if not row['online']], [1, 4, 5])
             jobs.validate_job(checkout=self.checkout,
                               resources=jobs.FluxResources(1, 1, 0, 30, 'host:dl380g10'))
-            for online in ('0', ''):
-                self.online = online
-                with self.subTest(online=online), self.assertRaises(ValueError):
-                    jobs.validate_job(checkout=self.checkout, resources=self.resources)
+            jobs.validate_job(checkout=self.checkout, resources=self.resources)
 
     def test_changed_instance_identity_submits_and_records_observations(self):
         self.live_instance()
@@ -561,11 +558,10 @@ class FluxJobsTests(unittest.TestCase):
         self.assertNotEqual(hashes[0][0], hashes[1][0])
         self.assertNotEqual(hashes[0][1], hashes[1][1])
 
-    def test_offline_rank_and_unhealthy_or_ambiguous_overlay_refuse_before_submit(self):
+    def test_invalid_online_ranks_or_ambiguous_overlay_refuse_before_submit(self):
         for online, overlay in (
-                ('0-1', None), ('', None), ('0-1,4-6', None),
+                ('', None), ('0-1,4-6', None),
                 (None, '0 coordinator: full\n1 worker1: full\n4 worker4: full\n4 worker4: offline\n'),
-                (None, '0 coordinator: full\n1 worker1: full\n'),
                 (None, '0 coordinator: full\n1 worker1: full\n4 worker4: full\n4 worker4: full\n')):
             self.live_instance()
             if online is not None:
@@ -582,19 +578,19 @@ class FluxJobsTests(unittest.TestCase):
             self.assertFalse(any(call.args[0][0] == 'submit' for call in run.call_args_list))
             self.assertFalse(self.record.exists())
 
-    def test_health_is_scoped_to_placement_and_records_offline_ranks(self):
+    def test_one_spark_offline_allows_portable_and_host_submits(self):
         for placement, online, succeeds in (
-                ('host:dl380g10', '0', True), ('x86_64', '0', True),
-                ('portable', '0-1,4', True), ('portable', '5', False),
+                ('host:dl380g10', '0,4', True), ('x86_64', '0', True),
+                ('portable', '0,4', True), ('portable', '5', False),
                 ('portable', '', False), ('aarch64', '0', False)):
             self.live_instance()
             model = json.loads(self.live_r)
             model['execution']['properties'] = {'x86_64': '0', 'aarch64': '1,4'}
             self.live_r = json.dumps(model)
             self.online = online
-            self.overlay = '0 coordinator: full\n1 worker1: offline\n4 worker4: offline\n5 worker5: offline\n'
-            if placement == 'portable' and succeeds:
-                self.overlay = self.overlay.replace('worker1: offline', 'worker1: full').replace('worker4: offline', 'worker4: full')
+            self.overlay = '0 coordinator: partial\n1 worker1: offline\n4 worker4: offline\n5 worker5: offline\n'
+            for rank in jobs._allocation_ids(online) if online else ():
+                self.overlay = self.overlay.replace(f'worker{rank}: offline', f'worker{rank}: full')
             self.record = self.root / ('health-' + placement.replace(':', '-') + '-' + str(succeeds) + '-' + online)
             resources = jobs.FluxResources(1, 1, 0, 30, placement)
             with self.subTest(placement=placement, online=online), \
