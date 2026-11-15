@@ -1427,11 +1427,8 @@ def support_facts(
 
     # 5. export and served validation --------------------------------------
     rows = attested_cells() if cells is None else cells
-    matching = [
-        cell for cell in rows
-        if cell.family == spec.name and cell.rate_q256 == rate
-        and cell.structure == structure
-    ]
+    matching = [cell for cell in rows if cell.rate_q256 == rate
+                and (cell.family, cell.structure) == (spec.name, structure)]
     with_artifact = [cell for cell in matching if cell.evidence_artifact_id]
     in_scope = [
         cell for cell in with_artifact
