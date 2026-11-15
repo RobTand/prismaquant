@@ -669,6 +669,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/anchored_cost",
+        ":prismaquant/build_production_cache",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/gpu_guard",
         "@pq_pip//numpy",
@@ -754,6 +755,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/anchored_cost",
+        ":prismaquant/build_production_cache",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/dsv4_campaign_completion",
         ":prismaquant/gpu_guard",
@@ -1001,6 +1003,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/anchored_cost",
+        ":prismaquant/build_production_cache",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/gpu_guard",
         ":prismaquant/production_cache_stripes",
@@ -8715,7 +8718,6 @@ pq_py_library(
         "prismaquant/aura_cost.py",
         "prismaquant/aura_provenance.py",
         "prismaquant/autoscale.py",
-        "prismaquant/build_production_cache.py",
         "prismaquant/build_rtn_cache.py",
         "prismaquant/capture_layer_chain.py",
         "prismaquant/cost_currency.py",
@@ -8786,7 +8788,6 @@ pq_py_library(
         "prismaquant/model_profiles/structure.py",
         "prismaquant/model_walk.py",
         "prismaquant/moe_imatrix.py",
-        "prismaquant/mtp_production_cache.py",
         "prismaquant/mtp_rung_selection.py",
         "prismaquant/mxfp4_widen.py",
         "prismaquant/name_projection.py",
@@ -8926,6 +8927,7 @@ pq_py_library(
     ],
     deps = [
         ":prismaquant/__init__",
+        ":prismaquant/activation_index",
         ":prismaquant/activation_sampling",
         ":prismaquant/calibration_data",
         ":prismaquant/campaign_container_spec",
@@ -9023,6 +9025,19 @@ pq_py_library(
         "@pq_pip//torch",
         "@pq_pip//transformers",
         "@pq_pip//xxhash",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/activation_index",
+    srcs = [
+        "prismaquant/activation_index.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
+        ":prismaquant/tensor_digests",
+        "@pq_pip//torch",
     ],
 )
 
@@ -9173,6 +9188,24 @@ pq_py_library(
         ":prismaquant/digests",
         ":prismaquant/validate_quantized_model",
         ":tools/__init__",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/build_production_cache",
+    srcs = [
+        "prismaquant/build_production_cache.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/calibration_data",
+        ":prismaquant/gpu_guard",
+        ":prismaquant/memory_management",
+        ":prismaquant/model_runtime",
+        ":prismaquant/mtp_production_cache",
+        "@pq_pip//torch",
+        "@pq_pip//transformers",
     ],
 )
 
@@ -10191,6 +10224,21 @@ pq_py_library(
     name = "prismaquant/mount_facts",
     srcs = [
         "prismaquant/mount_facts.py",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/mtp_production_cache",
+    srcs = [
+        "prismaquant/mtp_production_cache.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/model_runtime",
+        ":prismaquant/render_cache_paths",
+        "@pq_pip//torch",
+        "@pq_pip//transformers",
     ],
 )
 
