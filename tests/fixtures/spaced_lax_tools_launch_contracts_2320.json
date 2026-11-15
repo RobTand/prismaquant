@@ -185,19 +185,6 @@
       "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
     },
     {
-      "file": "tools/compose_tessera_cached_units.py",
-      "kind": "Package-dependent argument/help entry",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.compose_tessera_cached_units",
-        "--help"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
-      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
-    },
-    {
       "file": "tools/dispatch_joint_quanta.py",
       "kind": "Package-dependent argument/help entry",
       "supported_probe": [
