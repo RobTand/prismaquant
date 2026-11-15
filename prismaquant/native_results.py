@@ -136,18 +136,17 @@ def _runtime_stat(filename):
     info = os.stat(filename, follow_symlinks=False)
     if not stat.S_ISREG(info.st_mode):
         raise ValueError('native runtime requires regular members')
-    return file_stat_signature(info)
+    return file_stat_signature(info)[:4]
 
 
 def _runtime_file(filename, expected):
-    fd = open_regular(filename)
-    with os.fdopen(fd, 'rb') as handle:
-        before = file_stat_signature(os.fstat(handle.fileno()))
+    with os.fdopen(open_regular(filename), 'rb') as handle:
+        before = file_stat_signature(os.fstat(handle.fileno()))[:len(expected)]
         if before != expected or before[2] > MAX_RUNTIME_FILE_BYTES:
             raise ValueError('native runtime file changed or exceeds byte bound')
         digest = file_digest_sha256hex(handle, max_bytes=before[2])
-        if (handle.tell() != before[2] or file_stat_signature(os.fstat(handle.fileno())) != before
-                or _runtime_stat(filename) != before):
+        if (handle.tell() != before[2] or file_stat_signature(os.fstat(handle.fileno()))[:len(expected)] != before
+                or file_stat_signature(os.stat(filename, follow_symlinks=False))[:len(expected)] != before):
             raise ValueError('native runtime file changed during streaming read')
     return {'bytes': before[2], 'sha256': digest}
 
@@ -163,7 +162,7 @@ def _runtime_tree(root, *, stdlib=False):
             raise ValueError('native runtime directory depth exceeds bound')
         info = current.lstat()
         if stat.S_ISREG(info.st_mode) and current == Path(root):
-            files['.'] = file_stat_signature(info)
+            files['.'] = file_stat_signature(info)[:4]
             break
         if not stat.S_ISDIR(info.st_mode):
             raise ValueError('native runtime tree has non-directory or symlink owner')
@@ -184,7 +183,7 @@ def _runtime_tree(root, *, stdlib=False):
                 if stat.S_ISDIR(item.st_mode):
                     pending.append(child)
                 elif stat.S_ISREG(item.st_mode):
-                    files[str(member)] = file_stat_signature(item)
+                    files[str(member)] = file_stat_signature(item)[:4]
                 else:
                     raise ValueError('native runtime tree contains symlink/nonregular member')
                 if len(files) + len(directories) + len(pending) > MAX_RUNTIME_ENTRIES:
@@ -277,7 +276,7 @@ def _runtime_libraries():
         major, minor = (int(v, 16) for v in device.split(':'))
         if (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino) != (major, minor, int(inode)):
             raise ValueError(f'native runtime mapped library replaced: {path}')
-        libraries[path] = file_stat_signature(info)
+        libraries[path] = file_stat_signature(info)[:4]
     if not libraries or len(libraries) > MAX_RUNTIME_ENTRIES:
         raise ValueError('native runtime requires finite mapped libraries')
     return dict(sorted(libraries.items()))
@@ -358,7 +357,7 @@ def _runtime_distribution(name):
         if locations != expected:
             raise ValueError('native runtime import search owner differs')
         owners[module] = {'origin': entry, 'locations': locations}
-    if any(_runtime_stat(path) != signature for path, signature in signatures.items()):
+    if any(_runtime_stat(path) != signature[:4] for path, signature in signatures.items()):
         raise ValueError('native runtime distribution metadata changed during observation')
     return {'version': versions[0], 'metadata': metadata[0], 'record': record[0],
             'roots': sorted(roots), 'imports': owners}
@@ -385,7 +384,7 @@ def _runtime_owners(packages, imported):
 
 
 def measure_runtime(*, dependencies: tuple[str, ...] = ()) -> dict:
-    """Measure the finite declared closure and current imported/mapped owners.
+    """Measure the declared closure and imported/mapped owners. Only directory fences use ctime.
 
     No observation is reused between calls. New imports and dlopen mappings
     change identity, even when their owners were not declared for a full tree.

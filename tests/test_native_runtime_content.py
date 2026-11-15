@@ -233,7 +233,7 @@ def test_file_and_roster_races_refuse(runtime_layout, monkeypatch, axis):
                 previous = target.stat()
                 target.write_bytes(b'!' * target.stat().st_size)
                 os.utime(target, ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000_000))
-                assert nr._runtime_stat(target) != nr.file_stat_signature(previous)
+                assert nr._runtime_stat(target) != nr.file_stat_signature(previous)[:4]
             elif axis == 'add':
                 (root / 'reviewpkg/new.py').write_bytes(b'new file')
             elif axis == 'remove':
@@ -456,7 +456,7 @@ def test_native_mapping_owner_parser_refuses_substitution(runtime_layout, monkey
         return original_open(path, *args, **kwargs)
     monkeypatch.setattr(builtins, 'open', mapped_open)
     real = runtime_layout['real_libraries']
-    assert real() == {str(library):nr.file_stat_signature(known)}
+    assert real() == {str(library):nr.file_stat_signature(known)[:4]}
     if mutation == 'named-code':
         raw += b'3000-4000 r-xp 00000000 00:00 0 [anon:numerical-code]\n'
     elif mutation == 'executable-stack':
