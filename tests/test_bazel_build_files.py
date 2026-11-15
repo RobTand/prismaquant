@@ -57,7 +57,6 @@ def indexed_repository(tmp_path):
         'fixture.json': '{"tracked": true}\n',
         'tests/test_scan.py': 'from tools import scan\n',
         'tools/ci/gate_durations.json': '{"files": {}}\n',
-        'tools/ci/gate_quarantine.json': '{}\n',
     })
     git(root, 'add', '.')
     git(root, '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixed graph inputs')
@@ -438,29 +437,16 @@ def test_the_graph_record_names_edges_cycles_tests_and_uncertain_modules(tmp_pat
     assert record['uncertain'] == {'tools/beta.py': ['dynamic import not followed']}
 
 
-PLAN = {'selected': [{'path': 'tests/test_in.py'}, {'path': 'tests/test_slow.py'}],
-        'deselect': ['tests/test_in.py::test_flaky'],
-        'deferred': [{'path': 'tests/test_cuda.py', 'lane': 'cuda', 'issue': 12, 'kind': 'environment_lanes'},
-                     {'path': 'tests/test_costly.py', 'issue': 1997, 'kind': 'cost_exclusions'}]}
-
-
-def test_population_files_keep_their_deselects_and_others_are_manual_with_owner():
-    attributes = build_files.test_attributes('tests/test_in.py', PLAN, {})
-    assert attributes['args'] == ['--deselect=tests/test_in.py::test_flaky']
-    assert 'tags' not in attributes
-    assert build_files.test_attributes('tests/test_cuda.py', PLAN, {})['tags'] == ['gate-lane-cuda', 'manual']
-    assert build_files.test_attributes('tests/test_costly.py', PLAN, {})['tags'] == ['gate-issue-1997', 'manual']
-
-
-def test_a_test_file_outside_the_plan_is_an_error():
-    with pytest.raises(build_files.GenerationError, match='tests/test_unknown.py'):
-        build_files.test_attributes('tests/test_unknown.py', PLAN, {})
+def test_dedicated_graph_check_keeps_its_own_job():
+    attributes = build_files.test_attributes('tests/test_graph_impact.py', {})
+    assert attributes['args'] == ['--deselect=tests/test_graph_impact.py::test_graph_impact_gate']
+    assert build_files.test_attributes('tests/test_in.py', {})['args'] == []
 
 
 def test_long_files_are_sharded_and_given_a_long_timeout_only_when_needed():
-    slow = build_files.test_attributes('tests/test_slow.py', PLAN, {'tests/test_slow.py': 170.2})
+    slow = build_files.test_attributes('tests/test_slow.py', {'tests/test_slow.py': 170.2})
     assert slow['shard_count'] == 5 and slow['timeout'] == 'moderate'
-    quick = build_files.test_attributes('tests/test_in.py', PLAN, {'tests/test_in.py': 3.0})
+    quick = build_files.test_attributes('tests/test_in.py', {'tests/test_in.py': 3.0})
     assert 'shard_count' not in quick and quick['timeout'] == 'moderate'
 
 
@@ -494,9 +480,6 @@ def test_a_module_depends_on_the_pip_distributions_it_imports(tmp_path):
 SMALL = {
     'pytest.ini': '[pytest]\ntestpaths = tests\n',
     'tools/ci/gate_durations.json': json.dumps({'files': {'tests/test_slow.py': 100.0}}),
-    'tools/ci/gate_quarantine.json': json.dumps({'entries': [
-        {'target': 'tests/test_held.py', 'issue': 7, 'reason': 'owned elsewhere'},
-        {'target': 'tests/test_slow.py::test_flaky', 'issue': 8, 'reason': 'flaky'}]}),
     'tools/bazel/pip_modules.json': json.dumps({'yaml': ['pyyaml']}),
     'tools/bazel/test_inputs.bzl': 'TEST_INPUTS = {}\n',
     'tests/conftest.py': 'from prismaquant import core\n',
@@ -511,7 +494,7 @@ SMALL = {
 }
 
 
-def test_generated_packages_hold_libraries_tests_lanes_and_deselects(tmp_path):
+def test_generated_packages_hold_libraries_tests_and_shards(tmp_path):
     files = write(tmp_path, SMALL)
     generated = build_files.generate(tmp_path, files)
     assert set(generated) == {'', 'tests'}
@@ -519,14 +502,13 @@ def test_generated_packages_hold_libraries_tests_lanes_and_deselects(tmp_path):
     assert root.startswith(build_files.HEADER) and tests.startswith(build_files.HEADER)
     assert 'name = "prismaquant/child",' in root and '"@pq_pip//pyyaml"' in root
     slow = tests[tests.index('name = "test_slow"'):].split('\n)\n', 1)[0]
-    # The conftest above it, the program its closure launches, its deselect, its shards.
+    # Keep the conftest, the launched program, and the shards.
     assert '":conftest"' in slow and '"//:prismaquant/child"' in slow
-    assert '"--deselect=tests/test_slow.py::test_flaky"' in slow
     assert 'shard_count = 3' in slow
     deep = tests[tests.index('name = "g3job/test_deep"'):].split('\n)\n', 1)[0]
     assert '":conftest"' in deep and '":g3job/conftest"' in deep
     held = tests[tests.index('name = "test_held"'):].split('\n)\n', 1)[0]
-    assert '"gate-issue-7"' in held and '"manual"' in held
+    assert '"manual"' not in held
 
 
 def test_an_import_cycle_across_packages_refuses_generation(tmp_path):
@@ -648,13 +630,6 @@ def test_modules_a_test_inputs_entry_names_become_the_tests_dependencies(tmp_pat
     sources['tools/bazel/test_inputs.bzl'] = sources['tools/bazel/test_inputs.bzl'].replace('child.py', 'gone.py')
     with pytest.raises(build_files.GenerationError, match='prismaquant/gone.py'):
         build_files.generate(tmp_path, write(tmp_path, sources))
-
-
-def test_a_deselected_node_with_a_space_stays_one_argument():
-    plan = {'selected': [{'path': 'tests/test_in.py'}], 'deferred': [],
-            'deselect': ["tests/test_in.py::test_x[a b]"]}
-    args = build_files.test_attributes('tests/test_in.py', plan, {})['args']
-    assert build_files.shlex.split(args[0]) == ["--deselect=tests/test_in.py::test_x[a b]"]
 
 
 def test_a_package_that_redirects_its_path_serves_that_directorys_modules(tmp_path):

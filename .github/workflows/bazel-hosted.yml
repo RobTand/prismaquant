@@ -30,7 +30,6 @@ name: Bazel hosted exception tests
         value: ${{ jobs.tests.outputs.verdict }}
 permissions:
   contents: read
-  issues: read
 jobs:
   tests:
     runs-on: ${{ inputs.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
@@ -67,7 +66,6 @@ jobs:
     - name: Plan complete hosted policy then narrow verified exceptions
       id: plan
       env:
-        GITHUB_TOKEN: ${{ github.token }}
         BASE: ${{ inputs.base }}
         HEAD: ${{ inputs.head }}
         TRUSTED: ${{ inputs.trusted }}

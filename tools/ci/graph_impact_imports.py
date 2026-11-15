@@ -244,7 +244,6 @@ def gate_population(root: Path) -> list[str]:
     names = [path for path in python_files(root) if path.startswith('tests/')]
     plan = gate_select.create_plan(
         root, [], durations=json.loads((root / 'tools/ci/gate_durations.json').read_text()),
-        quarantine=json.loads((root / 'tools/ci/gate_quarantine.json').read_text()),
         index={name: (set(), set()) for name in names}, mode='full')
     return [row['path'] for row in plan['selected']]
 

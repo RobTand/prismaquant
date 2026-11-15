@@ -29,8 +29,7 @@ It writes:
 - one pq_py_library per module, or per import cycle, with the @pq_pip
   packages that module imports (tools/bazel/pip_modules.json);
 - one pq_py_test per test file, depending on its module's library and every
-  conftest above it; the hosted gate's lanes and quarantined files are manual,
-  tagged with their owner, and node-level deselects are args;
+  conftest above it; the graph check runs in its dedicated job;
 - data for every file a module names by path.
 
 Run tools/bazel/generate.sh after adding a module, test or fixture. --check
@@ -50,7 +49,6 @@ import os
 import posixpath
 import re
 from pathlib import Path, PurePosixPath
-import shlex
 import subprocess
 import sys
 import textwrap
@@ -1074,27 +1072,14 @@ def hosted_plan(root, files, gate_select=None):
     index = {path: (set(), set()) for path in files if path.startswith('tests/') and path.endswith('.py')}
     durations = json.loads((root / 'tools/ci/gate_durations.json').read_text())
     plan = gate_select.create_plan(root, [], durations=durations,
-                                   quarantine=json.loads((root / 'tools/ci/gate_quarantine.json').read_text()),
                                    index=index, mode='full')
     return plan, durations['files']
 
 
-def test_attributes(path, plan, durations):
-    """args, tags, shard_count and timeout for one test file."""
-    selected = {row['path'] for row in plan['selected']}
-    attributes = {}
-    if path in selected:
-        # Bazel tokenizes args like a shell: a node id with a space or quote stays one argument.
-        attributes['args'] = [shlex.quote('--deselect=' + node) for node in plan['deselect']
-                              if node.split('::', 1)[0] == path]
-    else:
-        reasons = [row for row in plan['deferred'] if row['path'] == path]
-        if not reasons:
-            raise GenerationError(f'{path} is neither in the gate population nor deferred')
-        tags = ['manual']
-        for row in reasons:
-            tags.append(f"gate-lane-{row['lane']}" if row.get('lane') else f"gate-issue-{row['issue']}")
-        attributes['tags'] = sorted(set(tags))
+def test_attributes(path, durations):
+    """Set the dedicated graph job, shard count, and timeout for one test file."""
+    attributes = {'args': ['--deselect=' + node for node in sorted(GATE_SELECT.DEDICATED_NODEIDS)
+                           if node.split('::', 1)[0] == path]}
     seconds = durations.get(path)
     if seconds is not None and seconds > SHARD_SECONDS:
         shards = min(MAX_SHARDS, math.ceil(seconds / SHARD_SECONDS))
@@ -1215,7 +1200,7 @@ def generate(root=ROOT, files=None):
         packages[home].append((relative(path, home).removesuffix('.py'), 'pq_py_test', {
             'path': path, 'library': label(*owner[path], home), 'deps': sorted(deps),
             'data': trees.labels(inputs['own_data'] - inputs['modules'], home),
-            **test_attributes(path, plan, durations)}))
+            **test_attributes(path, durations)}))
     for package, directories in trees.used.items():
         if package == HANDWRITTEN[0].rstrip('/'):
             continue  # Its BUILD file, written by hand, declares :files.

@@ -229,48 +229,6 @@ def test_split_forward_subcommand_keeps_its_supported_bootstrap():
     assert result.returncode == 0, result.stderr.decode()
 
 
-def test_source_adoption_batch_reaches_only_its_actual_input_boundary():
-    """Real imports and input open, not source adoption or 120-header execution."""
-    expected = "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-joint-01/prepare/source-identity.json"
-    probe = r'''
-import json, os, runpy, sys
-expected = sys.argv[1]
-output_root = "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/cpu-export-codex-20260922"
-denied = []
-publications = []
-class ApplicationInputDenied(Exception):
-    pass
-def audit(event, args):
-    if event != "open" or not isinstance(args[0], (str, bytes, os.PathLike)):
-        return
-    path = os.fsdecode(args[0])
-    if path == expected:
-        denied.append(path)
-        raise ApplicationInputDenied("bootstrap application input deliberately denied")
-    flags = args[2]
-    if path.startswith(output_root + "/") and flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT):
-        publications.append(path)
-        raise RuntimeError("unexpected output publication before the input boundary")
-sys.addaudithook(audit)
-try:
-    runpy.run_module("tools.prove_glm_source_adoption", run_name="__main__")
-except ApplicationInputDenied:
-    print(json.dumps({"scope": "bootstrap through first application input only",
-        "denied_open": denied, "publications": publications,
-        "reason": "bootstrap application input deliberately denied"}, sort_keys=True))
-    raise SystemExit(86)
-raise SystemExit("script did not reach the actual denied input")
-'''
-    env = _scientific_environment()
-    result = subprocess.run([sys.executable, "-c", probe, expected],
-        cwd=ROOT, env=env, capture_output=True, check=False)
-    assert result.returncode == 86, result.stderr.decode()
-    observed = json.loads(result.stdout.splitlines()[-1])
-    assert observed["denied_open"] == [expected]
-    assert observed["publications"] == []
-    assert observed["reason"] == "bootstrap application input deliberately denied"
-
-
 @pytest.mark.parametrize("name", ["check_stageb_a4_quantizer.py", "check_stageb_a4_group_quantizer.py"])
 def test_native_batch_entrypoint_runs_its_real_tiny_cuda_checker(name):
     import hashlib

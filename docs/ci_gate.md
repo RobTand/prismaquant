@@ -91,7 +91,7 @@ plan artifact under the new attempt number and therefore cannot produce a verdic
 Full reruns swap every shard's architecture. Pytest failures, including xdist
 worker crash reports, remain final failures. There is no automatic test retry.
 
-## Time budgets and quarantine
+## Time budgets
 
 `tools/ci/gate_budget.json` defines the default and exact-node exceptions.
 Every measured overrun is a warning, regardless of its size. It never fails a
@@ -157,24 +157,10 @@ that exact policy blob, so a merged migration grants nothing to a later PR. The
 default, file budgets and every unlisted node stay shrink-only. A malformed record
 fails closed. The first migration (#3223) recorded the dependency change of a retired client install.
 
-`tools/ci/gate_quarantine.json` replaces `.github/hosted-known-failures.txt`.
-The legacy file at main `8d72e303e2f070925077ce9e072b254df3856909` had 54 active
-entries, not 72. The initial policy carries those entries plus the observed ARM
-exit-ownership race owned by #3197. As with budgets, a base predating this policy
-permits initial setup. Once present, quarantine can only shrink against the PR
-base during an ordinary code change. A whole-file exclusion may narrow to an
-exact node owned by the same issue. New targets, broader targets, or owner changes
-require a PR touching only the quarantine file and optional documentation.
-A fix can always remove an entry alongside its code changes.
-
-Planning checks each distinct owner using GitHub's public REST API. Owners must
-be open issues, not PR numbers. Closed or missing owners fail. An unavailable,
-rate-limited, malformed, or timed-out API returns exit 75, never a pass.
-Whole-file exclusions happen before import. Node exclusions use exact collected
-IDs, so excluding `test_a` never excludes `test_a_more` or an unlisted parameter.
-The post-merge full suite uses the same exact exclusion hook. Cgroup membership
-comes from collected pytest markers, including aliases and hooks, rather than
-source substrings. Quarantine owners repair their failures and remove entries.
+The gate has no known-failure exclusions. The graph check runs in its dedicated
+job. The CPU plan excludes that exact node and keeps its other tests.
+Cgroup membership comes from collected pytest markers, including aliases and
+hooks.
 
 ## Secrets
 
