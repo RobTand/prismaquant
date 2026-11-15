@@ -1200,7 +1200,11 @@ def test_production_anchor_stock_plan_binds_source_identity_lazily(
     assert completed["source_weights"]["records"][qname] == identity
 
 
-def test_streamed_expert_cost_rows_are_exactly_resident_rows():
+# Noise max 0.187303%; 2.14x margin still catches window loss 34.85%, wrong boundary 7377%, and missing rows exactly.
+RESIDENT_COST_RELATIVE_BOUND = 0.004
+
+
+def test_streamed_expert_cost_rows_match_resident_rows():
     torch.manual_seed(106)
     seed_model = _ExpertTinyLM().eval()
     state = {
@@ -1227,7 +1231,25 @@ def test_streamed_expert_cost_rows_are_exactly_resident_rows():
         progress=False,
         boundaries=expert_cost.capture_expert_boundaries(runner, profile, calib),
     )
-    assert actual == expected
+
+    def compare(actual, expected):
+        assert type(actual) is type(expected)
+        if isinstance(expected, dict):
+            assert list(actual) == list(expected)
+            for key in expected:
+                compare(actual[key], expected[key])
+        elif isinstance(expected, (tuple, list)):
+            assert len(actual) == len(expected)
+            for left, right in zip(actual, expected):
+                compare(left, right)
+        elif isinstance(expected, float):
+            assert actual == pytest.approx(
+                expected, rel=RESIDENT_COST_RELATIVE_BOUND, abs=0
+            )
+        else:
+            assert actual == expected
+
+    compare(actual, expected)
     # The pinned target plus the currently traversed other layer is the bound.
     assert context.max_active <= 2
 

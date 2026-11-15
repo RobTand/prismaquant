@@ -1053,7 +1053,11 @@ def measure_expert_unit_costs_forked(
     model_identity: Mapping[str, object] | None = None,
     checkpoint_identity_extra: Mapping[str, object] | None = None,
 ) -> tuple[dict, dict, dict]:
-    """Measure one format and layer group from saved source boundaries."""
+    """Measure one format and layer group from saved source boundaries.
+
+    Forked and resident paths differ at reassociation level through GEMM row
+    counts and KL sum order, measured up to 0.187303% on the CPU fixture.
+    """
     if profile.new_forward_pass_state() != {}:
         raise RuntimeError("expert units require stateless layer passes")
     profile = resolve_routed_expert_profile(runner.model, profile)
