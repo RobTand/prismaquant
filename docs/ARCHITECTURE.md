@@ -942,12 +942,12 @@ and 58-minute await deadline are unchanged. See `docs/bazel.md` for the timing
 source and scope. Known excluded manual rules are removed from impacts before
 manifest validation; hosted routing and unknown-target refusal remain enforced.
 
-As of: 2026-11-11, batch CI, PQ #3383.
+As of: 2026-11-15, FIFO merge queue, PQ #3642.
 Source: `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.mergify.yml`.
-Both queues require `linked issue` on original PRs and `gate` on batch drafts.
-The default batch waits up to 10 minutes. Bazel and hosted gate jobs run only
-on authenticated Mergify batches or `gate-canary` PRs. Graph impact still runs
-on every PR. The post-merge CPU suite remains on Python 3.12.
+One serial queue requires `linked issue` on original PRs and `gate` on each draft.
+Each draft checks one PR on the newest main, in `queue` label order.
+Bazel and hosted gate jobs run only on authenticated Mergify drafts or `gate-canary` PRs.
+Graph impact runs on every PR. The post-merge CPU suite remains on Python 3.12.
 
 As of: 2026-11-14, item 17 removes the known-failure quarantine after cause fixes
 and dead-test deletion. Source: `tools/ci/gate_select.py`, `tools/ci/gate_collect.py`,
