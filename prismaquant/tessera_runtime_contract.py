@@ -2397,10 +2397,8 @@ def published_tensor_parallel_axes(
 ) -> Mapping[str, Mapping[str, str]]:
     """``family -> axis -> status``, read from a contract file on disk.
 
-    The same reader the parsed contract uses, for the two callers that hold a
-    contract path rather than a loaded contract: the packaged-table route
-    admission, and ``prismaquant.tessera_tp_audit``'s ``--contract``.  One
-    reader means the vocabulary refusal is identical on every path.
+    The packaged-table route admission uses this reader when it holds a
+    contract path rather than a loaded contract.
     """
     return _published_tensor_parallel(path, sha)[1]
 
