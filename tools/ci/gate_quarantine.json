@@ -432,6 +432,11 @@
         "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
         "legacy_line": 97
       }
+    },
+    {
+      "target": "tests/test_native_results.py::test_measured_interpreter_is_the_actual_executable",
+      "issue": 3531,
+      "reason": "ValueError: native runtime file changed (dl380g10 BuildBuddy executor hard-links inputs, which changes ctime)"
     }
   ]
 }
