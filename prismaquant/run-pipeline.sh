@@ -78,15 +78,7 @@ fi
 # linear time cost in probe wall-time. Override for faster iteration.
 : "${NSAMPLES:=32}"
 : "${SEQLEN:=1024}"
-# LAYERS_PER_SHARD controls how many decoder layers share one reverse
-# sweep for Fisher accumulation. Larger = fewer sweeps = faster probe,
-# but each shard needs more gradient + retained-activation memory.
-# Default `auto` asks prismaquant.autoscale to pick from available RAM +
-# model size. Set to an int (e.g. `2`) to override.
-: "${LAYERS_PER_SHARD:=auto}"
-# CACHE_HEADROOM_GB controls the streaming layer-cache budget
-# (cache = free_RAM - headroom). Default `auto` picks from model +
-# LAYERS_PER_SHARD. Set to a float to override.
+# CACHE_HEADROOM_GB reserves host memory outside the streaming layer cache.
 : "${CACHE_HEADROOM_GB:=auto}"
 : "${PREFETCH_LOOKAHEAD:=auto}"
 : "${PREFETCH_WORKERS:=auto}"
@@ -987,7 +979,7 @@ echo "  TARGET_PROFILE=${TARGET_PROFILE:-<unset, spec-resolved>} -> $TARGET_PROF
 echo "  ALLOW_PINNED=${ALLOW_PINNED:-<none>}"
 echo "  LM_HEAD_FORMAT=$LM_HEAD_FORMAT -> $LM_HEAD_FORMAT_CANONICAL  fixed_quantized=$LM_HEAD_FIXED_QUANTIZED dp_unpinned=$LM_HEAD_DP_UNPINNED"
 echo "  COST_FORMATS=$COST_FORMATS  remaining_profile_pins=${REMAINING_PROFILE_PINS[*]:-<none>}"
-echo "  NSAMPLES=$NSAMPLES SEQLEN=$SEQLEN LAYERS_PER_SHARD=$LAYERS_PER_SHARD"
+echo "  NSAMPLES=$NSAMPLES SEQLEN=$SEQLEN"
 echo "  PREFETCH_LOOKAHEAD=$PREFETCH_LOOKAHEAD PREFETCH_WORKERS=$PREFETCH_WORKERS"
 echo "  ACTIVATION_ROWS_LIMIT=$ACTIVATION_ROWS_LIMIT"
 echo "  VISUAL_FORMAT=$VISUAL_FORMAT"
@@ -1336,8 +1328,7 @@ else
 fi
 
 # -----------------------------------------------------------------------
-# 2. Cost measurement (per-(Linear, format) measured RTN error,
-#    body + MTP in one pass)
+# 2. Cost measurement for MTP and other non-body rows.
 # -----------------------------------------------------------------------
 if [[ -n "$PREPRICED_COST_REPORT" ]]; then
   echo "[pipeline] [2/4] using validated prepriced input: $COST_PATH (cost builders skipped)"
@@ -1355,7 +1346,7 @@ elif ! (
   BASE_COST_REUSABLE=0
 fi
 if [[ "$BASE_COST_REUSABLE" == "0" ]]; then
-  echo "[pipeline] [2/4] measuring per-(layer, format) cost ..."
+  echo "[pipeline] [2/4] measuring non-body base cost ..."
   python3 -m prismaquant.incremental_measure_quant_cost \
     --model "$MODEL_PATH" \
     --cost-mode "$COST_MODE" \
@@ -1366,7 +1357,6 @@ if [[ "$BASE_COST_REUSABLE" == "0" ]]; then
     --work-dir "${WORK_DIR}/work" \
     --device "$DEVICE" --dtype bf16 \
     --mode batched --chunk-size 256 \
-    --layers-per-shard "$LAYERS_PER_SHARD" \
     --skip-missing-activations \
     "${LM_HEAD_BASE_COST_ARGS[@]}" \
     2>&1 | tee "${WORK_DIR}/logs/cost.log"

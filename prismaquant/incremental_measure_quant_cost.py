@@ -1,28 +1,7 @@
 #!/usr/bin/env python3
-"""incremental_measure_quant_cost.py — per-(Linear, format) quantization
-error, streamed shard-by-shard on top of `layer_streaming`.
+"""Measure base costs for MTP and other non-body rows that AURA does not price.
 
-This is the unified cost path. There is no whole-model `from_pretrained`
-load anymore: we mirror the Step-2 `incremental_probe` architecture —
-one `StreamingContext` built once with the head (embed + norm + lm_head
-+ rotary) resident and every decoder layer offloaded to disk / on meta.
-Each shard installs its decoder layers on demand, runs
-`measure_batched_gpu` / `measure_unbatched` + `_measure_packed_experts`
-on the matching Linears, writes a per-shard pickle, then unloads.
-
-MTP is folded in as a built-in shard kind: when `--include-mtp` (default
-True), a shard's regex like `^mtp\\.layers\\.0\\.` triggers synthesis of
-the profile's MTP module (`profile.build_mtp_module`), loading of the
-source MTP safetensors (`profile.read_mtp_source_state_dict` /
-`profile.load_mtp_state_dict`), enumeration of MTP Linears + packed
-experts, then the same measurement pipeline against the MTP activation
-cache (the probe writes those activations to the same
-`--activation-cache-dir` when its own `--include-mtp` was set).
-
-Small models pay the no-op cost of a cache that can hold every layer
-resident; large models drain the cache to disk as needed. The per-shard
-pickle format matches `measure_quant_cost.run_cost_pass` — allocator
-consumes either unchanged.
+Use the existing streamed shard schedule and activation cache.
 """
 from __future__ import annotations
 
@@ -783,10 +762,6 @@ def main():
     ap.add_argument("--chunk-size", type=int, default=256)
     ap.add_argument("--min-mem-available-mb", type=int, default=2048)
     ap.add_argument("--no-watchdog", action="store_true")
-    ap.add_argument("--layers-per-shard", default="1",
-                    help='Int, or "auto" to derive from available RAM + model size.')
-    ap.add_argument("--start-layer", type=int, default=0)
-    ap.add_argument("--end-layer", type=int, default=None)
     ap.add_argument("--include-mtp", action="store_true", default=True,
                     help="Measure cost for profile-declared MTP layers.")
     ap.add_argument("--no-include-mtp", action="store_false", dest="include_mtp")
@@ -813,42 +788,11 @@ def main():
 
     source_root = resolve_source_checkpoint_path(args.model)
     n_layers = load_num_hidden_layers(str(source_root))
-    start = max(0, args.start_layer)
-    end = n_layers if args.end_layer is None else min(args.end_layer, n_layers)
-    if start >= end:
-        raise SystemExit(f"empty layer range: start={start} end={end}")
-
-    # Resolve --layers-per-shard: int literal or "auto" (hardware-adaptive).
-    # Cost script has no --nsamples / --seqlen of its own — those belong to
-    # the probe run. Pull them from the probe pickle's meta so the autoscale
-    # memory model uses the same calibration shape that produced the probe.
-    lps_arg = str(args.layers_per_shard).strip()
-    if lps_arg.lower() in ("auto", ""):
-        from .autoscale import pick_layers_per_shard
-        try:
-            with open(args.probe, "rb") as _f:
-                _probe_meta = (pickle.load(_f).get("meta") or {})
-        except Exception:
-            _probe_meta = {}
-        _nsamples = int(_probe_meta.get("nsamples", 32))
-        _seqlen = int(_probe_meta.get("seqlen", 1024))
-        lps, lps_diag = pick_layers_per_shard(
-            str(source_root), nsamples=_nsamples, seqlen=_seqlen,
-        )
-        print(f"[cost] layers_per_shard=auto -> {lps} "
-              f"(nsamples={_nsamples}, seqlen={_seqlen}, "
-              f"available={lps_diag.get('available_gb',0):.1f} GB, "
-              f"per_layer_active={lps_diag.get('per_layer_active_gb',0):.2f} GB)",
-              flush=True)
-        args.layers_per_shard = lps
-    else:
-        args.layers_per_shard = int(lps_arg)
-
     schedule = build_shard_schedule(
         model_path=str(source_root),
         num_body_layers=n_layers,
-        body_layers_per_shard=args.layers_per_shard,
-        body_layer_range=(start, end),
+        body_layers_per_shard=1,
+        body_layer_range=(0, 0),
         include_mtp=args.include_mtp,
         include_visual=args.include_visual,
         include_lm_head=args.include_lm_head,
@@ -951,7 +895,7 @@ def main():
             str(source_root),
             device=torch.device(args.device),
             dtype=dtype,
-            offload_folder=offload_folder, layers_per_shard=args.layers_per_shard,
+            offload_folder=offload_folder, layers_per_shard=1,
             log_prefix="[incremental-cost]",
         )
         if not args.no_watchdog:
@@ -1047,17 +991,8 @@ def main():
             ctx.shutdown()
 
     merge_cost_pickles(shard_paths, Path(args.output))
-    # Coverage gate: every body layer the probe measured must appear in
-    # the merged cost table. A silent hole here flows straight into the
-    # allocation (the allocator only allocates what has costs) and the
-    # export passes the hole through as passthrough bytes.
-    import pickle as _pkl
-    import re as _re
-    with open(args.probe, "rb") as _pf:
-        _probe_stats = _pkl.load(_pf).get("stats", {})
-    with open(args.output, "rb") as _cf:
-        _cost_table = _pkl.load(_cf).get("costs", {})
-    _cost_names = set(_cost_table)
+    with open(args.output, "rb") as handle:
+        _cost_table = pickle.load(handle).get("costs", {})
     # Rows a measurement exception poisoned. measure_batched_gpu aborts the
     # shard by default, so reaching here means someone ran with
     # PRISMAQUANT_COST_FAIL_FAST=0 — the table must still never reach the
@@ -1074,20 +1009,6 @@ def main():
               f"rows failed measurement and carry no usable cost, e.g. "
               f"{_failed[:5]} — refusing to hand the allocator a cost table "
               f"with fail-open holes.", flush=True)
-        raise SystemExit(2)
-    _lay = _re.compile(r"\blayers\.(\d+)\.")
-    def _layers_of(names):
-        out = set()
-        for n in names:
-            m = _lay.search(str(n))
-            if m:
-                out.add(int(m.group(1)))
-        return out
-    _missing = sorted(_layers_of(_probe_stats) - _layers_of(_cost_names))
-    if _missing:
-        print(f"[incremental-cost] FATAL: merged cost table has no entries "
-              f"for probed body layers {_missing} — refusing to hand the "
-              f"allocator a cost table with silent holes.", flush=True)
         raise SystemExit(2)
     print(f"[incremental-cost] wrote merged cost to {args.output}", flush=True)
 
