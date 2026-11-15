@@ -25,6 +25,7 @@ CONSOLIDATED_HELPERS = [
     ("file_sha256hex", "prismaquant/digests.py"),
     ("_canon_fmt", "prismaquant/streaming_production_cache.py"),
     ("nvfp4_activation_qdq_served", "prismaquant/nvfp4_activation_contract.py"),
+    ("_optional_str", "prismaquant/model_profiles/structure.py"),
 ]
 DIGEST_FREE = [
     "prismaquant/visual_linears.py",

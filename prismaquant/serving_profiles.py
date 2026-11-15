@@ -11,6 +11,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from importlib import import_module
+from .model_profiles.structure import _optional_str
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Collection, Mapping
 
@@ -1657,12 +1658,6 @@ def _load_runtime_validator(callable_path: str):
     if not callable(validator):
         raise TypeError(f"runtime validator {callable_path!r} is not callable")
     return validator
-
-
-def _optional_str(value: object) -> str | None:
-    if value is None:
-        return None
-    return str(value)
 
 
 def _optional_int(value: object) -> int | None:
