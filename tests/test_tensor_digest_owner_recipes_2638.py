@@ -30,15 +30,16 @@ TOKEN_SCOPE = "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256"
 # Canonical JSON identity after the token route, native migration, and sealed
 # buffer digest consolidation. Retained byte-contract goldens stay fixed.
 # #3457 drops three same-name helper entries of its deleted modules.
-TOKEN_ONLY_BASELINE_SHA256 = "2b5f96e215ce930417ee826e66529abd2d312685f53d8fa82a3c8be33691ecd0"
+TOKEN_ONLY_BASELINE_SHA256 = "970f7cb5e10603bd2b32f21f709e1660ddced9119d5a85b7345d918846435f4b"
 # Supplied main 6d8288ad had 277 primitive scopes. The migration removed
 # retired PB tooling in 8c336f2e3, 728a6e8fd, a4cf01ccc, adaf3d9f6,
 # 989eaa5fc and cb07374d5. 3ffa08ae7 consolidated SealedBuffer.seal;
 # 0c56ce19c removed its allowance. PrismaSnap removal drops seven scopes
 # from the supplied-main list, including the retired cluster campaign main.
 # #3448 drops the four scopes of its deleted probe-resume modules.
-MAIN_SCOPES_SHA256 = "9e71eb55011678a935222ab1211d855f139f2189f08186c722f5c11914fc2816"
+MAIN_SCOPES_SHA256 = "3fc8e85296ae0bf9e0f3b7861cbc346d855efa082fab64d3c444a24eab9f1c21"
 MIGRATION_REMOVED_SCOPES = {
+    'hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob',
     "hashlib:prismaquant/io_engine.py::SealedBuffer.seal",
     "hashlib:prismaquant/joint_forward_resume.py::_read",
     "hashlib:tools/build_t4_recovery_request.py::sha",
@@ -154,11 +155,11 @@ def test_token_route_removes_only_enumerated_main_baseline_scopes():
     main_sites = json.loads((REPO / 'tests/fixtures/digest_main_scopes_2638.json').read_text())
     canonical_main = json.dumps(main_sites, separators=(',', ':')).encode()
     assert hashlib.sha256(canonical_main).hexdigest() == MAIN_SCOPES_SHA256
-    assert len(main_sites) == len(set(main_sites)) == 251
+    assert len(main_sites) == len(set(main_sites)) == 241
     removals = {TOKEN_SCOPE, *MIGRATION_REMOVED_SCOPES}
     assert removals <= set(main_sites)
     assert set(baseline['primitive_digest_sites']) == set(main_sites) - removals
-    assert len(baseline['primitive_digest_sites']) == 234
+    assert len(baseline['primitive_digest_sites']) == 223
     canonical = json.dumps(baseline, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(canonical).hexdigest() == TOKEN_ONLY_BASELINE_SHA256, (
         "regenerate the reviewed native baseline after classifying source removals; "

@@ -84120,6 +84120,7 @@ pq_py_library(
         "//:prismaquant/io_engine.py",
         "//:prismaquant/joint_forward_resume.py",
         "//:prismaquant/tensor_digests.py",
+        "//:prismaquant/tessera_census_cache.py",
         "//:prismaquant/tessera_hessian.py",
         "//:tools/stagea_produced_live_cycle.py",
         "fixtures/digest_main_scopes_2638.json",
