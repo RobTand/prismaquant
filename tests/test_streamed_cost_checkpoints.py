@@ -1137,12 +1137,7 @@ def test_production_anchor_resolves_raw_named_expert_activation_cache(
 def test_production_anchor_stock_plan_binds_source_identity_lazily(
     monkeypatch,
 ):
-    """``source_weight_identity_for`` binds the identity from the live
-    source weight -- the GLM-5.3 harvest crashed on exactly this at its first
-    reverse layer (2026-08-27) because the method only read a codebook
-    binding (that lane was archived 2026-09-25, #1304).
-    A unit outside the plan stays refused.
-    """
+    """Bind live source weights and refuse units outside the plan."""
     import prismaquant.streaming_production_cache as streaming
     from prismaquant.production_weight_cache import (
         _source_weight_value_identity,
@@ -1177,6 +1172,7 @@ def test_production_anchor_stock_plan_binds_source_identity_lazily(
         calibration_hash="c" * 64,
         arm_identity={"arm": "fixture-stock-plan"},
         model_identity=_model_identity("stock-plan-source"),
+        producer_git_commit="1" * 40,
         max_act_rows=8,
     )
     rendered = renderer.render_layer(
