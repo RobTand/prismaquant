@@ -24,7 +24,6 @@ gate_paths = importlib.util.module_from_spec(PATH_SPEC)
 PATH_SPEC.loader.exec_module(gate_paths)
 
 POLICY = 'specific-references-runtime-data-full-v5'
-DEDICATED_NODEIDS = frozenset({'tests/test_graph_impact.py::test_graph_impact_gate'})
 
 
 def load_gate_json(path: Path) -> dict:
@@ -317,15 +316,13 @@ def create_plan(root: Path, changed: list[str], *, durations: dict,
     selected = shadow if mode == 'selection' else [
         {'path': name, 'reasons': ['full queue population'],
          'estimated_seconds': durations['files'].get(name)} for name in sorted(population)]
-    deselect = sorted(node for node in DEDICATED_NODEIDS
-                      if node.split('::', 1)[0] in {item['path'] for item in selected})
     files = [row['path'] for row in selected]
     return {'schema': 'prismaquant.gate_plan.v1', 'policy': POLICY,
             'population': {'size': len(population), 'version': version,
                            'estimate': estimate(sorted(population), durations)},
             'mode': mode, 'changed_files': sorted(set(changed)), 'selected': selected,
             'shadow_selected': shadow,
-            'deselect': deselect, 'estimate': estimate(files, durations),
+            'deselect': [], 'estimate': estimate(files, durations),
             'budget': {'target_wall_seconds': 300, 'maximum_wall_seconds': 600,
                        'includes_pickup': False, 'policy': 'never truncate relevant coverage'}}
 

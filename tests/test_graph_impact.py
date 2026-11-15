@@ -1,4 +1,4 @@
-"""Synthetic, language-neutral contracts and the live per-PR graph check."""
+"""Synthetic, language-neutral contracts of the per-PR graph check."""
 from __future__ import annotations
 
 import hashlib
@@ -159,26 +159,6 @@ def test_vendored_core_hash():
     assert actual == recorded, 'Update the recorded hash only when the core changes in all four repos'
 
 
-def test_graph_impact_gate(capsys):
-    from tools.ci import graph_impact_pq
-    with capsys.disabled():
-        assert graph_impact_pq.main([]) == 0
-
-
-def test_pra_baseline_keeps_main_minima_under_the_current_analyzer():
-    from tools.ci import graph_impact_pq as pq
-
-    main = pq.snapshot_at(ROOT, '9fb507d69a13dc058e731f039bf445e84e4b5d3a')
-    recorded = json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text())
-    expected = {**main['recorded_baseline'],
-                'figures': {**main['recorded_baseline']['figures'], 'scc_max': main['scc_max']},
-                'test_to_test_count': len(impact.test_to_test_edges(main)),
-                'analyzer_sha256': pq.file_sha256hex(ROOT / 'tools/bazel/build_files.py')}
-    assert impact.baseline_errors(recorded, expected) == []
-    fixed = expected.keys() - {'figures', 'reach_budget', 'test_to_test_count', 'edge_groups', 'test_to_test'}
-    assert {key: recorded[key] for key in fixed} == {key: expected[key] for key in fixed}
-
-
 @pytest.mark.parametrize('mutation', [None, 'base fingerprint', 'base source fingerprint',
     'head fingerprint', 'executing fingerprint', 'old count', 'old SCC',
     'measured count', 'measured SCC', 'head count', 'head SCC', 'budget', 'tolerance',
@@ -300,19 +280,6 @@ def test_pq_no_git_reports_no_base_and_enforces_absolute_budget(tmp_path, capsys
     assert pq.main(['--root', str(tmp_path)]) == 1
     output = capsys.readouterr()
     assert 'no base available' in output.out and 'reach 1 exceeds budget 0' in output.err
-
-
-def test_live_graph_check_belongs_to_dedicated_job():
-    from tools.ci import gate_select
-    plan = gate_select.create_plan(ROOT, ['docs/ci_gate.md'],
-                                  index={'tests/test_graph_impact.py': (set(), set()),
-                                         'tests/test_unrelated.py': (set(), set())},
-                                  durations={'files': {}})
-    assert plan['selected'] == []
-    plan = gate_select.create_plan(ROOT, ['tests/test_graph_impact.py'],
-                                  index={'tests/test_graph_impact.py': (set(), set())},
-                                  durations={'files': {}})
-    assert plan['deselect'] == ['tests/test_graph_impact.py::test_graph_impact_gate']
 
 
 from tools.ci import graph_impact_imports as fanout

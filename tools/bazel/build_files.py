@@ -29,7 +29,7 @@ It writes:
 - one pq_py_library per module, or per import cycle, with the @pq_pip
   packages that module imports (tools/bazel/pip_modules.json);
 - one pq_py_test per test file, depending on its module's library and every
-  conftest above it; the graph check runs in its dedicated job;
+  conftest above it;
 - data for every file a module names by path.
 
 Run tools/bazel/generate.sh after adding a module, test or fixture. --check
@@ -1077,9 +1077,8 @@ def hosted_plan(root, files, gate_select=None):
 
 
 def test_attributes(path, durations):
-    """Set the dedicated graph job, shard count, and timeout for one test file."""
-    attributes = {'args': ['--deselect=' + node for node in sorted(GATE_SELECT.DEDICATED_NODEIDS)
-                           if node.split('::', 1)[0] == path]}
+    """Set the shard count and timeout for one test file."""
+    attributes = {}
     seconds = durations.get(path)
     if seconds is not None and seconds > SHARD_SECONDS:
         shards = min(MAX_SHARDS, math.ceil(seconds / SHARD_SECONDS))
