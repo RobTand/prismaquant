@@ -296,8 +296,7 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: Re-pinned 2026-09-22 to 07bfcc0e9 -- Tessera master after #580, #582,
 #: #583 and #585 (the declared resident-tensor census, the wire-derived
 #: footprint and the native-unpriced acquisition producer) and #596
-#: (``SourceDigestCache.adopt``, which ``tessera_source_digest_adoption``
-#: now calls).  The packaged contract is byte-identical to ``acf9eafa6``'s
+#: (``SourceDigestCache.adopt``).  The packaged contract is byte-identical to ``acf9eafa6``'s
 #: (v34, digest ``d37c9448…``), so admission does not move: this is a
 #: commit-only move and the answer diff is empty.
 #: Re-pinned 2026-09-26 to af7a86d43 -- Tessera master's merge of #621,

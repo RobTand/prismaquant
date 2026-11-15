@@ -69,7 +69,6 @@ FILE_SITES = [
     ("prismaquant.production_cache_stripes._sha256", False, {}),
     ("prismaquant.digests.file_sha256hex", True, {"block_size": 1024 * 1024}),
     ("prismaquant.stage_a_chain_split._file_sha256", True, {}),
-    ("prismaquant.tessera_anchored_surface._sha", True, {}),
     ("prismaquant.tessera_joint_aura._sha", True, {}),
     ("prismaquant.tessera_legal_domain._file_digest", True, {}),
     ("prismaquant.tessera_materialization._sha", True, {}),
