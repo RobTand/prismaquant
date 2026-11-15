@@ -142,7 +142,6 @@ pq_py_library(
         "conftest.py",
     ],
     data = [
-        ":files/fixtures",
         "test_conftest_reach.py",
         "test_nvfp4_served_dequant_kernel.py",
         "test_render_score_served_quantizer_identity.py",

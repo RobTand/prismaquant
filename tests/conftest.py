@@ -831,6 +831,6 @@ def _golden_rows_all_used(request):
         unused = table.unused_rows(unfinished=unfinished)
         if unused:
             pytest.fail(
-                f"fixtures/{table.name}.json has {len(unused)} frozen row(s) that no "
+                f"golden table {table.name} has {len(unused)} frozen row(s) that no "
                 f"passing call used: {unused[:10]}. Restore the call, or archive the "
                 "rows of a retired test with its archive wall.", pytrace=False)
