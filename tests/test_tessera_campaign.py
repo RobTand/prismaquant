@@ -296,7 +296,7 @@ def test_e2m1_costs_price_the_served_static_ue4m3_contract(monkeypatch, tmp_path
     dynamic callback prices an activation tensor the runtime never executes
     (RobTand/prismaquant#194).
     """
-    from prismaquant.format_registry import nvfp4_activation_qdq_served
+    from prismaquant.nvfp4_activation_contract import nvfp4_activation_qdq_served
     from prismaquant.production_weight_cache import _local_forward_render_score
 
     torch.manual_seed(0)

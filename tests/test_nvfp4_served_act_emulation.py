@@ -4,7 +4,7 @@ import os
 import pytest
 import torch
 
-from prismaquant.format_registry import nvfp4_activation_qdq_served
+from prismaquant.nvfp4_activation_contract import nvfp4_activation_qdq_served
 
 
 def _reference(x: torch.Tensor, g: float) -> torch.Tensor:

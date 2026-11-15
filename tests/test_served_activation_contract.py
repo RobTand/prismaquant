@@ -49,7 +49,7 @@ def underflow_case():
     g = _g_of(amax)            # 1.0
     assert g == 1.0, g
     x = torch.full((1, 16), 1e-3, dtype=torch.bfloat16)
-    served = fr.nvfp4_activation_qdq_served(x, g)
+    served = owner.nvfp4_activation_qdq_served(x, g)
     assert float(served[0, 0]) == 0.0, "the case must underflow to be a case"
     return amax, g, x, served
 
@@ -151,7 +151,7 @@ def test_cache_score_for_a_tessera_row_prices_the_served_contract(underflow_case
         activations=x, activation_max_abs=amax, levers=NativeRenderLevers.resolve(gptq_default=True))
     served_score = _local_forward_render_score(
         reference_weight=w, rendered_weight=w, activations=x,
-        activation_quantize=lambda t: fr.nvfp4_activation_qdq_served(t, g),
+        activation_quantize=lambda t: owner.nvfp4_activation_qdq_served(t, g),
         activation_max_abs=None)[0]
     assert served_score > 0.0
     assert record["score"] == pytest.approx(served_score, rel=0, abs=0)
@@ -464,7 +464,7 @@ def test_the_kl_hook_refuses_an_activation_priced_at_another_scale(
     amax, x, _w = policy_case
     spec = fr.get_format(W4A4)
     monkeypatch.setenv(POLICY_ENV, "0")
-    served = fr.nvfp4_activation_qdq_served(x, 1.0)
+    served = owner.nvfp4_activation_qdq_served(x, 1.0)
     # Control: the cache priced this unit at the same G the hook applies.
     assert torch.equal(_activation_qdq(x, spec, {Q: amax}, Q, {Q: 1.0}), served)
     # And with no priced G at all (no production cache) nothing changes.
