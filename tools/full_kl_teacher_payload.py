@@ -11,7 +11,6 @@ serialized file are all digest-bound.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import hashlib
 import json
 import math
 import os
@@ -21,6 +20,7 @@ from typing import Any
 
 import torch
 
+from prismaquant.digests import DIRECT_UTF8_INDENT2_STRICT, bytes_sha256hex
 from prismaquant.tokenizer_identity import (
     TOKENIZER_IDENTITY_SCHEMA,
     build_tokenizer_identity,
@@ -661,7 +661,7 @@ def tensor_descriptor(value: torch.Tensor) -> dict[str, object]:
     return {
         "dtype": str(tensor.dtype).removeprefix("torch."),
         "shape": [int(dimension) for dimension in tensor.shape],
-        "sha256": hashlib.sha256(raw).hexdigest(),
+        "sha256": bytes_sha256hex(raw),
     }
 
 
@@ -1094,9 +1094,7 @@ def atomic_json_write(payload: object, path: str | os.PathLike) -> None:
     temporary = target.with_name(f".{target.name}.tmp.{os.getpid()}")
     if temporary.exists():
         raise TeacherPayloadError(f"temporary metadata already exists: {temporary}")
-    data = json.dumps(
-        payload, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False
-    ).encode("utf-8") + b"\n"
+    data = DIRECT_UTF8_INDENT2_STRICT.encoded(payload) + b"\n"
     try:
         with temporary.open("xb") as handle:
             handle.write(data)
