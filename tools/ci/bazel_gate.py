@@ -28,6 +28,7 @@ from tools.ci import bazel_artifacts as artifacts
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_sha256hex
 
 SCHEMA = 'prismaquant.bazel-gate.v1'
+NONHERMETIC = Path(__file__).resolve().parents[2] / 'tools/bazel/nonhermetic.bzl'
 
 
 class GateError(RuntimeError):
@@ -476,7 +477,7 @@ def main(argv=None):
     if args.mode == 'hosted':
         try:
             assignment = hosted_assignment(json.loads(args.plan.read_text()), args.architecture,
-                                           Path('tools/bazel/nonhermetic.bzl').read_text())
+                                           NONHERMETIC.read_text())
             with args.output.open('xb') as stream:
                 stream.write(DIRECT_ASCII_SPACED_LAX.encoded(assignment) + b'\n')
         except (GateError, ValueError, TypeError, KeyError, OSError):

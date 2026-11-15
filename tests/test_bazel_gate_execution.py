@@ -30,16 +30,16 @@ TABLE = """NONHERMETIC = {
 }"""
 PLAN = {'schema': 'prismaquant.gate_plan.v1', 'mode': 'full', 'base_sha': 'b' * 40, 'head_sha': 'a' * 40,
         'population': {'version': 'full-population'},
-        'selected': [{'path': f'tests/test_{name}.py'} for name in ('owned', 'disk', 'other')],
+        'selected': [{'path': 'tests/test_owned.py'}, {'path': 'tests/test_disk.py'}, {'path': 'tests/test_other.py'}],
         'deselect': ['tests/test_owned.py::test_known', 'tests/test_other.py::test_known']}
 
 
-@pytest.mark.parametrize('architecture,wanted', [('amd64', 'owned'), ('arm64', 'disk')])
-def test_hosted_assignment_keeps_the_plan_and_only_its_lane_tag(architecture, wanted):
+@pytest.mark.parametrize('architecture,wanted,deselect', [('amd64', 'tests/test_owned.py', 1), ('arm64', 'tests/test_disk.py', 0)])
+def test_hosted_assignment_keeps_the_plan_and_only_its_lane_tag(architecture, wanted, deselect):
     found = gate.hosted_assignment(PLAN, architecture, TABLE)
-    assert [row['path'] for row in found['selected']] == [f'tests/test_{wanted}.py']
+    assert [row['path'] for row in found['selected']] == [wanted]
     assert found['population'] == PLAN['population'] and found['base_sha'] == 'b' * 40
-    assert found['deselect'] == [n for n in PLAN['deselect'] if n.startswith(f'tests/test_{wanted}.py')]
+    assert found['deselect'] == PLAN['deselect'][:deselect]
 
 
 @pytest.mark.parametrize('architecture,table', [('other', TABLE), ('amd64', ''),
@@ -51,13 +51,12 @@ def test_hosted_assignment_refuses_an_empty_or_unknown_lane(architecture, table)
 
 @pytest.mark.parametrize('fault', [None, 'malformed', 'occupied'])
 def test_hosted_cli_writes_only_a_valid_assignment(tmp_path, monkeypatch, fault):
-    (tmp_path / 'tools/bazel').mkdir(parents=True)
-    (tmp_path / 'tools/bazel/nonhermetic.bzl').write_text(TABLE)
+    monkeypatch.setattr(gate, 'NONHERMETIC', tmp_path / 'table.bzl')
+    gate.NONHERMETIC.write_text(TABLE)
     plan, output = tmp_path / 'plan.json', tmp_path / 'assigned.json'
     plan.write_text('{' if fault == 'malformed' else json.dumps(PLAN))
     if fault == 'occupied':
         output.write_text('preexisting private evidence')
-    monkeypatch.chdir(tmp_path)
     code = gate.main(['hosted', '--architecture', 'amd64', '--plan', str(plan), '--output', str(output)])
     assert code == (75 if fault else 0)
     if fault == 'occupied':
