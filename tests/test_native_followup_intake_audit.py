@@ -160,11 +160,13 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
     dense['provenance'].update(model=str(source), cost_mode='aura')
     dense_path = tmp_path / 'dense.pkl'
     dense_path.write_bytes(pickle.dumps(dense))
-    monkeypatch.setenv('PRISMAQUANT_EXPERT_EVAL_DRIVER', 'forked')
     output = tmp_path / 'hybrid.pkl'
-    assert expert.main(['--model', str(source), '--output', str(output), '--device', 'cpu',
+    expert_args = ['--model', str(source), '--output', str(output), '--device', 'cpu',
         '--dataset', 'synthetic-token-draw', '--formats', 'FP8_E4M3,BF16', '--max-units', '1',
-        '--streaming', '--checkpoint-dir', str(tmp_path / 'expert-journal'),
+        '--checkpoint-dir', str(tmp_path / 'expert-journal'),
+        '--boundary-file', str(tmp_path / 'expert-boundaries.pt')]
+    assert expert.main(expert_args + ['--capture-boundaries']) == 0
+    assert expert.main(expert_args + ['--unit-format', 'FP8_E4M3', '--layer-range', '0:1',
         '--merge-base', str(dense_path), '--backfill-base', str(base_path), '--cost-mode', 'aura']) == 0
     payload = pickle.loads(output.read_bytes())
     for name in names:

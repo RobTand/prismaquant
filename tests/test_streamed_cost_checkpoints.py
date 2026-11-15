@@ -1137,12 +1137,7 @@ def test_production_anchor_resolves_raw_named_expert_activation_cache(
 def test_production_anchor_stock_plan_binds_source_identity_lazily(
     monkeypatch,
 ):
-    """``source_weight_identity_for`` binds the identity from the live
-    source weight -- the GLM-5.3 harvest crashed on exactly this at its first
-    reverse layer (2026-08-27) because the method only read a codebook
-    binding (that lane was archived 2026-09-25, #1304).
-    A unit outside the plan stays refused.
-    """
+    """Bind live source weights and refuse units outside the plan."""
     import prismaquant.streaming_production_cache as streaming
     from prismaquant.production_weight_cache import (
         _source_weight_value_identity,
@@ -1177,6 +1172,7 @@ def test_production_anchor_stock_plan_binds_source_identity_lazily(
         calibration_hash="c" * 64,
         arm_identity={"arm": "fixture-stock-plan"},
         model_identity=_model_identity("stock-plan-source"),
+        producer_git_commit="1" * 40,
         max_act_rows=8,
     )
     rendered = renderer.render_layer(
@@ -1204,7 +1200,11 @@ def test_production_anchor_stock_plan_binds_source_identity_lazily(
     assert completed["source_weights"]["records"][qname] == identity
 
 
-def test_streamed_expert_cost_rows_are_exactly_resident_rows():
+# Noise max 0.187303%; 2.14x margin still catches window loss 34.85%, wrong boundary 7377%, and missing rows exactly.
+RESIDENT_COST_RELATIVE_BOUND = 0.004
+
+
+def test_streamed_expert_cost_rows_match_resident_rows():
     torch.manual_seed(106)
     seed_model = _ExpertTinyLM().eval()
     state = {
@@ -1223,14 +1223,33 @@ def test_streamed_expert_cost_rows_are_exactly_resident_rows():
     )
 
     _model, context, runner, profile = _expert_runner(state)
-    actual = expert_cost.measure_expert_unit_costs_streamed(
+    actual = expert_cost.measure_expert_unit_costs_forked(
         runner,
         profile,
         calib,
         ["NVFP4", "BF16"],
         progress=False,
+        boundaries=expert_cost.capture_expert_boundaries(runner, profile, calib),
     )
-    assert actual == expected
+
+    def compare(actual, expected):
+        assert type(actual) is type(expected)
+        if isinstance(expected, dict):
+            assert list(actual) == list(expected)
+            for key in expected:
+                compare(actual[key], expected[key])
+        elif isinstance(expected, (tuple, list)):
+            assert len(actual) == len(expected)
+            for left, right in zip(actual, expected):
+                compare(left, right)
+        elif isinstance(expected, float):
+            assert actual == pytest.approx(
+                expected, rel=RESIDENT_COST_RELATIVE_BOUND, abs=0
+            )
+        else:
+            assert actual == expected
+
+    compare(actual, expected)
     # The pinned target plus the currently traversed other layer is the bound.
     assert context.max_active <= 2
 
@@ -1239,7 +1258,7 @@ def _run_streamed_expert(
     state, checkpoint_dir, *, resume, model_identity
 ):
     model, context, runner, profile = _expert_runner(state)
-    result = expert_cost.measure_expert_unit_costs_streamed(
+    result = expert_cost.measure_expert_unit_costs_forked(
         runner,
         profile,
         torch.tensor([[1, 2, 3, 4]]),
@@ -1248,6 +1267,8 @@ def _run_streamed_expert(
         checkpoint_dir=checkpoint_dir,
         resume=resume,
         model_identity=model_identity,
+        boundaries=expert_cost.capture_expert_boundaries(
+            runner, profile, torch.tensor([[1, 2, 3, 4]])),
     )
     return result, context
 
@@ -1300,7 +1321,7 @@ def test_streamed_expert_interrupt_resume_and_identity_refusal(
 
     _model, mismatch_context, mismatch_runner, profile = _expert_runner(state)
     with pytest.raises(RuntimeError, match="model.content_sha256.*refusing"):
-        expert_cost.measure_expert_unit_costs_streamed(
+        expert_cost.measure_expert_unit_costs_forked(
             mismatch_runner,
             profile,
             torch.tensor([[1, 2, 3, 4]]),
@@ -1309,6 +1330,7 @@ def test_streamed_expert_interrupt_resume_and_identity_refusal(
             checkpoint_dir=tmp_path / "resumed",
             resume=True,
             model_identity=_model_identity("tiny-model-v2"),
+            boundaries={},
         )
     assert mismatch_context.install_calls == 0
 
@@ -1372,3 +1394,100 @@ def test_streamed_aura_checkpointing_needs_anchor_identity(
     complete, complete_context = _anchored(tmp_path / "whole", resume=True)
     assert complete["costs"] == expected["costs"]
     assert complete_context.install_calls == 0
+
+
+@torch.no_grad()
+def _monolithic_forked_kls(runner, profile, calib, menu):
+    """Run the original full-body fork schedule without unit selection."""
+    capture = expert_cost.capture_expert_boundaries(runner, profile, calib)
+    from prismaquant.streamed_boundary_artifacts import StreamedForwardBoundaries
+    batch = StreamedForwardBoundaries(**capture["batch"])
+    records, _ = expert_cost._streamed_expert_unit_records(
+        runner.model, profile, unit_filter=None, max_units=0)
+    kls = {qn: {} for _, qn, _ in records}
+    for fmt in menu[:-1]:
+        forks = {}
+        with runner.context.walk_layers(range(runner.num_layers), prefetch_lookahead=runner.prefetch_lookahead) as walk:
+            for block in walk:
+                with block:
+                    for qn in forks:
+                        forks[qn] = runner.isolated_layer(batch, block.layer, forks[qn], pass_state=None)
+                    for kind, qn, storage in records:
+                        if runner.layer_index_for_qname(qn) == block.layer:
+                            forks[qn] = expert_cost._fork_quantized_unit(
+                                runner, batch, block.layer, kind, storage, qn, fmt,
+                                profile=profile, expert_chunk=16, col_weights={}, rows_meta={})
+        for qn in forks:
+            logits = runner.tail_logits(batch, forks[qn])
+            total, count = 0.0, 0
+            for window, baseline in enumerate(capture["baseline_lp"]):
+                kl = expert_cost.forward_kl_per_token(logits[window].float().log_softmax(-1), baseline)
+                total += float(kl.sum().item())
+                count += kl.numel()
+            kls[qn][fmt] = total / max(count, 1)
+    return kls
+
+
+def test_saved_units_equal_monolithic_moe_rows_in_order(tmp_path, monkeypatch):
+    import json
+    from copy import deepcopy
+
+    torch.manual_seed(121)
+    state = _ExpertTinyLM().eval().state_dict()
+    calib = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]])
+    menu = ["NVFP4", "FP8_E4M3", "BF16"]
+    model, _, runner, profile = _expert_runner(state)
+    for layer in model.model.layers:
+        layer._fixture_requires_stream_residency = False
+    monkeypatch.setenv("PRISMAQUANT_EXPERT_CALIB_BATCH", "2")
+    expected = expert_cost.measure_expert_unit_costs(model, profile, calib, menu, progress=False)
+    monolithic = _monolithic_forked_kls(runner, profile, calib, menu)
+    for name, row in expected[1].items():
+        qn = expected[0][name]["_unpacked_expert_unit"]
+        total = sum(meta["n_params"] for meta in expected[0].values()
+                    if meta["_unpacked_expert_unit"] == qn)
+        for fmt, value in monolithic[qn].items():
+            row[fmt]["predicted_dloss"] = value * expected[0][name]["n_params"] / total
+    expected = expected[:2] + (monolithic,)
+    capture = expert_cost.capture_expert_boundaries(runner, profile, calib)
+    _, units = expert_cost._streamed_expert_unit_records(model, profile, unit_filter=None, max_units=0)
+    capture["identity"] = {"formats": menu, "units": units}
+    path = tmp_path / "boundaries.pt"
+    torch.save(capture, path)
+    capture = torch.load(path, map_location="cpu", weights_only=False, mmap=True)
+    runner.capture_boundaries = lambda *_: pytest.fail("a unit must use saved boundaries")
+    payloads = []
+    for fmt in menu[:-1]:
+        for layer in range(2):
+            stats, costs, kls = expert_cost.measure_expert_unit_costs_forked(
+                runner, profile, calib, [fmt, "BF16"], boundaries=capture,
+                layer_range=(layer, layer + 1), progress=False)
+            payloads.append({"stats": stats, "costs": costs,
+                             "provenance": {"boundary_identity": capture["identity"], "unit_kls": kls}})
+    actual = expert_cost.reduce_expert_units(capture, list(reversed(payloads)))
+    assert actual == expected
+    assert json.dumps(actual) == json.dumps(expected)
+    import pickle
+    from prismaquant import gpu_guard
+    monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *a: pytest.fail("reduce used CUDA"))
+    capture["provenance"] = {}
+    path = tmp_path / "reduce-boundaries.pt"
+    torch.save(capture, path)
+    files = []
+    for index, payload in enumerate(payloads):
+        part = tmp_path / f"unit-{index}.pkl"
+        part.write_bytes(pickle.dumps(payload))
+        files.append(str(part))
+    output = tmp_path / "reduced.pkl"
+    assert expert_cost.main(["--model", "unused", "--boundary-file", str(path),
+                        "--output", str(output), "--reduce-units", *files]) == 0
+    reduced = pickle.loads(output.read_bytes())
+    assert json.dumps((reduced["stats"], reduced["costs"], reduced["provenance"]["unit_kls"])) == json.dumps(expected)
+    with pytest.raises(ValueError, match="missing expert cells"):
+        expert_cost.reduce_expert_units(capture, payloads[:-1])
+    with pytest.raises(ValueError, match="duplicate expert cell"):
+        expert_cost.reduce_expert_units(capture, payloads + payloads[:1])
+    foreign = deepcopy(payloads)
+    foreign[0]["provenance"]["boundary_identity"]["formats"] = ["BF16"]
+    with pytest.raises(ValueError, match="identity differs"):
+        expert_cost.reduce_expert_units(capture, foreign)
