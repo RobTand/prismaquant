@@ -30,6 +30,7 @@ CONSOLIDATED_HELPERS = [
     ("sha", "tools/benchmarks/joint_validation_pair.py"),
 ]
 DIGEST_FREE = [
+    "tools/measure_served_gold.py",
     "prismaquant/visual_linears.py",
     "prismaquant/stage_a_chain_resume.py",
     "prismaquant/tessera_census_cache.py",
