@@ -36,13 +36,12 @@ loaded against that digest.  Nothing is encoded, interpolated or re-priced.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-import hashlib
 import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .cost_stage_checkpoint import MANIFEST_SCHEMA, _load_unit, unit_path
-from .digests import checkpoint_json_sha256
+from .digests import checkpoint_json_sha256, file_sha256hex
 from .layer_config import LAYER_CONFIG_META_KEY
 from .tessera_expert_projection import (
     EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY, STACK_FORMATS_KEY,
@@ -238,17 +237,8 @@ def _verify_dense_blob(name: str, fmt: str, record: Mapping[str, Any], wire_dir:
     path = wire_dir / record["file"]
     if path.is_symlink() or path.resolve().parent != wire_dir or not path.is_file():
         raise CensusCacheError(f"{name}@{fmt}: dense wire escapes the campaign directory")
-    if not hash_blob:
-        if path.stat().st_size != record["blob_bytes"]:
-            raise CensusCacheError(f"{name}@{fmt}: dense wire differs from measured receipt")
-        return
-    digest = hashlib.sha256()
-    size = 0
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(16 << 20), b""):
-            digest.update(block)
-            size += len(block)
-    if size != record["blob_bytes"] or digest.hexdigest() != record["blob_sha256"]:
+    if path.stat().st_size != record["blob_bytes"] or (
+            hash_blob and file_sha256hex(path) != record["blob_sha256"]):
         raise CensusCacheError(f"{name}@{fmt}: dense wire differs from measured receipt")
 
 
