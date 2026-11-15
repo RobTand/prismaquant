@@ -5,7 +5,6 @@ from collections import Counter
 from contextlib import contextmanager
 import argparse
 import errno
-import importlib.util
 import io
 import http.client
 import json
@@ -343,10 +342,6 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
             or any(not re.fullmatch(r'//[^\s]*:[^\s]+', label) for label in targets)
             or not re.fullmatch('[0-9a-f]{40}', manifest['head'])):
         raise GateError('invalid immutable shard manifest')
-    spec = importlib.util.spec_from_file_location(
-        'pq_shard_artifacts', Path(__file__).with_name('bazel_artifacts.py'))
-    artifacts = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(artifacts)
     environment = artifacts.child_environment()
     # Only Bazel's client receives its remote-auth key. Neither this key nor
     # any other controller credential is forwarded to the test action env.
@@ -396,10 +391,6 @@ def fetch_artifact(uri):
         return Path(unquote(urlsplit(uri).path)).read_bytes()
     if not uri.startswith('bytestream://'):
         raise GateError('artifact has an unsupported URI')
-    spec = importlib.util.spec_from_file_location(
-        'pq_shard_output_client', Path(__file__).with_name('bazel_artifacts.py'))
-    artifacts = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(artifacts)
     return artifacts.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
         'GetFile', {'uri': uri}, raw=True)
 

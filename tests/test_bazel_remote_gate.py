@@ -544,7 +544,7 @@ def test_controller_cli_publishes_scanned_results_and_scopes_only_after_own_proo
         assert output.read_text().splitlines() == [
             'scopes=["//tests"]', 'all_scopes=true', 'scopes_ready=true']
         assert 'Bazel verdict: ' + result['verdict'] in summary.read_text()
-    assert annotations == ([f'::error::failed test //tests:test_{index}' for index in range(6)]
+    assert annotations == ([f'::error::failed test //tests:test_{index} on amd64' for index in range(6)]
                            if fault == 'fail' else [])
 
 
