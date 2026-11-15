@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib as _contextlib
 from contextvars import ContextVar as _ContextVar
 from threading import Lock
+from .fla_config_pin import pin_fla_configs
 from .streaming_initialization import (
     clear_pretrained_initialization_contract,
     record_pretrained_initialization,
@@ -235,4 +236,5 @@ def initialize_model_runtime() -> None:
             return
         _ensure_triton_cache_writable()
         _polyfill_transformers()
+        pin_fla_configs()
         _runtime_initialized = True
