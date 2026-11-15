@@ -1,86 +1,15 @@
-"""Packed probe -> persisted draw -> packed campaign prices -> scoped allocator."""
+"""Check that checkpoint identity binds Fisher and sampling values."""
 
 import copy
-import json
-import pickle
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 
 from prismaquant import tessera_campaign_wire as campaign_wire
-from prismaquant import tessera_campaign_selection as campaign_selection
-from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_campaign as campaign
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from test_tessera_stack_sample_cost import _profile, _packed_probe_row, _anchor, STEM
-
-
-def _plan(tmp_path, monkeypatch):
-    import dispatch_tessera_campaign as dispatch
-    from prismaquant import model_profiles
-    monkeypatch.setattr(model_profiles, 'detect_profile', lambda _: _profile())
-    # The model is a name with no shards behind it, so ``plan`` has no read
-    # set to derive; the draw is under test here, the data manifest in
-    # ``tests/test_campaign_plan_publishes_data_manifests.py``.
-    monkeypatch.setattr(dispatch, 'planned_data_manifests',
-                        lambda workspace, plan, selections, rows: (rows, []))
-    data = json.loads((Path(__file__).parent / 'fixtures/tessera_stack_lfm_layer18.json').read_text())
-    stats = data['packed_probe_rows']
-    probe = tmp_path / 'probe.pkl'
-    probe.write_bytes(pickle.dumps({'stats': stats, 'meta': {'model': 'lfm'}}))
-    groups = {'s:' + STEM: sorted(data['member_anchors'])}
-    (tmp_path / 'census.json').write_text(json.dumps({
-        'model': 'lfm', 'layer_stride': 1, 'anchor_groups': groups,
-        'counts': {member: 1 for member in data['member_anchors']}}))
-    spec = tmp_path / 'spec.json'
-    spec.write_text(json.dumps({'model': 'lfm', 'cwd': str(tmp_path),
-        'python': 'python', 'env': {}, 'campaign_argv': []}))
-    args = SimpleNamespace(spec=spec, workspace=tmp_path, stack_sample=8,
-        probe=probe, stack_sample_seed=5, audit_rate=10, groups_per_row=1,
-        seed_checkpoint=None, seed_wire_dir=None, rows_per_box=1, timeout_s=300)
-    assert dispatch.cmd_plan(args) == 0
-    return json.loads((tmp_path / 'units/row-0000.json').read_text()), stats
-
-
-def test_real_packed_probe_plans_and_rehydrates_shared_projection_draw(tmp_path, monkeypatch):
-    selection, stats = _plan(tmp_path, monkeypatch)
-    samples = campaign_table.selection_stack_samples(selection, _profile())
-    assert set(samples) == set(stats)
-    for name, sample in samples.items():
-        assert sample.stack_h_trace == stats[name]['h_trace']
-        assert sample.h_trace_per_expert == tuple(stats[name]['h_trace_per_expert'])
-        assert set(sample.inclusion_prob) == set(range(32))
-        assert len(sample.sampled_experts) == 8
-        expected = {m for names in sample.members.values() for m in names}
-        assert expected <= set(selection['groups'][0]['sampled'])
-    # Full-frame metadata survives JSON, including experts outside the draw.
-    assert len(selection['groups'][0]['inclusion_probability']) == 96
-    anchors = {}
-    for sample in samples.values():
-        for members in sample.members.values():
-            for member in members:
-                anchors[member] = {'TESSERA_E2M1_K2': [_anchor(member,
-                    'TESSERA_E2M1_K2', 'TESSERA_E2M1_K2_R896', 896, 0.02)]}
-    payload = campaign_table.campaign_cost_payload(anchors, {}, loo={}, provenance={}, stack_samples=samples)
-    assert set(payload['costs']) == set(stats)
-
-
-def test_selection_rejects_independent_gate_and_up_draws(tmp_path, monkeypatch):
-    selection, _ = _plan(tmp_path, monkeypatch)
-    selection['groups'][0]['sampled'].pop()
-    with pytest.raises(campaign_table.StackSampleError, match='sampled members'):
-        campaign_table.selection_stack_samples(selection, _profile())
-
-
-def test_draw_receipt_must_replay_from_the_carried_probe(tmp_path, monkeypatch):
-    selection, _ = _plan(tmp_path, monkeypatch)
-    record = next(iter(selection['groups'][0]['stack_samples'].values()))
-    record['seed'] += 1
-    with pytest.raises(campaign_table.StackSampleError, match='does not replay'):
-        campaign_table.selection_stack_samples(selection, _profile())
 
 
 def test_checkpoint_binds_fisher_and_probability_values_with_same_measured_units(monkeypatch):
@@ -100,38 +29,3 @@ def test_checkpoint_binds_fisher_and_probability_values_with_same_measured_units
     second = campaign.campaign_checkpoint_identity(**common, stack_sampling_identity=changed)
     assert first['units'] == second['units']
     assert canonical_json_sha256(first, where="first") != canonical_json_sha256(second, where="second")
-
-
-def test_campaign_main_consumes_persisted_draw_and_emits_packed_population(tmp_path, monkeypatch):
-    """Real producer projection/capture/receipts, with the established CPU fixture."""
-    import dispatch_tessera_campaign as dispatch
-    from test_tessera_campaign_packed import _bridge_main_fixture, STACK, RUNG
-    campaign, argv, model, encoded = _bridge_main_fixture(monkeypatch, tmp_path)
-    profile = _profile()
-    population = campaign._require_campaign_population(model, profile, 1)
-    dense = 'model.layers.0.attention'
-    groups = campaign.resolve_anchor_groups([dense, *population.qnames], profile=profile,
-        expert_members={member.qname: member for member in population.members})
-    probe_rows = {}
-    for name, shape in population.packed_in_scope.items():
-        probe_rows[name] = _packed_probe_row(shape[0], [1.0] * shape[0],
-            packed_param=name.rsplit('.', 1)[-1], out_features=shape[1], in_features=shape[2])
-        probe_rows[name]['_packed_experts_module'] = STACK
-    census = {'counts': {m: 1 for members in groups.values() for m in members}}
-    sampled = dispatch.sample_stack_groups(groups, probe_rows, census, profile=profile,
-        stack_sample=2, seed=5, audit_rate=10)
-    selection = {'schema': campaign_selection.UNITS_SCHEMA_V2, 'model': argv[1], 'layer_stride': 1,
-        'groups': [{'key': key, 'members': members, **sampled.get(key, {})}
-                   for key, members in sorted(groups.items())]}
-    path = tmp_path / 'units.json'
-    path.write_text(json.dumps(selection))
-    assert campaign.main([*argv, '--units', str(path)]) == 0
-    payload = pickle.loads((tmp_path / 'cost.pkl').read_bytes())
-    assert set(payload['costs']) == {dense, *probe_rows}
-    assert payload['provenance']['population']['priced']['routed_experts'] == sorted(probe_rows)
-    assert len(payload['tessera_expert_wires']) == 6
-    assert payload['provenance']['unit_selection']['groups'] == selection['groups']
-    checkpoint = json.loads((tmp_path / 'cost.anchors.json').read_text())
-    assert set(checkpoint['identity']['stack_sampling_identity']) == set(probe_rows)
-    for packed in probe_rows:
-        assert set(payload['costs'][packed]) == {RUNG}

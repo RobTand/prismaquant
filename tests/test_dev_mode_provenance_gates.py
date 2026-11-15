@@ -12,10 +12,8 @@ CPU-only; no external checkpoint is touched.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
-import shutil
 import sys
 from types import SimpleNamespace
 
@@ -30,7 +28,6 @@ if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
 from container_inspection_fixture import inspection
-from prismaquant import aura_cost as aura
 from prismaquant import dev_mode
 from prismaquant import joint_aura_run_transition as transition
 from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
@@ -42,31 +39,8 @@ from test_joint_aura_streamed import _fixture, _run as _streamed_run
 from test_streamed_cost_checkpoints import (
     _anchored_streamed_aura, _dense_runner, _DenseTinyLM,
 )
-from test_glm_joint_data_manifest_at_submit import (
-    _prepared_fixture, _scope_args, _workspace,
-)
 
 DEV_ENV = dev_mode.DEV_MODE_ENV
-
-
-@pytest.fixture()
-def scratch(request):
-    """A per-test directory that is never under ``/tmp`` (house rule, copied)."""
-    root = ROOT / ".dev-mode-scratch" / request.node.name
-    if root.exists():
-        shutil.rmtree(root)
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
-
-
-@pytest.fixture()
-def shared_mount(scratch, monkeypatch):
-    """The fixture's files are not on /mnt/shared, so the prefix moves to it."""
-    from prismaquant import campaign_data_manifests as glm_data_manifests
-    monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(scratch))
 
 
 def _write_json(path, value):
@@ -332,61 +306,6 @@ def test_checkpoint_identity_mismatch_reuses_the_lineage_under_dev_mode(
 # ----------------------------------------------------------------- gates 4+5:
 # dispatch digests become records; PRISMAQUANT_DEV_MODE reaches the container
 
-def _joint_submission(scratch, *, prepared=True, extra=()):
-    import dispatch_tessera_campaign as dispatch
-    fixture = _workspace(scratch)
-    arguments = ["submit-joint", "run", "--plan", str(fixture["plan"]),
-                 *_scope_args(fixture)]
-    if prepared:
-        prepared_path, _cache = _prepared_fixture(scratch)
-        arguments += ["--prepared", str(prepared_path)]
-    spec = scratch / "spec.joint.json"
-    spec.write_text(json.dumps({"container": {"image": "x"}}))
-    arguments += ["--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
-                  "--manifest-dir", str(scratch / "manifests"), "--dry-run"]
-    return dispatch, fixture, spec, [*arguments, *extra]
-
-
-def test_submit_joint_wrong_digest_still_refuses_without_dev_mode(
-        scratch, shared_mount, monkeypatch):
-    dispatch, _fixture_, _spec, argv = _joint_submission(
-        scratch, extra=["--resume", "--plan-sha256", "0" * 64])
-    with pytest.raises(RuntimeError, match="hashes to"):
-        dispatch.main(argv)
-
-
-def test_submit_joint_digest_arguments_are_records_under_dev_mode(
-        scratch, shared_mount, monkeypatch, capsys):
-    import shlex
-    dispatch, fixture, _spec, argv = _joint_submission(
-        scratch, extra=["--resume", "--plan-sha256", "0" * 64])
-    monkeypatch.setenv(DEV_ENV, "1")
-    assert dispatch.main(argv) == 0
-    out = capsys.readouterr().out
-    assert "DEV-MODE" in out
-    line = next(line for line in out.splitlines() if line.startswith("[dry-run] "))
-    submitted = json.loads(line[len("[dry-run] "):])["argv"]
-    actual = hashlib.sha256(Path(fixture["plan"]).read_bytes()).hexdigest()
-    inner = submitted[submitted.index("prismaquant.tessera_joint_aura"):]
-    assert inner[inner.index("--plan-sha256") + 1] == actual  # the record is the ACTUAL digest
-
-
-def test_submit_joint_run_resume_needs_no_receipt_under_dev_mode(
-        scratch, shared_mount, monkeypatch, capsys):
-    import shlex
-    dispatch, _fixture_, _spec, argv = _joint_submission(
-        scratch, extra=["--resume"])  # no --source-transition: no receipt wiring
-    # Certified mode refuses this shape at the pass gates (gates 1-3 above);
-    # the submission itself is admitted only under dev mode's contract.
-    monkeypatch.setenv(DEV_ENV, "1")
-    assert dispatch.main(argv) == 0
-    out = capsys.readouterr().out
-    line = next(line for line in out.splitlines() if line.startswith("[dry-run] "))
-    submitted = json.loads(line[len("[dry-run] "):])["argv"]
-    inner = submitted[submitted.index("prismaquant.tessera_joint_aura"):]
-    assert "--resume" in inner
-    assert "--source-transition" not in inner
-
 
 def _launch_container(monkeypatch, launcher_args):
     from tools import tessera_campaign_container as launcher
@@ -401,48 +320,6 @@ def _launch_container(monkeypatch, launcher_args):
     docker_env = dict(item.split("=", 1) for index, item in enumerate(executed[0])
                       if index and executed[0][index - 1] == "--env")
     return docker_env
-
-
-def _submitted_launcher_argv(capsys):
-    import shlex
-    out = capsys.readouterr().out
-    line = next(line for line in out.splitlines() if line.startswith("[dry-run] "))
-    submitted = json.loads(line[len("[dry-run] "):])["argv"]
-    return submitted[submitted.index("tools.tessera_campaign_container") + 1:]
-
-
-def test_dev_mode_env_reaches_the_container_and_the_spec_file_stays_sealed(
-        scratch, shared_mount, monkeypatch, capsys):
-    dispatch, _fixture_, spec, argv = _joint_submission(scratch)
-    # Certified is "0" since PQ #1147 (unset is dev mode), and the certified
-    # submitter seals "0" so the container, which does not inherit this
-    # environment, stays certified.
-    monkeypatch.setenv(DEV_ENV, "0")
-    assert dispatch.main(argv) == 0
-    certified = _submitted_launcher_argv(capsys)
-    assert "PRISMAQUANT_DEV_MODE=1" not in certified
-    docker_env = _launch_container(monkeypatch, certified)
-    assert docker_env[dev_mode.DEV_MODE_ENV] == "0"
-    original = spec.read_text()
-
-    monkeypatch.setenv(DEV_ENV, "1")
-    assert dispatch.main(argv) == 0
-    ambient = _submitted_launcher_argv(capsys)
-    assert json.loads(ambient[ambient.index("--spec") + 1])["env"][DEV_ENV] == "0"
-    # Native submissions take scientific settings from an explicit spec.
-    dev_spec = spec.with_name("explicit-dev-spec.json")
-    declared = json.loads(original)
-    declared["env"] = {**declared.get("env", {}), DEV_ENV: "1"}
-    dev_spec.write_text(json.dumps(declared))
-    dev_argv = list(argv)
-    dev_argv[dev_argv.index("--spec") + 1] = str(dev_spec)
-    assert dispatch.main(dev_argv) == 0
-    dev = _submitted_launcher_argv(capsys)
-    assert spec.read_text() == original  # the sealed spec file is never rewritten
-    spec_json = json.loads(dev[dev.index("--spec") + 1])
-    assert spec_json["env"][dev_mode.DEV_MODE_ENV] == "1"
-    docker_env = _launch_container(monkeypatch, dev)
-    assert docker_env[dev_mode.DEV_MODE_ENV] == "1"  # PRISMAQUANT_LAYER_READ_THREADS's road
 
 
 def test_a_hand_sealed_spec_carries_dev_mode_to_the_container(monkeypatch):

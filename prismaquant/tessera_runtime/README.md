@@ -349,8 +349,7 @@ as `--producer-authority`, and contract **v40** publishes which drivers do
 (`producer_interface.reuse_authority.drivers`: the serving exporter,
 `export_glm53_tessera.py`, `glm_routed_owner_inputs.py`,
 `bf16_reach_roster.py` and `tools/glm_cpu_cached_pack_probe.py`). PrismaQuant
-reads that block and never asserts it: `run-pipeline.sh` and
-`dispatch_tessera_campaign.py submit-export` add the option only when the
+reads that block and never asserts it: `run-pipeline.sh` adds the option only when the
 checkout the export runs from publishes it
 (`tessera_export_lane.producer_authority_argv`), so an older pin such as the
 live campaign's `a3e83875` gets exactly the argv it got before. v40 is

@@ -190,9 +190,6 @@
   "sorted-json:tools/dispatch_joint_quanta.py::handoff_template_id",
   "sorted-json:tools/dispatch_joint_quanta.py::quantum_argv",
   "sorted-json:tools/dispatch_stage_a_split.py::main",
-  "sorted-json:tools/dispatch_tessera_campaign.py::cmd_capture",
-  "sorted-json:tools/dispatch_tessera_campaign.py::cmd_census",
-  "sorted-json:tools/dispatch_tessera_campaign.py::cmd_plan",
   "sorted-json:tools/dspark_memavailable_sampler.py::_append_sample",
   "sorted-json:tools/dspark_memavailable_sampler.py::_record_error",
   "sorted-json:tools/duplication_inventory.py::main",
@@ -602,10 +599,6 @@
   "build": [
    "tools/build_stagea_seed_package.py",
    "tools/build_stagea_split_package.py"
-  ],
-  "canonical_bytes": [
-   "prismaquant/joint_layer_quanta.py",
-   "prismaquant/tessera_campaign_reseal.py"
   ],
   "canonical_json_bytes": [
    "prismaquant/digests.py",

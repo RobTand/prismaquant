@@ -5,7 +5,6 @@ import pytest
 
 from container_admission import ADMISSION, with_admission
 from tests.test_tessera_campaign_namespace_1986 import PROVENANCE, arguments
-from tools import dispatch_tessera_campaign as dispatch
 from tools import tessera_campaign_container as adapter
 from tools import tessera_campaign_namespace as namespace
 
@@ -13,7 +12,7 @@ from tools import tessera_campaign_namespace as namespace
 def prepare(tmp_path, provenance):
     kwargs = arguments(tmp_path)
     kwargs["provenance"] = kwargs["expected_provenance"] = provenance
-    return dispatch.prepare_namespace_requests(**kwargs)
+    return namespace.prepare_namespace_requests(**kwargs)
 
 
 def test_the_schema_is_v2_and_the_provenance_keys_are_exact(tmp_path):

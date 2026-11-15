@@ -296,10 +296,7 @@ def pytest_sessionfinish(session, exitstatus):
     That is invisible in a full-suite run, because some other file collects.
     It matters where a shard gets its own pytest: a shard whose only file skips at collection exits 5, and the shard
     reads as failed even though pytest reported the skip and nothing went
-    wrong (RobTand/prismaquant#915, seen on
-    ``tests/test_tessera_stack_group_cli.py``, which imports
-    ``test_glm_campaign_streaming`` -> ``test_glm5_next_streamed_forward_parity``
-    -> ``pytest.importorskip("transformers.models.glm5_next")``).
+    wrong. A module-level ``pytest.importorskip`` can cause this result.
 
     The conversion is deliberately narrow. It fires only when pytest itself
     reported at least one skip, so an empty collection with no skip -- a typo
