@@ -34,7 +34,6 @@ from prismaquant import (
     quality_prefill_screen,
     runtime_provenance,
     schemas,
-    tessera_anchored_surface,
     tessera_joint_aura,
     tessera_sampled_stack_proposal,
 )
@@ -221,7 +220,6 @@ REQUIRE_SITES = {
     "joint_head_walk_quanta": joint_head_walk_quanta,
     "joint_served_activation": joint_served_activation,
     "joint_stageb_resources": joint_stageb_resources,
-    "tessera_anchored_surface": tessera_anchored_surface,
     "tessera_joint_aura": tessera_joint_aura,
     "tessera_sampled_stack_proposal": tessera_sampled_stack_proposal,
 }
