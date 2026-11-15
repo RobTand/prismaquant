@@ -119,7 +119,9 @@ def test_forked_expert_consumer_routes_each_window_and_keeps_token_mean(monkeypa
         unload=lambda layer: events.append(("unload", layer)),
     )
     context.walk_layers = MethodType(StreamingContext.walk_layers, context)
-    batch = SimpleNamespace(activations_cpu=[baseline, baseline])
+    batch = SimpleNamespace(input_ids=None, position_ids=None, position_embeddings=None,
+                            attention_mask=None, shared_pass_state=None,
+                            activations_cpu=[baseline, baseline])
     runner = SimpleNamespace(
         model=torch.nn.Module(), device=torch.device("cpu"), num_layers=1,
         prefetch_lookahead=1, require_prefetched_residency=True, context=context,
@@ -141,6 +143,7 @@ def test_forked_expert_consumer_routes_each_window_and_keeps_token_mean(monkeypa
     _, costs, units = ec.measure_expert_unit_costs_forked(
         runner, profile, torch.zeros(3, 4, dtype=torch.int64),
         ["NVFP4", "BF16"], progress=False,
+        boundaries=ec.capture_expert_boundaries(runner, profile, torch.zeros(3, 4, dtype=torch.int64)),
     )
     assert len(calls) == 3
     expected = sum(float(tokens.sum().item()) for tokens in calls) / sum(tokens.numel() for tokens in calls)

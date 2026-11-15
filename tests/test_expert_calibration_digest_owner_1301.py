@@ -50,22 +50,28 @@ def _identity(monkeypatch, calib):
 
 
 def _cli(monkeypatch, tmp_path, calib):
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoTokenizer
     from prismaquant import build_rtn_cache, calibration_data, gpu_guard, layer_streaming, model_profiles
 
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *args: None)
     monkeypatch.setattr(build_rtn_cache, "stage_multimodal", lambda path: (path, None))
     monkeypatch.setattr(model_profiles, "detect_profile", lambda path: None)
     monkeypatch.setattr(AutoTokenizer, "from_pretrained", lambda *a, **k: object())
-    monkeypatch.setattr(AutoModelForCausalLM, "from_pretrained", lambda *a, **k: torch.nn.Linear(1, 1))
     monkeypatch.setattr(layer_streaming, "fill_packed_experts_from_source", lambda *a, **k: 0)
     monkeypatch.setattr(calibration_data, "load_wikitext_calibration_windowed", lambda *a, **k: calib)
-    monkeypatch.setattr(ec, "measure_expert_unit_costs", lambda *a, **k: ({}, {}, {}))
+    from prismaquant import cost_streaming
+    runner = SimpleNamespace(model=torch.nn.Linear(1, 1), shutdown=lambda: None)
+    monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", lambda *a, **k: runner)
+    monkeypatch.setattr(ec, "_streaming_model_identity", lambda *a, **k: {})
+    monkeypatch.setattr(ec, "_streamed_expert_unit_records", lambda *a, **k: ([], []))
+    monkeypatch.setattr(ec, "_expert_checkpoint_identity", lambda **k: {})
+    monkeypatch.setattr(ec, "capture_expert_boundaries", lambda *a: {})
     monkeypatch.setattr(ec, "_git_commit", lambda: "test-commit")
     out = tmp_path / "cost.pkl"
     assert ec.main(["--model", str(tmp_path), "--output", str(out),
-                    "--device", "cpu", "--formats", "BF16"]) == 0
-    return pickle.loads(out.read_bytes())
+                    "--device", "cpu", "--formats", "BF16", "--capture-boundaries",
+                    "--boundary-file", str(tmp_path / "boundaries.pt")]) == 0
+    return {"provenance": torch.load(tmp_path / "boundaries.pt", weights_only=False)["provenance"]}
 
 
 @pytest.mark.parametrize("site", ["checkpoint", "cli"])

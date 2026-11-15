@@ -1531,19 +1531,36 @@ print(len(payload.get("provenance", {}).get("omitted_packed_experts", []) or [])
 PY
 )"
     if [[ "$OMITTED_EXPERTS" != "0" ]]; then
-      echo "[pipeline] [2d/4] measuring empirical routed-expert unit-KL costs (${OMITTED_EXPERTS} omitted targets; hybrid merge) ..."
-      python3 -m prismaquant.expert_empirical_cost \
-        --model "$MODEL_PATH" \
-        --cost-mode "$COST_MODE" \
-        --output "$COST_PATH" \
-        --formats "$FORMATS" \
-        --dataset "$DATASET" \
-        --n-calib-samples "$AURA_EXPERT_NSAMPLES" \
-        --calib-seqlen "$AURA_EXPERT_SEQLEN" \
-        --merge-base "$AURA_COST_RAW" \
-        --backfill-base "$BASE_COST_PATH" \
-        "${COST_CACHE_COL_WEIGHT_ARGS[@]+"${COST_CACHE_COL_WEIGHT_ARGS[@]}"}" \
-        "${AURA_EXPERT_EXECUTION_ARGS[@]+"${AURA_EXPERT_EXECUTION_ARGS[@]}"}" \
+      EXPERT_ROOT="${WORK_DIR}/artifacts/expert-units"
+      mkdir -p "$EXPERT_ROOT"
+      EXPERT_ARGS=(python3 -m prismaquant.expert_empirical_cost
+        --model "$MODEL_PATH" --cost-mode "$COST_MODE" --formats "$FORMATS"
+        --dataset "$DATASET" --n-calib-samples "$AURA_EXPERT_NSAMPLES"
+        --calib-seqlen "$AURA_EXPERT_SEQLEN"
+        --boundary-file "$EXPERT_ROOT/boundaries.pt"
+        "${COST_CACHE_COL_WEIGHT_ARGS[@]+"${COST_CACHE_COL_WEIGHT_ARGS[@]}"}")
+      "${EXPERT_ARGS[@]}" --capture-boundaries --output "$EXPERT_ROOT/boundaries.pt" \
+        2>&1 | tee "${WORK_DIR}/logs/expert_boundaries.log"
+      EXPERT_PARTS=()
+      while read -r fmt layer; do
+        part="$EXPERT_ROOT/${fmt}-${layer}.pkl"
+        "${EXPERT_ARGS[@]}" --unit-format "$fmt" --layer-range "$layer:$((layer + 1))" \
+          --checkpoint-dir "$EXPERT_ROOT/${fmt}-${layer}" --resume --output "$part" \
+          2>&1 | tee "${WORK_DIR}/logs/expert-${fmt}-${layer}.log"
+        EXPERT_PARTS+=("$part")
+      done < <(python3 - "$EXPERT_ROOT/boundaries.pt" <<'PYUNITS'
+import sys
+import torch
+from prismaquant.expert_empirical_cost import PASSTHROUGH_FORMATS
+identity = torch.load(sys.argv[1], map_location="cpu", weights_only=False, mmap=True)["identity"]
+for fmt in identity["formats"]:
+    if fmt not in PASSTHROUGH_FORMATS:
+        for layer in sorted({unit["layer"] for unit in identity["units"]}):
+            print(fmt, layer)
+PYUNITS
+)
+      "${EXPERT_ARGS[@]}" --reduce-units "${EXPERT_PARTS[@]}" --output "$COST_PATH" \
+        --merge-base "$AURA_COST_RAW" --backfill-base "$BASE_COST_PATH" \
         2>&1 | tee "${WORK_DIR}/logs/expert_empirical_cost.log"
     else
       echo "[pipeline] [2d/4] no routed experts omitted; finalizing AURA cost (sidecar backfill) ..."
