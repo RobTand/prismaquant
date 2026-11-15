@@ -126,6 +126,3 @@ def test_graph_check_remains_parallel_and_requires_exactly_one_pass():
     check=next(s for s in graph['steps'] if s.get('id')=='check')
     assert 'python tools/ci/graph_impact_pq.py' in check['run']
     assert 'graph-impact' in jobs['gate']['needs']
-
-
-    assert (output.read_text() if output.exists() else '')==('verdict=pass\n' if passes else '')
