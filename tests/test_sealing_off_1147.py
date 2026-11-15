@@ -11,7 +11,6 @@ variable explicitly: the unset default is what these tests pin.
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 from pathlib import Path
 import sys
@@ -53,8 +52,7 @@ def test_the_switch_has_one_definition():
     from prismaquant import joint_adjoint_checkpoints
 
     assert joint_adjoint_checkpoints.dev_mode_enabled is dev_mode.dev_mode_enabled
-    for path in (ROOT / "tools" / "dispatch_tessera_campaign.py",
-                 ROOT / "prismaquant" / "joint_adjoint_checkpoints.py"):
+    for path in (ROOT / "prismaquant" / "joint_adjoint_checkpoints.py",):
         text = path.read_text()
         assert "environ.get(DEV_MODE_ENV" not in text
         assert 'environ.get("PRISMAQUANT_DEV_MODE"' not in text
@@ -113,7 +111,7 @@ def test_same_overrides_equality(unset, monkeypatch):
 
 # -- the campaign join --------------------------------------------------------
 
-from tests.test_joint_quanta_join import campaign, probe  # noqa: E402,F401 (fixtures)
+from tests.test_joint_quanta_join import campaign, probe
 
 
 def test_join_admits_a_quantum_sealed_for_another_scope(tmp_path, campaign, unset):
@@ -206,8 +204,6 @@ def test_row_mathematics_is_separate_from_provenance(field, value, wall):
     assert probe_identity_walls_differ(_PROBE_IDENTITY, {**_PROBE_IDENTITY, field: value}) is wall
 
 
-
-
 @pytest.mark.parametrize('mode', [None, '1', '0'])
 def test_join_refuses_a_different_row_calibration_draw(tmp_path, campaign, monkeypatch, mode):
     from prismaquant.joint_quanta_join import JoinRefused, join_joint_quanta
@@ -223,8 +219,6 @@ def test_join_refuses_a_different_row_calibration_draw(tmp_path, campaign, monke
     with pytest.raises(JoinRefused):
         join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
                           output_dir=tmp_path/'must-not-join')
-
-
 
 
 @pytest.mark.parametrize('mode', [None, '1', '0'])
@@ -244,8 +238,6 @@ def test_rows_of_a_different_draw_refuse_in_one_cost_table(tmp_path, campaign, m
     with pytest.raises(JoinRefused):
         join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
                           output_dir=tmp_path/'must-not-join')
-
-
 
 
 def test_rows_of_another_producer_source_are_ranked_with_a_stamp(
@@ -371,18 +363,6 @@ def test_a_runtime_that_differs_from_the_qualification_runs(unset, monkeypatch):
 
 
 # -- the dispatchers and the prepared completion ---------------------------------
-
-def test_a_declared_submission_digest_is_a_record(tmp_path, unset, monkeypatch):
-    import dispatch_tessera_campaign as dispatch
-
-    path = tmp_path / "plan.json"
-    path.write_bytes(b"plan")
-    actual = hashlib.sha256(b"plan").hexdigest()
-    assert dispatch._bound_sha256(path, "e" * 64, label="plan") == actual
-    assert "[DEV-MODE] seal plan declared digest differs" in unset()
-    monkeypatch.setenv(ENV, "0")
-    with pytest.raises(RuntimeError, match="not the declared"):
-        dispatch._bound_sha256(path, "e" * 64, label="plan")
 
 
 def test_a_prepared_completion_of_another_plan_is_recorded(unset, monkeypatch):

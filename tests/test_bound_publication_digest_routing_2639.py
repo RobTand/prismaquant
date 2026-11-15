@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
@@ -27,7 +26,6 @@ def _load(name: str, path: str):
 
 
 QUANTA = _load("route2639_quanta", "tools/dispatch_joint_quanta.py")
-CAMPAIGN = _load("route2639_campaign", "tools/dispatch_tessera_campaign.py")
 
 from prismaquant import digests as owners  # noqa: E402
 from prismaquant import stage_b_prep_io as preparation  # noqa: E402
@@ -52,41 +50,6 @@ def test_hash_range_routes_through_owner(monkeypatch, tmp_path):
                         lambda *a: seen.append(a) or "routed")
     assert preparation._hash_range(str(target), 2, 4) == "routed"
     assert seen == [(str(target), 2, 4)]
-
-
-def test_seed_workspace_rows_routes_through_owner(monkeypatch, tmp_path):
-    census = {"model": "m"}
-    census_path = tmp_path / "census.json"
-    census_path.write_text(json.dumps(census))
-    root = tmp_path / "ws"
-    root.mkdir()
-    (root / "plan.json").write_text(json.dumps({
-        "schema": CAMPAIGN.PLAN_SCHEMA, "model": "m",
-        "census": str(census_path), "calibration_cache": "cc",
-        "rows": [{"groups": ["g"]}]}))
-    seen = []
-    monkeypatch.setattr(owners, "bytes_sha256hex",
-                        lambda data: seen.append(bytes(data)) or "routed")
-    rows, binding = CAMPAIGN._seed_workspace_rows(str(root), census=census,
-                                                 calibration_cache="cc")
-    assert binding["plan_sha256"] == "routed"
-    assert seen == [(root / "plan.json").read_bytes()]
-
-
-def test_seed_for_selection_routes_through_owner(monkeypatch, tmp_path):
-    selection = {"units": ["u"]}
-    selection_path = tmp_path / "selection.json"
-    selection_path.write_text(json.dumps(selection))
-    rowdir = tmp_path / "row"
-    rowdir.mkdir()
-    (rowdir / "cost.anchors.json").write_text(json.dumps({"identity_sha256": "s"}))
-    rows = {("g",): {"units": str(selection_path), "dir": str(rowdir), "row_id": "r1"}}
-    seen = []
-    monkeypatch.setattr(owners, "bytes_sha256hex",
-                        lambda data: seen.append(bytes(data)) or "routed")
-    out = CAMPAIGN._seed_for_selection(rows, ["g"], selection)
-    assert out["manifest_sha256_at_plan"] == "routed"
-    assert seen == [(rowdir / "cost.anchors.json").read_bytes()]
 
 
 def test_routed_values_match_hashlib(tmp_path):

@@ -40,11 +40,6 @@ def framed(files):
     return result.hexdigest()
 
 
-def reseal():
-    from prismaquant import tessera_campaign_reseal
-    return tessera_campaign_reseal
-
-
 def profiles(caller, files, root):
     if caller == 'producer':
         return runtime_provenance._source_profiles(files)
@@ -53,12 +48,10 @@ def profiles(caller, files, root):
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(raw)
-    if caller == 'reader':
-        return tessera_reader._source_tree_profiles(root)[0]
-    return reseal().encoder_tree_profiles(root)[0]
+    return tessera_reader._source_tree_profiles(root)[0]
 
 
-@pytest.mark.parametrize('caller', ['producer', 'reader', 'reseal'])
+@pytest.mark.parametrize('caller', ['producer', 'reader'])
 def test_counterexample_keeps_v1_but_separates_v2(tmp_path, caller):
     merged = {'__init__.py': b'', 'a.py': b'first\0b.py\0second'}
     split = {'__init__.py': b'', 'a.py': b'first', 'b.py': b'second'}
@@ -68,7 +61,7 @@ def test_counterexample_keeps_v1_but_separates_v2(tmp_path, caller):
     assert left[V2] == framed(merged) != framed(split) == right[V2]
 
 
-@pytest.mark.parametrize('caller', ['producer', 'reader', 'reseal'])
+@pytest.mark.parametrize('caller', ['producer', 'reader'])
 def test_legitimate_cpp_nul_is_accepted_and_stable(tmp_path, caller):
     files = {'__init__.py': b'', 'embedded.cpp': CPP}
     expected = {V1: '02f1f416bc3b045161dd9e984b7431c3219c71e0812a2280f4c855cdedc4c0d9',
@@ -218,19 +211,6 @@ def test_runtime_relation_v2_compares_strong_profiles_not_cross_run_v1(relation_
     assert all(run['source_framing']['status'] == 'framed_v2' for run in result['runs'].values())
 
 
-def test_reseal_hash_output_emits_both_without_rewriting(tmp_path, capsys):
-    root = tmp_path / 'src' / 'tessera'
-    root.mkdir(parents=True)
-    (root / '__init__.py').write_bytes(b'')
-    tool = reseal()
-    from tools.reseal_campaign_identity import main
-    assert main(["hash-tree", "--producer", str(tmp_path)]) == 0
-    output = json.loads(capsys.readouterr().out)
-    assert output['encoder_source_sha256'] == output['encoder_source_profiles'][V1]
-    assert output['encoder_source_profiles'][V2] == framed({'__init__.py': b''})
-    assert list(root.iterdir()) == [root / '__init__.py']
-
-
 def test_actual_installed_git_v1_identity_is_unchanged():
     try:
         distribution = metadata.distribution('tessera-quant')
@@ -253,7 +233,6 @@ def test_actual_installed_git_v1_identity_is_unchanged():
     expected = legacy(files)
     assert runtime_provenance._source_digest(files) == expected
     assert tessera_reader._source_tree(root)[0] == expected
-    assert reseal().encoder_tree_sha256(root) == (expected, len(files))
     import tessera.cached_unit as installed_encoder
     assert installed_encoder.__file__ is not None
     assert Path(installed_encoder.__file__).resolve().parent == root

@@ -1,6 +1,5 @@
 """Canonical H handoffs union commitments and authenticate only consumed H."""
 from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import sys
 import json
@@ -18,7 +17,6 @@ from test_tessera_priced_export_inputs import TRIPLE, _assignment
 POLICY=dict(schema='tessera.hessian_reference_load.v1', max_metadata_bytes=1024**2,
             max_file_bytes=1024**2,max_hessian_bytes=1024**2)
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from tools import dispatch_tessera_campaign as dispatch
 
 
 @pytest.fixture
@@ -68,31 +66,6 @@ def rows(f):
             calibration_cache=f['record'],hessian=hessian,
             unit_selection={'groups':[{'members':[name]}]}))
     return dirs,payloads
-
-
-def test_dispatch_union_never_reads_h_and_matches_legacy_full_seal(handoff,monkeypatch):
-    f=handoff;dirs,payloads=rows(f)
-    monkeypatch.setattr(torch,'load',lambda *a,**kw:pytest.fail('eager H load during metadata merge'))
-    path,_,digest=dispatch.merge_export_inputs(dirs,payloads,out_cache=f['tmp']/'merged',
-        identity=f['calibration'],policy='fixture',static_scales={},census=f['census'])
-    assert digest==export.hessian_capture_sha256(f['H'],{**f['calibration'],'hessian_role':'fit'})
-    with cc.open_hessian_reference(path) as owner:
-        assert set(owner)==set(f['H']) and len(owner.descriptor['rows'])==2
-        assert owner.receipt()['loaded_entries']==0
-
-
-@pytest.mark.parametrize('defect',['row_seal','row_binding','canonical','roster','mixed'])
-def test_dispatch_refuses_unbound_reference_rows(handoff,defect):
-    f=handoff;dirs,payloads=rows(f);p=payloads['a']
-    if defect=='row_seal':p['costs']['a']['format']['hessian_identity']['capture_sha256']='0'*64
-    elif defect=='row_binding':p['provenance']['hessian']['reference_binding']['census_sha256']='0'*64
-    elif defect=='canonical':p['provenance']['calibration_cache']={**f['record'],'sha256':'0'*64}
-    elif defect=='roster':p['provenance']['unit_selection']['groups'][0]['members']=['b']
-    else:p['provenance']['hessian'].pop('reference_binding')
-    with pytest.raises(campaign_table.MergeRefused):
-        dispatch.merge_export_inputs(dirs,payloads,out_cache=f['tmp']/'merged',
-            identity=f['calibration'],policy='fixture',static_scales={},census=f['census'])
-    assert not (f['tmp']/'merged/hessian_capture.references.json').exists()
 
 
 def test_export_gate_binds_reference_without_claiming_unconsumed_payloads(handoff,monkeypatch):

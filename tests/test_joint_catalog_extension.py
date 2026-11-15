@@ -33,8 +33,57 @@ def _write(root, name, value, *, binary=False):
     return {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest()}
 
 
+FIXTURE = 'f'*64
+
+
+def _recipe(family, rate):
+    """Return the body and plane recorded in a wire receipt."""
+    if family == 'TESSERA_E2M1_K2':
+        return ('tcq', 'lut16') if rate >= 896 else ('window', 'lut16')
+    return ('window', 'channel')
+
+
+ENGAGED = dict(encode_windows=4, stage1_admitted=256, stage1_refused=0, stage1_fused=256, stage1_refusals={},
+               stage2_admitted=40, stage2_refused=0, stage2_fused=40, stage2_tripped=0, stage2_nonfinite=0,
+               stage2_refusals={}, stage1_counts_agree=True, stage2_counts_agree=True)
+
+
+def _arm_result(path, old, new, *, routed_rates=(832, 960, 1088), dense_rates=(832, 960, 1088),
+                dropped=(), environment=None, engagement=ENGAGED, e2m1_rates=(896,)):
+    cells = []
+    def cell(qname, family, rate):
+        body, plane = _recipe(family, rate)
+        cells.append(dict(ok=True, byte_identical=True, dloss=0.5, stored_dloss=0.5, qname=qname, family=family,
+                          format_name=f'{family}_R{rate}', body_rate_q256=rate, blob_sha256='e'*64, blob_bytes=10,
+                          encoder_fixture_id=FIXTURE, recipe_body=body, recipe_plane=plane))
+    for rate in routed_rates:
+        for j in range(4):
+            cell(f'layers.0.mlp.experts.{j}.down_proj', 'TESSERA_E4M3_K1', rate)
+    for rate in dense_rates:
+        for family in ('TESSERA_BF16_K1', 'TESSERA_E4M3_K1'):
+            for j in range(2):
+                cell(f'layers.{j}.mlp.gate_proj', family, rate)
+    for rate in e2m1_rates:
+        cell('layers.0.mlp.up_proj', 'TESSERA_E2M1_K2', rate)
+    result = dict(kind='dense', comparison=dict(
+        kind='comparison', ok=True, old_pins=old, new_pins=new, identity_matches_with_pins_substituted=True,
+        dropped_settings=list(dropped), cells=cells))
+    if environment is not None:
+        result['environment'] = environment
+    if engagement is not None:
+        result['fused_engagement'] = dict(summary=dict(engagement))
+    path.write_text(json.dumps(result))
+    return path
+
+
+def _fixture_result(path, old_seal, new_seal):
+    path.write_text(json.dumps(dict(kind='fixture_id', ok=True, fixture_id_equal=True,
+                                    encoder_source_sha256={'old': old_seal, 'new': new_seal},
+                                    encoder_fixture_ids={'old': FIXTURE, 'new': FIXTURE})))
+    return path
+
+
 def _encoder_proof(tmp_path):
-    from tests.test_reseal_campaign_identity import _arm_result, _fixture_result
     old = {'prismaquant_source_sha256': 'a'*64, 'encoder_source_sha256': '4'*64}
     new = {**old, 'encoder_source_sha256': '8'*64}
     arm_path = _arm_result(tmp_path/'source-proof-arm.json', old, new)
@@ -187,8 +236,7 @@ def _campaign_identity(tmp_path, inputs):
 
 
 def _expected_scope(inputs, identity):
-    """The scope the dispatcher stamps on a campaign-scoped submission
-    (``dispatch_tessera_campaign.cmd_submit_joint``)."""
+    """Build the campaign scope from the original plan and identity."""
     from prismaquant.tessera_campaign_table import (joint_campaign_scope)
     plan = json.loads(Path(inputs['original_plan']['path']).read_bytes())
     return {**joint_campaign_scope(plan), 'campaign_identity_sha256': identity['sha256']}

@@ -16,7 +16,6 @@ import pytest
 from prismaquant import tessera_campaign_table as campaign_table
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-import dispatch_tessera_campaign as dispatch
 from test_tessera_campaign_fanout import SCOPE, _shard
 
 REASON = "the dense cells already exist in another table"
@@ -33,12 +32,11 @@ def _three_group_rows():
     return rows
 
 
-def _plan(rows, excluded=None):
-    plan = {"schema": campaign_table.PLAN_SCHEMA,
-            "rows": [{"row_id": row_id, "groups": list(groups)} for row_id, groups in rows]}
-    if excluded is not None:
-        plan[dispatch.DENSE_ROWS_EXCLUDED_KEY] = excluded
-    return plan
+def _coverage(rows, excluded=None):
+    if excluded is None:
+        return None
+    return {"expected_groups": sorted({group for _, groups in rows for group in groups}),
+            "excluded_rows": excluded["rows"], "reason": excluded["reason"]}
 
 
 def _merge(rows, coverage):
@@ -47,16 +45,15 @@ def _merge(rows, coverage):
 
 
 def test_a_plan_without_the_declaration_keeps_the_scope_refusal():
-    plan = _plan([("row-0000", ["u:a"]), ("row-0001", ["u:b"])])
-    assert dispatch.declared_coverage(plan) is None
+    coverage = _coverage([("row-0000", ["u:a"]), ("row-0001", ["u:b"])])
+    assert coverage is None
     with pytest.raises(campaign_table.MergeRefused, match=r"do not cover 1 anchor group\(s\) of the scope: u:c"):
-        _merge(_three_group_rows(), dispatch.declared_coverage(plan))
+        _merge(_three_group_rows(), coverage)
 
 
 def test_a_declared_exclusion_merges_the_declared_groups_and_stamps_the_rest():
-    plan = _plan([("row-0000", ["u:a"]), ("row-0001", ["u:b"])],
+    coverage = _coverage([("row-0000", ["u:a"]), ("row-0001", ["u:b"])],
                  excluded={"rows": ["row-0002"], "reason": REASON})
-    coverage = dispatch.declared_coverage(plan)
     assert coverage == {"expected_groups": ["u:a", "u:b"], "excluded_rows": ["row-0002"],
                         "reason": REASON}
 
@@ -82,47 +79,35 @@ def test_a_declared_exclusion_merges_the_declared_groups_and_stamps_the_rest():
 def test_the_expectation_is_the_plan_and_not_the_rows_that_exist():
     # The plan declares three priced rows and excludes a fourth; only two rows
     # were merged.  The missing declared row is still missing.
-    plan = _plan([("row-0000", ["u:a"]), ("row-0001", ["u:b"]), ("row-0002", ["u:c"])],
+    coverage = _coverage([("row-0000", ["u:a"]), ("row-0001", ["u:b"]), ("row-0002", ["u:c"])],
                  excluded={"rows": ["row-0003"], "reason": REASON})
     with pytest.raises(campaign_table.MergeRefused, match=r"do not cover 1 anchor group\(s\) of the plan: u:c"):
-        _merge(_three_group_rows(), dispatch.declared_coverage(plan))
+        _merge(_three_group_rows(), coverage)
 
 
 def test_rows_pricing_a_group_the_plan_does_not_declare_refuse():
-    plan = _plan([("row-0000", ["u:a"])], excluded={"rows": ["row-0002"], "reason": REASON})
+    coverage = _coverage([("row-0000", ["u:a"])], excluded={"rows": ["row-0002"], "reason": REASON})
     with pytest.raises(campaign_table.MergeRefused, match="the plan does not declare: u:b"):
-        _merge(_three_group_rows(), dispatch.declared_coverage(plan))
+        _merge(_three_group_rows(), coverage)
 
 
 def test_a_declaration_that_still_covers_the_scope_is_a_whole_scope_table():
     rows = {"row-0000": _shard("u:a", "a"), "row-0001": _shard("u:b", "b")}
-    plan = _plan([("row-0000", ["u:a"]), ("row-0001", ["u:b"])],
+    coverage = _coverage([("row-0000", ["u:a"]), ("row-0001", ["u:b"])],
                  excluded={"rows": ["row-0009"], "reason": REASON})
-    merged = _merge(rows, dispatch.declared_coverage(plan))
+    merged = _merge(rows, coverage)
     assert merged["provenance"]["unit_selection"]["selected"] is False
     assert merged["provenance"]["coverage"]["unpriced_groups"] == []
     assert merged["provenance"]["coverage"]["priced_groups"] == 2
 
 
 def test_a_declared_group_outside_the_scope_refuses():
-    plan = _plan([("row-0000", ["u:a"]), ("row-0001", ["u:b", "u:z"])],
+    coverage = _coverage([("row-0000", ["u:a"]), ("row-0001", ["u:b", "u:z"])],
                  excluded={"rows": ["row-0002"], "reason": REASON})
     with pytest.raises(campaign_table.MergeRefused, match="outside the campaign scope: u:z"):
-        _merge(_three_group_rows(), dispatch.declared_coverage(plan))
+        _merge(_three_group_rows(), coverage)
 
 
-@pytest.mark.parametrize("excluded, message", [
-    ({"rows": ["row-0002"]}, "give a reason"),
-    ({"rows": ["row-0002"], "reason": "  "}, "give a reason"),
-    ({"rows": [], "reason": REASON}, "list the excluded row ids"),
-    ({"reason": REASON}, "list the excluded row ids"),
-    ("row-0002", "list the excluded row ids"),
-    ({"rows": ["row-0001"], "reason": REASON}, "names planned row"),
-])
-def test_a_malformed_declaration_refuses(excluded, message):
-    plan = _plan([("row-0000", ["u:a"]), ("row-0001", ["u:b"])], excluded=excluded)
-    with pytest.raises(campaign_table.MergeRefused, match=message):
-        dispatch.declared_coverage(plan)
 
 
 def test_a_whole_scope_merge_carries_no_coverage_block():

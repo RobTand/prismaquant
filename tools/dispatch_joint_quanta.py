@@ -932,8 +932,7 @@ def stage_a_memory_gib(campaign: Mapping) -> int:
 
     ``aggregate_memory_bytes`` is the bound the plan states for the capture's
     host side and its device envelope together
-    (``dispatch_tessera_campaign.joint_submission_memory_bound`` reads it
-    first too), rounded up to the whole GiB ``--demand`` counts in. The GLM
+    rounded up to the whole GiB ``--demand`` counts in. The GLM
     plan states 108447924224 B, so the row reserves 101 GiB. A constant 104
     reserved 3 GiB more than the plan's own bound, and a GB10 whose live offer
     was 102 GiB could never place the row (PQ #997, 2026-09-23). A plan that

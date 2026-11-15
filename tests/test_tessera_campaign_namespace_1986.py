@@ -1,5 +1,6 @@
 """Metadata-only namespace admission; no model, Docker or historical inputs."""
 from container_admission import ADMISSION
+from prismaquant.tessera_campaign_cli import campaign_action_arguments
 import copy
 import json
 import os
@@ -9,7 +10,6 @@ import sys
 import pytest
 
 import tools.tessera_campaign_namespace as namespace
-from tools import dispatch_tessera_campaign as dispatch
 from tools import tessera_campaign_container as adapter
 from tools.pq_profile_artifact import profile_digest_owner
 
@@ -63,12 +63,12 @@ def test_adapter_refuses_unbound_namespace_before_docker(monkeypatch):
 def test_preparation_is_deterministic_and_preserves_legacy(tmp_path):
     kwargs = arguments(tmp_path)
     original = copy.deepcopy(kwargs["requests"])
-    first = dispatch.prepare_namespace_requests(**kwargs)
-    assert first == dispatch.prepare_namespace_requests(**kwargs)
+    first = namespace.prepare_namespace_requests(**kwargs)
+    assert first == namespace.prepare_namespace_requests(**kwargs)
     assert kwargs["requests"] == original
     assert not (tmp_path / "new").exists()
     row = first[0]
-    inner = dispatch._inner_campaign_argv(row)
+    inner = campaign_action_arguments(row["argv"])
     for flag in ("--out", "--cache-dir", "--checkpoint"):
         assert inner[inner.index(flag) + 1].startswith(str(tmp_path / "new") + "/")
     spec = json.loads(row["argv"][4])
@@ -81,7 +81,7 @@ def test_completed_request_cannot_be_selected(tmp_path):
     kwargs = arguments(tmp_path)
     kwargs["reconciliation"]["status"][kwargs["selected"][0]] = "completed"
     with pytest.raises(RuntimeError, match="unfinished"):
-        dispatch.prepare_namespace_requests(**kwargs)
+        namespace.prepare_namespace_requests(**kwargs)
 
 
 @pytest.mark.parametrize("change, message", [
@@ -137,40 +137,28 @@ def test_preparation_refusals(tmp_path, change, message):
         kwargs["reconciliation"]["requests_sha256"] = owner.canonical_json_sha256(kwargs["requests"], where="fixture roster")
         kwargs["readsets"] = {key: kwargs["readsets"][old]}
     with pytest.raises(RuntimeError, match=message):
-        dispatch.prepare_namespace_requests(**kwargs)
+        namespace.prepare_namespace_requests(**kwargs)
+
+
+def _publish_fixture(rows):
+    """Write ownership files for namespace reader tests."""
+    record = namespace.namespace_publication_record(rows)
+    root = adapter.Path(record["root"])
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "namespace.json").write_bytes(
+        owner.canonical_json_bytes(record, where="namespace publication"))
+    for row in rows:
+        binding = namespace.validate_namespace_request(row)
+        directory = root / binding["request_key"]
+        directory.mkdir(exist_ok=True)
+        for name, value in (("binding.json", binding), ("request.json", row)):
+            (directory / name).write_bytes(
+                owner.canonical_json_bytes(value, where="namespace publication"))
+        namespace.establish_namespace_temporaries(row)
 
 
 def prepared(tmp_path):
-    return dispatch.prepare_namespace_requests(**arguments(tmp_path))
-
-
-def test_publication_identical_resume_preserves_outputs(tmp_path):
-    rows = prepared(tmp_path)
-    dispatch.publish_namespace_requests(rows)
-    binding = namespace.validate_namespace_request(rows[0])
-    root = tmp_path / "new"
-    before = {path: path.read_bytes() for path in root.rglob("*.json")}
-    output = root / binding["request_key"] / "cost.pkl"
-    output.write_bytes(b"durable completed anchors stand in")
-    dispatch.publish_namespace_requests(rows)
-    namespace.require_namespace_publication(rows[0])
-    assert {path: path.read_bytes() for path in before} == before
-    assert output.read_bytes() == b"durable completed anchors stand in"
-
-
-@pytest.mark.parametrize("occupied", ["empty", "foreign", "conflicting"])
-def test_publication_no_overwrite(tmp_path, occupied):
-    rows = prepared(tmp_path)
-    root = tmp_path / "new"
-    root.mkdir()
-    if occupied != "empty":
-        (root / "namespace.json").write_bytes(b"foreign bytes")
-    if occupied == "foreign":
-        (root / "legacy.pkl").write_bytes(b"immutable legacy")
-    before = {path: path.read_bytes() for path in root.iterdir()}
-    with pytest.raises(RuntimeError, match="occupied|bytes differ"):
-        dispatch.publish_namespace_requests(rows)
-    assert {path: path.read_bytes() for path in root.iterdir()} == before
+    return namespace.prepare_namespace_requests(**arguments(tmp_path))
 
 
 @pytest.mark.parametrize("field", ["out", "source", "binding", "request", "env"])
@@ -214,7 +202,7 @@ def test_symlink_escape_refusal(tmp_path, location):
 
 def test_adapter_positive_and_source_refusal_before_docker(tmp_path, monkeypatch):
     row = prepared(tmp_path)[0]
-    dispatch.publish_namespace_requests([row])
+    _publish_fixture([row])
     spec = json.loads(row["argv"][4])
     for name, value in row["env"].items():
         monkeypatch.setenv(name, value)
@@ -231,7 +219,7 @@ def test_adapter_positive_and_source_refusal_before_docker(tmp_path, monkeypatch
 
 def test_adapter_refuses_dirty_full_source_and_outer_env(tmp_path, monkeypatch):
     row = prepared(tmp_path)[0]
-    dispatch.publish_namespace_requests([row])
+    _publish_fixture([row])
     spec = json.loads(row["argv"][4])
     with pytest.raises(RuntimeError, match="outer/spec environment"):
         adapter.validate_namespace_launch(spec, row["argv"][6:], cwd=str(tmp_path), environ={})
@@ -260,7 +248,7 @@ def test_existing_unbuffered_command_shape(tmp_path):
     kwargs["reconciliation"]["status"] = {key: "unfinished"}
     kwargs["reconciliation"]["requests_sha256"] = owner.canonical_json_sha256(kwargs["requests"], where="fixture roster")
     kwargs["readsets"] = {key: kwargs["readsets"][old]}
-    assert dispatch.prepare_namespace_requests(**kwargs)[0]["argv"][7] == "-u"
+    assert namespace.prepare_namespace_requests(**kwargs)[0]["argv"][7] == "-u"
 
 
 def test_complete_roster_does_not_retarget_completed_requests(tmp_path):
@@ -273,7 +261,7 @@ def test_complete_roster_does_not_retarget_completed_requests(tmp_path):
     kwargs["reconciliation"]["status"][complete_key] = "completed"
     kwargs["reconciliation"]["requests_sha256"] = owner.canonical_json_sha256(kwargs["requests"], where="fixture roster")
     original = copy.deepcopy(kwargs["requests"])
-    rows = dispatch.prepare_namespace_requests(**kwargs)
+    rows = namespace.prepare_namespace_requests(**kwargs)
     assert len(rows) == 1
     assert namespace.validate_namespace_request(rows[0])["original_request_sha256"] == kwargs["selected"][0]
     assert kwargs["requests"] == original
@@ -288,7 +276,7 @@ def test_malformed_embedded_spec_refuses_with_namespace_error():
 
 def test_source_inspection_failure_is_explicit_refusal(tmp_path, monkeypatch):
     row = prepared(tmp_path)[0]
-    dispatch.publish_namespace_requests([row])
+    _publish_fixture([row])
     spec = json.loads(row["argv"][4])
     monkeypatch.setattr(adapter, "checkout_commit", lambda cwd: COMMIT)
 
@@ -302,7 +290,7 @@ def test_source_inspection_failure_is_explicit_refusal(tmp_path, monkeypatch):
 
 def test_untracked_executed_source_is_not_the_bound_commit(tmp_path, monkeypatch):
     row = prepared(tmp_path)[0]
-    dispatch.publish_namespace_requests([row])
+    _publish_fixture([row])
     spec = json.loads(row["argv"][4])
     monkeypatch.setattr(adapter, "checkout_commit", lambda cwd: COMMIT)
     monkeypatch.setattr(adapter.subprocess, "run", lambda *a, **k: type("Result", (), {
@@ -333,8 +321,8 @@ def test_review_source_requires_known_guarded_checkout(tmp_path, monkeypatch, py
     spec["env"] = row["env"]
     row["argv"][4] = json.dumps(spec)
     replace_fixture_request(kwargs, row)
-    row = dispatch.prepare_namespace_requests(**kwargs)[0]
-    dispatch.publish_namespace_requests([row])
+    row = namespace.prepare_namespace_requests(**kwargs)[0]
+    _publish_fixture([row])
     spec = json.loads(row["argv"][4])
     (tmp_path / "prismaquant").mkdir()
     (tmp_path / "prismaquant" / "__init__.py").write_text("# genuine fixture checkout\n")
@@ -365,7 +353,7 @@ def test_review_mount_coverage_refusal(tmp_path, mount_case):
     row["argv"][4] = json.dumps(spec)
     replace_fixture_request(kwargs, row)
     with pytest.raises(RuntimeError, match="mount|hidden"):
-        dispatch.prepare_namespace_requests(**kwargs)
+        namespace.prepare_namespace_requests(**kwargs)
     assert not (tmp_path / "new").exists()
 
 
@@ -373,7 +361,7 @@ def test_review_fresh_and_identical_publication_establishes_writable_temps(tmp_p
     rows = prepared(tmp_path)
     assert not (tmp_path / "new").exists()
     for attempt in range(2):
-        dispatch.publish_namespace_requests(rows)
+        _publish_fixture(rows)
         namespace.require_namespace_publication(rows[0])
         for name in ("TMPDIR", "TMP", "TEMP"):
             directory = adapter.Path(rows[0]["env"][name])
@@ -405,7 +393,7 @@ def test_review_path_input_is_canonical_before_overlap(tmp_path, value):
     row["argv"][row["argv"].index("--units") + 1] = path
     replace_fixture_request(kwargs, row)
     with pytest.raises(RuntimeError, match="canonical|overlap"):
-        dispatch.prepare_namespace_requests(**kwargs)
+        namespace.prepare_namespace_requests(**kwargs)
     assert not (tmp_path / "new").exists()
 
 
@@ -450,8 +438,8 @@ def import_shadow_launch_fixture(tmp_path, monkeypatch, shadow):
     spec["env"] = row["env"]
     row["argv"][4] = json.dumps(spec)
     replace_fixture_request(kwargs, row)
-    row = dispatch.prepare_namespace_requests(**kwargs)[0]
-    dispatch.publish_namespace_requests([row])
+    row = namespace.prepare_namespace_requests(**kwargs)[0]
+    _publish_fixture([row])
     spec = json.loads(row["argv"][4])
     monkeypatch.chdir(checkout)
     for name, value in row["env"].items():
@@ -558,7 +546,7 @@ def test_import_shadow_legacy_non_opt_in_selection_unchanged(tmp_path):
 
 def test_review_temporary_symlink_race_cannot_escape_or_replace_bindings(tmp_path, monkeypatch):
     row = prepared(tmp_path)[0]
-    dispatch.publish_namespace_requests([row])
+    _publish_fixture([row])
     binding = namespace.require_namespace_publication(row)
     row_root = tmp_path / "new" / binding["request_key"]
     before = {name: (row_root / name).read_bytes() for name in ("binding.json", "request.json")}
@@ -582,7 +570,7 @@ def test_review_temporary_symlink_race_cannot_escape_or_replace_bindings(tmp_pat
 
 def test_review_temporary_writability_refuses_without_metadata_overwrite(tmp_path, monkeypatch):
     row = prepared(tmp_path)[0]
-    dispatch.publish_namespace_requests([row])
+    _publish_fixture([row])
     binding = namespace.require_namespace_publication(row)
     path = tmp_path / "new" / binding["request_key"] / "binding.json"
     before = path.read_bytes()
@@ -594,7 +582,7 @@ def test_review_temporary_writability_refuses_without_metadata_overwrite(tmp_pat
 
 def test_review_adapter_repairs_missing_owned_temps_before_entry(tmp_path, monkeypatch):
     row = prepared(tmp_path)[0]
-    dispatch.publish_namespace_requests([row])
+    _publish_fixture([row])
     spec = json.loads(row["argv"][4])
     directory = adapter.Path(row["env"]["TMPDIR"])
     directory.rmdir()
@@ -627,7 +615,7 @@ def test_mount_component_preparation_refuses_leading_double_slash(tmp_path, viol
     row["argv"][4] = json.dumps(spec)
     replace_fixture_request(kwargs, row)
     with pytest.raises(RuntimeError, match="namespace paths must be canonical"):
-        dispatch.prepare_namespace_requests(**kwargs)
+        namespace.prepare_namespace_requests(**kwargs)
     assert not (tmp_path / "new").exists()
 
 
@@ -673,9 +661,9 @@ def test_mount_component_adapter_refuses_self_consistent_alias_before_docker(tmp
 
 def test_mount_component_valid_identity_mount_covers_outputs_and_owned_temps(tmp_path, monkeypatch):
     kwargs = arguments(tmp_path)
-    rows = dispatch.prepare_namespace_requests(**kwargs)
+    rows = namespace.prepare_namespace_requests(**kwargs)
     assert not (tmp_path / "new").exists()
-    dispatch.publish_namespace_requests(rows)
+    _publish_fixture(rows)
     row = rows[0]
     spec = json.loads(row["argv"][4])
     (tmp_path / "prismaquant").mkdir()
@@ -709,57 +697,6 @@ def test_review_adapter_rechecks_self_consistent_old_contract_gaps(tmp_path, vio
     with pytest.raises(RuntimeError, match="mount|canonical"):
         namespace.namespace_adapter_request(spec, request["argv"][6:], request["env"])
     assert not (tmp_path / "new").exists()
-
-
-@pytest.mark.parametrize("location", ["root", "row"])
-def test_publication_parent_symlink_race_cannot_write_foreign_metadata(tmp_path, monkeypatch, location):
-    from prismaquant import cost_stage_checkpoint as checkpoint
-
-    rows = prepared(tmp_path)
-    binding = namespace.validate_namespace_request(rows[0])
-    root = tmp_path / "new"
-    foreign = tmp_path / "foreign"
-    foreign.mkdir()
-    swapped = False
-    publish = checkpoint.publish_new_bytes
-
-    def swap_parent_after_preflight(path, payload, **kwargs):
-        nonlocal swapped
-        parent = root if location == "root" else root / binding["request_key"]
-        if path.parent == parent and not swapped:
-            assert not parent.exists()
-            parent.symlink_to(foreign, target_is_directory=True)
-            swapped = True
-        return publish(path, payload, **kwargs)
-
-    monkeypatch.setattr(checkpoint, "publish_new_bytes", swap_parent_after_preflight)
-    with pytest.raises((RuntimeError, OSError)):
-        dispatch.publish_namespace_requests(rows)
-    assert swapped, "the publication boundary was exercised"
-    assert list(foreign.iterdir()) == [], "publication wrote through the raced parent symlink"
-
-
-def test_publication_concurrent_identical_callers_preserve_no_clobber(tmp_path, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Barrier
-    from prismaquant import cost_stage_checkpoint as checkpoint
-
-    rows = prepared(tmp_path)
-    first_publication = Barrier(2)
-    publish = checkpoint.publish_new_bytes
-
-    def both_preflights_complete(path, payload, **kwargs):
-        if path.name == "namespace.json":
-            first_publication.wait(timeout=10)
-        return publish(path, payload, **kwargs)
-
-    monkeypatch.setattr(checkpoint, "publish_new_bytes", both_preflights_complete)
-    with ThreadPoolExecutor(max_workers=2) as callers:
-        futures = [callers.submit(dispatch.publish_namespace_requests, rows) for _ in range(2)]
-        for future in futures:
-            future.result(timeout=20)
-    namespace.require_namespace_publication(rows[0])
-    assert not list((tmp_path / "new").rglob("*.tmp*"))
 
 
 @pytest.fixture(autouse=True)

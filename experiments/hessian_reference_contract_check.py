@@ -34,7 +34,7 @@ def main():
             producer_archive_sha256=actual,producer_module=str(tessera.__file__)),sort_keys=True),flush=True)
         files=['prismaquant/tessera_calibration_cache.py','prismaquant/tessera_campaign.py',
             'prismaquant/tessera_export_lane.py','prismaquant/tessera_menu.py',
-            'prismaquant/tessera_materialization.py','tools/dispatch_tessera_campaign.py']
+            'prismaquant/tessera_materialization.py']
         if not all(compileall.compile_file(path,quiet=1) for path in files):
             raise RuntimeError('touched module compilation failed')
         import pytest

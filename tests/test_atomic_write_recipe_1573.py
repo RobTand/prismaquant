@@ -4,9 +4,7 @@
 "stage bytes beside the target, fsync, replace, fsync the directory".
 `prismaquant/aura_cost.py` carried its own copy; the AURA checkpoint writer
 now lives in `prismaquant/aura_checkpoint_journal.py` and shares the owner.
-The reseal package owner must rewrite plain checkpoint data without numerical
-or CLI dependencies. Its actual import and payload behavior is exercised in a
-fresh child interpreter. The durable publication ordering is:
+The durable publication order is:
 
 write -> flush -> fsync(file) -> os.replace -> fsync(containing directory)
 
@@ -28,53 +26,6 @@ def test_aura_checkpoint_journal_uses_the_owner_recipe() -> None:
     from prismaquant import aura_checkpoint_journal
 
     assert aura_checkpoint_journal.atomic_write_bytes is csc.atomic_write_bytes
-
-
-def test_reseal_package_rewrites_plain_data_without_numerical_or_tool_imports(tmp_path):
-    from pathlib import Path
-    import subprocess
-    import sys
-
-    root = Path(__file__).resolve().parents[1]
-    script = """
-import sys
-sys.path.insert(0, ROOT)
-class ForbiddenRuntime:
-    def find_spec(self, name, path=None, target=None):
-        if name.startswith('tessera.serving') or name.split('.')[0] in {'torch', 'transformers', 'triton', 'vllm', 'tools'}:
-            raise AssertionError('reseal dependency: ' + name)
-sys.meta_path.insert(0, ForbiddenRuntime())
-import pickle
-from pathlib import Path
-from prismaquant import tessera_campaign_reseal as owner
-value = {'units': {'u': {'menu': ['TESSERA_E4M3_K1_R832']}}, 'unicode': 'héllo'}
-raw = pickle.dumps(value, protocol=4)
-assert owner.loads(raw) == value
-assert owner.dumps_like(value, raw) == raw
-assert owner.canonical_bytes(value) == b'{"unicode":"h\\xc3\\xa9llo","units":{"u":{"menu":["TESSERA_E4M3_K1_R832"]}}}'
-for unsafe in (pickle.dumps(Exception('x')), b'not-a-pickle'):
-    try:
-        owner.loads(unsafe)
-    except (owner.Refused, pickle.UnpicklingError):
-        pass
-    else:
-        raise AssertionError('non-plain checkpoint admitted')
-try:
-    owner.discover_rows()
-except owner.Refused as error:
-    assert 'no rows' in str(error)
-else:
-    raise AssertionError('empty row scope admitted')
-path = Path('metadata.json')
-owner.write_json(path, value)
-import json
-assert json.loads(path.read_bytes()) == value
-print('RESEAL-OWNER-OK')
-""".replace('ROOT', repr(str(root)), 1)
-    result = subprocess.run([sys.executable, '-c', script], cwd=tmp_path,
-                            capture_output=True, text=True)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.strip() == 'RESEAL-OWNER-OK'
 
 
 def test_owner_orders_fsync_replace_dirfsync(tmp_path, monkeypatch) -> None:

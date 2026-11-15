@@ -1880,9 +1880,8 @@ def anchor_group_rate_grids(groups: Mapping, rates_by_unit: Mapping, *,
     return group_rates, route_refused
 
 
-#: The selection file ``--units`` reads and ``tools/dispatch_tessera_campaign.py``
-#: writes.  A selection names **fused anchor groups**, never bare units: anchor
-#: placement is a group property (one shared rung grid, the group's worst
+#: The ``--units`` selection names fused anchor groups.
+#: Anchor placement is a group property (one shared rung grid, the group's worst
 #: member drives the split), so a group is the smallest scope whose measured
 #: values do not depend on what else the run priced.
 from prismaquant.tessera_campaign_selection import (

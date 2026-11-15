@@ -105,12 +105,10 @@ def container_memory_budget_gb(spec: dict) -> float | None:
 
     TWO FIELDS, TWO MEANINGS. ``cpu_memory_gb`` is this cap: what the container's
     cgroup may charge, which on GB10 is the CPU side. ``box_memory_gb`` is the
-    box's total unified capacity, the number ``dispatch_tessera_campaign``
-    refuses to derive a row's admission demand above -- and a PrismaBuild
-    reservation for a row that holds 80 GiB of device residency beside a 34 GiB
-    CPU cap has to be the combined physical demand, not the CPU cap. Reading the
-    cap out of ``box_memory_gb`` conflated those and would have either refused
-    the pilot or under-reserved the box.
+    box's total unified capacity. A row's admission demand must fit this capacity.
+    A PrismaBuild reservation must cover device residency plus the CPU cap.
+    For example, 80 GiB of device residency plus a 34 GiB CPU cap needs 114 GiB.
+    Do not use ``box_memory_gb`` as the CPU cap.
 
     ``box_memory_gb`` remains the fallback so a spec sealed before
     ``cpu_memory_gb`` existed keeps the invocation it was sealed with. A spec

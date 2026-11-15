@@ -87,7 +87,6 @@ MODULES = (
     "prismaquant/tessera_joint_aura.py",
     "prismaquant/tessera_joint_eval_panel.py",
     "tools/dispatch_joint_quanta.py",
-    "tools/dispatch_tessera_campaign.py",
     "tools/tessera_campaign_container.py",
     "tools/tessera_campaign_namespace.py",
     "tools/regenerate_joint_quanta.py",
@@ -296,13 +295,6 @@ ALLOWLIST = {
         1, INTEGRITY, "a file's bytes against its bound digest"),
     ("prismaquant/tessera_campaign_table.py", "verify_joint_campaign_scope"): (
         1, STRUCTURE, "the campaign identity has the expected schema"),
-    ("tools/dispatch_tessera_campaign.py", "work_profile_bundles"): (
-        1, WALL, "row-work predictions bind the census roster and shapes they price; "
-        "not a recorded producer identity compared with the running version"),
-    ("tools/dispatch_tessera_campaign.py", "_calibration_cache_binding"): (
-        1, AMBIGUOUS, "the capture binds this census (calibration data)"),
-    ("tools/dispatch_tessera_campaign.py", "_merge_export_hessian_references.accepted_rows"): (
-        1, INTEGRITY, "reference commitments bind the priced row they merge"),
     ("prismaquant/tessera_campaign_table.py", "merge_checkpoint"): (
         2, AMBIGUOUS, "rows merged into one checkpoint agree on identity and unit inputs"),
     ("prismaquant/tessera_campaign_table.py", "_merge_acquisition_settings"): (

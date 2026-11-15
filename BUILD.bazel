@@ -5548,42 +5548,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "docs/experiments/glm_full_anchor_preparation_20260908/draft_rows",
-    srcs = [
-        "docs/experiments/glm_full_anchor_preparation_20260908/draft_rows.py",
-    ],
-    data = [
-        "docs/experiments/glm_full_anchor_preparation_20260908/anchor-spec.draft.json",
-        "docs/experiments/glm_full_anchor_preparation_20260908/draft_rows.py",
-        "docs/experiments/glm_full_anchor_preparation_20260908/qualification-manifest.draft.json",
-    ],
-    deps = [
-        ":tools/__init__",
-        ":tools/dispatch_tessera_campaign",
-    ],
-)
-
-pq_py_library(
-    name = "docs/experiments/glm_full_anchor_preparation_20260908/preflight",
-    srcs = [
-        "docs/experiments/glm_full_anchor_preparation_20260908/preflight.py",
-    ],
-    data = [
-        "docs/experiments/glm_full_anchor_preparation_20260908/anchor-spec.draft.json",
-        "docs/experiments/glm_full_anchor_preparation_20260908/preflight.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":tools/__init__",
-        ":tools/dispatch_tessera_campaign",
-        "@pq_pip//safetensors",
-        "@pq_pip//tessera_quant",
-        "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
     name = "docs/experiments/glm_model_wikitext_inputs_20260908/audit_overlap",
     srcs = [
         "docs/experiments/glm_model_wikitext_inputs_20260908/audit_overlap.py",
@@ -6418,20 +6382,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "experiments/glm_data_manifests",
-    srcs = [
-        "experiments/glm_data_manifests.py",
-    ],
-    data = [
-        "experiments/glm_data_manifests.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/campaign_data_manifests",
-    ],
-)
-
-pq_py_library(
     name = "experiments/glm_derivative_cpu_gate",
     srcs = [
         "experiments/glm_derivative_cpu_gate.py",
@@ -6478,23 +6428,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/dev_mode",
         "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/glm_full_stack_admission_inspection",
-    srcs = [
-        "experiments/glm_full_stack_admission_inspection.py",
-    ],
-    data = [
-        "prismaquant/autoscale.py",
-        "tools/dispatch_tessera_campaign.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":tools/__init__",
-        ":tools/dispatch_tessera_campaign",
     ],
 )
 
@@ -6774,7 +6707,6 @@ pq_py_library(
         "prismaquant/tessera_export_lane.py",
         "prismaquant/tessera_materialization.py",
         "prismaquant/tessera_menu.py",
-        "tools/dispatch_tessera_campaign.py",
     ],
     deps = [
         "@pq_pip//pytest",
@@ -8840,7 +8772,6 @@ pq_py_library(
         "prismaquant/tessera_calibration_forward.py",
         "prismaquant/tessera_campaign.py",
         "prismaquant/tessera_campaign_cli.py",
-        "prismaquant/tessera_campaign_reseal.py",
         "prismaquant/tessera_campaign_rows.py",
         "prismaquant/tessera_campaign_table.py",
         "prismaquant/tessera_campaign_wire.py",
@@ -8903,7 +8834,6 @@ pq_py_library(
         "prismaquant/serving_profiles.py",
         "prismaquant/shape_runtime_prices.py",
         "prismaquant/shipcard.py",
-        "prismaquant/tessera_campaign_reseal.py",
         "prismaquant/tessera_campaign_rows.py",
         "prismaquant/tessera_joint_aura.py",
         "prismaquant/tessera_runtime_contract.py",
@@ -8921,7 +8851,6 @@ pq_py_library(
         "tools/measure_vllm_wikitext_ppl.py",
         "tools/prepare_dsv4_wikitext_inputs.py",
         "tools/prismaquant_source_bootstrap.py",
-        "tools/reseal_campaign_identity.py",
         "tools/serve_fingerprint.py",
         "tools/spec_decode_guard.py",
     ],
@@ -9003,6 +8932,7 @@ pq_py_library(
         ":prismaquant/tensor_digests",
         ":prismaquant/tessera_acquisition_inputs",
         ":prismaquant/tessera_campaign_requests",
+        ":prismaquant/tessera_campaign_reseal",
         ":prismaquant/tessera_campaign_selection",
         ":prismaquant/tessera_hessian",
         ":prismaquant/tessera_menu_modes",
@@ -9218,42 +9148,6 @@ pq_py_library(
     name = "prismaquant/campaign_container_spec",
     srcs = [
         "prismaquant/campaign_container_spec.py",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/campaign_data_manifests",
-    srcs = [
-        "prismaquant/campaign_data_manifests.py",
-    ],
-    data = [
-        "prismaquant/campaign_data_manifests.py",
-        "prismaquant/contract_checks.py",
-        "prismaquant/data_manifest_contract.py",
-        "prismaquant/digests.py",
-        "prismaquant/file_identity.py",
-        "prismaquant/joint_prewarm_phases.py",
-        "prismaquant/joint_replay_frontier.py",
-        "prismaquant/joint_run_progress.py",
-        "prismaquant/render_cache_paths.py",
-        "prismaquant/schemas.py",
-        "prismaquant/tessera_acquisition_inputs.py",
-        "prismaquant/tessera_campaign_cli.py",
-        "prismaquant/tessera_campaign_selection.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/data_manifest_contract",
-        ":prismaquant/digests",
-        ":prismaquant/joint_prewarm_phases",
-        ":prismaquant/joint_replay_frontier",
-        ":prismaquant/joint_retained_window_plan",
-        ":prismaquant/joint_run_progress",
-        ":prismaquant/render_cache_paths",
-        ":prismaquant/tessera_acquisition_inputs",
-        ":prismaquant/tessera_campaign_selection",
-        "@pq_pip//torch",
     ],
 )
 
@@ -10932,6 +10826,17 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "prismaquant/tessera_campaign_reseal",
+    srcs = [
+        "prismaquant/tessera_campaign_reseal.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
+    ],
+)
+
+pq_py_library(
     name = "prismaquant/tessera_campaign_selection",
     srcs = [
         "prismaquant/tessera_campaign_selection.py",
@@ -12298,36 +12203,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/dispatch_tessera_campaign",
-    srcs = [
-        "tools/dispatch_tessera_campaign.py",
-    ],
-    data = [
-        "prismaquant/tessera_reuse_authority.py",
-        "tools/dispatch_tessera_campaign.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/campaign_container_spec",
-        ":prismaquant/campaign_data_manifests",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/dev_mode",
-        ":prismaquant/digests",
-        ":prismaquant/tessera_acquisition_inputs",
-        ":prismaquant/tessera_campaign_selection",
-        ":tools/__init__",
-        ":tools/tessera_campaign_container",
-        ":tools/tessera_campaign_namespace",
-        ":tools/tessera_fleet/__init__",
-        ":tools/tessera_fleet/common",
-        ":tools/tessera_fleet/model_worker",
-        "@pq_pip//tessera_quant",
-        "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
     name = "tools/dspark_memavailable_sampler",
     srcs = [
         "tools/dspark_memavailable_sampler.py",
@@ -13376,20 +13251,6 @@ pq_py_library(
         ":prismaquant/io_spans",
         ":prismaquant/joint_retained_window_plan",
         "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "tools/reseal_campaign_identity",
-    srcs = [
-        "tools/reseal_campaign_identity.py",
-    ],
-    data = [
-        "tools/reseal_campaign_identity.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
     ],
 )
 

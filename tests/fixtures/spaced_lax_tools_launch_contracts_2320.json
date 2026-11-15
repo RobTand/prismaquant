@@ -1,9 +1,9 @@
 {
   "schema": "pq2317.independent_launch_contracts.v1",
   "scope": {
-    "files": 32,
+    "files": 31,
     "standard_library_help_modes": 10,
-    "scientific_package_help_modes": 20,
+    "scientific_package_help_modes": 19,
     "no_parser_batch_modules": 2
   },
   "source_reference": "99a578e071b; actual original import/argument/caller context, not an invented uniform contract",
@@ -243,19 +243,6 @@
         "Qualified SDK4 interpreter",
         "-m",
         "tools.dispatch_joint_quanta",
-        "--help"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
-      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
-    },
-    {
-      "file": "tools/dispatch_tessera_campaign.py",
-      "kind": "Package-dependent argument/help entry",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.dispatch_tessera_campaign",
         "--help"
       ],
       "working_directory": "Source checkout; coordinator PYTHONPATH cleared",

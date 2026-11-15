@@ -575,41 +575,8 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
         assert source_calls == [[UNIT], 'shutdown']
 
 
-def test_driver_capture_and_plan_bind_one_complete_capture(capture, monkeypatch):
-    from tools import dispatch_tessera_campaign as dispatch
-    from prismaquant import campaign_data_manifests as glm_data_manifests
-    root,path,census,identity,acts,hessians,record = capture
-    # ``plan`` builds each row's data manifest (#638), which refuses any read-set
-    # entry outside the shared mount. This capture lives under pytest's tmp_path,
-    # so the test names that root as the mount -- the same idiom the six other
-    # suites that drive ``plan`` use. The refusal still runs and still bites: an
-    # entry outside the declared root refuses here exactly as in production.
-    monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(path.parent))
-    spec = path.parent/'spec.json'
-    spec.write_text(json.dumps(dict(model=census['model'],campaign_argv=[],
-        cwd=str(path.parent),python='python3',env={},cpus=1,headroom_gb=2)))
-    common = ['--spec',str(spec),'--workspace',str(path.parent)]
-    assert dispatch.main(['capture',*common]) == 0
-    quantum = json.loads((path.parent/'capture-manifest.json').read_text())
-    assert len(quantum) == 1
-    assert '--capture-calibration-out' in quantum[0]['argv']
-    assert '--units' not in quantum[0]['argv']
-    assert dispatch.main(['plan',*common,'--calibration-cache',record['path']]) == 0
-    rows = json.loads((path.parent/'manifest.json').read_text())
-    for row in rows:
-        argv = row['argv']
-        assert argv[argv.index('--calibration-cache')+1] == record['path']
-        assert argv[argv.index('--calibration-cache-sha256')+1] == record['sha256']
-    manifest = json.loads(Path(record['path']).read_text())
-    manifest['status'] = 'partial'
-    Path(record['path']).write_text(json.dumps(manifest))
-    with pytest.raises(RuntimeError,match='complete.*capture'):
-        dispatch.main(['plan',*common,'--calibration-cache',record['path']])
-
-
 def test_merge_refuses_disagreeing_capture_bindings():
     from test_tessera_campaign_fanout import _payloads
-    from tools import dispatch_tessera_campaign as dispatch
     payloads = _payloads()
     for index,payload in enumerate(payloads.values()):
         payload['provenance']['calibration_cache'] = dict(path='/capture.json',sha256=str(index))

@@ -32,7 +32,6 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
-import dispatch_tessera_campaign as dispatch  # noqa: E402
 import tessera_campaign_container as container_tool  # noqa: E402
 
 

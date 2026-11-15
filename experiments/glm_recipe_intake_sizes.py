@@ -28,7 +28,7 @@ def main():
         hessian_logical_bytes_by_group=by_group,
         tensor_contract='Per-unit K by K FP32 Hessian; excludes serialization, Python, copies and allocator overhead.',
         scope='Logical original full-census H ownership; no payload reads, no deduplication or measured process-memory claim.',
-        consumer='tools/dispatch_tessera_campaign.py:885-934 retains all row H tensors before write_export_inputs.')
+        consumer='Logical full-census Hessian ownership. The campaign dispatcher is removed.')
     output=Path(args.output);output.parent.mkdir(parents=True,exist_ok=True)
     encoded=(json.dumps(result,indent=2,sort_keys=True)+'\n').encode();output.write_bytes(encoded)
     print(json.dumps(dict(output=str(output),sha256=hashlib.sha256(encoded).hexdigest(),

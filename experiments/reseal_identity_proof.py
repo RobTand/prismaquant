@@ -1,4 +1,4 @@
-"""Proof generator for the campaign identity re-seal (tools/reseal_campaign_identity.py).
+"""Produce source-comparison evidence for campaign proof bundles.
 
 The two source seals bound into every campaign checkpoint identity
 (``prismaquant_source_sha256``, ``encoder_source_sha256``) are pins over
@@ -18,8 +18,8 @@ This module produces that evidence, one arm per PB action:
                 numeric content of ``cost.pkl``.
 ``compare``     (CPU)  the comparator alone, for re-verification on the host.
 
-Every arm writes ``result.json`` under its ``--out``; the migration tool
-assembles those into the proof bundle it requires before rewriting a row.
+Every arm writes ``result.json`` under its ``--out``.
+The proof reader checks these results when an existing bundle names them.
 """
 from __future__ import annotations
 
@@ -491,15 +491,10 @@ class _SilentObserver:
 # ---------------------------------------------------------------------------
 
 def substitute_pins(identity, *, old, new, drop=()):
-    """The identity the migration will write: new pins, dropped settings gone.
+    """Build a comparison identity from new pins and removed settings.
 
-    ``drop`` is the pins file's ``drop_settings``: scheduling knobs the new
-    source no longer binds. ``reseal_campaign_identity.migrate`` pops exactly
-    these from ``identity['settings']``, so the proof has to pop them too --
-    otherwise it compares the produced row against an identity the migration
-    is not going to produce, and a correct run fails on a field neither side
-    disputes. A name that is not bound is refused rather than ignored, so a
-    typo in the pins file cannot quietly weaken the comparison.
+    ``drop`` names settings that the comparison excludes.
+    The function refuses a name that the stored identity does not contain.
     """
     identity = json.loads(json.dumps(identity))
     for key in PIN_KEYS:

@@ -8,7 +8,7 @@ PrismaQuant writes the records a rooted cached-unit bundle
 - the catalog extension (``joint_catalog_extension``, v1, v2 and v3) and the
   T4 candidate overlay (``tools/build_t4_overlay_catalog.py``);
 - each encoder-source adoption (``joint_catalog_extension.ADOPTION_SCHEMA``);
-- the reseal proof bundle (``tools/reseal_campaign_identity.py``);
+- the reseal proof bundle (``tessera_campaign_reseal``);
 - the served activation policy (``joint_served_activation``, v1 and v2);
 - the canonical calibration cache a Hessian reference binds
   (``tessera_calibration_cache.SCHEMA`` and ``SOURCE``).

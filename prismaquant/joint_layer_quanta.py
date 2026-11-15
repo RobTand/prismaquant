@@ -113,9 +113,8 @@ def canonical_sha256(value: object, *, where: str = "joint layer quanta") -> str
 def seal_manifest_bytes(manifest: Mapping) -> bytes:
     """The exact bytes a slice/adjoint manifest file carries.
 
-    Mirrors the run-manifest sealing (``dispatch_tessera_campaign``): compact
-    JSON with insertion order, one trailing newline, one gzip member with
-    ``mtime=0``. Insertion order is deterministic because every manifest dict
+    Uses compact JSON with insertion order and one trailing newline.
+    Uses one gzip member with ``mtime=0``. Insertion order is deterministic because every manifest dict
     is constructed key by key in this module.
     """
     if not isinstance(manifest, dict):

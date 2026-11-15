@@ -206,7 +206,7 @@ def merge_identity_migrations(per_source: Mapping[str, object], *,
                               error: type[Exception] = ValueError) -> "list | None":
     """The union of ``identity_migration`` records from several checkpoints, or None.
 
-    A re-sealed checkpoint (tools/reseal_campaign_identity.py) carries the pins
+    A re-sealed checkpoint carries the pins
     it was priced under, the pins it now carries, and the proof that licensed
     the change.  A merge or union rebuilds its manifest and payload from fixed
     keys, so without this the record would end there and the output would
