@@ -1,29 +1,9 @@
-# Mergify merge queue for PrismaQuant. Tracking: #3180.
-#
-# "gate" tests the full gate population on Mergify's temporary draft batch
-# pull request before the original pull requests merge into main.
-#
-# Every check runs on a draft batch PR. Mergify checks in place only when
-# merge_conditions are empty or equal to queue_conditions; "gate" is only in
-# merge_conditions. One batch checks at a time, in order. Default batches grow
-# from one PR to seven; release batches contain one PR and are served first.
-# A failed batch is split to isolate the failing PR. Mergify never retries a
-# failed check automatically. Never merge outside the queue.
-#
-# Add "queue" to queue and remove it to dequeue. After a failure, comment
-# "@mergifyio queue"; toggling the label does not reset a dequeued PR.
-# TL3b queues its pull requests with "queue" like every other pull request.
-# Its App needs an explicit command allowance because installation does not
-# grant a human collaborator's write permission.
-# Classic branch protection requires a pull request but no status checks.
-# Mergify injects classic required checks into both queue and merge
-# conditions, and merge conditions are judged on the batch draft, whose
-# mergify/merge-queue/ branch and body cannot pass the issue rule. So the
-# issue rule lives here instead: both queue paths require "linked issue"
-# on the original pull request, and the batch draft is judged
-# by "gate" alone. Don't add required status checks to classic protection.
-# (branch_protection_injection_mode: none would avoid injection but needs a
-# merge_bot_account, which this repository does not use.)
+# FIFO queue: check one PR at a time, in queue-label order.
+# Each draft contains the newest main and requires a passing "gate".
+# No batches, parallel checks, priority lanes, splits or automatic retries.
+# Add "queue" to queue. Remove it to dequeue. After failure, use "@mergifyio queue".
+# Keep the issue check on original PRs and the TL3b App command allowance.
+
 commands_restrictions:
   queue:
     conditions:
@@ -46,19 +26,6 @@ merge_queue:
   dequeued_label: dequeued
 
 queue_rules:
-  - name: release
-    queue_conditions:
-      - base = main
-      - label = queue
-      - label = release
-      - -draft
-      - check-success = linked issue
-    merge_conditions:
-      - check-success = gate
-    merge_method: merge
-    batch_size: 1
-    max_checks_retries: 0
-    checks_timeout: 90 minutes
   - name: default
     queue_conditions:
       - base = main
@@ -68,18 +35,9 @@ queue_rules:
     merge_conditions:
       - check-success = gate
     merge_method: merge
-    batch_size:
-      min: 1
-      max: 7
-    batch_max_wait_time: 10 minutes
+    batch_size: 1
     max_checks_retries: 0
     checks_timeout: 90 minutes
-
-priority_rules:
-  - name: release changes first
-    conditions:
-      - label = release
-    priority: high
 
 pull_request_rules:
   - name: queue pull requests labelled "queue"

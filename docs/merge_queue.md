@@ -17,8 +17,8 @@ as admitted Flux jobs; cite their job IDs and results in the PR body.
 3. Wait for `linked issue` and `pr-gate` to pass.
 
 Classic branch protection requires a pull request but no status checks.
-The `queue` label path enforces `linked issue` and `pr-gate` on your pull
-request, and the batch draft is judged by `gate` alone. Mergify would also
+The `queue` label path requires `linked issue` on your PR.
+The draft requires `gate` alone. Mergify would also
 apply any classic required check to the batch draft, which can't pass the
 issue rule, so keep required status checks out of classic protection.
 
@@ -26,28 +26,19 @@ issue rule, so keep required status checks out of classic protection.
 
 - Add the `queue` label. Mergify adds `queued` after accepting the PR.
 - Remove `queue` to take the PR out of the queue.
-- Add `release` alongside `queue` to use the release queue, served first.
 - People with write permission and TL3b's GitHub App, `tl3-robtand[bot]`, can
   use the comment commands `@mergifyio queue` and `@mergifyio requeue`.
   Put the command at the start of the comment.
 
-## What happens to a batch
+## What happens to a PR
 
-Mergify groups queued PRs into batches. The default queue batches one to seven
-PRs and waits at most two minutes to form a batch. The release queue always
-checks one PR at a time. Two batches can run checks concurrently, and merges
-follow queue order.
+Mergify checks one PR at a time, in `queue` label order. There are no priority lanes.
+For each PR, Mergify opens a temporary draft on a `mergify/merge-queue/` branch.
+The draft contains the newest `main` and that PR. Its `gate` must pass before merge.
+An external merge resets the check. Original PR heads stay unchanged.
 
-For each batch, Mergify opens a temporary draft PR on a
-`mergify/merge-queue/` branch. It contains `main`, the batches ahead of it,
-and the current batch. Draft checks preserve each original PR's head. The batch's `gate` check tests the full gate population
-on that integrated SHA. A green `pr-gate` on each original PR alone does not
-allow the batch to merge.
-
-When `gate` passes, Mergify merges the original PRs into `main` with merge
-commits. A failed batch is split to isolate the failing PR. Mergify marks a
-removed PR `dequeued` and links the failure. Each batch has a 30-minute checks
-timeout and no automatic Mergify check retries.
+Mergify merges each passing PR with a merge commit. A failed PR leaves the queue.
+Mergify adds `dequeued` and links the failure. Checks have a 90-minute timeout and no automatic retries.
 
 ## Requeue after a failure
 
