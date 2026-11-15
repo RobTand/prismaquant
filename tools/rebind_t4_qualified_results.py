@@ -27,21 +27,16 @@ accepts one existing pair-keyed or legacy qname-keyed input, but refuses when
 both exist; the explicit layouts never fall back. No input file is changed.
 """
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
-from prismaquant.digests import DIRECT_ASCII_LAX
+from prismaquant.digests import DIRECT_ASCII_LAX, bytes_sha256hex
 
 SCHEMA = 'prismaquant.t4_qualified_rebinding.v1'
 
 
-def sha(raw):
-    return hashlib.sha256(raw).hexdigest()
-
-
 def cell_sha256(cell):
-    return sha(json.dumps(cell, sort_keys=True, separators=(',', ':')).encode())
+    return bytes_sha256hex(json.dumps(cell, sort_keys=True, separators=(',', ':')).encode())
 
 
 def cell_task_id(cell):
@@ -57,7 +52,7 @@ def result_path(qualified_dir, qname, fmt=None, *, key='auto'):
     """
     if key not in ('auto', 'pair', 'qname'):
         raise ValueError(f'unknown qualification key {key!r}')
-    legacy = Path(qualified_dir) / (sha(qname.encode()) + '.json')
+    legacy = Path(qualified_dir) / (bytes_sha256hex(qname.encode()) + '.json')
     if fmt is None or key == 'qname':
         return legacy
     pair = Path(qualified_dir) / (cell_task_id({'qname': qname, 'format': fmt}) + '.json')
@@ -72,7 +67,7 @@ def result_path(qualified_dir, qname, fmt=None, *, key='auto'):
 
 def bound_json(path, expected):
     raw = Path(path).read_bytes()
-    assert sha(raw) == expected, (path, 'SHA256 mismatch')
+    assert bytes_sha256hex(raw) == expected, (path, 'SHA256 mismatch')
     return json.loads(raw)
 
 
@@ -99,7 +94,7 @@ def rebind_cell(new, previous, raw_result):
     assert value['cell_sha256'] == previous_sha, (pair, 'result does not bind the previous cell')
     if 'verified_cell_sha256' in value:  # absent on the 37 pilot-era results
         assert value['verified_cell_sha256'] == cell_sha256(value['verified_cell']), (pair, 'verified_cell digest')
-    return {'qname': pair[0], 'format': pair[1], 'result_sha256': sha(raw_result),
+    return {'qname': pair[0], 'format': pair[1], 'result_sha256': bytes_sha256hex(raw_result),
             'previous_cell_sha256': previous_sha, 'cell_sha256': cell_sha256(new),
             'previous_anchor': previous['anchor']}
 
@@ -107,7 +102,7 @@ def rebind_cell(new, previous, raw_result):
 def require_rebound(cell, raw_result, row):
     """The assembler's check: ``raw_result`` qualified ``cell`` up to its anchor."""
     assert (row['qname'], row['format']) == (cell['qname'], cell['format']), row['qname']
-    assert sha(raw_result) == row['result_sha256'], (row['qname'], 'result file changed')
+    assert bytes_sha256hex(raw_result) == row['result_sha256'], (row['qname'], 'result file changed')
     assert cell_sha256(cell) == row['cell_sha256'], (row['qname'], 'cell changed')
     previous = {**cell, 'anchor': row['previous_anchor']}
     assert cell_sha256(previous) == row['previous_cell_sha256'], (row['qname'], 'previous cell')
@@ -157,7 +152,7 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open('xb') as handle:
         handle.write(raw)
-    print(json.dumps({'path': str(out), 'sha256': sha(raw), 'rows': len(rows),
+    print(json.dumps({'path': str(out), 'sha256': bytes_sha256hex(raw), 'rows': len(rows),
                       'anchor_changed': sum(r['cell_sha256'] != r['previous_cell_sha256'] for r in rows)}),
           flush=True)
 

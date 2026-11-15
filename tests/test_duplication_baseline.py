@@ -27,6 +27,7 @@ CONSOLIDATED_HELPERS = [
     ("nvfp4_activation_qdq_served", "prismaquant/nvfp4_activation_contract.py"),
     ("_optional_str", "prismaquant/model_profiles/structure.py"),
     ("sha256", "prismaquant/tessera_calibration_cache.py"),
+    ("sha", "tools/benchmarks/joint_validation_pair.py"),
 ]
 DIGEST_FREE = [
     "prismaquant/visual_linears.py",
