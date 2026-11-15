@@ -39,8 +39,7 @@ platform(
         "@bazel_tools//tools/cpp:gcc",
     ],
     exec_properties = {
-        "Pool": "selfhosted-arm64",
-        "use-self-hosted-executors": "true",
+        "use-self-hosted-executors": "false",
         "Arch": "arm64",
         "OSFamily": "Linux",
         "container-image": "docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:2f48fc6c0c7f0794a76c74d77ff23b1a80944e05acacff22c63da2ef002ebf9b",

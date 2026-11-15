@@ -1,4 +1,4 @@
-"""Cutover actions use the declared fleet pools and preserve their isolation."""
+"""amd64 actions use the fleet pool, arm64 actions BuildBuddy's hosted executors, both isolated."""
 from pathlib import Path
 
 import pytest
@@ -24,18 +24,13 @@ def platforms():
 
 
 @pytest.mark.parametrize('arch', ['amd64', 'arm64'])
-def test_cutover_platforms_route_actions_to_the_matching_self_hosted_pool(arch):
+def test_cutover_platforms_route_amd64_to_its_pool_and_arm64_to_hosted_executors(arch):
     configuration = platforms()['linux_' + arch]
-    properties = configuration['exec_properties']
-    assert properties['Pool'] == 'selfhosted-' + arch
-    assert properties['use-self-hosted-executors'] == 'true'
-    assert properties['OSFamily'] == 'Linux'
-    assert properties['dockerNetwork'] == 'off'
-    assert properties['dockerUser'] == '1000:1000'
-    assert properties['container-image'] == (
-        'docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:' + IMAGES[arch])
-    if arch == 'arm64':
-        assert properties['Arch'] == 'arm64'
+    routing = ({'Pool': 'selfhosted-amd64', 'use-self-hosted-executors': 'true'}
+               if arch == 'amd64' else {'use-self-hosted-executors': 'false', 'Arch': 'arm64'})
+    assert configuration['exec_properties'] == {
+        **routing, 'OSFamily': 'Linux', 'dockerNetwork': 'off', 'dockerUser': '1000:1000',
+        'container-image': 'docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:' + IMAGES[arch]}
     constraint = 'x86_64' if arch == 'amd64' else 'aarch64'
     assert '@platforms//cpu:' + constraint in configuration['constraint_values']
 
