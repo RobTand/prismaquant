@@ -25,8 +25,7 @@ def decision(changed, *, impacted=frozenset(), used=frozenset(), deleted=frozens
 
 @pytest.mark.parametrize('path', [
     '.github/workflows/gate.yml', '.github/workflows/bazel-hosted.yml', '.bazelrc', '.bazelversion', '.bazelignore',
-    'MODULE.bazel', 'MODULE.bazel.lock', 'BUILD.bazel', 'tests/BUILD.bazel',
-    'tools/example/BUILD', 'tools/example/defs.bzl', 'tools/bazel/runtime.py',
+    'MODULE.bazel', 'MODULE.bazel.lock', 'tools/example/defs.bzl', 'tools/bazel/runtime.py',
     'tools/ci/bazel_selection.py', 'tools/ci/bazel_gate.py', 'tools/ci/remote_gate.py',
 ])
 def test_gate_and_bazel_inputs_select_everything(path):
@@ -61,8 +60,8 @@ def test_docs_read_by_a_test_select_their_consumer():
     assert found['selected'] == ['//tests:test_consumer']
 
 
-@pytest.mark.parametrize('path', ['uv.lock', 'pyproject.toml', 'pytest.ini'])
-def test_lock_and_metadata_use_proven_consumers(path):
+@pytest.mark.parametrize('path', ['uv.lock', 'pyproject.toml', 'pytest.ini', 'BUILD.bazel', 'tests/BUILD.bazel', 'tools/example/BUILD'])
+def test_lock_metadata_and_build_files_use_proven_consumers(path):
     found = decision({path}, impacted={'//tests:test_consumer'}, used={path})
     assert found['selection'] == 'impacted'
     assert found['selected'] == ['//tests:test_consumer']
