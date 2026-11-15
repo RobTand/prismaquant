@@ -36,6 +36,7 @@ DIGEST_FREE = [
     "prismaquant/tessera_census_cache.py",
     "tools/tessera_campaign_container.py",
     "prismaquant/joint_prewarm_phases.py",
+    "tools/full_kl_teacher_payload.py",
 ]
 
 
