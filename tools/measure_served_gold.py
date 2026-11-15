@@ -62,7 +62,6 @@ token at each position, which is exactly the teacher-forced NLL.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import sys
@@ -77,7 +76,7 @@ from prismaquant_source_bootstrap import activate_prismaquant_source
 
 activate_prismaquant_source()
 
-from prismaquant.digests import bytes_sha256hex
+from prismaquant.digests import DIRECT_ASCII_STRICT, bytes_sha256hex, file_sha256hex, text_sha256hex
 
 try:  # package mode (`python -m tools.measure_served_gold`)
     from .serve_fingerprint import gold_producer_identity
@@ -104,18 +103,7 @@ DEFAULT_MAX_TOKENS = 8192
 # ---------------------------------------------------------------------------
 # Identity
 # ---------------------------------------------------------------------------
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _canonical_sha256(payload: object) -> str:
-    return hashlib.sha256(json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode("utf-8")).hexdigest()
+_canonical_sha256 = DIRECT_ASCII_STRICT.sha256
 
 
 def _load_serve_manifest(artifact_dir: Path) -> dict[str, Any]:
@@ -212,14 +200,14 @@ def _calibration_contract(
             or len(token_ids) > n_tokens_requested):
         raise ValueError("invalid calibration token request")
     tokenizer_files = {
-        name: _sha256_file(tokenizer_dir / name)
+        name: file_sha256hex(tokenizer_dir / name)
         for name in ("tokenizer.json", "tokenizer_config.json")
         if (tokenizer_dir / name).is_file()
     }
     return {
         "schema": CALIBRATION_SCHEMA,
         "corpus_path": str(corpus.resolve()),
-        "corpus_sha256": _sha256_file(corpus),
+        "corpus_sha256": file_sha256hex(corpus),
         "corpus_bytes": corpus.stat().st_size,
         "tokenizer_files_sha256": tokenizer_files,
         "add_special_tokens": False,
@@ -228,9 +216,7 @@ def _calibration_contract(
         "seqlen": seqlen,
         "n_windows": len(starts),
         "window_overlap": 0,
-        "calib_ids_sha256": hashlib.sha256(
-            ",".join(str(i) for i in token_ids).encode("utf-8")
-        ).hexdigest(),
+        "calib_ids_sha256": text_sha256hex(",".join(str(i) for i in token_ids)),
     }
 
 
