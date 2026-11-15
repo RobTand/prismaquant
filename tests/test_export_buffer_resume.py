@@ -1,7 +1,9 @@
 """Exercise buffer preservation through the actual streaming exporter."""
 import json
+from collections import Counter
 from types import SimpleNamespace
 
+import pytest
 import torch
 from torch import nn
 from safetensors.torch import load_file, save_file
@@ -10,14 +12,16 @@ from prismaquant import export_native_compressed as export
 from prismaquant import layer_streaming, sensitivity_probe, streaming_model
 
 
-def _export_fixture(tmp_path, monkeypatch):
+def _export_fixture(tmp_path, monkeypatch, layers=1):
     """Replace architecture construction only; source reads and emission are real."""
     expected = torch.tensor([0.5, 0.5 + 2.0 ** -12], dtype=torch.float32)
     source = tmp_path / "source"
     source.mkdir()
     save_file({
-        "model.layers.0.expert_bias": expected,
-        "model.layers.0.proj.weight": torch.eye(2, dtype=torch.bfloat16),
+        key: tensor for i in range(layers) for key, tensor in {
+            f"model.layers.{i}.expert_bias": expected.clone(),
+            f"model.layers.{i}.proj.weight": torch.eye(2, dtype=torch.bfloat16),
+        }.items()
     }, str(source / "model.safetensors"))
 
     class Skeleton:
@@ -25,10 +29,10 @@ def _export_fixture(tmp_path, monkeypatch):
         def _from_config(config):
             model = nn.Module()
             model.model = nn.Module()
-            layer = nn.Module()
-            layer.proj = nn.Linear(2, 2, bias=False, device="meta")
-            layer.register_buffer("expert_bias", torch.empty(2, device="meta", dtype=torch.float32))
-            model.model.layers = nn.ModuleList([layer])
+            model.model.layers = nn.ModuleList([nn.Module() for _ in range(layers)])
+            for layer in model.model.layers:
+                layer.proj = nn.Linear(2, 2, bias=False, device="meta")
+                layer.register_buffer("expert_bias", torch.empty(2, device="meta", dtype=torch.float32))
             return model
 
     profile = SimpleNamespace(
@@ -45,14 +49,14 @@ def _export_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(streaming_model, "_init_rotary_inplace", lambda *a: None)
     monkeypatch.setattr(export, "_PRODUCTION_WEIGHT_CACHE", None)
 
-    def run(cache=None):
+    def run(cache=None, layer_range=None):
         emitted = {}
         def sink(tensors):
             emitted.update(tensors)
-        export.materialize_tensors_streaming(
+        _, run.hist = export.materialize_tensors_streaming(
             str(source), {}, profile=profile, bf16_passthrough=set(),
             device=torch.device("cpu"), tensor_sink=sink,
-            export_cache_dir=None if cache is None else str(cache))
+            export_cache_dir=None if cache is None else str(cache), layer_range=layer_range)
         path = tmp_path / "emitted.safetensors"
         save_file(emitted, str(path))
         return load_file(str(path))
@@ -89,3 +93,42 @@ def test_streaming_export_invalidates_resume_from_old_buffer_policy(tmp_path, mo
     emitted = run(cache)["model.layers.0.expert_bias"]
     assert torch.equal(emitted.view(torch.uint8), expected.view(torch.uint8))
     assert json.loads(manifest.read_text())["persistent_buffer_read_policy"]
+
+
+def test_range_replay_preserves_tensors_and_counts(tmp_path, monkeypatch):
+    run, _ = _export_fixture(tmp_path, monkeypatch, layers=2)
+    stats = Counter()
+    monkeypatch.setattr(export._native_render_codec, "_DO_NO_HARM_STATS", stats)
+    reads = []
+    real_read = layer_streaming._read_layer_to_device
+    def read(prefix, *args, **kwargs):
+        reads.append(prefix)
+        stats["NVFP4_reverts"] += 1
+        return real_read(prefix, *args, **kwargs)
+    monkeypatch.setattr(layer_streaming, "_read_layer_to_device", read)
+    baseline = run()
+    baseline_bytes = (tmp_path / "emitted.safetensors").read_bytes()
+    baseline_hist = run.hist
+    cache = tmp_path / "ranges"
+    reads.clear()
+    for layer in (1, 0):
+        stats.clear()
+        assert len(run(cache, (layer, layer + 1))) == 2
+        assert reads[-1] == f"model.layers.{layer}."
+        record = torch.load(cache / f"layer_{layer:03d}.pt", weights_only=False)
+        assert record["do_no_harm"] == {"NVFP4_reverts": 1}
+    assert len(reads) == 2
+    stats.clear()
+    replay = run(cache)
+    assert len(reads) == 2
+    assert replay.keys() == baseline.keys()
+    assert (tmp_path / "emitted.safetensors").read_bytes() == baseline_bytes
+    assert run.hist == baseline_hist == {("layer_buffer", "FP32"): 2, ("linear", "BF16"): 2}
+    assert stats == {"NVFP4_reverts": 2}
+
+
+@pytest.mark.parametrize("bounds", [(-1, 1), (1, 1), (0, 3)])
+def test_export_refuses_invalid_layer_range(tmp_path, monkeypatch, bounds):
+    run, _ = _export_fixture(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="invalid layer range"):
+        run(tmp_path / "ranges", bounds)
