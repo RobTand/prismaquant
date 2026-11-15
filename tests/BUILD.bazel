@@ -16589,6 +16589,9 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
+    data = [
+        "//:files/prismaquant/model_profiles/specs",
+    ],
     shard_count = 3,
     timeout = "moderate",
 )
