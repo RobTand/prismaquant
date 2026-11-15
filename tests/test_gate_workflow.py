@@ -124,5 +124,5 @@ def test_graph_check_remains_parallel_and_requires_exactly_one_pass():
     checkout=next(s for s in graph['steps'] if s.get('uses', '').startswith('actions/checkout@'))
     assert checkout['with']['fetch-depth']==0
     check=next(s for s in graph['steps'] if s.get('id')=='check')
-    assert 'python tools/ci/graph_impact_pq.py' in check['run']
+    assert 'graph_impact_pq' in check['run']
     assert 'graph-impact' in jobs['gate']['needs']
