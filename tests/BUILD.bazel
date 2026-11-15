@@ -94589,6 +94589,7 @@ pq_py_library(
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/allocator_cycle",
         "//:prismaquant/incremental_probe",
+        "//:prismaquant/tied_embeddings",
         "@pq_pip//pytest",
         "@pq_pip//safetensors",
         "@pq_pip//torch",
@@ -95389,6 +95390,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/tied_embeddings",
         "//:tools/__init__",
         "//:tools/make_uniform_assignment",
         ":test_make_uniform_assignment_lib",

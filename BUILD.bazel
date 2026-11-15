@@ -8801,7 +8801,6 @@ pq_py_library(
         "prismaquant/tessera_serving_runtime_pin.py",
         "prismaquant/tessera_serving_scope.py",
         "prismaquant/tessera_shipcard.py",
-        "prismaquant/tied_embeddings.py",
         "prismaquant/transient_charge_boundary.py",
         "prismaquant/validate_assignments_kl.py",
         "tools/serve_fingerprint.py",
@@ -8942,6 +8941,7 @@ pq_py_library(
         ":prismaquant/tessera_publication",
         ":prismaquant/tessera_reader",
         ":prismaquant/tessera_reuse_authority",
+        ":prismaquant/tied_embeddings",
         ":prismaquant/vendored/__init___cycle",
         ":prismaquant/visual_linears",
         ":tools/__init__",
@@ -9010,6 +9010,7 @@ pq_py_library(
         ":prismaquant/research_cost_acceptance",
         ":prismaquant/saturation_select",
         ":prismaquant/serve_constraints",
+        ":prismaquant/tied_embeddings",
         ":prismaquant/visual_linears",
     ],
 )
@@ -9677,6 +9678,7 @@ pq_py_library(
         ":prismaquant/incremental_shards",
         ":prismaquant/io_spans",
         ":prismaquant/probe_statistics",
+        ":prismaquant/tied_embeddings",
         "@pq_pip//safetensors",
         "@pq_pip//torch",
         "@pq_pip//transformers",
@@ -10887,6 +10889,16 @@ pq_py_library(
     ],
     data = [
         "prismaquant/tessera_reuse_authority.py",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/tied_embeddings",
+    srcs = [
+        "prismaquant/tied_embeddings.py",
+    ],
+    deps = [
+        "@pq_pip//safetensors",
     ],
 )
 
@@ -12413,6 +12425,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/model_runtime",
+        ":prismaquant/tied_embeddings",
         "@pq_pip//accelerate",
         "@pq_pip//transformers",
     ],
