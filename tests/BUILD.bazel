@@ -16293,6 +16293,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/digests",
+        "//:prismaquant/joint_prewarm_phases",
         "//:prismaquant/serving_runtime_patch_set",
         "//:prismaquant/visual_linears",
         "//:tools/duplication_inventory",
