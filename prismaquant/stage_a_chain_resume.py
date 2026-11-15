@@ -73,7 +73,7 @@ from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publis
 from .dev_mode import NOT_COMPUTED, seal_check
 from .joint_adjoint_slices import checkpoint_cotangent_plane, checkpoint_is_referenced
 from .matmul_arithmetic import BF16_REDUCTION_FIELD
-from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex
+from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex, indent2_json_file_bytes
 
 CHAIN_STATE_SCHEMA = "prismaquant.stage_a.chain_state.v1"
 CHAIN_ARITHMETIC_SCHEMA = "prismaquant.stage_a.chain_arithmetic.v1"
@@ -280,10 +280,6 @@ def parse_declaration(text) -> dict | None:
     return {"from": parts[0], "to": parts[1]}
 
 
-def _read_json(path: Path) -> dict:
-    return json.loads(Path(path).read_bytes())
-
-
 def resume_records(space, session) -> list[dict]:
     """Every sealed resume record of ``session``, in resume order.
 
@@ -297,7 +293,7 @@ def resume_records(space, session) -> list[dict]:
         match = _RESUME_RECORD.fullmatch(path.name)
         if match is None:
             continue
-        record = _read_json(path)
+        record = json.loads(path.read_bytes())
         body = {key: value for key, value in record.items() if key != "record_sha256"}
         if (record.get("schema") != RESUME_RECORD_SCHEMA
                 or record.get("record_sha256") != canonical_json_sha256(
@@ -473,7 +469,7 @@ def plan_chain_resume(space, document, *, recomputed, running_implementation_sha
 
     generation = _generation_directory(document)
     try:
-        status = _read_json(generation / "generation.json")
+        status = json.loads((generation / "generation.json").read_bytes())
     except (OSError, ValueError) as exc:
         raise ChainResumeRefused(f"the run's generation has no status file: {exc}") from exc
     if status.get("session") != session:
@@ -561,7 +557,7 @@ def apply_chain_resume(space, plan: ChainResume, *, producer=None, split=None) -
     }, where="chain resume record")
     record = {**body, "record_sha256": canonical_json_sha256(body, where="chain resume record")}
     path = resume_directory(space) / f"resume-{plan.index:03d}.json"
-    payload = (json.dumps(record, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+    payload = indent2_json_file_bytes(record)
     if not publish_new_bytes(path, payload):
         raise ChainResumeRefused(f"{path} already exists: another relaunch resumed this run")
     return record
