@@ -10,8 +10,6 @@ Run each driver as a module from the repository root:
 | Driver | What it submits |
 |---|---|
 | `python3 -m tools.tessera_fleet.dispatch_model` | A complete serving export, one action per whole layer, then an assembly behind the complete-set barrier. |
-| `python3 -m tools.tessera_fleet.dispatch_ladder` | The Tessera rate-band probe, one action per input shard. |
-| `python3 -m tools.tessera_fleet.status` | Nothing. It reads a dispatch's recorded keys and collects the native Flux facts for their endings. |
 | `python3 tools/render_identity.py` | Nothing. It renders on the local box; see [the cross-box render identity measurement](../measurements/cross-box-render-identity-2026-08-31.md). |
 
 ## One sealed workspace per dispatch
@@ -123,14 +121,3 @@ Full exports still use the real preparation, encode and assembly stages above.
 
 The old fixed-count shard export driver is removed. Use `dispatch_model`
 instead. Physical input shards do not define independent fused-module work.
-
-## Historical ladder probe
-
-`dispatch_ladder` retains its existing rate-band configuration. It copies
-`tessera_ladder_probe.py` and encoder sources into its own workspace.
-Its `--dry-run` prints rows without a submission. Its defaults do not define
-an export partition count.
-
-The status screen exits zero when every recorded action is complete.
-It exits four for unfinished work, one for failure and three for absent records.
-
