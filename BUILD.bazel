@@ -11655,7 +11655,6 @@ pq_py_library(
         "tools/ci/bazel_gate.py",
     ],
     data = [
-        "tools/ci/bazel_artifacts.py",
         "tools/ci/bazel_gate.py",
     ],
     deps = [
