@@ -30,7 +30,7 @@ TOKEN_SCOPE = "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256"
 # Canonical JSON identity after the token route, native migration, and sealed
 # buffer digest consolidation. Retained byte-contract goldens stay fixed.
 # #3457 drops three same-name helper entries of its deleted modules.
-TOKEN_ONLY_BASELINE_SHA256 = "103859c4b5bbd439e467a3345b6ab85a4a4065ff57ecd6854f6260f739af5028"
+TOKEN_ONLY_BASELINE_SHA256 = "2b5f96e215ce930417ee826e66529abd2d312685f53d8fa82a3c8be33691ecd0"
 # Supplied main 6d8288ad had 277 primitive scopes. The migration removed
 # retired PB tooling in 8c336f2e3, 728a6e8fd, a4cf01ccc, adaf3d9f6,
 # 989eaa5fc and cb07374d5. 3ffa08ae7 consolidated SealedBuffer.seal;

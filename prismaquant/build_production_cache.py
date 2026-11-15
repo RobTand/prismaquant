@@ -55,60 +55,13 @@ from prismaquant.mtp_production_cache import (
 from prismaquant.perturbed_x_cache import calibration_data_hash
 from prismaquant.production_recache import _load_assignment
 from prismaquant.production_weight_cache import (
-    fill_production_weight_cache,
+    fill_production_weight_cache, _load_col_weights,
 )
 from prismaquant.calibration_data import load_calibration
 from prismaquant.streamed_model_identity import (
     build_source_model_binding,
     resolve_source_checkpoint_path,
 )
-
-
-def _load_col_weights(path, formats) -> dict | None:
-    """Load the imatrix pickle for a weighted-family render (re-vet R3).
-
-    Refuses the two ways this can silently produce a confounded cache: a menu
-    that contains a weighted-render family with no vector (the render would be
-    unweighted while the exporter ships weighted bytes), and a vector supplied
-    for a menu that has no weighted family at all (nothing would consume it, so
-    the operator's intent is not what happened).
-    """
-    import pickle
-
-    import torch
-
-    from prismaquant.production_weight_cache import _weighted_render_family
-
-    weighted = sorted({
-        fmt for fmt in formats if _weighted_render_family(fmt) is not None
-    })
-    if not path:
-        if weighted:
-            raise SystemExit(
-                "[build-prod-cache] ERROR: the format menu contains "
-                f"weighted-render formats {weighted} but no --col-weights was "
-                "supplied. Their exporters ALWAYS render imatrix-weighted, so "
-                "an unweighted cache render is not the bytes that ship (the "
-                "rendering confound). Pass --col-weights "
-                "<work>/artifacts/cb_col_weights.pkl."
-            )
-        return None
-    if not weighted:
-        raise SystemExit(
-            "[build-prod-cache] ERROR: --col-weights was supplied but the "
-            f"format menu {sorted(set(formats))} has no weighted-render "
-            "family (GGUF); nothing would consume the vector and every "
-            "render would be byte-identical without it. Drop the flag."
-        )
-    with open(path, "rb") as fh:
-        raw = pickle.load(fh)
-    loaded = {str(k): torch.as_tensor(v) for k, v in raw.items()}
-    print(
-        f"[build-prod-cache] col-weights: {len(loaded)} entries from {path} "
-        f"(weighted-render formats in menu: {weighted})",
-        flush=True,
-    )
-    return loaded
 
 
 def _model_has_packed_experts(model: nn.Module, profile) -> bool:

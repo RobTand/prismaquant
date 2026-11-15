@@ -209,7 +209,9 @@ def test_aura_streaming_identity_path_is_explicit_and_stage_bound():
 
     assert _shell_default(script, "AURA_COST_STREAMING") == "0"
     assert _shell_default(script, "AURA_COST_CHECKPOINT_DIR") == ""
-    assert "AURA_COST_STREAMING=1 requires an absolute" in script
+    assert "streamed AURA requires an absolute" in script
+    assert "AURA_COST_STREAMING=1" in script
+    assert "--streaming --production-anchors" in script
     assert '--checkpoint-dir "$AURA_COST_CHECKPOINT_DIR"' in script
     assert '"AURA_COST_STREAMING=$AURA_COST_STREAMING"' in script
     assert '"AURA_COST_CHECKPOINT_DIR=$AURA_COST_CHECKPOINT_DIR"' in script

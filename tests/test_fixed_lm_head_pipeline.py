@@ -91,7 +91,7 @@ def test_run_pipeline_wires_head_policy_to_every_native_cache_and_export():
             script,
         )
     ]
-    assert len(starts) == 4
+    assert len(starts) == 3
     for start in starts:
         block = script[start:script.find("2>&1 | tee", start)]
         assert '"${PRODUCTION_CACHE_PIN_ARGS[@]}"' in block
@@ -103,7 +103,6 @@ def test_head_policy_is_part_of_persisted_cost_and_cache_identity():
 
     affected = {
         "base-cost",
-        "aura-dw-cache",
         "aura-cost",
         "aura-hybrid-cost",
         "frontier-cache",
