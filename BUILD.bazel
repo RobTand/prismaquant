@@ -10232,6 +10232,7 @@ pq_py_library(
     ],
     deps = [
         ":prismaquant/__init__",
+        ":prismaquant/fla_config_pin",
         ":prismaquant/streaming_initialization",
         ":prismaquant/vendored/__init___cycle",
         "@pq_pip//torch",

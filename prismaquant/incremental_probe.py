@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from . import probe_inventory
 from . import probe_statistics
-from .fla_config_pin import fla_config_identity, pin_fla_configs
+from .fla_config_pin import fla_config_identity
 
 import argparse
 import dataclasses
@@ -852,7 +852,6 @@ def main():
                          "for the cost stage. Lower values are useful for "
                          "debug runs on very wide MoE checkpoints.")
     args = ap.parse_args()
-    pin_fla_configs()
     if args.global_calibration_tensor is not None:
         raise SystemExit(SAMPLE_PARALLEL_RETIRED)
 

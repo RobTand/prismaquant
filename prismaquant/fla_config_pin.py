@@ -1,12 +1,10 @@
 """Pin and describe the fla kernel configs that this process uses (#3446).
 
-run-pipeline.sh sets FLA_CACHE_MODE=strict and FLA_CONFIG_DIR to
-prismaquant/fla_configs/gb10/. For each autotune key in those files, fla loads
-the recorded config instead of timing the candidates, so two runs choose the
-same kernel config and agree bitwise. fla's strict mode serves only the
-kernels decorated with fla_cache_autotune; pin_fla_configs() fills the cache
-of the plain triton.autotune kernels from the same files. A key that is not in
-the files still autotunes, and fla_config_identity() records it as data.
+run-pipeline.sh sets FLA_CACHE_MODE=strict and FLA_CONFIG_DIR to prismaquant/fla_configs/gb10/.
+fla then loads the recorded config for each key in those files instead of timing the candidates,
+so two runs agree bitwise. Strict mode serves only the fla_cache_autotune kernels;
+initialize_model_runtime() calls pin_fla_configs() to fill the plain triton.autotune caches.
+A key that is not in the files still autotunes; fla_config_identity() records it as data.
 """
 from __future__ import annotations
 
