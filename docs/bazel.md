@@ -171,10 +171,8 @@ Only valid UTF-8 JSON receipts are uploaded.
 Raw execution logs, BEP, archives and other diagnostics stay private on the
 runner. Renaming a binary artifact to `.json` does not make it eligible.
 
-Before a shard starts, the Remote Bazel runner hydrates full Git history for
-checkout-dependent tests, including the archived-main graph baseline contract.
-Git children receive the same allowlisted environment without credentials.
-Missing history or a source-head mismatch refuses the shard before tests run.
+Each shard fetches full history and objects for `origin/main` and HEAD without tags. Partial clones use `--refetch --no-filter`.
+Git children receive no credentials. The runner checks HEAD and missing objects from both tips. Unrelated refs keep their promisor metadata.
 
 The test population retains Python 3.12. Scanner unit tests isolate runtime
 admission; CLI tests isolate interpreter bootstrap. Each trusted upload step

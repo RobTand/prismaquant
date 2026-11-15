@@ -84,23 +84,17 @@ def prepare_history(expected_head, *, root=None, runner=None):
         shallow = git(['rev-parse', '--is-shallow-repository']).stdout.strip()
         if shallow not in ('true', 'false'):
             raise ValueError('invalid shallow status')
-        fetch = ['fetch', '--refetch', '--no-filter', '--tags']
+        fetch = ['fetch', '--no-tags']
+        if git(['config', '--get-regexp', r'^(remote\..*\.(promisor|partialclonefilter)|extensions\.partialclone)$'],
+               accepted=(0, 1)).stdout:
+            fetch += ['--refetch', '--no-filter']
         if shallow == 'true':
             fetch.append('--unshallow')
-        git([*fetch, 'origin', '+refs/heads/*:refs/remotes/origin/*'])
-        objects = git(['rev-list', '--objects', '--missing=print', '--all', 'HEAD']).stdout.splitlines()
+        git([*fetch, 'origin', '+refs/heads/main:refs/remotes/origin/main', expected_head])
+        objects = git(['rev-list', '--objects', '--missing=print', 'origin/main', 'HEAD']).stdout.splitlines()
         if not objects or any(not re.fullmatch('[0-9a-f]{40}', line.split(' ', 1)[0])
                               for line in objects):
             raise ValueError('missing history objects')
-        # A verified full refetch can leave stale partial-clone metadata.
-        pack = Path(git(['rev-parse', '--git-path', 'objects/pack']).stdout.strip())
-        if not pack.is_absolute():
-            pack = Path(root or Path.cwd()) / pack
-        for marker in pack.glob('*.promisor'):
-            marker.unlink(missing_ok=True)
-        for name in ('remote.origin.promisor', 'remote.origin.partialclonefilter',
-                     'extensions.partialclone'):
-            git(['config', '--local', '--unset-all', name], accepted=(0, 5))
         if (git(['rev-parse', '--verify', 'HEAD']).stdout.strip() != expected_head
                 or git(['rev-parse', '--is-shallow-repository']).stdout.strip() != 'false'):
             raise ValueError('incomplete runner history')

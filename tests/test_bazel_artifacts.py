@@ -220,8 +220,8 @@ def test_cli_refusal_names_a_fixed_phase_without_exception_values(tmp_path, monk
     assert 'private-path-token-and-query' not in output.err + output.out
 
 
-@pytest.mark.parametrize('wrong_head', [False, True])
-def test_runner_history_hydrates_a_shallow_checkout_for_archived_main(tmp_path, monkeypatch, wrong_head):
+@pytest.mark.parametrize('wrong_head,partial', [(False, False), (False, True), (True, False)])
+def test_runner_history_hydrates_a_shallow_checkout_for_archived_main(tmp_path, monkeypatch, wrong_head, partial):
     import subprocess
     source, checkout = tmp_path / 'origin', tmp_path / 'checkout'
     source.mkdir()
@@ -238,7 +238,11 @@ def test_runner_history_hydrates_a_shallow_checkout_for_archived_main(tmp_path, 
     (source / 'tracked').write_text('head')
     git(source, 'commit', '-am', 'head')
     head = git(source, 'rev-parse', 'HEAD')
-    git(tmp_path, 'clone', '--depth=1', source.as_uri(), str(checkout))
+    git(source, 'branch', 'unused', base)
+    git(source, 'tag', 'unused', base)
+    git(tmp_path, 'clone', '--no-tags', '--depth=1', source.as_uri(), str(checkout))
+    if partial:
+        git(checkout, 'config', 'remote.origin.partialclonefilter', 'blob:none')
     assert git(checkout, 'rev-parse', '--is-shallow-repository') == 'true'
     monkeypatch.setenv('BUILDBUDDY_API_KEY', 'history-private-sentinel')
     calls = []
@@ -256,7 +260,10 @@ def test_runner_history_hydrates_a_shallow_checkout_for_archived_main(tmp_path, 
         artifacts.prepare_history(head, root=checkout, runner=run)
         assert git(checkout, 'rev-parse', '--is-shallow-repository') == 'false'
         assert git(checkout, 'show', base + ':tracked') == 'archived main'
-        assert any('--unshallow' in command and '--no-filter' in command for command in calls)
+        fetch = next(command[5:] for command in calls if command[5] == 'fetch')
+        assert fetch == ['fetch', '--no-tags', *(['--refetch', '--no-filter'] if partial else []),
+                         '--unshallow', 'origin', '+refs/heads/main:refs/remotes/origin/main', head]
+        assert git(checkout, 'for-each-ref', '--format=%(refname)', 'refs/tags', 'refs/remotes/origin/unused') == ''
 
 
 def test_runner_history_failure_redacts_git_diagnostics(tmp_path, capsys):
