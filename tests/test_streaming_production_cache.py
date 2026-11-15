@@ -449,7 +449,7 @@ def test_streaming_cli_requires_scope_specific_inputs_and_cache_dirs():
     base = dict(
         model="/nonexistent", output="/nonexistent/out.pkl",
         render_scope="format-menu", render_layer_config=None,
-        recache_layer_config=None, cache_dir=None,
+        cache_dir=None,
         activation_cache_dir=None, skip_qnames=None,
         expert_render_mode="batched", expert_token_budget=32768,
         allow_incomplete=False,

@@ -1014,6 +1014,7 @@ def run_streaming_render(
     calibration_hash: str | None = None,
     max_act_rows: int = 512,
     include_qnames: Sequence[str] | None = None,
+    layer_range: tuple[int, int] | None = None,
     install=None,
     unload=None,
     set_priority=None,
@@ -1035,6 +1036,10 @@ def run_streaming_render(
         raise ValueError("assignment streaming render requires render_assignment")
     if max_act_rows < 1:
         raise ValueError("max_act_rows must be positive")
+
+    start, stop = layer_range if layer_range is not None else (0, num_layers)
+    if not 0 <= start < stop <= num_layers:
+        raise ValueError(f"invalid layer range {start}:{stop} for {num_layers} layers")
 
     levers = _resolve_production_render_levers(levers)
     mechanism_plan = _resolve_render_mechanism_plan(levers)
@@ -1062,6 +1067,11 @@ def run_streaming_render(
         skip_tokens,
         include_qname_set,
     )
+    dense_modules = {
+        name: mod for name, mod in dense_modules.items()
+        if ((index := _layer_index_of(name, layers_prefix)) is None and start == 0)
+        or (index is not None and start <= index < stop)
+    }
     if render_scope == "assignment":
         render_formats_by_qname = {
             qname: (fmt,)
@@ -1161,11 +1171,12 @@ def run_streaming_render(
                 if device.type == "cuda":
                     torch.cuda.empty_cache()
 
-    for L in range(num_layers):
+    for L in range(start, stop):
         _process_layer(L)
     # Head / root-level Linears (rare — lm_head is normally pinned-skipped) are
     # resident throughout; render them last with no install.
-    _process_layer(None)
+    if start == 0:
+        _process_layer(None)
 
     # The packed-expert append writes its own render-score records, coverage
     # and counters onto the cache as each layer is rendered
@@ -1252,6 +1263,7 @@ def fill_production_weight_cache_streaming(
     calibration_hash: str | None = None,
     max_act_rows: int = 512,
     include_qnames: Sequence[str] | None = None,
+    layer_range: tuple[int, int] | None = None,
     offload_folder: str | Path | None = None,
     progress: bool = True,
 ) -> ProductionWeightCache:
@@ -1329,6 +1341,7 @@ def fill_production_weight_cache_streaming(
             calibration_hash=calibration_hash,
             max_act_rows=max_act_rows,
             include_qnames=include_qnames,
+            layer_range=layer_range,
             install=ctx.install,
             unload=ctx.unload,
             set_priority=_priority_setter(ctx),

@@ -6028,11 +6028,7 @@ def fill_production_weight_cache(
     max_act_rows: int = 256,
     progress: bool = True,
     cache_dir: str | Path | None = None,
-    recache_pass: bool = False,
-    recache_assignment: Mapping[str, str] | None = None,
     recache_profile=None,
-    recache_include_activation_quant: bool = True,
-    recache_microbatch_size: int = 1,
     col_weights: Mapping[str, torch.Tensor] | None = None,
     source_binding: Mapping[str, object] | None = None,
 ) -> ProductionWeightCache:
@@ -6063,12 +6059,6 @@ def fill_production_weight_cache(
         remain internal; mutations after checkpoint loading are not identified.
       levers: which production levers to enable (default: GPTQ with optional
         joint NVFP4 scale optimization when requested by the caller).
-      recache_pass: when True, run a second calibration forward with the
-        concrete production assignment installed from this cache and refit
-        ``activation_max_abs`` under quantized upstream weights.
-      recache_assignment: required when ``recache_pass`` is True.  Candidate
-        caches with multiple possible formats per Linear are ambiguous; recache
-        needs the actual export assignment.
       col_weights: optional ``{qname: (in_features,)}`` imatrix map (re-vet
         R3). Applied only to the weighted-render families
         (``WEIGHTED_RENDER_FAMILIES``); every other format's rendered bytes are
@@ -6077,11 +6067,6 @@ def fill_production_weight_cache(
         ``ProductionWeightCache`` render instead of a separate
         skeleton-requantize path.
     """
-    if recache_pass and not recache_assignment:
-        raise ValueError(
-            "recache_pass=True requires recache_assignment with the concrete "
-            "production assignment"
-        )
     levers = _resolve_production_render_levers(levers)
     render_options = NativeRenderLevers.from_record(levers)
     mechanism_plan = _resolve_render_mechanism_plan(levers)
@@ -6855,37 +6840,6 @@ def fill_production_weight_cache(
             ),
         },
     )
-    if recache_pass:
-        from prismaquant.production_recache import recache_production_weight_cache
-
-        if progress:
-            print("[prod-cache] running production activation re-cache", flush=True)
-        cache.prefetch_assignment(
-            recache_assignment or {},
-            max_resident_bytes=(
-                cache._lru_max_bytes if cache._lru_max_bytes > 0 else None
-            ),
-            max_workers=4,
-            require=False,
-            progress=progress,
-        )
-        recache_production_weight_cache(
-            model,
-            calib_ids,
-            recache_assignment or {},
-            cache,
-            profile=model_profile,
-            include_activation_quant=recache_include_activation_quant,
-            microbatch_size=recache_microbatch_size,
-            progress=progress,
-        )
-        compacted = cache.compact_for_pickle()
-        if progress and compacted:
-            print(
-                f"[prod-cache] compacted {compacted} resident cache tensors "
-                "back to path references after re-cache",
-                flush=True,
-            )
     return cache
 
 

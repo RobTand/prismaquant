@@ -1,5 +1,6 @@
 from argparse import Namespace
 
+import pytest
 import torch
 
 from prismaquant import build_production_cache
@@ -74,3 +75,38 @@ def test_build_cache_dataset_loader_forwards_calib_seed(monkeypatch):
 
     assert tuple(out.shape) == (5, 16)
     assert seen["args"] == ("calib.jsonl", 5, 16, 321)
+
+
+@pytest.mark.parametrize("value,streaming", [("1:2", False), ("2:1", True), ("bad", True)])
+def test_layer_range_cli_refuses_invalid_input(value, streaming):
+    from prismaquant.build_production_cache import main
+    with pytest.raises(SystemExit) as exc:
+        main(["--model", "unused", "--output", "unused", "--layer-range", value]
+             + (["--streaming"] if streaming else []))
+    assert exc.value.code == 2
+
+
+
+@pytest.mark.parametrize("start,expected", [(0, ["model.layers.0.x", "lm_head"]), (1, ["model.layers.1.x"])])
+def test_layer_range_cli_filters_render_names(monkeypatch, tmp_path, start, expected):
+    from prismaquant import build_production_cache as b
+    from prismaquant import streaming_production_cache as stream
+    from types import SimpleNamespace
+    import transformers
+    monkeypatch.setattr(b, "resolve_source_checkpoint_path", lambda path: path)
+    monkeypatch.setattr(b, "require_cuda_hot_path", lambda *a: "cuda")
+    monkeypatch.setattr(b, "_load_assignment", lambda *a: dict.fromkeys(["model.layers.0.x", "model.layers.1.x", "lm_head"], "NVFP4"))
+    monkeypatch.setattr(b, "_load_col_weights", lambda *a: None)
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", lambda *a, **k: None)
+    monkeypatch.setattr(b, "_load_cache_calibration", lambda *a: None)
+    monkeypatch.setattr(b, "calibration_data_hash", lambda *a: "hash")
+    monkeypatch.setattr(b, "detect_profile_with_warning", lambda *a, **k: SimpleNamespace(body_layer_prefix=lambda: "model.layers", live_to_recipe_name=lambda x: x))
+    def capture(*a, **kw):
+        assert kw["include_qnames"] == expected
+        raise LookupError("range checked")
+    monkeypatch.setattr(stream, "fill_production_weight_cache_streaming", capture)
+    with pytest.raises(LookupError, match="range checked"):
+        b.main(["--model", "unused", "--output", str(tmp_path / "out"), "--streaming",
+                "--layer-range", f"{start}:{start + 1}", "--render-scope", "assignment",
+                "--render-layer-config", "unused", "--cache-dir", str(tmp_path),
+                "--activation-cache-dir", str(tmp_path)])

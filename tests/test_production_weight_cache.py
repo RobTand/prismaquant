@@ -627,74 +627,6 @@ def test_production_cache_unifies_activation_max_abs_for_profile_fused_siblings(
     assert cache.activation_max_abs["k"] == pytest.approx(7.0)
 
 
-def test_recache_pass_forwards_detected_profile(monkeypatch):
-    import prismaquant.export_native_compressed as enc
-    import prismaquant.model_profiles as model_profiles
-    import prismaquant.production_recache as production_recache
-    import prismaquant.production_weight_cache as pwc
-
-    class TinyModel(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.q = nn.Linear(32, 32, bias=False)
-
-        def forward(self, input_ids, use_cache=False):
-            batch, seqlen = input_ids.shape
-            x = torch.ones((batch, seqlen, 32), dtype=torch.float32)
-            return self.q(x)
-
-    class Profile:
-        pass
-
-    detected_profile = Profile()
-    observed = {}
-
-    def fake_render_production_weight(weight, fmt, **_kwargs):
-        return weight.detach().to(torch.float32)
-
-    def fake_recache(
-        model,
-        calib_ids,
-        assignment,
-        cache,
-        *,
-        profile=None,
-        **_kwargs,
-    ):
-        observed["profile"] = profile
-        return {}
-
-    monkeypatch.setattr(
-        model_profiles,
-        "profile_from_model",
-        lambda _model: detected_profile,
-    )
-    monkeypatch.setattr(
-        enc,
-        "_compute_nvfp4_joint_global",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(pwc, "render_production_weight", fake_render_production_weight)
-    monkeypatch.setattr(
-        production_recache,
-        "recache_production_weight_cache",
-        fake_recache,
-    )
-
-    fill_production_weight_cache(
-        TinyModel(),
-        torch.tensor([[0, 1]], dtype=torch.long),
-        qnames=["q"],
-        formats=["NVFP4"],
-        levers={"gptq": False, "scale_sweep": False},
-        recache_pass=True,
-        recache_assignment={"q": "NVFP4"},
-        progress=False,
-    )
-
-    assert observed["profile"] is detected_profile
-
-
 def test_production_cache_gates_four_over_six_as_first_class_plugin(monkeypatch):
     model = _TinyChain()
     with torch.no_grad():
@@ -1425,20 +1357,6 @@ def test_activation_max_abs_delta_summary_reports_ratio_quantiles():
     assert summary["ratio_max"] == pytest.approx(1.5)
     assert summary["changed_gt_1pct"] == 2
     assert summary["changed_gt_5pct"] == 2
-
-
-def test_fill_production_cache_recache_requires_concrete_assignment():
-    model = nn.Linear(1, 1, bias=False)
-    calib_ids = torch.empty((0, 1), dtype=torch.long)
-
-    with pytest.raises(ValueError, match="recache_assignment"):
-        fill_production_weight_cache(
-            model,
-            calib_ids,
-            qnames=[],
-            progress=False,
-            recache_pass=True,
-        )
 
 
 def test_recache_assignment_loader_is_exporter_independent(monkeypatch, tmp_path):
