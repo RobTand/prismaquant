@@ -7,15 +7,12 @@ mounts into one owned container, and cleans up only the container it created.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import math
 import os
 from pathlib import Path, PurePosixPath
 import re
 import signal
 import subprocess
-import sys
 
 import runpy
 
@@ -872,9 +869,8 @@ def inspect_or_load(container):
         bound = container.get("archive")
         if bound is None:
             raise RuntimeError("declared container image is unavailable: " + found.stderr)
-        with Path(bound["path"]).open("rb") as stream:
-            actual = hashlib.file_digest(stream, "sha256").hexdigest()
-        if actual != bound["sha256"]:
+        from prismaquant.digests import file_sha256hex
+        if file_sha256hex(bound["path"]) != bound["sha256"]:
             raise RuntimeError("declared image archive bytes changed")
         subprocess.run([PODMAN, "load", "--input", bound["path"]], check=True)
         found = subprocess.run([PODMAN, "image", "inspect", requested], capture_output=True, text=True, check=True)

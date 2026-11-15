@@ -16269,7 +16269,6 @@ pq_py_test(
         "//:tools/prepare_dsv4_wikitext_inputs",
         "//:tools/prismaquant_source_bootstrap",
         "//:tools/spec_decode_guard",
-        "//:tools/tessera_campaign_container",
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
@@ -16298,6 +16297,7 @@ pq_py_library(
         "//:prismaquant/visual_linears",
         "//:tools/benchmarks/joint_validation_pair",
         "//:tools/duplication_inventory",
+        "//:tools/tessera_campaign_container",
         "@pq_pip//pytest",
     ],
 )
