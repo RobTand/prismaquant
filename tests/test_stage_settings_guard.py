@@ -166,7 +166,7 @@ def test_cb_imatrix_source_is_reuse_identity_for_harvest_and_render(tmp_path):
     base = _full_settings()
     base["CB_IMATRIX_SOURCE"] = "activation-cache"
 
-    for stage in ("cb-col-weights", "aura-dw-cache", "frontier-cache"):
+    for stage in ("cb-col-weights", "production-cache-raw", "frontier-cache"):
         artifact = tmp_path / f"{stage}.pkl"
         pipeline.check_stage_settings(artifact, stage, _document(**base))
         artifact.write_bytes(b"artifact")
@@ -383,29 +383,28 @@ def test_legacy_flat_manifest_still_guards_its_stage(tmp_path):
 
 
 def test_two_stages_can_own_one_path(tmp_path):
-    """COST_MODE=aura + validated-surrogate points the AURA dW cache and the
-    frontier cache at the SAME file; both key sets must coexist."""
+    """Two cache stages keep independent settings on one fixture path."""
     settings = _full_settings()
     doc = _document(**settings)
     artifact = tmp_path / "cache.pkl"
-    assert pipeline.check_stage_settings(artifact, "aura-dw-cache", doc)[0] == 0
+    assert pipeline.check_stage_settings(artifact, "production-cache-raw", doc)[0] == 0
     artifact.write_bytes(b"x")
     code, messages = pipeline.check_stage_settings(artifact, "frontier-cache", doc)
     assert code == 0 and any("predates this stage's" in m for m in messages)
     stored = json.loads((tmp_path / "cache.pkl.settings.json").read_text())
-    assert set(stored["stages"]) == {"aura-dw-cache", "frontier-cache"}
+    assert set(stored["stages"]) == {"production-cache-raw", "frontier-cache"}
     # The stage that recorded a projection still holds one; the second stage
     # holds the admission that its artifact's identity is unknown, NOT a copy
     # of the first stage's projection or of today's request.
-    assert _admission(artifact, "aura-dw-cache") is None
+    assert _admission(artifact, "production-cache-raw") is None
     assert _admission(artifact, "frontier-cache") is not None
     # …and both keep guarding independently: the verified one still compares
     # (a drift refuses), the unverified one stays unverified across retries.
-    assert pipeline.check_stage_settings(artifact, "aura-dw-cache", doc)[0] == 0
+    assert pipeline.check_stage_settings(artifact, "production-cache-raw", doc)[0] == 0
     code, messages = pipeline.check_stage_settings(artifact, "frontier-cache", doc)
     assert code == 0 and any("still UNVERIFIED" in m for m in messages)
     assert pipeline.check_stage_settings(
-        artifact, "aura-dw-cache",
+        artifact, "production-cache-raw",
         _document(**dict(settings, NSAMPLES="999")))[0] == 2
 
 

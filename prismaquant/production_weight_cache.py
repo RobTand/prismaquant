@@ -3205,6 +3205,44 @@ def _expert_col_weights(
     return _item_col_weights(stack_cw, index, n_experts)
 
 
+def _load_col_weights(path, formats) -> dict | None:
+    """Load column weights and require a matching weighted render format."""
+    import pickle
+
+    import torch
+
+    weighted = sorted({
+        fmt for fmt in formats if _weighted_render_family(fmt) is not None
+    })
+    if not path:
+        if weighted:
+            raise SystemExit(
+                "[build-prod-cache] ERROR: the format menu contains "
+                f"weighted-render formats {weighted} but no --col-weights was "
+                "supplied. Their exporters ALWAYS render imatrix-weighted, so "
+                "an unweighted cache render is not the bytes that ship (the "
+                "rendering confound). Pass --col-weights "
+                "<work>/artifacts/cb_col_weights.pkl."
+            )
+        return None
+    if not weighted:
+        raise SystemExit(
+            "[build-prod-cache] ERROR: --col-weights was supplied but the "
+            f"format menu {sorted(set(formats))} has no weighted-render "
+            "family (GGUF); nothing would consume the vector and every "
+            "render would be byte-identical without it. Drop the flag."
+        )
+    with open(path, "rb") as fh:
+        raw = pickle.load(fh)
+    loaded = {str(k): torch.as_tensor(v) for k, v in raw.items()}
+    print(
+        f"[build-prod-cache] col-weights: {len(loaded)} entries from {path} "
+        f"(weighted-render formats in menu: {weighted})",
+        flush=True,
+    )
+    return loaded
+
+
 def _weighted_render_family(fmt: str) -> str | None:
     """The weighted-render family of ``fmt``, or ``None`` for every format
     whose render ignores ``col_weights`` (NVFP4/FP8/MX/BF16/INT)."""

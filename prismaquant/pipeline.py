@@ -352,17 +352,6 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
         "FORMATS<-COST_FORMATS", *_HEAD_SETTINGS,
         *_CB_SERIALIZATION_SETTINGS,
     ),
-    # AURA dW cache. FORMATS is the derived non-BF16 menu (AURA_CACHE_FORMATS);
-    # SELECTION_MODE is keyed because validated-surrogate redirects this cache
-    # to the frontier path and renders packed experts into it.
-    "aura-dw-cache": _key_pairs(
-        "MODEL_PATH", "DATASET",
-        "FORMATS<-AURA_CACHE_FORMATS",
-        "NS<-NSAMPLES", "SL<-SEQLEN", "SELECTION_MODE",
-        *_HEAD_SETTINGS,
-        *_RENDER_SETTINGS,
-        *_CB_SERIALIZATION_SETTINGS,
-    ),
     "aura-cost": _AURA_COST_SETTINGS,
     "aura-hybrid-cost": _AURA_COST_SETTINGS + _key_pairs(
         "EXPERT_NS<-AURA_EXPERT_NSAMPLES",

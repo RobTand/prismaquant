@@ -62,7 +62,7 @@ def test_canonical_json_value(index):
     GOLDEN.call(lambda: site(_JSON_VALUES[index], where="w"))
 
 
-# --- git HEAD commit (emu_forward_kl, fisher_col_weights -> aura_provenance) ---
+# --- git HEAD commit (emu_forward_kl -> aura_provenance) ---
 
 _GIT_RESULTS = ["abc123\n", "", "  \n", OSError("no git"), subprocess.TimeoutExpired(["git"], 5)]
 
@@ -79,7 +79,6 @@ def _fake_run(result, calls):
 
 @pytest.mark.parametrize("ref", [
     "prismaquant.emu_forward_kl._git_commit",
-    "prismaquant.fisher_col_weights._git_commit",
     "tools.tp2_budget_plan._git_sha",
     "tools.tp_decode_feasibility._git_sha",
 ])

@@ -8856,6 +8856,7 @@ pq_py_library(
     ],
     deps = [
         ":prismaquant/__init__",
+        ":prismaquant/activation_index",
         ":prismaquant/activation_sampling",
         ":prismaquant/calibration_data",
         ":prismaquant/campaign_container_spec",
@@ -8954,6 +8955,19 @@ pq_py_library(
         "@pq_pip//torch",
         "@pq_pip//transformers",
         "@pq_pip//xxhash",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/activation_index",
+    srcs = [
+        "prismaquant/activation_index.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
+        ":prismaquant/tensor_digests",
+        "@pq_pip//torch",
     ],
 )
 
@@ -9366,23 +9380,6 @@ pq_py_library(
     name = "prismaquant/file_identity",
     srcs = [
         "prismaquant/file_identity.py",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/fisher_col_weights",
-    srcs = [
-        "prismaquant/fisher_col_weights.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/calibration_data",
-        ":prismaquant/digests",
-        ":prismaquant/memory_management",
-        ":prismaquant/model_runtime",
-        "@pq_pip//torch",
-        "@pq_pip//transformers",
     ],
 )
 

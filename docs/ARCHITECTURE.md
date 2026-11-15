@@ -22929,6 +22929,20 @@ graveyard.
 
 ## 3. The quantization pipeline
 
+As of: 2026-11-14, streamed production-anchor AURA, P2a.
+Source: `prismaquant/aura_cost.py`, `prismaquant/run-pipeline.sh`.
+
+[2c] renders each AURA-priced Linear in each non-passthrough menu format.
+It uses the probe's keyed `act/` rows and the existing production renderer.
+The stream releases each layer's anchors after it computes that layer's costs.
+Per-Linear checkpoints bind the source, activation rows, render settings, and format plan.
+[2b] no longer builds an AURA dW cache. The resident AURA estimator and its Fisher-column wrapper are removed.
+
+`SELECTION_MODE=validated-surrogate` keeps its resident format-menu frontier cache in [4/4].
+That cache still uses its existing calibration forward. P2a does not change that path.
+AURA anchors use keyed rows, so equality with the earlier resident renders is not claimed.
+The 512-row 27B comparison remains pending. Layer-range work units belong to P2b.
+
 The orchestrator is `prismaquant/run-pipeline.sh` — **not** the repo root; several older docs
 imply a root-level copy and there is none. One bash script, four numbered phases (probe → cost
 → allocate → cache+export), each phase file-artifact-coupled and skip-if-exists.
@@ -22967,7 +22981,7 @@ flowchart TD
   CBL --> BASE
 
   subgraph COST["cost stage -- COST_MODE=aura, the only mode since #3448"]
-    AUR["aura -- DEFAULT since 2026-07-30<br/>aura_cost excludes profile-declared routed experts -> cost_aura.pkl<br/>then expert_empirical_cost --merge-base -> cost.pkl<br/>then the [3c] additivity report"]
+    AUR["aura -- DEFAULT since 2026-07-30<br/>[2c] aura_cost --streaming --production-anchors<br/>keyed act/ rows -> per-layer renders -> cost_aura.pkl<br/>then expert_empirical_cost --merge-base -> cost.pkl<br/>then the [3c] additivity report"]
   end
 
   subgraph DSVA["platform-agnostic anchored-cost mechanism -- DSv4 is the CB acceptance driver"]
@@ -22981,6 +22995,8 @@ flowchart TD
   end
 
   BASE --> AUR
+  ACT -->|"keyed render rows"| AUR
+  SRC -->|"streamed source layers"| AUR
   SRC --> DAP0
   ACT --> DAP0
   CBL --> DAMAP
@@ -23101,8 +23117,7 @@ which is what the rows touched since are keyed on.
 | **2/4** | Base RTN cost for MTP and other non-body rows that AURA does not price. The schedule uses `body_layer_range=(0, 0)`. `COST_FORMATS` and the resolved head policy set the menu and head scope | `prismaquant.incremental_measure_quant_cost --[no-]include-lm-head` | `artifacts/cost_baseline.pkl`; `logs/cost.log` | settings-hash `base-cost`, including the resolved head policy and `COST_FORMATS` | `aura`; allocator `require_candidate_coverage` refuses missing mutable body rows |
 | **2a-CB** | imatrix column-weight harvest | `harvest_cb_col_weights` — ONE shell function, four call sites (`[2/4] pre-cost`, `[2b/4] cost-cache`, `[2d-CB]`, `[4/4]`) → `export_gguf.build_imatrix_from_act_cache` + `moe_imatrix.synthesize_packed_expert_col_weights` | `artifacts/cb_col_weights.pkl` | settings-hash `cb-col-weights` | CB lane; called by whichever stage needs the vector first |
 | **pre-2-CBL** | Train/verify the immutable value-bearing codebook bundle. Historical trainer v1 keeps its measured rung policy. Trainer v2 derives the existing probe imatrix and emits lattice for every FP8 producer rung unless an independently validated per-rung promotion receipt authorizes the exact learned candidate | `ensure_cb_learned_bundle` → `prismaquant.build_cb_learned_bundle` → streaming source reader; v2 additionally uses `moe_imatrix.imatrix_from_probe_file` (moved from `cb_imatrix` 2026-09-25, #1304) + `cb_learned_promotion` | `artifacts/cb_learned_bundle.pqcb`; optional external `prismaquant.fp8_cbl_promotion_receipt.v1` input is embedded and digest-bound | settings-hash `cb-learned-bundle` includes the calibration/imatrix input identity; bundle load revalidates complete source, role, candidate-table, and receipt bindings | CB lane, learned scope only; runs before the first cost/cache/KL render. V2 without a valid receipt is all-lattice, never a guessed learned/lattice crossover |
-| **2b/4** | Format-menu render for AURA dW. A materialized cache exposes dW later; the streamed CB lifetime exposes each canonical render to the synchronous cost consumer and discards it only after that row is durably acknowledged (§5.4). It uses the same activation-cache/MTP and remaining-pin policy as the cost cache | `build_production_cache … --render-scope format-menu --activation-cache-dir act/` | frontier cache under validated-surrogate, else `production_render_score_cache.pkl`; transient CB mode retains pair attestations rather than loser weight shards | settings-hash `aura-dw-cache`, including the resolved head policy | `aura`; `exit 2` if the menu is BF16-only; every requested candidate must be consumed |
-| **2c/4** | AURA downstream-KL-adjoint cost. A fixed head remains auxiliary and is omitted; only `ALLOW_PINNED=lm_head` asks AURA to price the head inside the research DP | `prismaquant.aura_cost` with `--include-lm-head` only in DP-unpinned mode | `artifacts/cost_aura.pkl` | settings-hash `aura-cost`, including the resolved head policy | `aura` |
+| **2c/4** | Streamed AURA prices each smooth target in each menu format. The production renderer uses keyed `act/` rows. Passthrough rows have zero cost. Routed experts use [2d]; the streamed adjoint excludes `lm_head` | `prismaquant.aura_cost --streaming --production-anchors --probe probe.pkl --activation-cache-dir act/` | `artifacts/cost_aura.pkl`; per-Linear checkpoints; no [2b] render cache | settings-hash `aura-cost`; source, activation, plan, and render identity in checkpoints | `aura`; requires a non-passthrough format |
 | **2d/4** | Source boundary capture, format × layer-group units, CPU reduce and sidecar backfill | `prismaquant.expert_empirical_cost --capture-boundaries`, `--unit-format --layer-range`, `--reduce-units --merge-base --backfill-base` (with the shared `--col-weights` on weighted cached-menu lanes) or inline backfill (`run-pipeline.sh`, AURA `[2d]`) | `artifacts/cost.pkl` | settings-hash `aura-hybrid-cost` + cost-mode provenance | `aura` |
 | ~~**2d-CB**~~ (RETIRED 2026-09-02 with the lane, §9.2) | CB hybrid: replace routed-expert rows with empirical unit-KL | `harvest_cb_col_weights "[2d-CB]"` → `expert_empirical_cost --replace-experts --col-weights` | `artifacts/cost_local_raw.pkl`, `artifacts/cost.pkl`, `cb_col_weights.pkl` | settings-hash `cb-hybrid-cost` + the in-payload merge probe; col-weights `cb-col-weights` | CB lane, `CB_EXPERT_EMPIRICAL=1` |
 | **2b/4 cw** | Cost-cache col-weights (weighted lanes only) | `harvest_cb_col_weights "[2b/4] cost-cache"` → `build_production_cache --col-weights` | `artifacts/cb_col_weights.pkl` | settings-hash `cb-col-weights` | `COST_RENDER=cached-menu` on a CB/GGUF lane (§4.7) |
@@ -23220,7 +23235,7 @@ FORMATS=NVFP4,FP8_DYNAMIC,BF16   TARGET_BITS=4.75
 PARETO_TARGETS=4.5,4.6,4.7,4.75,4.85,5.0,5.25,5.5,6.0,7.0,8.25
 NSAMPLES=32  SEQLEN=1024  DATASET=…/calibration/diverse-v1.jsonl
 EXPERT_GATE_DATASET=…/calibration/xdom-gate-v1.jsonl (cross-domain)
-ACTIVATION_ROWS_LIMIT=1024 on the GGUF/CB lanes else 256
+ACTIVATION_ROWS_LIMIT=1024 on GGUF, else 512
 COST_MODE=aura (R2 flip 2026-07-30; = COST_RENDER=cached-menu x
                 COST_OBJECTIVE=aura-adjoint) PRODUCTION_CACHE_PREFETCH=require
 TARGET_DISK_GB=<unset>  EXPORT_CONTAINER=compressed-tensors
@@ -23266,12 +23281,11 @@ PRISMAQUANT_GGUF_IMATRIX=1  DEVICE=cuda  EXPORT_DEVICE=cuda
 non-BF16 head or the research DP-unpin needs head rows; and `LM_HEAD_DP_UNPINNED=1` only when
 `ALLOW_PINNED` structurally names the profile's output head. `run-pipeline.sh` adds those
 three values to `STAGE_SETTINGS_ENV`; `pipeline.py:_HEAD_SETTINGS` includes them in
-`base-cost`, `render-cost-cache`, `render-cost`, `aura-dw-cache`, `aura-cost`,
+`base-cost`, `render-cost-cache`, `render-cost`, `aura-cost`,
 `aura-hybrid-cost`, `frontier-cache`, `frontier-recache`, `production-cache-recached`, and
 `production-cache-raw`. Cost-bearing stages use derived `COST_FORMATS`, so changing a fixed
 head rung cannot reuse a body-only cost/cache artifact merely because `FORMATS` stayed the
-same. `CACHE_FORMATS` and `AURA_CACHE_FORMATS` are derived from that expanded menu where
-their stages need it. These are identity inputs, not new independent operator knobs.
+same. `CACHE_FORMATS` comes from that expanded menu when the frontier cache needs it. These are identity inputs, not new independent operator knobs.
 
 BF16 preserves the old pin exactly. A non-BF16 `LM_HEAD_FORMAT` and an
 `ALLOW_PINNED` token that lifts the head are a hard conflict: the first fixes a measured
@@ -23457,8 +23471,8 @@ The operator must rebuild those parts. The guard does not silently adopt them
 
 The AURA settings projection canonicalizes the execution switch spellings that
 the shell accepts.
-Resident AURA reuse includes `AURA_COST_PROBE_MICROBATCH`.
-Both streamed AURA projections omit that unused resident option.
+Both streamed AURA projections omit the unused resident `AURA_COST_PROBE_MICROBATCH` option.
+The [2c] block records its effective streaming mode and checkpoint directory before it checks reuse.
 Raw and hybrid stages share the raw measurement projection.
 The hybrid stage also binds the raw cost bytes
 (`pipeline.stage_settings_projection`, `pipeline.STAGE_SETTINGS_KEYS`,
@@ -23568,11 +23582,11 @@ above.
 
 **The key set is `pipeline.py`'s job; the values are the shell's.** `STAGE_SETTINGS_KEYS`
 (`pipeline.py`) declares, per artifact, which settings that artifact's identity depends on.
-`run-pipeline.sh` passes every value once (`STAGE_SETTINGS_ENV`, `596`+), `pipeline.py
+`run-pipeline.sh` passes stage values through `STAGE_SETTINGS_ENV`, `pipeline.py
 --write-stage-settings` projects them onto each declared key set and emits
 `artifacts/stage_settings.json`, and `require_stage_settings <artifact> <stage> [LATE=v …]`
 (`684`) reads that projection instead of re-deciding the key set at the call site. Late-computed
-values (`AURA_CACHE_FORMATS`, `CACHE_FORMATS`, `ASSIGNMENT_DIGEST`) are passed as overrides;
+values (`CACHE_FORMATS`, `ASSIGNMENT_DIGEST`) are passed as overrides;
 a declared key nobody supplies is a hard stop, not a silent gap. This is re-vet **R5**, and it
 closes **D6** by mechanism rather than by enumeration — the twelfth stage cannot arrive without
 a guard, because adding one is a table entry, not a bespoke argument list.
@@ -23607,8 +23621,8 @@ stamping. A refused mismatch files nothing, and the `tessera-plan` carve-out is 
 plan still refuses, because an allocation binding guessed after translation is a fiction rather
 than an admission.
 
-**The shell guard roster has 15 call sites over 15 stage identifiers**:
-`probe`, `base-cost`, `render-cost-cache`, `render-cost`, `aura-dw-cache`,
+**The settings contract includes these stage identifiers**:
+`probe`, `base-cost`, `render-cost-cache`, `render-cost`,
 `aura-cost`, `aura-hybrid-cost`, `cb-col-weights`, `frontier-cache`,
 `frontier-kl-point`, `frontier-recache`, `production-cache-recached`, `production-cache-raw`,
 `gguf-skeleton` (deprecated), and `tessera-plan`. The Tessera plan's allocation
@@ -24056,14 +24070,10 @@ table, which priced in this currency, now has no admitted mode:
 
 Native AURA classifies the resolved original checkpoint, including Hub snapshots.
 Its streamed proof and journal use that same root.
-Resident native AURA uses `streaming_model.load_resident_source_model`.
-The decoder multiplies on the declared block grid in BF16 arithmetic.
-An FP32 request casts that decode to FP32.
-It does not produce an exact FP32 block decode.
-Native streaming refuses FP32 before loading, including an automatic FP32 choice.
-The operator must set `AURA_COST_DTYPE=bfloat16` or choose the resident route.
-There is no implicit route fallback (`aura_cost.main`,
-`streaming_model.load_resident_source_model`).
+The streamed decoder uses the declared block grid and BF16 arithmetic.
+Native streaming refuses an explicit FP32 request before loading.
+`AURA_COST_DTYPE=auto` selects BF16. The resident AURA route is removed.
+There is no implicit route fallback (`aura_cost.main`).
 
 Fresh expert component cells receive their source binding before merge or backfill.
 Both streamed expert journals bind that source before unit restoration.

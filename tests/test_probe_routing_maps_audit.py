@@ -14,17 +14,7 @@ from prismaquant import incremental_probe as owner
 
 def _source(root):
     from tokenizers import Tokenizer, models, pre_tokenizers
-    from transformers import LlamaConfig, LlamaForCausalLM, PreTrainedTokenizerFast
-
-    config = LlamaConfig(
-        vocab_size=35, hidden_size=16, intermediate_size=32, num_hidden_layers=1,
-        num_attention_heads=2, num_key_value_heads=2, max_position_embeddings=64,
-        tie_word_embeddings=False, attention_dropout=0.0,
-        bos_token_id=1, eos_token_id=2, pad_token_id=0)
-    with torch.random.fork_rng(), genuine_weight_initialization():
-        torch.manual_seed(61)
-        model = LlamaForCausalLM(config)
-    model.save_pretrained(root, safe_serialization=True)
+    from transformers import PreTrainedTokenizerFast
     vocab = {"[UNK]": 0, "[BOS]": 1, "[EOS]": 2,
              **{f"w{index}": index + 3 for index in range(32)}}
     tokenizer = Tokenizer(models.WordLevel(vocab, unk_token="[UNK]"))
@@ -78,10 +68,15 @@ def probe_run(tmp_path, monkeypatch):
     return run, work
 
 
-def test_main_records_the_router_population(probe_run):
-    run, _work = probe_run
+def test_main_records_router_population_and_default_act_rows(probe_run, monkeypatch):
+    run, work = probe_run
+    monkeypatch.delenv("ACTIVATION_ROWS_LIMIT", raising=False)
+    row_arg = sys.argv.index("--activation-rows-limit")
+    monkeypatch.setattr(sys, "argv", sys.argv[:row_arg] + sys.argv[row_arg + 2:] +
+                        ["--nsamples", "12", "--seqlen", "64"])
     fresh = run()
     fields = ("router_counts", "router_totals", "router_active_counts", "expert_route_stats")
     assert all(fresh[field] for field in fields)
-    # 2 samples x 8 tokens through the one router.
-    assert sum(fresh["router_totals"].values()) == 16
+    assert sum(fresh["router_totals"].values()) == 768
+    act = torch.load(work / "act/model__layers__0__self_attn__o_proj.pt", weights_only=False)
+    assert fresh["meta"]["activation_rows_limit"] == act["inputs"].shape[0] == 512
