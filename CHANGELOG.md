@@ -18,6 +18,7 @@
   `ReadStream.paused()` no longer returns while a worker still holds that value.
 
 ### Added
+- The pass profiler `memory` entry records the device identity and the allocated and reserved device bytes at the start and the end of the group (#3511, #2881).
 - Reconcile shipcard's existing file-digest routes and descriptor retention (#2635, #1301).
   Reuse 40 original frozen outcomes and check current consumers against the original recipe.
   Preserve runtime code, the historical census and the existing baseline.

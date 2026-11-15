@@ -171,6 +171,12 @@ def memory_spy(monkeypatch):
     spy = _MemorySpy()
     monkeypatch.setattr(torch.cuda.memory, "_record_memory_history", spy.record)
     monkeypatch.setattr(torch.cuda.memory, "_dump_snapshot", spy.dump)
+    # Fixed device values: the tests do not depend on the box.
+    allocated, reserved = iter((100, 150)), iter((200, 300))
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda *a: "FakeGPU")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *a: (12, 1))
+    monkeypatch.setattr(torch.cuda, "memory_allocated", lambda *a: next(allocated))
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda *a: next(reserved))
     return spy
 
 
@@ -313,6 +319,42 @@ def test_memory_without_cuda_is_unsupported_and_the_run_continues(
     assert timing["units_count"] == 3 and timing["errors"] == []
 
 
+def test_memory_entry_names_the_device_and_the_device_bytes(
+        tmp_path, monkeypatch, memory_spy):
+    def entry(status):
+        folder = tmp_path / status
+        folder.mkdir()
+        session = _memory_request(folder, "memory_group=1").session(
+            kind="capture", probe=1, identity={})
+        memory_spy.fail_dump = status == "export_failed"
+        allocated, reserved = iter((100, 150)), iter((200, 300))
+        monkeypatch.setattr(torch.cuda, "memory_allocated", lambda *a: next(allocated))
+        monkeypatch.setattr(torch.cuda, "memory_reserved", lambda *a: next(reserved))
+        run = lambda: _run_memory_groups(
+            session, monkeypatch, memory_spy, cuda=status != "unsupported",
+            fail_in=1 if status == "incomplete" else None)
+        if status == "incomplete":
+            with pytest.raises(RuntimeError, match="capture failed"):
+                run()
+        else:
+            run()
+        return _memory_timing(folder)["memory"]
+
+    complete = entry("complete")
+    assert complete.get("device") is not None
+    for status in ("complete", "incomplete", "export_failed"):
+        memory = complete if status == "complete" else entry(status)
+        assert memory["status"] == status
+        assert memory["device"] == {
+            "name": "FakeGPU", "capability": [12, 1],
+            "torch": str(torch.__version__), "cuda": torch.version.cuda}
+        assert memory["allocated_bytes"] == {"start": 100, "end": 150}
+        assert memory["reserved_bytes"] == {"start": 200, "end": 300}
+    unsupported = entry("unsupported")
+    assert unsupported["status"] == "unsupported"
+    assert not {"device", "allocated_bytes", "reserved_bytes"} & set(unsupported)
+
+
 def test_memory_group_that_the_pass_never_reaches_is_not_reached(
         tmp_path, monkeypatch, memory_spy):
     request = _memory_request(tmp_path, "memory_group=5")
@@ -346,6 +388,29 @@ def test_cuda_memory_snapshot_of_the_selected_group(tmp_path):
     traces = [trace for trace in snapshot["device_traces"] if trace]
     assert traces and all(len(trace) <= 8 for trace in traces)
     assert any(event.get("frames") for trace in traces for event in trace)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA (allocator)")
+def test_cuda_memory_entry_counts_the_bytes_that_the_group_keeps(tmp_path):
+    request = _memory_request(
+        tmp_path, "capture=0,wait=0,warmup=0,active=1,memory_group=1,memory_entries=8")
+    session = request.session(kind="capture", probe=0,
+                              identity={"quantum_id": "mem", "capture_groups": 3})
+    with session:
+        for index in range(3):
+            session.unit_begin()
+            if index == 1:
+                kept = [torch.empty(1 << 18, device="cuda") for _ in range(4)]
+                kept_bytes = sum(t.numel() * t.element_size() for t in kept)
+            session.unit_end()
+    memory = json.loads((tmp_path / "mem-p0-capture.timing.json").read_text())["memory"]
+    assert memory.get("device") is not None
+    assert kept_bytes >= 4 << 20
+    allocated, reserved = memory["allocated_bytes"], memory["reserved_bytes"]
+    assert allocated["end"] - allocated["start"] >= kept_bytes
+    assert reserved["end"] >= allocated["end"]
+    assert memory["device"]["name"] == torch.cuda.get_device_name()
+    del kept
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA (CUPTI trace)")
