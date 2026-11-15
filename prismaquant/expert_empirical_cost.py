@@ -899,166 +899,6 @@ def _validate_expert_checkpoint_state(
     return dict(state)
 
 
-def measure_expert_unit_costs_streamed(
-    runner,
-    profile,
-    calib_ids: torch.Tensor,
-    formats: Sequence[str],
-    *,
-    expert_chunk: int = 16,
-    progress: bool = True,
-    col_weights: Mapping[str, torch.Tensor] | None = None,
-    expert_sample: int = 0,
-    max_units: int = 0,
-    unit_filter: str | None = None,
-    checkpoint_dir: str | Path | None = None,
-    resume: bool = False,
-    model_identity: Mapping[str, object] | None = None,
-    checkpoint_identity_extra: Mapping[str, object] | None = None,
-) -> tuple[dict, dict, dict]:
-    """Measure routed serving units with one decoder layer resident at once.
-
-    The numerical core is the resident ``measure_expert_unit_costs`` function:
-    identical qdq, fp32 log-softmax/KL, window order, and row builder.
-    Streaming changes only model residency.  A target layer stays pinned for
-    the complete serving unit so its temporary qdq is restored before the
-    context can cache/unload it.
-    """
-    if resume and checkpoint_dir is None:
-        raise ValueError("resume=True requires checkpoint_dir")
-    profile = resolve_routed_expert_profile(runner.model, profile)
-    menu = _canon_formats(formats)
-    weights = {
-        str(name): torch.as_tensor(value)
-        for name, value in dict(col_weights or {}).items()
-    }
-    records, unit_identities = _streamed_expert_unit_records(
-        runner.model,
-        profile,
-        unit_filter=unit_filter,
-        max_units=max_units,
-    )
-    qnames = [str(record[1]) for record in records]
-    if len(qnames) != len(set(qnames)):
-        raise RuntimeError(
-            "streamed expert discovery produced duplicate serving-unit qnames"
-        )
-    # Every serving unit is layer-local by serving contract. Resolve this
-    # before opening the journal so malformed topology cannot acquire state.
-    for qname in qnames:
-        runner.layer_index_for_qname(qname)
-
-    menu_by_unit = {qname: menu for qname in qnames}
-
-    completed: dict[str, dict[str, object]] = {}
-    journal_root: Path | None = None
-    journal_identity_sha256: str | None = None
-    if checkpoint_dir is not None:
-        if model_identity is None:
-            raise RuntimeError(
-                "streamed expert checkpointing requires exact model_identity; "
-                "refusing model-name-gated resume"
-            )
-        extra = dict(checkpoint_identity_extra or {})
-        identity = _expert_checkpoint_identity(
-            runner=runner,
-            profile=profile,
-            calib_ids=calib_ids,
-            formats=menu,
-            col_weights=weights,
-            unit_identities=unit_identities,
-            model_identity=model_identity,
-            expert_chunk=expert_chunk,
-            expert_sample=expert_sample,
-            max_units=max_units,
-            unit_filter=unit_filter,
-            identity_extra=extra,
-        )
-        from prismaquant.cost_stage_checkpoint import prepare_journal
-
-        journal_root, journal_identity_sha256, raw_completed = prepare_journal(
-            checkpoint_dir,
-            stage=EXPERT_CHECKPOINT_STAGE,
-            resume=resume,
-            identity=identity,
-            qnames=qnames,
-        )
-        completed = {
-            qname: _validate_expert_checkpoint_state(qname, state, forked=False)
-            for qname, state in raw_completed.items()
-        }
-
-    pending = [qname for qname in qnames if qname not in completed]
-    baseline = None
-    if pending:
-        # Resume identity was validated above, before this first forward.
-        baseline = _baseline_logprobs(
-            runner.model,
-            calib_ids,
-            forward_model=runner,
-        )
-
-    results: dict[str, dict[str, object]] = dict(completed)
-    t_units0 = time.time()
-    for u_i, qname in enumerate(pending):
-        if progress:
-            _log(f"streamed unit {qname} ({u_i + 1}/{len(pending)})")
-        t_unit0 = time.time()
-        exact_filter = rf"\A{re.escape(qname)}\Z"
-        unit_menu = menu_by_unit[qname]
-        with runner.pin_layer_for_qname(qname):
-            unit_stats, unit_costs, unit_kls = measure_expert_unit_costs(
-                runner.model,
-                profile,
-                calib_ids,
-                unit_menu,
-                expert_chunk=expert_chunk,
-                progress=False,
-                col_weights=weights,
-                expert_sample=expert_sample,
-                max_units=0,
-                unit_filter=exact_filter,
-                forward_model=runner,
-                baseline_logprobs=baseline,
-            )
-        if set(unit_kls) != {qname}:
-            raise RuntimeError(
-                f"streamed expert unit {qname} produced unit_kls keys "
-                f"{sorted(unit_kls)!r}"
-            )
-        state = {
-            "stats": unit_stats,
-            "costs": unit_costs,
-            "unit_kls": unit_kls,
-        }
-        results[qname] = state
-        if journal_root is not None:
-            assert journal_identity_sha256 is not None
-            _write_expert_unit_checkpoint(
-                journal_root,
-                qname=qname,
-                identity_sha256=journal_identity_sha256,
-                state=state,
-            )
-        if progress:
-            dt = time.time() - t_unit0
-            rate = (time.time() - t_units0) / (u_i + 1)
-            eta_min = rate * (len(pending) - u_i - 1) / 60.0
-            _log(f"unit {qname} done in {dt:.0f}s "
-                 f"({sorted(unit_kls[qname])}); "
-                 f"~{eta_min:.0f} min left for {len(pending) - u_i - 1} units")
-
-    stats: dict = {}
-    costs: dict = {}
-    unit_kls: dict = {}
-    for qname in qnames:
-        state = results[qname]
-        stats.update(state["stats"])
-        costs.update(state["costs"])
-        unit_kls.update(state["unit_kls"])
-    return stats, costs, unit_kls
-
-
 @torch.no_grad()
 def _fork_quantized_unit(
     runner,
@@ -1201,6 +1041,8 @@ def measure_expert_unit_costs_forked(
     calib_ids: torch.Tensor,
     formats: Sequence[str],
     *,
+    boundaries: Mapping[str, object],
+    layer_range: tuple[int, int] | None = None,
     expert_chunk: int = 16,
     progress: bool = True,
     col_weights: Mapping[str, torch.Tensor] | None = None,
@@ -1211,48 +1053,13 @@ def measure_expert_unit_costs_forked(
     model_identity: Mapping[str, object] | None = None,
     checkpoint_identity_extra: Mapping[str, object] | None = None,
 ) -> tuple[dict, dict, dict]:
-    """Forked-stream expert unit KLs: O(1) body streams instead of O(units).
+    """Measure one format and layer group from saved source boundaries.
 
-    The window-major streamed driver re-streams the whole body for EVERY
-    forward (a 306 GB source at 16 windows = ~1.1 TB of disk per unit,
-    ~47 TB for a 42-unit run — measured 2026-08-26 on GLM-5.3-Flash, GPU
-    idling at ~25% while the nvme pinned at 2 GB/s). This driver streams
-    the body THREE times total: one boundary-capture pass (baseline
-    activations at every decoder boundary + baseline logits), then one
-    pass per measured format in which every unit's quantized stream is
-    forked from its layer's baseline boundary and advanced through the
-    live layers together with all other forks.
-
-    Semantics per unit are identical to the window-major path: exactly one
-    unit quantized (export-equivalent packed render), everything else at
-    source precision, KL(BF16 || quantized) from fp32 log-softmax at the
-    head. Downstream route-flips propagate through the fork's own suffix,
-    so the empirical route-flip floor is preserved. Differences are
-    reassociation-class only (all windows forward in one batch instead of
-    ``_calib_batch()`` chunks).
-
-    The live model is NEVER mutated: the fork's layer call swaps each
-    member Linear's ``weight`` Parameter for a view into the quantized
-    packed stacks and reattaches the ORIGINAL Parameter objects in
-    ``finally`` — no restore clone exists, so the triple-expert-mass peak
-    that wedged the window-major runs (resident + clone + packed) cannot
-    recur; the transient is the packed render alone.
-
-    Fail-closed scope (v1): profiles with per-pass layer state and expert
-    subsampling are refused — use the window-major driver for those. Packed
-    and unpacked units are both handled; the packed all-zero-stack guard
-    fires at fork time (the unpacked variant relies on the window driver's
-    discovery-time check if you re-enable it there).
-    Checkpoint granularity is the whole run: per-unit rows are journaled
-    only after every format pass completes, so a mid-pass crash re-pays
-    the passes (~1 h at GLM scale), never the journal identity.
+    Forked and resident paths differ at reassociation level through GEMM row
+    counts and KL sum order, measured up to 0.187303% on the CPU fixture.
     """
     if profile.new_forward_pass_state() != {}:
-        raise RuntimeError(
-            "forked expert eval requires stateless layer passes; profile "
-            f"{type(profile).__name__} declares per-pass state — use the "
-            "window-major streamed driver"
-        )
+        raise RuntimeError("expert units require stateless layer passes")
     profile = resolve_routed_expert_profile(runner.model, profile)
     menu = _canon_formats(formats)
     measured_fmts = [f for f in menu if f not in PASSTHROUGH_FORMATS]
@@ -1266,6 +1073,12 @@ def measure_expert_unit_costs_forked(
         unit_filter=unit_filter,
         max_units=max_units,
     )
+    if layer_range is not None:
+        start, stop = layer_range
+        if not 0 <= start < stop <= runner.num_layers:
+            raise ValueError("invalid expert layer range")
+        records = [record for record in records
+                   if start <= runner.layer_index_for_qname(record[1]) < stop]
     for kind, qname, _storage in records:
         if kind not in ("packed", "unpacked"):
             raise RuntimeError(
@@ -1295,7 +1108,8 @@ def measure_expert_unit_costs_forked(
             raise ValueError(
                 "checkpoint_identity_extra cannot override eval_driver"
             )
-        extra["eval_driver"] = "forked-stream/1"
+        extra["eval_driver"] = "forked-units/1"
+        extra["layer_range"] = layer_range
         identity = _expert_checkpoint_identity(
             runner=runner,
             profile=profile,
@@ -1340,34 +1154,23 @@ def measure_expert_unit_costs_forked(
     # Row-shape metadata captured at fork time (first format pass), while
     # the unit's layer is resident — by row-building time it is unloaded.
     rows_meta: dict[str, dict[str, object]] = {}
-    baseline_lp: list[torch.Tensor] | None = None
-    batch = None
+    from prismaquant.streamed_boundary_artifacts import StreamedForwardBoundaries
+    from torch.utils._pytree import tree_map
 
     if pending:
+        fields = dict(boundaries["batch"])
+        activations = fields.pop("activations_cpu")
+        fields = tree_map(lambda value: value.to(device) if isinstance(value, torch.Tensor)
+                          else value, fields)
+        batch = StreamedForwardBoundaries(**fields, activations_cpu=activations)
+        baseline_lp = boundaries["baseline_lp"]
         n_windows = int(calib_ids.shape[0])
-        _log(f"forked driver: {len(pending)}/{len(qnames)} units pending, "
-             f"formats {measured_fmts}, {n_windows} windows in one batch")
-        t0 = time.time()
-        batch = runner.capture_boundaries(calib_ids)
-        avail, swap = _avail_swap_gb()
-        _log(f"boundary pass done in {time.time() - t0:.0f}s "
-             f"({len(batch.activations_cpu)} boundaries, "
-             f"avail {avail:.0f}G, swap {swap:.1f}G)")
-        logits = runner.tail_logits(
-            batch, batch.activations_cpu[-1].to(device)
-        )
-        baseline_lp = [
-            F.log_softmax(logits[w].float(), dim=-1).cpu()
-            for w in range(n_windows)
-        ]
-        del logits
-        torch.cuda.empty_cache()
-
         for f_i, fmt in enumerate(measured_fmts):
             t_pass0 = time.time()
             forks: dict[str, torch.Tensor] = {}
             with runner.context.walk_layers(
-                    range(num_layers), prefetch_lookahead=runner.prefetch_lookahead,
+                    range(min(layer_of[qn] for qn in pending), num_layers),
+                    prefetch_lookahead=runner.prefetch_lookahead,
                     require_prefetched=runner.require_prefetched_residency) as walk:
                 for block in walk:
                     with block:
@@ -1495,6 +1298,59 @@ def measure_expert_unit_costs_forked(
         costs.update(state["costs"])
         unit_kls.update(state["unit_kls"])
     return stats, costs, unit_kls
+
+
+@torch.no_grad()
+def capture_expert_boundaries(runner, profile, calib_ids):
+    """Capture one source forward with the existing streaming boundary owner."""
+    from torch.utils._pytree import tree_map
+
+    if profile.new_forward_pass_state() != {}:
+        raise RuntimeError("expert units require stateless layer passes")
+    batch = runner.capture_boundaries(calib_ids)
+    logits = runner.tail_logits(batch, batch.activations_cpu[-1].to(runner.device))
+    return {
+        "batch": tree_map(lambda value: value.cpu() if isinstance(value, torch.Tensor)
+                          else value, vars(batch)),
+        "baseline_lp": [F.log_softmax(logits[w].float(), dim=-1).cpu()
+                        for w in range(calib_ids.shape[0])],
+    }
+
+
+def reduce_expert_units(capture, payloads):
+    """Require complete, disjoint cells and restore source row and format order."""
+    identity = capture["identity"]
+    menu = identity["formats"]
+    measured = [fmt for fmt in menu if fmt not in PASSTHROUGH_FORMATS]
+    qnames = [unit["qname"] for unit in identity["units"]]
+    cells, member_stats, member_costs = {}, {}, {}
+    for payload in payloads:
+        provenance = payload["provenance"]
+        if provenance["boundary_identity"] != identity:
+            raise ValueError("expert boundary identity differs")
+        for qname, formats in provenance["unit_kls"].items():
+            for fmt, value in formats.items():
+                if qname not in qnames or fmt not in measured or (qname, fmt) in cells:
+                    raise ValueError("unknown or duplicate expert cell")
+                cells[qname, fmt] = value
+        for name, rows in payload["costs"].items():
+            if name in member_stats and member_stats[name] != payload["stats"][name]:
+                raise ValueError("expert member stats differ")
+            member_stats[name] = payload["stats"][name]
+            target = member_costs.setdefault(name, {})
+            for fmt, row in rows.items():
+                if fmt in target and target[fmt] != row:
+                    raise ValueError("expert member rows differ")
+                target[fmt] = row
+    if set(cells) != {(qn, fmt) for qn in qnames for fmt in measured}:
+        raise ValueError("missing expert cells")
+    names = [member["qname"] for unit in identity["units"] for member in unit["members"]]
+    order = measured + [fmt for fmt in menu if fmt in PASSTHROUGH_FORMATS]
+    if set(member_stats) != set(names) or any(set(rows) != set(menu) for rows in member_costs.values()):
+        raise ValueError("expert member coverage differs")
+    return ({name: member_stats[name] for name in names},
+            {name: {fmt: member_costs[name][fmt] for fmt in order} for name in names},
+            {qn: {fmt: cells[qn, fmt] for fmt in measured} for qn in qnames})
 
 
 def merge_cost_payloads(
@@ -1636,13 +1492,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Validate and reuse completed qname-keyed unit shards; any "
              "identity mismatch refuses reuse and recomputation.")
     p.add_argument(
-        "--streaming", action="store_true",
-        help="Use the existing decoder-layer prefetch/cache context instead "
-             "of loading the expanded source model resident.")
-    p.add_argument(
         "--streaming-offload-dir", default=None,
         help="Streaming model work directory. Defaults below the checkpoint "
              "or output directory and is never placed in /tmp.")
+    p.add_argument("--capture-boundaries", action="store_true")
+    p.add_argument("--boundary-file", help="Saved source boundaries and baseline log-probabilities.")
+    p.add_argument("--unit-format", help="One measured format for this unit.")
+    p.add_argument("--layer-range", help="Half-open decoder layer range START:STOP.")
+    p.add_argument("--reduce-units", nargs="+", help="Unit payloads to reduce on CPU.")
     p.add_argument("--device", default="cuda")
     return p
 
@@ -1670,12 +1527,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.resume and not args.checkpoint_dir:
         raise SystemExit("--resume requires --checkpoint-dir")
 
+    if args.reduce_units:
+        capture = torch.load(args.boundary_file, map_location="cpu", weights_only=False, mmap=True)
+        with_files = []
+        for path in args.reduce_units:
+            with open(path, "rb") as stream:
+                with_files.append(pickle.load(stream))
+        stats, costs, unit_kls = reduce_expert_units(capture, with_files)
+        provenance = dict(capture["provenance"], unit_kls=unit_kls, expert_units=len(unit_kls))
+        return _finalize_expert_payload(args, stats, costs, unit_kls, capture["identity"]["formats"],
+                                        provenance, provenance.get("source_binding"))
+    if not args.boundary_file:
+        raise SystemExit("streamed expert work requires --boundary-file")
+    if not args.capture_boundaries and (not args.unit_format or not args.layer_range):
+        raise SystemExit("expert units require --unit-format and --layer-range")
     from prismaquant.gpu_guard import require_cuda_hot_path
     require_cuda_hot_path("expert_empirical_cost", args.device)
 
     import os
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoTokenizer
     from prismaquant.build_rtn_cache import stage_multimodal
     from prismaquant.model_profiles import detect_profile
     from prismaquant.streamed_model_identity import (
@@ -1699,64 +1570,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     tok = AutoTokenizer.from_pretrained(
         staged, trust_remote_code=True, local_files_only=local_only)
     _log(f"loading {args.model} (staged={staged}) bf16 ...")
-    model = None
-    streamed_runner = None
-    if args.streaming:
-        from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.cost_streaming import build_streamed_causal_lm
 
-        offload_dir = args.streaming_offload_dir
-        if not offload_dir:
-            anchor = Path(args.checkpoint_dir or args.output).parent
-            offload_dir = str(anchor / "expert-cost-streaming-offload")
-        streamed_runner = build_streamed_causal_lm(
-            str(source_root) if native_source else staged,
-            device=torch.device(args.device),
-            dtype=torch.bfloat16,
-            offload_folder=offload_dir,
-            profile=profile,
-        )
-        model = streamed_runner.model
-    elif native_source:
-        from prismaquant.memory_management import CaptureMemoryGuard
-        from prismaquant.streaming_model import load_resident_source_model
-
-        device = torch.device(args.device)
-        model = load_resident_source_model(
-            str(source_root), device=device, dtype=torch.bfloat16,
-            offload_folder=str(Path(args.output).parent / "expert-cost-resident-offload"),
-            resource_check=CaptureMemoryGuard(device).check,
-            attn_implementation="eager",
-        ).eval()
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            staged, dtype=torch.bfloat16, trust_remote_code=True,
-            local_files_only=local_only, attn_implementation="eager",
-            device_map=args.device,
-        ).eval()
-        for prm in model.parameters():
-            prm.requires_grad_(False)
-    # Per-expert-on-disk -> packed-in-class checkpoints (Qwen3.5-MoE /
-    # Ornith): the text class lacks the per-expert->packed mapper, so the
-    # packed params load ZERO-INITIALIZED — the zero-expert calibration bug
-    # (quantizing zeros is a no-op; every unit KL reads exactly 0). Fill from
-    # the source shards; measure_expert_unit_costs also hard-fails on
-    # all-zero stacks so this class of silent garbage can never recur.
-    from prismaquant.layer_streaming import fill_packed_experts_from_source
-    # NOTE: pass the ORIGINAL model dir, not the staged text-only view — the
-    # staging rewrites index keys to `model.layers.*` while the profile's
-    # source_tensor_name keeps the checkpoint's own nesting
-    # (`model.language_model.*`), so against the staged index the fill's
-    # prefix filter silently matches nothing (how production_recache calls it).
-    fill_src = str(source_root)
-    filled = (
-        0
-        if streamed_runner is not None or native_source
-        else fill_packed_experts_from_source(
-            model, fill_src, profile, progress=True
-        )
-    )
-    if filled:
-        _log(f"filled {filled} packed-expert params from source shards")
+    offload_dir = args.streaming_offload_dir or str(Path(args.output).parent / "expert-cost-streaming-offload")
+    streamed_runner = build_streamed_causal_lm(
+        str(source_root) if native_source else staged,
+        device=torch.device(args.device), dtype=torch.bfloat16,
+        offload_folder=offload_dir, profile=profile)
+    model = streamed_runner.model
 
     if args.dataset:
         from prismaquant.calibration_data import load_calibration
@@ -1781,82 +1602,43 @@ def main(argv: Sequence[str] | None = None) -> int:
                            for k, v in pickle.load(fh).items()}
     if col_weights is None:
         col_weights = {}
-    if streamed_runner is not None:
-        try:
-            streamed_model_identity = None
-            if args.checkpoint_dir:
-                streamed_model_identity = _streaming_model_identity(
-                    streamed_runner,
-                    args.model,
-                    identity_cache_path=(
-                        Path(args.checkpoint_dir)
-                        / "streamed_model_identity.json"
-                    ),
-                )
-            eval_driver = os.environ.get(
-                "PRISMAQUANT_EXPERT_EVAL_DRIVER", "window"
-            ).strip().lower()
-            if eval_driver not in ("window", "forked"):
-                raise SystemExit(
-                    f"PRISMAQUANT_EXPERT_EVAL_DRIVER={eval_driver!r} is not "
-                    "one of: window, forked"
-                )
-            if eval_driver == "forked":
-                # O(1) body streams instead of O(units): see
-                # measure_expert_unit_costs_forked. Scope guards live in the
-                # driver (stateless pass, unpacked units); the CLI features
-                # it does not take are refused here, loudly.
-                refused = {
-                    "--expert-sample": args.expert_sample,
-                }
-                on = sorted(k for k, v in refused.items() if v)
-                if on:
-                    raise SystemExit(
-                        "PRISMAQUANT_EXPERT_EVAL_DRIVER=forked does not "
-                        f"support {on}; unset them or use the window driver"
-                    )
-                stats, costs, unit_kls = measure_expert_unit_costs_forked(
-                    streamed_runner,
-                    profile,
-                    calib,
-                    formats,
-                    expert_chunk=args.expert_chunk,
-                    col_weights=col_weights,
-                    max_units=args.max_units,
-                    unit_filter=args.unit_filter,
-                    checkpoint_dir=args.checkpoint_dir,
-                    resume=args.resume,
-                    model_identity=streamed_model_identity,
-                    checkpoint_identity_extra=(
-                        {"source_binding": source_binding} if source_binding is not None else None
-                    ),
-                )
-            else:
-                stats, costs, unit_kls = measure_expert_unit_costs_streamed(
-                    streamed_runner,
-                    profile,
-                    calib,
-                    formats,
-                    expert_chunk=args.expert_chunk,
-                    col_weights=col_weights,
-                    expert_sample=args.expert_sample,
-                    max_units=args.max_units,
-                    unit_filter=args.unit_filter,
-                    checkpoint_dir=args.checkpoint_dir,
-                    resume=args.resume,
-                    model_identity=streamed_model_identity,
-                    checkpoint_identity_extra=(
-                        {"source_binding": source_binding} if source_binding is not None else None
-                    ),
-                )
-        finally:
-            streamed_runner.shutdown()
-    else:
-        stats, costs, unit_kls = measure_expert_unit_costs(
-            model, profile, calib, formats, expert_chunk=args.expert_chunk,
-            col_weights=col_weights,
-            expert_sample=args.expert_sample, max_units=args.max_units,
-            unit_filter=args.unit_filter)
+    try:
+        streamed_model_identity = _streaming_model_identity(
+            streamed_runner, args.model,
+            identity_cache_path=Path(args.boundary_file).with_suffix(".model-identity.json"))
+        _, unit_identities = _streamed_expert_unit_records(
+            model, profile, unit_filter=args.unit_filter, max_units=args.max_units)
+        for unit in unit_identities:
+            unit["layer"] = streamed_runner.layer_index_for_qname(unit["qname"])
+        identity = _expert_checkpoint_identity(
+            runner=streamed_runner, profile=profile, calib_ids=calib, formats=formats,
+            col_weights=col_weights, unit_identities=unit_identities,
+            model_identity=streamed_model_identity, expert_chunk=args.expert_chunk,
+            expert_sample=0, max_units=args.max_units, unit_filter=args.unit_filter,
+            identity_extra={"source_binding": source_binding})
+        if args.expert_sample:
+            raise SystemExit("expert units do not support --expert-sample")
+        if args.capture_boundaries:
+            capture = capture_expert_boundaries(streamed_runner, profile, calib)
+            stats, costs, unit_kls = {}, {}, {}
+        else:
+            capture = torch.load(args.boundary_file, map_location="cpu", weights_only=False, mmap=True)
+            if capture["identity"] != identity:
+                raise RuntimeError("expert boundary identity differs")
+            unit_format = _canon_formats([args.unit_format])[0]
+            if unit_format not in formats or unit_format in PASSTHROUGH_FORMATS:
+                raise SystemExit("--unit-format must select a measured format")
+            unit_menu = [unit_format] + [fmt for fmt in formats if fmt in PASSTHROUGH_FORMATS]
+            stats, costs, unit_kls = measure_expert_unit_costs_forked(
+                streamed_runner, profile, calib, unit_menu, boundaries=capture,
+                layer_range=tuple(map(int, args.layer_range.split(":"))),
+                expert_chunk=args.expert_chunk, col_weights=col_weights,
+                max_units=args.max_units, unit_filter=args.unit_filter,
+                checkpoint_dir=args.checkpoint_dir, resume=args.resume,
+                model_identity=streamed_model_identity,
+                checkpoint_identity_extra={"source_binding": source_binding})
+    finally:
+        streamed_runner.shutdown()
     if source_binding is not None:
         for rows in costs.values():
             for row in rows.values():
@@ -1882,6 +1664,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if source_binding is not None:
         provenance["source_binding"] = source_binding
 
+    provenance["boundary_identity"] = identity
+    if args.capture_boundaries:
+        capture.update(identity=identity, provenance=provenance)
+        Path(args.boundary_file).parent.mkdir(parents=True, exist_ok=True)
+        torch.save(capture, args.boundary_file)
+        _log(f"wrote source boundaries to {args.boundary_file}")
+        return 0
+    return _finalize_expert_payload(args, stats, costs, unit_kls, formats, provenance, source_binding)
+
+
+def _finalize_expert_payload(args, stats, costs, unit_kls, formats, provenance, source_binding):
     if args.merge_base:
         with open(args.merge_base, "rb") as fh:
             base = pickle.load(fh)
