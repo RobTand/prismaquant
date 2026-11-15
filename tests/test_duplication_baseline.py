@@ -23,6 +23,7 @@ import duplication_inventory as inventory  # noqa: E402
 
 CONSOLIDATED_HELPERS = [
     ("file_sha256hex", "prismaquant/digests.py"),
+    ("_canon_fmt", "prismaquant/streaming_production_cache.py"),
 ]
 DIGEST_FREE = [
     "prismaquant/visual_linears.py",
