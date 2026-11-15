@@ -11178,20 +11178,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/accept_tessera_pin_provisioner",
-    srcs = [
-        "tools/accept_tessera_pin_provisioner.py",
-    ],
-    data = [
-        "tools/accept_tessera_pin_provisioner.py",
-        "tools/provision_tessera_pin.py",
-    ],
-    deps = [
-        ":tools/provision_tessera_pin",
-    ],
-)
-
-pq_py_library(
     name = "tools/adopt_tessera_source_digests",
     srcs = [
         "tools/adopt_tessera_source_digests.py",
@@ -11238,22 +11224,6 @@ pq_py_library(
     ],
     deps = [
         ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
-    name = "tools/audit_tessera_selected_cache_slice",
-    srcs = [
-        "tools/audit_tessera_selected_cache_slice.py",
-    ],
-    data = [
-        "tools/audit_tessera_selected_cache_slice.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cost_stage_checkpoint",
-        "@pq_pip//tessera_quant",
     ],
 )
 
@@ -11441,23 +11411,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/build_t4_logical_request",
-    srcs = [
-        "tools/build_t4_logical_request.py",
-    ],
-    data = [
-        "tools/qualify_t4_overlay.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
-        ":tools/__init__",
-        ":tools/rebind_t4_qualified_results",
-    ],
-)
-
-pq_py_library(
     name = "tools/build_t4_overlay_catalog",
     srcs = [
         "tools/build_t4_overlay_catalog.py",
@@ -11470,39 +11423,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
-    name = "tools/build_tessera_hessian_collection",
-    srcs = [
-        "tools/build_tessera_hessian_collection.py",
-    ],
-    data = [
-        "tools/build_tessera_hessian_collection.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/digests",
-        ":prismaquant/tessera_reuse_authority",
-        "@pq_pip//tessera_quant",
-    ],
-)
-
-pq_py_library(
-    name = "tools/build_tessera_mtp_cached_units",
-    srcs = [
-        "tools/build_tessera_mtp_cached_units.py",
-    ],
-    data = [
-        "tools/build_tessera_mtp_cached_units.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cost_stage_checkpoint",
-        "@pq_pip//tessera_quant",
     ],
 )
 
@@ -11581,21 +11501,6 @@ pq_py_library(
         ":prismaquant/source_read_plan",
         ":prismaquant/staged_tier_policy",
         "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "tools/check_campaign_activation_identity",
-    srcs = [
-        "tools/check_campaign_activation_identity.py",
-    ],
-    data = [
-        "tools/check_campaign_activation_identity.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
     ],
 )
 
@@ -13098,25 +13003,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/qualify_t4_overlay",
-    srcs = [
-        "tools/qualify_t4_overlay.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
-        ":prismaquant/io_engine",
-        ":prismaquant/residency_map",
-        ":prismaquant/residency_shard_reader",
-        ":prismaquant/staged_lease",
-        ":prismaquant/staged_tier_policy",
-        "@pq_pip//tessera_quant",
-        "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
     name = "tools/quality_cpu_parity",
     srcs = [
         "tools/quality_cpu_parity.py",
@@ -13158,23 +13044,6 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
-    name = "tools/reconcile_digest_census",
-    srcs = [
-        "tools/reconcile_digest_census.py",
-    ],
-    data = [
-        "docs/audits/digest_site_census_pq1301_2026-10-04.json",
-        "tools/reconcile_digest_census.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/digests",
-        ":tools/__init__",
-        ":tools/duplication_inventory",
     ],
 )
 
@@ -13482,18 +13351,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/tessera_fleet/dispatch_ladder",
-    srcs = [
-        "tools/tessera_fleet/dispatch_ladder.py",
-    ],
-    deps = [
-        ":tools/__init__",
-        ":tools/tessera_fleet/__init__",
-        ":tools/tessera_fleet/common",
-    ],
-)
-
-pq_py_library(
     name = "tools/tessera_fleet/dispatch_model",
     srcs = [
         "tools/tessera_fleet/dispatch_model.py",
@@ -13529,20 +13386,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/tessera_fleet/status",
-    srcs = [
-        "tools/tessera_fleet/status.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":tools/__init__",
-        ":tools/tessera_fleet/__init__",
-        ":tools/tessera_fleet/common",
-    ],
-)
-
-pq_py_library(
     name = "tools/tessera_surface_replay",
     srcs = [
         "tools/tessera_surface_replay.py",
@@ -13554,27 +13397,6 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/tessera_anchored_surface",
-    ],
-)
-
-pq_py_library(
-    name = "tools/test_qualify_t4_overlay",
-    srcs = [
-        "tools/test_qualify_t4_overlay.py",
-    ],
-    data = [
-        "tools/qualify_t4_overlay.py",
-        "tools/test_qualify_t4_overlay.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/io_engine",
-        ":prismaquant/residency_map",
-        ":prismaquant/residency_shard_reader",
-        ":prismaquant/staged_tier_policy",
-        ":tools/qualify_t4_overlay",
-        "@pq_pip//pytest",
-        "@pq_pip//torch",
     ],
 )
 
@@ -13618,24 +13440,6 @@ pq_py_library(
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/io_spans",
         ":prismaquant/memory_management",
-    ],
-)
-
-pq_py_library(
-    name = "tools/verify_tessera_calibration_forward",
-    srcs = [
-        "tools/verify_tessera_calibration_forward.py",
-    ],
-    deps = [
-        ":experiments/workspace_netdata",
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
-        ":prismaquant/io_spans",
-        ":prismaquant/model_runtime",
-        ":prismaquant/tensor_digests",
-        "@pq_pip//torch",
-        "@pq_pip//transformers",
     ],
 )
 

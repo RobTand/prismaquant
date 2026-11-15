@@ -522,19 +522,7 @@ repartition, the same freeze semantics `residency_stage_rows` already keeps):
 
 1. Seal (or verify) all 46 artifacts: 45 records + slice manifests, coverage
    proof green. Nothing is submitted if the proof refuses.
-2. **Stage A first:** submit the adjoint action — `pbrun --tag <adjoint.tag>
-   --data-manifest <adjoint read set> --residency stage
-   --progress-phase head=<head_grace> --progress-phase <phase>=900 … (one per
-   manifest read phase, in manifest order) --container-image
-   <spec image> --detach -- python3 -m tools.tessera_campaign_container --spec
-   <spec> -- python3 -m prismaquant.joint_adjoint_capture …` — and record its
-   action key in `<output_root>/layer-quanta/campaign-state.json` (the
-   campaign's own machine-readable state; atomic append of submission events,
-   never edits). The payload carries `--data-manifest-sha256` (the submitted
-   manifest bytes) and `--read-manifest-sha256` (the annotated parent
-   read-set digest): a pass that seals no read schedule is told its manifest
-   by the submitter, and a pass told nothing binds nothing and gets no
-   redirect (PQ #835).
+2. **Stage A first:** submit it as a Flux job (see the flux skill).
 3. **Then quanta, when their inputs exist:** a layer-L quantum is publishable
    once a sealed Stage A proof covers its checkpoint: the completed
    `adjoint-capture.json` or the checkpoint band of its boundary, which
@@ -548,31 +536,10 @@ repartition, the same freeze semantics `residency_stage_rows` already keeps):
    (§9.3). Within a run every publishable row is published — the tool never
    waits on a worker.
 
-Per quantum:
-
-```
-pbrun --tag gb10 \
-      --data-manifest …/manifests/layer-013.data-manifest.json.gz \
-      --residency stage --residency-ram auto \
-      --container-image <spec image> \
-      --progress-phase head=<head_grace> \
-      --progress-phase layer-013-chunk-000=900 … (one per chunk) \
-      --priority -5 --env PRISMAQUANT_DEV_MODE=1 --detach -- \
-      python3 -m tools.tessera_campaign_container --spec <spec> -- \
-      python3 -m prismaquant.joint_cost_quantum \
-        --quantum …/layer-quanta/records/layer-013.json \
-        --quantum-sha256 <record file wire digest> \
-        --plan <plan> --plan-sha256 <plan digest> \
-        --prepared <prepared> --prepared-sha256 <prepared digest> \
-        --adjoint-slice <slice file> --adjoint-slice-sha256 <slice digest> \
-        --data-manifest-sha256 <slice manifest bytes digest> \
-        --resume \
-        --output-root …/complete-512-seed237….encoder-reuse-02
-```
+Submit each quantum as a Flux job (see the flux skill).
 
 The slice digest is the row's own read-set digest (`read_set.manifest_sha256`),
-verified against the slice file at dispatch: the quantum binds the bytes pbrun
-stages for it, never the campaign parent it also carries (PQ #835). The
+verified against the slice file at dispatch. The quantum binds its staged bytes (PQ #835). The
 record digest is the record file's wire bytes (the consumer checks raw bytes
 first; its canonical body check inside stays; PQ #838: earlier rows bound the
 canonical digests and died in argparse or at the first gate).

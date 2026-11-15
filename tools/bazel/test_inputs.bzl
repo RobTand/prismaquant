@@ -77,10 +77,8 @@ TEST_INPUTS = {
     "//tests:test_tessera_fleet_drivers": struct(
         modules = [
             "tools/render_identity.py",
-            "tools/tessera_fleet/dispatch_ladder.py",
             "tools/tessera_fleet/dispatch_model.py",
             "tools/tessera_fleet/model_worker.py",
-            "tools/tessera_fleet/status.py",
         ],
         reason = "it runs each driver's --help with python -m tools.<name> from a parametrized f-string.",
     ),

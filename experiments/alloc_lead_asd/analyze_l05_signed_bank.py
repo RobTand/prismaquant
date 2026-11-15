@@ -1,6 +1,7 @@
 """Inspect accepted L05 signed rows without claiming a corrected model price.
 
-Run through PrismaBuild with a bound staged readset. This diagnostic uses the
+Submit it as a Flux job (see the flux skill). Use a bound staged readset.
+This diagnostic uses the
 existing signed-probe arithmetic owner; it does not fabricate cost identities.
 """
 from __future__ import annotations

@@ -26,7 +26,6 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from prismaquant.digests import DIRECT_ASCII_LAX, bytes_sha256hex  # noqa: E402
 from tools import assemble_t4_overlay as assemble  # noqa: E402
-from tools import build_t4_logical_request as builder  # noqa: E402
 from tools import rebind_t4_qualified_results as rebind  # noqa: E402
 
 FMT = "TESSERA_E2M1_K2_R3"
@@ -242,7 +241,7 @@ def test_a_rebinding_of_an_undeclared_catalog_refuses(fx, monkeypatch):
     assert not fx.out.exists()
 
 
-def test_builder_pair_outputs_feed_rebinding_and_assembly_without_renames(fx, monkeypatch):
+def test_pair_outputs_feed_rebinding_and_assembly_without_renames(fx, monkeypatch):
     """Simulate qualification metadata only; never read source bytes or run a decoder."""
     original = json.loads(Path(fx.catalog['path']).read_bytes())['cells']
     cells = [{**c, 'format': fmt,
@@ -252,23 +251,14 @@ def test_builder_pair_outputs_feed_rebinding_and_assembly_without_renames(fx, mo
     catalog = {'schema': 'prismaquant.t4_adopted_catalog.v2', 'cells': cells,
                'formats': [FMT, FMT2], 'cell_sources': [0] * len(cells),
                'sources': [{'cost': {'path': 'synthetic', 'sha256': 'b' * 64}}]}
-    previous = _write(fx.root / 'builder-catalog.json', DIRECT_ASCII_LAX.encoded(catalog))
-    request_path = fx.root / 'request.json'
-    monkeypatch.setattr(sys, 'argv', ['builder', '--root', str(fx.root / 'fresh-campaign'),
-                        '--catalog', previous['path'], '--catalog-sha256', previous['sha256'],
-                        '--python', '/pinned/python', '--qualifier-checkout', '/independent-worker',
-                        '--out', str(request_path)])
-    builder.main()
-    tasks = json.loads(request_path.read_bytes())['roster']['tasks']
-    assert all(len(t['payload']['reads']) == 2 for t in tasks)
+    previous = _write(fx.root / 'pair-catalog.json', DIRECT_ASCII_LAX.encoded(catalog))
+    fx.qualified = fx.root / 'fresh-campaign' / 'qualified'
     before = {}
-    for task in tasks:
-        cell = task['payload']['cell']
-        path = Path(task['payload']['output'])
+    for cell in cells:
+        path = fx.qualified / (rebind.cell_task_id(cell) + '.json')
         raw = _result_bytes(cell, cell)
         _write(path, raw)
         before[path] = raw
-    fx.qualified = fx.root / 'fresh-campaign' / 'qualified'
     fx.catalog = previous
     fx.out = fx.root / 'direct-pair-overlay'
     monkeypatch.setattr(assemble, 'fence_cell_artifacts', lambda c: None)

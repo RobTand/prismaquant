@@ -1,7 +1,7 @@
 """CPU-only preparation of the bounded GLM v3 original-wire screen.
 
 This does not submit work, load model payloads, or authorize native execution.
-Run through PrismaBuild because resource derivation is a qualification probe.
+Submit it as a Flux job (see the flux skill).
 """
 from __future__ import annotations
 

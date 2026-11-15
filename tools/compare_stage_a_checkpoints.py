@@ -8,7 +8,7 @@ reduction settings, and writes
 relative L2 distance of the candidate from the reference, and the largest
 elementwise difference, with a summary. Every entry is read digest-verified.
 
-Run it as a PrismaBuild action, for example::
+Submit it as a Flux job (see the flux skill). For example::
 
     python3 tools/compare_stage_a_checkpoints.py \\
         --reference PATH --reference-sha256 SHA \\

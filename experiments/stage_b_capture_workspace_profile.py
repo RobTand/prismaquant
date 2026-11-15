@@ -12,8 +12,7 @@ checkpoint load, source load and retained window -- with two differences:
   touch the campaign's own layer directory. The record file is only read.
 
 Usage: the quantum's own argument list, plus ``--profile-root DIR``,
-``--profile-out FILE.json`` and optionally ``--profile-groups N``. Submit it
-through PrismaBuild with the row's own residency, image and phases.
+``--profile-out FILE.json`` and optionally ``--profile-groups N``. Submit it as a Flux job (see the flux skill).
 
 ``--stop-after-chain`` (PQ #1163) measures the chain phase instead: every
 chain roll is admitted, measured in-process (CUDA allocated and reserved
