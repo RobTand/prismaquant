@@ -31,6 +31,7 @@ CONSOLIDATED_HELPERS = [
 DIGEST_FREE = [
     "prismaquant/visual_linears.py",
     "prismaquant/tessera_census_cache.py",
+    "prismaquant/joint_prewarm_phases.py",
 ]
 
 

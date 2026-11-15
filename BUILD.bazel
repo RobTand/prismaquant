@@ -9846,6 +9846,8 @@ pq_py_library(
         "prismaquant/joint_replay_frontier.py",
     ],
     deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
         ":prismaquant/joint_replay_frontier",
     ],
 )
