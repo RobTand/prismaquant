@@ -39,16 +39,12 @@ from prismaquant.production_weight_cache import (
     nvfp4_joint_global_witnesses,
 )
 from prismaquant.render_cache_paths import require_injective_cache_filenames
-from prismaquant.streaming_production_cache import _render_dense_layer
+from prismaquant.streaming_production_cache import _canon_fmt, _render_dense_layer
 
 
 MTP_RENDER_METADATA_SCHEMA = (
     "prismaquant.production_weight_cache.mtp_render.v1"
 )
-
-
-def _canon_fmt(fmt: str) -> str:
-    return fr.canonical_format_name(str(fmt).strip().upper())
 
 
 def _nonbf16_mtp_assignment(
