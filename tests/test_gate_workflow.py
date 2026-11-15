@@ -49,7 +49,7 @@ def test_remote_planner_uses_queue_aware_refs_and_requires_scope_upload():
     jobs = workflows()['gate.yml']['jobs']
     remote = jobs['remote']
     assert remote['if'] == jobs['gate']['if']
-    assert jobs['hosted']['if'] == "${{ !cancelled() && needs.remote.result == 'success' }}"
+    assert jobs['hosted']['if'] == remote['if'] and 'needs' not in jobs['hosted']
     steps = {step.get('id'): step for step in remote['steps']}
     assert steps['refs']['with']['action'] == 'scopes-git-refs'
     assert steps['scopes']['with']['action'] == 'scopes-upload'

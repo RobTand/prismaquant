@@ -160,7 +160,6 @@ jobs:
       base: ${{ needs.tests.outputs.base }}
       head: ${{ github.sha }}
       trusted: true
-      receipt: bazel-main-${{ github.run_attempt }}
     secrets:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
       MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
@@ -175,7 +174,6 @@ jobs:
       base: ${{ needs.tests.outputs.base }}
       head: ${{ github.sha }}
       trusted: true
-      receipt: bazel-main-${{ github.run_attempt }}
     secrets:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
       MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}

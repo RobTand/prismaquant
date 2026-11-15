@@ -9,7 +9,7 @@ import io
 import http.client
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 import shutil
 import socket
@@ -28,6 +28,7 @@ from tools.ci import bazel_artifacts as artifacts
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_sha256hex
 
 SCHEMA = 'prismaquant.bazel-gate.v1'
+NONHERMETIC = Path(__file__).resolve().parents[2] / 'tools/bazel/nonhermetic.bzl'
 
 
 class GateError(RuntimeError):
@@ -102,37 +103,16 @@ def evidence_phase(phase):
         raise ShardEvidenceError(phase, refusal_category(error)) from None
 
 
-def hosted_assignment(plan, result, architecture):
-    """Narrow the existing hosted plan to this verified result's exact lane."""
-    try:
-        if (architecture not in ('amd64', 'arm64')
-                or plan['schema'] != 'prismaquant.gate_plan.v1'
-                or result['schema'] != SCHEMA or result['mode'] not in ('pr', 'main')
-                or result['verdict'] not in ('pass', 'skipped')
-                or architecture == 'arm64' and result['mode'] != 'main'
-                or any(not re.fullmatch('[0-9a-f]{40}', result[key])
-                       or plan[key + '_sha'] != result[key] for key in ('base', 'head'))):
-            raise GateError('hosted assignment has inconsistent source or lane evidence')
-        labels = result['hosted' if architecture == 'amd64' else 'hosted_arm64']
-        if (not isinstance(labels, list) or any(not isinstance(label, str) for label in labels)
-                or len(labels) != len(set(labels))):
-            raise GateError('hosted assignment has duplicate or invalid labels')
-        paths = set()
-        for label in labels:
-            if not re.fullmatch(r'//tests(?:/[^:\s]+)?:[^:\s]+', label):
-                raise GateError('hosted label is not a test target')
-            raw = label[2:].replace(':', '/') + '.py'
-            path = PurePosixPath(raw)
-            if path.as_posix() != raw or any(part in ('.', '..') for part in path.parts):
-                raise GateError('hosted label has a noncanonical path')
-            paths.add(raw)
-        rows = {row['path']: row for row in plan['selected']}
-        if len(rows) != len(plan['selected']) or not paths <= rows.keys():
-            raise GateError('hosted label is outside the existing test population')
-        return {**plan, 'selected': [rows[path] for path in sorted(paths)],
-                'deselect': [node for node in plan['deselect'] if node.split('::', 1)[0] in paths]}
-    except (KeyError, TypeError, ValueError, AttributeError):
-        raise GateError('hosted assignment evidence is malformed') from None
+def hosted_assignment(plan, architecture, table):
+    """Narrow the full hosted plan to the files nonhermetic.bzl routes to this hosted lane."""
+    tag = {'amd64': '"hosted"', 'arm64': '"hosted-arm64"'}.get(architecture)
+    paths = {label[2:].replace(':', '/') + '.py' for label, tags in
+             re.findall(r'"(//tests:[\w/]+)": struct\(\s*tags = \[([^\]]*)\]', table) if tag and tag in tags}
+    rows = {row['path']: row for row in plan['selected']}
+    if not paths or not paths <= rows.keys():
+        raise GateError('hosted lane is empty or outside the existing test population')
+    return {**plan, 'selected': [rows[path] for path in sorted(paths)],
+            'deselect': [node for node in plan['deselect'] if node.split('::', 1)[0] in paths]}
 
 
 def partition_population(population, *, shard_count=8, tests=None, durations=None):
@@ -492,16 +472,15 @@ def main(argv=None):
     hosted = commands.add_parser('hosted')
     hosted.add_argument('--architecture', choices=['amd64', 'arm64'], required=True)
     hosted.add_argument('--plan', type=Path, required=True)
-    hosted.add_argument('--result', type=Path, required=True)
     hosted.add_argument('--output', type=Path, required=True)
     args = parser.parse_args(argv)
     if args.mode == 'hosted':
         try:
-            assignment = hosted_assignment(json.loads(args.plan.read_text()),
-                                           json.loads(args.result.read_text()), args.architecture)
+            assignment = hosted_assignment(json.loads(args.plan.read_text()), args.architecture,
+                                           NONHERMETIC.read_text())
             with args.output.open('xb') as stream:
                 stream.write(DIRECT_ASCII_SPACED_LAX.encoded(assignment) + b'\n')
-        except (GateError, ValueError, TypeError, OSError):
+        except (GateError, ValueError, TypeError, KeyError, OSError):
             print('hosted assignment evidence unavailable or invalid', file=sys.stderr)
             return 75
         return 0

@@ -36,8 +36,6 @@ jobs:
     timeout-minutes: 140
     outputs:
       verdict: ${{ steps.controller.outputs.verdict }}
-      base: ${{ steps.refs.outputs.base }}
-      head: ${{ steps.refs.outputs.head }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
@@ -115,17 +113,14 @@ jobs:
         retention-days: 7
   hosted:
     name: Hosted exception lane
-    needs:
-    - remote
-    if: ${{ !cancelled() && needs.remote.result == 'success' }}
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) }}
     uses: ./.github/workflows/bazel-hosted.yml
     with:
       architecture: amd64
       mode: pr
-      base: ${{ needs.remote.outputs.base || github.event.pull_request.base.sha }}
-      head: ${{ needs.remote.outputs.head || github.event.pull_request.head.sha }}
+      base: ${{ github.event.pull_request.base.sha }}
+      head: ${{ github.event.pull_request.head.sha }}
       trusted: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-      receipt: bazel-pr-${{ github.run_attempt }}
     secrets:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
       MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}

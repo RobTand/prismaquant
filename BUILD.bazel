@@ -11570,6 +11570,7 @@ pq_py_library(
         "tools/ci/bazel_gate.py",
     ],
     data = [
+        "//tools/bazel:nonhermetic.bzl",
         "tools/ci/bazel_gate.py",
     ],
     deps = [
