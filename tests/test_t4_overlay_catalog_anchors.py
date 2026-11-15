@@ -155,7 +155,7 @@ def test_the_assembler_rechecks_every_rebinding_row(tamper):
 def _bind(path, value):
     raw = json.dumps(value, sort_keys=True).encode()
     path.write_bytes(raw)
-    return {"path": str(path), "sha256": rebind.sha(raw)}
+    return {"path": str(path), "sha256": rebind.bytes_sha256hex(raw)}
 
 
 def _rebind_fixture(tmp_path, *, new_prepared_changes=None, same_prepared=False):

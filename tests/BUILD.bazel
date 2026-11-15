@@ -16295,6 +16295,7 @@ pq_py_library(
         "//:prismaquant/digests",
         "//:prismaquant/serving_runtime_patch_set",
         "//:prismaquant/visual_linears",
+        "//:tools/benchmarks/joint_validation_pair",
         "//:tools/duplication_inventory",
         "@pq_pip//pytest",
     ],
