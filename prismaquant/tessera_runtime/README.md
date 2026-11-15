@@ -39,9 +39,9 @@ git -C "$TS" cat-file -p "$SHA:src/tessera/serving/runtime_contract.json" | sha2
 The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
-## Current pin: contract v60
+## Contract v60 pin history
 
-The pin names Tessera `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb` (Tessera #1033, PQ #2426).
+The v60 pin move used Tessera `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb` (Tessera #1033, PQ #2426).
 The contract uses v60 and lane schema v11.
 Its raw SHA-256 is `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
 The canonical remote supplies these bytes, not a working checkout.
@@ -391,19 +391,9 @@ GLM-image cell while the vanilla image retains dense E4M3 q1024.
 `TESSERA_DEV_PIN_ANSWER`, `tests/test_tessera_pin_v38_scope.py` and
 `docs/ARCHITECTURE.md` record that review. `grammar.py` and `export.py` are
 byte-identical to the previous pin; the legal inventory keeps its unique
-`reader-pin-09d6559d` byte-state and unchanged wire counts. Install that revision
-and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
-`experiments/` and are not wheel entry points.
-Provision the pin venv from a git URL so the install records the commit
-(`git+https://github.com/RobTand/tessera.git@<pin>`). The current reader pin
-retains Tessera `b40c93cb`; its test interpreter on DL380 is
-`/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb`. Provision a new interpreter
-as an admitted job by copying the previous pin's interpreter to the new path,
-repointing copied scripts and any `.pth` references, and reinstalling only
-Tessera. Assert the noneditable Git commit and the installed path under the new
-prefix before using it; a path alone is not a provision pass. This CPU pin
-movement does not certify Spark interpreters or activate a runtime generation.
-Do not mutate old live venvs.
+`reader-pin-09d6559d` byte-state and unchanged wire counts.
+For current provisioning, use the exact commit in `tessera_serving_runtime_pin.json`.
+Submit provisioning and verification as Flux jobs (see the flux skill).
 
 The previous interpreter
 `/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb` carried Tessera `b40c93cb`
@@ -411,7 +401,7 @@ The previous interpreter
 `pq-pb059953bc-tessera-83460680` with only Tessera reinstalled, non-editable,
 provisioned by host-pinned admitted build actions on 2026-09-29: dl380g10
 `04db45b6e214`, sparky `6e595022a3d5` and sparklina `18820b4622bf`.
-Each Spark action also builds the `-tf516` sibling. All five interpreters
+Each Spark action also built the `-tf516` sibling. All five interpreters
 passed the exact dependency-pin preflight, `provision_tessera_pin.py
 --check-only`, and the Tessera import check. Pin publication is recorded as action
 `d4c602dbe103`; the full keys, commands and receipts are recorded in PR #1740
@@ -443,23 +433,7 @@ head, never a merged pin), the `cadc200c` ones, the
 `pq-pb059953bc-tessera-20bf5346` ones (PQ #1541's test interpreter), and the
 `20bf5346` interpreters (dl380g10 `68bdb80acd8d`, sparky `6940c8f1c592`,
 sparklina `062be8b71f67`) and the `a3e83875` ones stay in place. Old interpreters remain untouched for running
-sessions. Announce the new `--python` paths before merging a pin move; never
-update a live venv in place. On each box, run as a host-pinned admitted job; the GB10 boxes repeat it for the `-tf516` sibling, and
-the copy repoints any `base-shadow` `.pth` file from the source venv to the new
-one:
-
-```bash
-SRC=/home/rob/venvs/pq-pb059953bc-tessera-83460680  # + "-tf516" for the sibling
-V=/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb    # + "-tf516" for the sibling
-test ! -e "$V" || exit 1
-cp -a "$SRC" "$V"
-for pth in "$V"/lib/python*/site-packages/*base-shadow*.pth; do
-  [ -e "$pth" ] || continue
-  grep -qF "$SRC" "$pth" && sed -i "s#$SRC#$V#" "$pth"
-done
-"$V/bin/python" -m pip install --no-deps --no-build-isolation --force-reinstall \
-  'git+https://github.com/RobTand/tessera.git@b40c93cb73745097e57a1ba4cf5b9eee166c759a'
-```
+sessions.
 
 dl380g10's x86 interpreter descends from `pq881-pb461728e4` (Python 3.14,
 CPU torch, no `base-shadow` and no `-tf516` sibling). Each build action's
@@ -475,11 +449,11 @@ from it and skip with it: `test_glm_campaign_streaming`,
 `test_collector_source_release` and `test_streamed_capture_admission`. Until
 2026-09-23 none of the six had run in an admitted test run.
 
-The sibling interpreter `/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb-tf516`
-is the interpreter above with transformers 5.16.1, tokenizers 0.23.1 and
+The historical sibling `/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb-tf516`
+was the interpreter above with transformers 5.16.1, tokenizers 0.23.1 and
 safetensors 0.8.0, the versions in the campaign's `prismaquant-tf516` venv.
-Tessera, torch and every other package are the same, so
-the pin check sees the same exact pin. Each pin move copies the previous pin's
+Tessera, torch and every other package were the same, so
+the pin check saw the same exact pin. Each pin move copied the previous pin's
 `-tf516` sibling in the Spark build actions above; the `b40c93cb` siblings
 descend from `83460680-tf516`, the `83460680` ones from `a21d74d8-tf516`, the `a21d74d8` ones from `a5f3b232-tf516`,
 the `a5f3b232` ones from `38e96012-tf516`, the
@@ -487,38 +461,7 @@ the `a5f3b232` ones from `38e96012-tf516`, the
 `43da1c39` ones from `cadc200c-tf516`, the `cadc200c` ones from `20bf5346-tf516`, the `20bf5346` ones from `a3e83875-tf516`, the `a3e83875` ones from `f94929de-tf516`, and the `4c4ff1c2` ones from `09d6559d-tf516`. The original
 transformers installations came from actions `fa510fbf5a02` (sparky) and
 `29ec7048687b` (sparklina, 2026-09-25). dl380g10's interpreter of the base name is a
-different base (`pq881`, Python 3.14, CPU torch), so pin a run that uses it
-with `--tag gb10`. It is built the same way as its base, so a Tessera pin
-move re-provisions it too:
-
-```bash
-# Historical bootstrap of a tf516 sibling; a pin move copies that sibling.
-SRC=/home/rob/venvs/pq-pb461728e4-tessera-4c4ff1c2
-V=/home/rob/venvs/pq-pb461728e4-tessera-4c4ff1c2-tf516
-test ! -e "$V" || exit 1
-cp -a "$SRC" "$V"
-echo "$V/base-shadow" > "$V/lib/python3.12/site-packages/pq846-base-shadow.pth"
-# Unlink the base's copies from the new base-shadow first, so pip never
-# uninstalls through a link into pq-cu130.
-for n in transformers transformers-5.6.0.dist-info tokenizers \
-         tokenizers-0.22.2.dist-info safetensors safetensors-0.7.0.dist-info; do
-  test -L "$V/base-shadow/$n" && rm "$V/base-shadow/$n"
-done
-"$V/bin/python" -m pip install --no-deps --no-cache-dir \
-  'transformers==5.16.1' 'tokenizers==0.23.1' 'safetensors==0.8.0'
-```
-
-A PR that touches those six modules, or what they test, runs them there as
-admitted jobs using that interpreter, with one thread per shard, two workers and
-two CPUs per shard, and 8 GB per shard:
-
-```bash
-/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb-tf516/bin/python -m pytest \
-  tests/test_glm5_next_streamed_forward_parity.py \
-  tests/test_glm_campaign_streaming.py tests/test_tessera_stack_group_cli.py \
-  tests/test_selected_snapshot_scope.py tests/test_collector_source_release.py \
-  tests/test_streamed_capture_admission.py
-```
+different base (`pq881`, Python 3.14, CPU torch).
 
 Every session prints a `pq-test-environment:` line with the interpreter and
 its torch, transformers and tessera-quant versions
@@ -865,7 +808,7 @@ worker) whose `argv` is:
 
 ```bash
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-  /home/rob/venvs/pq-cpu312-tessera-4c384e60/bin/python -m pytest -q -n 4 \
+  python -m pytest -q -n 4 \
   tests/test_tessera_serving_pin.py tests/test_tessera_lane_v6.py \
   tests/test_tessera_lane_admission.py tests/test_tessera_export_lane.py
 ```
