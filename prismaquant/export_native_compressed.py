@@ -2725,7 +2725,7 @@ def materialize_tensors_streaming(
             else:
                 collected.update(cached["tensors"])
             hist.update(cached["hist"])
-            _native_render_codec._DO_NO_HARM_STATS.update(cached["do_no_harm"])
+            _native_render_codec.update_do_no_harm_stats(cached["do_no_harm"])
             cache_hits += 1
             if L % 4 == 0 or L == num_layers - 1:
                 print(f"[export-stream] layer {L:02d}  CACHED "
