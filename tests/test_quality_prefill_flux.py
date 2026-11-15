@@ -300,7 +300,7 @@ def test_phase_preflight_enforces_child_host_health_before_native_validation(tmp
         elif args[0] == 'kvs': text = json.dumps(model)
         elif args[0] == 'hostlist': text = 'dl380g10 sparky\n'
         elif args[0] == 'resource': text = online + '\n'
-        elif args[0] == 'overlay': text = '0 coordinator: full\n1 worker: offline\n'
+        elif args[0] == 'overlay': text = '0 coordinator: partial\n1 worker: offline\n'
         else: raise AssertionError('unexpected native query')
         return prefill.flux_jobs.subprocess.CompletedProcess([], 0, text, '')
     monkeypatch.setattr(prefill.flux_jobs, '_flux_run', query)
@@ -309,7 +309,7 @@ def test_phase_preflight_enforces_child_host_health_before_native_validation(tmp
     monkeypatch.setattr(prefill.flux_jobs, 'validate_job', native_validation)
     root = prefill.Path('/mnt/shared') / tmp_path.name / 'health-phase'
     error, message = ((RuntimeError, 'native validation reached') if online == '0'
-                      else (ValueError, 'every eligible rank.*online'))
+                      else (ValueError, 'no eligible rank.*online'))
     with pytest.raises(error, match=message):
         prefill.submit_phase(binding, phase=phase, checkout=checkout, record_dir=root)
 
