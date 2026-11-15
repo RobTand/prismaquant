@@ -1,7 +1,7 @@
 # Sparse Tessera curve replay and the activation/prefill axis
 
-Status: opt-in research replay, updated 2026-09-11. This capability emits a report and
-measurement requests, not allocator costs or serving qualification. The normal
+Status: historical research design, 2026-09-11. U6 pass 2 removes the unused replay CLI and reader.
+Recorded measurements remain available. The normal
 Tessera campaign retains its piecewise log-linear interpolation and adaptive
 measurement policy.
 
@@ -126,16 +126,6 @@ every rung. An infeasible path reports refusal explicitly.
 
 ## Replay inputs and output
 
-Run from the repository with the same Python dependencies as the campaign:
-
-```bash
-python tools/tessera_surface_replay.py \
-  --costs /run/cost.pkl \
-  --checkpoint /run/anchors.json \
-  --plan /run/replay-plan.json \
-  --out /run/replay-report.json
-```
-
 The input is a trusted local campaign pickle plus the existing checkpoint
 manifest, its `.parts` journal, and its recorded wire directory. The plan
 binds the exact payload SHA-256 and checkpoint identity SHA-256. The importer
@@ -157,8 +147,7 @@ The plan schema is `prismaquant.tessera_anchored_replay.plan.v1`. It declares:
   `audit` keys;
 - `max_absolute_log10_error` and optional `refit_after_audit`.
 
-The exact example construction and executable cases live in
-`tests/test_tessera_anchored_surface.py`. Roles are explicit plan declarations;
+Roles are explicit plan declarations;
 the importer does not certify that a declared transfer class generalizes.
 Actual family, activation, geometry, recipe and Hessian boundaries must agree.
 The pilot covers the target rate envelope; held-out units are distinct from

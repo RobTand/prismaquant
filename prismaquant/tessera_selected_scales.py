@@ -1,13 +1,11 @@
 """Write the selected allocation's priced activation values without recalibration."""
 from __future__ import annotations
 
-import argparse
 import json
 import math
 from pathlib import Path
 from .digests import (
     DIRECT_ASCII_INDENT2_LAX,
-    DIRECT_ASCII_SPACED_LAX,
     bytes_sha256hex,
 )
 
@@ -74,18 +72,3 @@ def write_selected_scales(assignment_binding, output_dir):
     if not publish_new_bytes(out/'receipt.json', DIRECT_ASCII_INDENT2_LAX.encoded(result)+b'\n'):
         raise ValueError('selected scale receipt already exists')
     return result
-
-
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--assignment', required=True)
-    parser.add_argument('--assignment-sha256', required=True)
-    parser.add_argument('--out-dir', required=True)
-    args = parser.parse_args(argv)
-    result = write_selected_scales({'path': args.assignment, 'sha256': args.assignment_sha256}, args.out_dir)
-    print(DIRECT_ASCII_SPACED_LAX.text(result))
-    return 0
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())
