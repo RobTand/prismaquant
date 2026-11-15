@@ -26,10 +26,6 @@ MANIFEST_SOURCE_BLOBS = {
         "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
         "cebc40e00f04a9f411e5d8fb027adfef4f6011e8541b2acb19bdf36f496f5391",
     ),
-    "prismaquant/tessera_census_cache.py": (
-        "a7e64371421c65c16b3c587c8034b5a15336963e",
-        "3914f446032630aeb20dd5517c1875f4453d7a024d7a820c7e6e483e2f958e7c",
-    ),
     "prismaquant/digests.py": (
         "a2f8936b77a09eda702bd704c40ea3d6970ff1ef",
         "1cde1f0edd7b210beb5ff67b8efef6d06d05ae6008c84550b7b0db00a28be9b6",
@@ -38,13 +34,16 @@ MANIFEST_SOURCE_BLOBS = {
         "5c364c5d7c8fadf78ad9917668e72e1262546278",
         "98406374a7859e9a1b9e490671432372ad5dbe84a7a58c2b3c34377125af2037",
     ),
+    "prismaquant/tessera_census_cache.py": (
+        "a7e64371421c65c16b3c587c8034b5a15336963e",
+        "3914f446032630aeb20dd5517c1875f4453d7a024d7a820c7e6e483e2f958e7c",
+    ),
 }
 # Reviewed native-migration pins, not refreshed historical evidence:
 # perturbed_x_cache: native lifecycle migration in 02c35277f and filename owner
 # extraction in ab18816fd; retained guarded-read scopes remain checked below.
 # afd626d6d adds staged object offsets in the two read scopes, preserving their
 # raw SHA-256 calls and digest comparisons against the logical entry bytes.
-# tessera_census_cache: native result selection replaces the PB service reader.
 # digests: bounded chunks_sha256hex owner supports the native byte writer.
 # tensor_digests: the additive retained token owner route from 58a2db300.
 # perturbed_x_cache, PQ #3421: the unreachable landing wait, ram branches and
@@ -55,12 +54,12 @@ MANIFEST_SOURCE_BLOBS = {
 # Future changed pins require a per-file --reason and print the source diff.
 CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('cf7f382046d38975ed4a0b22fa6b63b1182f4dba',
                                       'cc2793ea2cb73def65ea2ed2e5e2ab40a9f09e5fb3ce4e596dbec9cb51381d55'),
- 'prismaquant/tessera_census_cache.py': ('b8158910df6d22720611dd9b8588bf51777170c4',
-                                         'c67e32264f35f0f1b2ab953e00f4dab8dfb0753ccd6cebf04e613cc4346c90f1'),
  'prismaquant/digests.py': ('1511a8142cca4b1fb9067bb5cbbcf92098f95f69',
                             'e8ab9ab2d8afd9fcbc3bc6fd57401247405bd17ec850fefb71e4694edb2dbb99'),
  'prismaquant/tensor_digests.py': ('0777758650869edc365cbf545280250e6fa175f2',
-                                   '8baeaf7541a23481b9d233a7c65ee5f679f4fcc248c004e83ad0ca16ea8ee50a')}
+                                   '8baeaf7541a23481b9d233a7c65ee5f679f4fcc248c004e83ad0ca16ea8ee50a'),
+ 'prismaquant/tessera_census_cache.py': ('7c7cae9ba7ee4f647b9009dba8c01e84059c18dd',
+                                          '0914cddfc0694d00b530a06a5dab6511530ae95e8cddfe4ffe5a72456f7f6ed1')}
 
 # The original producer test is archived, not runnable current coverage. Keep its
 # historical evidence string below and check the active calibration-hash oracle.
@@ -77,7 +76,6 @@ SCOPES = {
         "calibration_data_hash",
         "load_verified_activation_cache_entry",
     ],
-    "prismaquant/tessera_census_cache.py": ["_verify_dense_blob"],
 }
 
 # The source coordinates belong to the #2540 snapshot, not the historical census.
@@ -90,6 +88,10 @@ IDS = {
         "guarded-read",
         "tests/test_exact_activation_entry_read_amplification.py::test_prefetch_reads_each_entry_once",
     ),
+    "hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob@245:13": (
+        "consumed-size",
+        "tests/test_tessera_census_cache.py::test_same_size_changed_blob_refuses_at_export_intake_or_under_hash_blobs",
+    ),
     "hashlib:prismaquant/perturbed_x_cache.py::_seed_from@2405:13": (
         "scientific-seed",
         "tests/test_perturbed_x_cache.py::test_perturbed_cache_shares_row_subsample_for_fused_siblings",
@@ -101,10 +103,6 @@ IDS = {
     "hashlib:prismaquant/perturbed_x_cache.py::load_verified_activation_cache_entry@903:17": (
         "guarded-read",
         "tests/test_verified_capture_load.py::test_large_tensor_uses_readinto_and_releases_buffer_before_return",
-    ),
-    "hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob@245:13": (
-        "consumed-size",
-        "tests/test_tessera_census_cache.py::test_same_size_changed_blob_refuses_at_export_intake_or_under_hash_blobs",
     ),
 }
 
@@ -286,7 +284,7 @@ def test_manifest_requires_reviewed_integration_source(tmp_path, monkeypatch, mi
 @pytest.mark.parametrize("changed", CURRENT_SOURCE_BLOBS)
 def test_manifest_refuses_stale_caller_or_owner(tmp_path, monkeypatch, changed):
     # No .git directory or historical commit is needed, even in a transported tree.
-    for rel in (*SCOPES, "prismaquant/digests.py", "prismaquant/tensor_digests.py"):
+    for rel in CURRENT_SOURCE_BLOBS:
         destination = tmp_path / rel
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes((REPO / rel).read_bytes())
