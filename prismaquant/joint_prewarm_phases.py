@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import gzip
-import hashlib
 import json
 from pathlib import Path
+
+from .digests import bytes_sha256hex
 
 
 # Smaller than the storage role's 192 GiB nominal ARC budget even when a
@@ -24,19 +25,6 @@ HEAD_PHASE = "head"
 
 def phase_name(layer: int, part: int) -> str:
     return f"layer-{layer}-part-{part}"
-
-
-def load_prepare_frontier(path: str, sha256: str, plan_sha256: str) -> dict[str, str]:
-    """Bind runtime progress to the exact PB manifest used by the storage role.
-
-    The manifest is an immutable CAS input at submission. The action receives
-    its digest in the sealed command; replacing the live pathname later must
-    stop the action before it can announce a false consumed prefix.
-
-    Returns the unit-to-phase table. A resumed manifest also seals a replay
-    frontier beside it; ``load_prepare_read_set`` returns both from one read.
-    """
-    return load_prepare_read_set(path, sha256, plan_sha256)[0]
 
 
 def load_prepare_read_set(
@@ -58,7 +46,7 @@ def load_prepare_read_set(
     announces it.
     """
     blob = Path(path).read_bytes()
-    if hashlib.sha256(blob).hexdigest() != sha256:
+    if bytes_sha256hex(blob) != sha256:
         raise RuntimeError("joint prepare data manifest changed after submission")
     decoded = gzip.decompress(blob) if path.endswith(".gz") else blob
     manifest = json.loads(decoded)
