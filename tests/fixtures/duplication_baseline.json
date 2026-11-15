@@ -32,10 +32,6 @@
   "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256",
   "hashlib:prismaquant/tessera_calibration_cache.py::sha256",
   "hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob",
-  "hashlib:prismaquant/tessera_census_union.py::_write_stream_atomic",
-  "hashlib:prismaquant/tessera_census_union.py::identity_sha256",
-  "hashlib:prismaquant/tessera_census_union.py::read_manifest",
-  "hashlib:prismaquant/tessera_census_union.py::write_plan",
   "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
   "hashlib:prismaquant/tessera_sampled_stack_proposal.py::_read_bound",
   "hashlib:prismaquant/tessera_sampled_stack_proposal.py::propose_from_bound_inputs",
@@ -86,7 +82,6 @@
   "hashlib:tools/measure_wire_rehash_readers.py::_hash",
   "hashlib:tools/pilot_existing_t4.py::main",
   "hashlib:tools/pilot_existing_t4.py::main.unit",
-  "hashlib:tools/pq282_equality/recheck_refusal_order.py::<module>",
   "hashlib:tools/prepare_dsv4_wikitext_inputs.py::_build_payload",
   "hashlib:tools/prepare_dsv4_wikitext_inputs.py::_load_corpus",
   "hashlib:tools/prepare_dsv4_wikitext_inputs.py::main",
@@ -111,7 +106,6 @@
   "hashlib:tools/render_window_bench.py::_renders",
   "hashlib:tools/render_window_bench.py::cmd_child",
   "hashlib:tools/reselect_mtp_fixed.py::main",
-  "hashlib:tools/seal_tessera_census_identity.py::main",
   "hashlib:tools/serve_fingerprint.py::_canonical_sha256",
   "hashlib:tools/serve_fingerprint.py::_decode_record_sha256",
   "hashlib:tools/serve_fingerprint.py::_file_identity",
@@ -157,8 +151,6 @@
   "sorted-json:prismaquant/stage_b_workspace_profile.py::write_profile",
   "sorted-json:prismaquant/streamed_boundary_artifacts.py::StreamedBoundaryArtifacts._publish_status",
   "sorted-json:prismaquant/tessera_campaign.py::_main",
-  "sorted-json:prismaquant/tessera_census_union.py::<module>",
-  "sorted-json:prismaquant/tessera_census_union.py::_json_key",
   "sorted-json:prismaquant/tessera_expert_projection.py::request_expert_projection",
   "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
   "sorted-json:prismaquant/tessera_export_lane.py::main",
@@ -179,7 +171,6 @@
   "sorted-json:tools/build_stagea_split_package.py::build",
   "sorted-json:tools/build_streamed_full_kl_teacher.py::main",
   "sorted-json:tools/build_t4_overlay_catalog.py::main",
-  "sorted-json:tools/build_tessera_census_cache.py::main",
   "sorted-json:tools/build_tessera_hessian_collection.py::publish_collection",
   "sorted-json:tools/build_tessera_mtp_cached_units.py::main",
   "sorted-json:tools/capture_glm_routed_layers.py::main",
@@ -215,7 +206,6 @@
   "sorted-json:tools/make_uniform_assignment.py::main",
   "sorted-json:tools/measure_served_gold.py::_canonical_sha256",
   "sorted-json:tools/measure_wire_rehash_readers.py::main",
-  "sorted-json:tools/pq282_equality/recheck_refusal_order.py::<module>",
   "sorted-json:tools/prepare_dsv4_wikitext_inputs.py::_build_payload",
   "sorted-json:tools/prepare_dsv4_wikitext_inputs.py::main",
   "sorted-json:tools/prismaquant_runtime_snapshot.py::_closure_sha256",
@@ -233,7 +223,6 @@
   "sorted-json:tools/render_window_bench.py::cmd_analyze",
   "sorted-json:tools/render_window_bench.py::cmd_child",
   "sorted-json:tools/reselect_mtp_fixed.py::main",
-  "sorted-json:tools/seal_tessera_census_identity.py::main",
   "sorted-json:tools/serve_fingerprint.py::_canonical_sha256",
   "sorted-json:tools/serve_fingerprint.py::artifact_binding",
   "sorted-json:tools/serve_fingerprint.py::fingerprint",
@@ -246,7 +235,6 @@
   "sorted-json:tools/tessera_fleet/model_worker.py::main",
   "sorted-json:tools/tessera_surface_replay.py::main",
   "sorted-json:tools/test_qualify_t4_overlay.py::test_partial_checkpoint_corruption_is_not_adopted",
-  "sorted-json:tools/union_tessera_census_tables.py::main",
   "sorted-json:tools/unit_journal_bench.py::cmd_child",
   "sorted-json:tools/unit_journal_bench.py::cmd_host",
   "sorted-json:tools/vllm_prompt_smoke.py::main",
@@ -265,7 +253,6 @@
   ],
   "_bound": [
    "prismaquant/joint_aura_transition_base.py",
-   "tools/build_tessera_census_cache.py",
    "tools/build_tessera_selected_cache.py",
    "tools/derive_retained_window_budget.py"
   ],
@@ -302,10 +289,6 @@
    "prismaquant/kl_measurement.py",
    "tools/build_sensitivity_ablation_assignments.py"
   ],
-  "_digest": [
-   "prismaquant/tessera_anchored_surface.py",
-   "prismaquant/tessera_census_union.py"
-  ],
   "_domain": [
    "prismaquant/adaptive_anchored_shape.py",
    "prismaquant/tessera_sampled_stack_proposal.py"
@@ -320,8 +303,7 @@
   ],
   "_equal": [
    "prismaquant/native_operator_panel.py",
-   "prismaquant/runtime_provenance.py",
-   "prismaquant/tessera_census_union.py"
+   "prismaquant/runtime_provenance.py"
   ],
   "_fail": [
    "prismaquant/artifact_collection.py",
@@ -552,8 +534,7 @@
   ],
   "_same": [
    "prismaquant/joint_catalog_extension.py",
-   "prismaquant/joint_stage_b_head.py",
-   "prismaquant/tessera_census_union.py"
+   "prismaquant/joint_stage_b_head.py"
   ],
   "_sample": [
    "prismaquant/quality_prefill_coverage.py",
@@ -580,7 +561,6 @@
    "tools/kl_ab.py"
   ],
   "_sha256_file": [
-   "prismaquant/tessera_census_union.py",
    "tools/chain_roll_bench.py",
    "tools/measure_served_gold.py"
   ],
@@ -610,10 +590,6 @@
    "prismaquant/artifact_collection_legacy.py",
    "tools/exl3_grouped_down_replay.py"
   ],
-  "_write": [
-   "prismaquant/tessera_tp_audit.py",
-   "tools/build_tessera_census_cache.py"
-  ],
   "_write_json": [
    "tools/dispatch_stage_a_split.py",
    "tools/tp_decode_feasibility.py"
@@ -626,10 +602,6 @@
   "build": [
    "tools/build_stagea_seed_package.py",
    "tools/build_stagea_split_package.py"
-  ],
-  "build_plan": [
-   "prismaquant/tessera_census_union.py",
-   "tools/tp2_budget_plan.py"
   ],
   "canonical_bytes": [
    "prismaquant/joint_layer_quanta.py",
@@ -696,10 +668,6 @@
   "git_provenance": [
    "prismaquant/shipcard.py",
    "tools/serve_fingerprint.py"
-  ],
-  "identity_sha256": [
-   "prismaquant/tessera_campaign_reseal.py",
-   "prismaquant/tessera_census_union.py"
   ],
   "load_manifest": [
    "prismaquant/readset_coverage.py",
@@ -774,10 +742,6 @@
   "verify_quanta_coverage": [
    "prismaquant/joint_head_walk_quanta.py",
    "prismaquant/joint_layer_quanta.py"
-  ],
-  "write_plan": [
-   "prismaquant/production_cache_stripes.py",
-   "prismaquant/tessera_census_union.py"
   ]
  }
 }

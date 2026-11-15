@@ -1,9 +1,9 @@
 {
   "schema": "pq2317.independent_launch_contracts.v1",
   "scope": {
-    "files": 36,
+    "files": 32,
     "standard_library_help_modes": 10,
-    "scientific_package_help_modes": 24,
+    "scientific_package_help_modes": 20,
     "no_parser_batch_modules": 2
   },
   "source_reference": "99a578e071b; actual original import/argument/caller context, not an invented uniform contract",
@@ -105,19 +105,6 @@
         "forward",
         "--help"
       ]
-    },
-    {
-      "file": "tools/build_tessera_census_cache.py",
-      "kind": "Package-dependent argument/help entry",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.build_tessera_census_cache",
-        "--help"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
-      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
     },
     {
       "file": "tools/build_tessera_hessian_collection.py",
@@ -302,19 +289,6 @@
       "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
     },
     {
-      "file": "tools/pq282_equality/recheck_refusal_order.py",
-      "kind": "Package-dependent argument/help entry",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.pq282_equality.recheck_refusal_order",
-        "--help"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
-      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
-    },
-    {
       "file": "tools/profile_stage_b_head.py",
       "kind": "Standard-library argument/help entry",
       "supported_probe": [
@@ -399,19 +373,6 @@
         "Qualified SDK4 interpreter",
         "-m",
         "tools.retire_stage_a_run",
-        "--help"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
-      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
-    },
-    {
-      "file": "tools/seal_tessera_census_identity.py",
-      "kind": "Package-dependent argument/help entry",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.seal_tessera_census_identity",
         "--help"
       ],
       "working_directory": "Source checkout; coordinator PYTHONPATH cleared",

@@ -215,9 +215,3 @@ def test_runtime_menu_refuses_projected_units_declared_dense(monkeypatch, tmp_pa
             cache_dir=tmp_path/'cache', selected_source=False, streaming_head=False,
             source_authentication=None, selected_guard=None)
     assert not (tmp_path/'cache').exists()
-
-
-def test_menu_operation_has_all_actual_global_bindings():
-    from tools.verify_campaign_operation_globals import unbound_global_reads
-
-    assert unbound_global_reads(campaign.resolve_campaign_menu) == ()
