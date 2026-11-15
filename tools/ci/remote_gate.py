@@ -188,6 +188,8 @@ def run_gate(client, args, *, clock=time.monotonic):
     with _evidence_phase('plan-await', invocation, REFUSAL_DETAIL):
         record = await_invocation(client, invocation, clock() + args.timeout * 60, clock=clock)
     with _evidence_phase('plan-validate', invocation):
+        if not succeeded(record):
+            raise RemoteError(f'remote run {invocation} failed')
         if record.get('commitSha') != args.head:
             raise RemoteError('plan runner has the wrong source head')
         artifacts = {}
@@ -244,6 +246,8 @@ def verify_shard_result(client, invocation_id, expected, head, deadline, *, cloc
             raise RemoteError('shard result has the wrong source base')
         if result['mode'] != expected['mode'] or result.get('error'):
             raise RemoteError('shard result does not establish its requested mode')
+        if not succeeded(record) and result['verdict'] != 'fail':
+            raise RemoteError(f'remote run {invocation_id} failed')
         return {**result, 'runner_invocation': invocation_id,
                 'invocation_status': record['invocationStatus']}
 
@@ -267,8 +271,6 @@ def await_invocation(client, invocation_id, deadline, *, interval=15,
             raise RemoteError('remote run evidence has the wrong invocation ID')
         status = record.get('invocationStatus')
         if status == 'COMPLETE_INVOCATION_STATUS':
-            if not succeeded(record):
-                raise RemoteError(f'remote run {invocation_id} failed')
             return record
         if status == 'DISCONNECTED_INVOCATION_STATUS':
             raise RemoteError(f'remote run {invocation_id} disconnected')
@@ -330,6 +332,11 @@ def main(argv=None):
             with Path(summary).open('a') as stream:
                 stream.write('Bazel verdict: ' + result['verdict'] + '\n\n')
                 stream.write('Budget warnings: ' + str(len(result['budget_warnings'])) + '\n')
+        if result['verdict'] == 'fail':
+            for architecture in result['architectures'].values():
+                for shard in architecture['shards']:
+                    for label in shard['failed']:
+                        print('::error::failed test ' + label)
         return 0 if result['verdict'] in ('pass', 'skipped') else 1
     except (RemoteError, RuntimeError, OSError, ValueError, KeyError, TypeError):
         if upload.is_symlink():
