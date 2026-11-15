@@ -23,7 +23,6 @@
   "reach:tests/test_dispatch_stage_a_split.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_doc_claims_driver_truth.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_docs_staleness.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
-  "reach:tests/test_dsv4_campaign_completion.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_dsv4_fixture_isolation.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_exl3_grouped_down_replay_integration.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",
   "reach:tests/test_exl3_replay_cli.py": "Existing test above the initial p90 budget at c44e5426; remove as its source reach shrinks.",

@@ -21,7 +21,8 @@ from golden_table import GoldenTable
 
 GOLDEN = GoldenTable("spaced_lax_tools_consumers_2320")
 ROOT = Path(__file__).resolve().parents[1]
-RETIRED_HELP_TOOLS = {"tools/pwc_window_load_bench.py"}
+RETIRED_HELP_TOOLS = {"tools/pwc_window_load_bench.py",
+                      "tools/build_tessera_selected_cache.py"}
 LAUNCH_CONTRACTS = json.loads((Path(__file__).parent / "fixtures" /
     "spaced_lax_tools_launch_contracts_2320.json").read_text())["rows"]
 

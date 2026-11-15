@@ -6,10 +6,6 @@ import os
 import pytest
 
 from prismaquant import tessera_joint_aura as bridge
-import tools.build_tessera_selected_cache as tool
-from test_selected_cache_plan_allowance_1488 import (
-    INPUTS, _Reached, _argv, _write, captured,
-)
 
 
 def test_explicit_io_width_does_not_require_extra_cpu_reservation(monkeypatch):
@@ -27,23 +23,6 @@ def test_explicit_io_width_is_a_bounded_integer(monkeypatch, value):
     monkeypatch.setattr(os, "sched_getaffinity", lambda _pid: set(range(64)))
     with pytest.raises(ValueError, match="head walk workers"):
         bridge._head_walk_worker_count(value)
-
-
-def test_selected_cache_forwards_explicit_io_width(tmp_path, captured):
-    _plan, _digest, handoff, handoff_sha = _write(tmp_path, {"inputs": INPUTS})
-    with pytest.raises(_Reached):
-        tool.main(_argv(handoff, handoff_sha, "--head-walk-workers", "8"))
-    assert captured["head_walk_workers"] == 8
-    assert captured["require_existing_renders"] is True
-    assert captured["verify_payloads"] is False
-
-
-@pytest.mark.parametrize("value", ["0", "-1", "17"])
-def test_selected_cache_refuses_invalid_width_before_loader(tmp_path, captured, value):
-    _plan, _digest, handoff, handoff_sha = _write(tmp_path, {"inputs": INPUTS})
-    with pytest.raises(ValueError, match="head walk workers"):
-        tool.main(_argv(handoff, handoff_sha, "--head-walk-workers", value))
-    assert not captured
 
 
 def test_head_resume_io_policy_preserves_other_journal_cpu_limits(tmp_path, monkeypatch):

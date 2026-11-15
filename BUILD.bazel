@@ -758,7 +758,6 @@ pq_py_library(
         ":prismaquant/anchored_cost",
         ":prismaquant/build_production_cache",
         ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/dsv4_campaign_completion",
         ":prismaquant/gpu_guard",
         ":tools/prismaquant_runtime_snapshot",
         "@pq_pip//torch",
@@ -9273,21 +9272,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "prismaquant/dsv4_campaign_completion",
-    srcs = [
-        "prismaquant/dsv4_campaign_completion.py",
-    ],
-    data = [
-        "prismaquant/digests.py",
-        "prismaquant/dsv4_campaign_completion.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
     name = "prismaquant/exact_activation_contract",
     srcs = [
         "prismaquant/exact_activation_contract.py",
@@ -10822,20 +10806,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "prismaquant/tessera_anchored_surface",
-    srcs = [
-        "prismaquant/tessera_anchored_surface.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/anchored_shape",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
     name = "prismaquant/tessera_campaign_requests",
     srcs = [
         "prismaquant/tessera_campaign_requests.py",
@@ -10929,32 +10899,6 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/tessera_source_digest_adoption",
-    srcs = [
-        "prismaquant/tessera_source_digest_adoption.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/digests",
-        "@pq_pip//tessera_quant",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/tessera_tp_audit",
-    srcs = [
-        "prismaquant/tessera_tp_audit.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
     ],
 )
@@ -11199,20 +11143,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/adopt_tessera_source_digests",
-    srcs = [
-        "tools/adopt_tessera_source_digests.py",
-    ],
-    data = [
-        "tools/adopt_tessera_source_digests.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/tessera_source_digest_adoption",
-    ],
-)
-
-pq_py_library(
     name = "tools/assemble_t4_overlay",
     srcs = [
         "tools/assemble_t4_overlay.py",
@@ -11444,23 +11374,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
-    name = "tools/build_tessera_selected_cache",
-    srcs = [
-        "tools/build_tessera_selected_cache.py",
-    ],
-    data = [
-        "tools/build_tessera_selected_cache.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cluster_campaign",
-        ":prismaquant/digests",
-        "@pq_pip//tessera_quant",
     ],
 )
 
@@ -11995,7 +11908,6 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/digests",
         "@pq_pip//tessera_quant",
     ],
@@ -13406,21 +13318,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/tessera_surface_replay",
-    srcs = [
-        "tools/tessera_surface_replay.py",
-    ],
-    data = [
-        "tools/tessera_surface_replay.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/tessera_anchored_surface",
-    ],
-)
-
-pq_py_library(
     name = "tools/tp2_budget_plan",
     srcs = [
         "tools/tp2_budget_plan.py",
@@ -13467,35 +13364,5 @@ pq_py_library(
     name = "tools/vllm_prompt_smoke",
     srcs = [
         "tools/vllm_prompt_smoke.py",
-    ],
-)
-
-pq_py_library(
-    name = "tools/wait_dsv4_aura_campaign",
-    srcs = [
-        "tools/wait_dsv4_aura_campaign.py",
-    ],
-    data = [
-        "prismaquant/dsv4_campaign_completion.py",
-        "tools/prismaquant_runtime_snapshot.py",
-        "tools/wait_dsv4_aura_campaign.py",
-    ],
-    deps = [
-        ":prismaquant/dsv4_campaign_completion",
-        ":tools/prismaquant_runtime_snapshot",
-    ],
-)
-
-pq_py_library(
-    name = "tools/write_tessera_selected_scales",
-    srcs = [
-        "tools/write_tessera_selected_scales.py",
-    ],
-    data = [
-        "tools/write_tessera_selected_scales.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/tessera_selected_scales",
     ],
 )
