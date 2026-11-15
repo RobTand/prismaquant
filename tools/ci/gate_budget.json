@@ -19,7 +19,6 @@
     "tests/test_native_receipt_table_routed.py::test_the_cli_refuses_a_forged_or_changed_rank_report": 60,
     "tests/test_native_receipt_table_routed.py::test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members": 64,
     "tests/test_native_render_levers_explicit.py::test_every_live_call_site_names_the_recipe": 49,
-    "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": 76,
     "tests/test_packed_append_streaming_and_pair_identity.py::test_streaming_append_records_per_layer_section": 47,
     "tests/test_packed_expert_cross_domain_gate.py::test_default_path_keeps_in_domain_holdout": 42,
     "tests/test_packed_grouped_qdq_audit.py::test_grouped_activation_rows_match_expert_reference[32-NVFP4]": 53,
@@ -32,8 +31,6 @@
     "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_run_owned_cost_keeps_existing_additivity_provenance_stamp": 52,
     "tests/test_pq1588_predispatch_packet.py::test_packet_cell_state_matches_the_pinned_contract": 175,
     "tests/test_pq1588_predispatch_packet.py::test_packet_rungs_are_producer_legal_without_holes": 281,
-    "tests/test_prismabuild_boundary.py::test_prismabuild_references_equal_the_frozen_allowlist": 63,
-    "tests/test_prismabuild_import_leak_1281.py::test_source_consumers_restore_the_public_plugin_import_graph": 232,
     "tests/test_production_cache_render_identity.py::test_resume_refuses_different_hooked_enumeration": 41,
     "tests/test_production_weight_cache.py::test_render_score_clips_nvfp4_but_not_dynamic_mxfp8": 43,
     "tests/test_resident_packed_stripe_scope_audit.py::test_resident_format_menu_include_selects_one_packed_projection[False]": 43,
@@ -215,13 +212,6 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
-    "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": {
-      "seconds": 37.814,
-      "run": 41284744088,
-      "attempt": 1,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/9/junit.xml"
-    },
     "tests/test_packed_append_streaming_and_pair_identity.py::test_streaming_append_records_per_layer_section": {
       "seconds": 23.344,
       "run": 41277228478,
@@ -305,20 +295,6 @@
       "attempt": 2,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-2/effective/10/junit.xml"
-    },
-    "tests/test_prismabuild_boundary.py::test_prismabuild_references_equal_the_frozen_allowlist": {
-      "seconds": 31.33,
-      "run": 41285636094,
-      "attempt": 1,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/1/junit.xml"
-    },
-    "tests/test_prismabuild_import_leak_1281.py::test_source_consumers_restore_the_public_plugin_import_graph": {
-      "seconds": 115.91,
-      "run": 41487683378,
-      "attempt": 1,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-pr-final-1/effective/9/junit.xml"
     },
     "tests/test_production_cache_render_identity.py::test_resume_refuses_different_hooked_enumeration": {
       "seconds": 20.229,
