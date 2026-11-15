@@ -1,9 +1,7 @@
-"""Keep exact builtin-required and optional int-subclass policies different."""
+"""Check the optional positive-integer evidence policy."""
 import pytest
 
 from prismaquant import shipcard_slots
-from prismaquant import tessera_reduced_schedule as schedule
-from prismaquant.tessera_formats import TesseraFormatError
 
 
 class IntegerSubclass(int):
@@ -11,9 +9,7 @@ class IntegerSubclass(int):
 
 
 @pytest.mark.parametrize("value", [True, False, 0, -1, 1.0, "1", None, IntegerSubclass(1)])
-def test_required_builtin_policy_refuses_without_widening(value):
-    with pytest.raises(TesseraFormatError, match="^fixture: expected a positive integer$"):
-        schedule._require_positive_builtin_int(value, "fixture")
+def test_optional_policy_accepts_only_positive_integers(value):
     optional = shipcard_slots._positive_int(value)
     if type(value) is IntegerSubclass:
         assert optional is value
@@ -22,6 +18,5 @@ def test_required_builtin_policy_refuses_without_widening(value):
 
 
 @pytest.mark.parametrize("value", [1, 37])
-def test_both_policies_preserve_positive_builtin(value):
-    assert schedule._require_positive_builtin_int(value, "fixture") is value
+def test_optional_policy_preserves_positive_builtin(value):
     assert shipcard_slots._positive_int(value) is value

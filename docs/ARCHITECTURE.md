@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-14, placement requires one eligible online rank. Sources below describe the current implementation.
+As of: 2026-11-14, unused Tessera schedule and census-tool removal. Placement requires one eligible online rank. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -2440,14 +2440,6 @@ The executable parses argv and prints returned reports and row progress.
 Public operations receive explicit paths and selections, never argparse state.
 Package consumers import the proof owner directly. Proof requirements, wire
 identities, scored content and idempotent row semantics keep their prior gates.
-
-Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
-`tessera_census_union` owns union planning, source/cell/Hessian/receipt checks and
-publication of sealed campaign tables. Shared layout and stage names belong to
-`tessera_campaign_table`. The executable parses arguments and prints results;
-package consumers do not load tool source or initialize a numerical campaign.
-Planning preserves the existing all-checks-before-write policy, wire hardlinks,
-identity migration proofs and verification of resumed outputs.
 
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
 `tessera_campaign_table` owns anchor/stack metadata, campaign payload construction,
@@ -5198,20 +5190,6 @@ reader does not infer or declare a synthesis phase. Existing head checkpoint,
 current-byte verification, manifest bytes and worker limits remain unchanged.
 This CPU wiring is not NFS-throughput or GPU qualification.
 
-Re-stamped 2026-09-30 (PQ #1776, Refs #495, `sol/pq-tessera-5`):
-`plan_reduced_schedule_repair` replays explicit research input history under a
-fixed declared experiment and round cap. Prior receipt continuity, monotonic
-coverage, complete requested scalar rows and immutable observations are required
-before a supplied re-solved assignment can request its next missing cells.
-Fixed fields and prior rows are compared as canonical JSON bytes, so numeric
-retyping cannot bypass their identity. Replays are digest-bound and cap
-exhaustion fails closed. This wraps the existing planner/global greedy
-diagnostic; it does not solve, encode, dispatch, replace live measured rows,
-modify resumes, admit wires or establish convergence/quality.
-The [repair-history contract](design/tessera_reduced_schedule_repair.md) keeps
-actual execution and GPU acceptance separate. Pin, serving and defaults stay
-unchanged.
-
 Re-stamped 2026-09-30 (PQ #1786, Refs #1367, `sol/pq-stageb-3`):
 Stage B has an explicitly opt-in host publication path selected by the runtime
 execution setting `checkpoint_publication_budget_bytes`. Absent/zero retains
@@ -5370,18 +5348,6 @@ research accounting, and an explicit footprint recipe remains authoritative.
 Unattested served wires are refused by the existing resolver. Production
 rendering, producer accounting, encoded bytes, pin and ship gates are unchanged.
 This is CPU recipe/geometry consistency, not GPU or serving qualification.
-
-Re-stamped 2026-09-29 (PQ #1755, Refs #495, `sol/pq-tessera-3`):
-`python -m prismaquant.tessera_reduced_schedule` provides a research-only offline
-next-work transition from explicit stack evidence, current allocator winners,
-byte costs and a measured-cell ledger. The existing global regret gate selects
-missing winner cells on pass or the full declared band for all stacks on fail.
-Inputs/configuration are canonically digest-bound; mismatched rosters, incomplete
-base evidence and infeasible winners are refused. Scalar coverage never implies
-wire readiness. The gate retains its greedy diagnostic, not production-DP
-regret. [The contract](design/tessera_reduced_schedule.md) describes the boundary:
-no live campaign dispatch, encoding, repair/re-solve loop, exact-wire admission,
-GPU qualification, pin, serving numerics or production default changes.
 
 Re-stamped 2026-09-29 (PQ #1761, routed backfill admission regression):
 checkpoint presence does not require a load-all row head. The failed
@@ -15629,18 +15595,6 @@ default, format menu, lane or sealed row moves. Rescoring routed cells under
 the executed grouping is design only
 (`docs/design/routed_executed_scale_grouping_2026-09-14.md`). Gate:
 `tests/test_routed_executed_scale_grouping.py`.
-
-Re-stamped (2026-09-14, `claude/a4-union-census-tables`) for **the census
-table union** (#623). `tools/union_tessera_census_tables.py` writes one
-merged-table directory from two merged tables that priced disjoint cells of
-one sealed census — the same weights, Hessians, calibration draw, encoder and
-projection — so every downstream reader sees one campaign. Nothing is
-re-encoded, re-priced or interpolated: every sealed input except the menu
-must be equal per unit, a cell priced twice must agree on price and wire
-bytes (only the clock and anchor-batch-width fields may differ), wires are
-hardlinked never copied, and every check runs before the first byte is
-written (`--dry-run`). No pipeline default, stage or gate changes. Gate:
-`tests/test_union_tessera_census_tables.py`.
 
 Re-stamped (2026-09-14, `claude/a4-merge-declared-coverage`) for **the campaign
 merge expecting a declared partial coverage** (#621). `merge` still requires
@@ -27062,39 +27016,6 @@ whole-scope claim is `False`) and `provenance.coverage` records
 population block is still rebuilt over the scope, so the unpriced units are
 counted there as before. Gate: `tests/test_tessera_campaign_merge_declared_coverage.py`.
 
-**Two merged tables over one census union into one table** (2026-09-14,
-#623). A census extension — a new rate band, a new family — is a second
-campaign over the same sealed census, pricing cells the first did not, and it
-merges into its own table directory. `tools/union_tessera_census_tables.py
---table NAME=DIR --table NAME=DIR --out DIR` writes one directory of the same
-shape (`cost.pkl`, the sealed `cost.anchors.json` streamed byte-for-byte in
-the dispatcher's layout, the per-unit journal envelopes re-sealed under the
-union digest, hardlinked wires, one Hessian reference handoff, one
-`input_scales.safetensors`) that the allocator, `tessera_census_cache` and
-the reseal tool accept as one campaign. It refuses by name whatever is not
-equal: per-unit sealed inputs other than the menu, every top-level identity
-key but `settings` and `family_restriction` (the differing settings keys
-move under `identity.union.tables[<name>]`, inside the seal), the cost-table
-provenance keys without a merge rule, and a (unit, format) cell priced by
-both tables unless the rows agree after the capture-digest restamp, ignoring
-only the wall-clock fields and the anchor batch width they were divided by
-(`encode_seconds`, `encode_seconds_accounting`, an anchor's `seconds`,
-`encoding_batch_size` — the three the campaign derives from the batch at
-`tessera_campaign.py:1771-1774`). Two tables pricing different rungs of one
-family refuse, because their rate surfaces were fitted to different anchors
-and the tool does not refit. The Hessian handoff is not byte-identical across
-tables (its `capture_sha256` is computed over each campaign's unit set), so
-the union requires one table's descriptor to cover every unit, hardlinks it,
-and restamps every row to its digest — the restamp `merge_payloads` applies
-— before `assert_uniform_hessian_identity` runs on the planned table. A
-partial B table is read through `unit_selection.selected` and
-`provenance.coverage` (the block #621 writes). Nothing is copied: a failed
-`os.link` refuses. `--dry-run` runs every check and writes nothing;
-`--resume` continues into an `--out` whose files verify against the plan.
-Serial by design after profiling: the per-unit envelope load is
-`pickle.loads` plus checks under the GIL. Gate:
-`tests/test_union_tessera_census_tables.py`.
-
 **A reseal proof bundle authorizes only the strata it proved** (2026-09-14,
 #628). `tools/reseal_campaign_identity.py dry-run --proof` and `migrate`
 derive each row's (kind, family) strata from its sealed identity
@@ -32930,9 +32851,6 @@ Concurrent calls in one process cannot alter another call's stage bytes.
 The existing no-follow parent-descriptor publication rules still apply
 (`cost_stage_checkpoint.publish_new_bytes`).
 
-The census-cache tool parses authenticated config bytes for assignment and metadata.
-Its optional projection retains the path-change refusal
-(`tools/build_tessera_census_cache.py`, `main`).
 The offline calibration builder rejects nonpositive token windows at CLI and pack intake
 (`tools/build_diverse_calibration.py`, `_require_positive_target`).
 Chain-roll analysis requires the complete declared result population before reports

@@ -28,7 +28,6 @@ def _load(name: str, path: str):
 
 QUANTA = _load("route2639_quanta", "tools/dispatch_joint_quanta.py")
 CAMPAIGN = _load("route2639_campaign", "tools/dispatch_tessera_campaign.py")
-from prismaquant import tessera_census_union as UNION
 
 from prismaquant import digests as owners  # noqa: E402
 from prismaquant import stage_b_prep_io as preparation  # noqa: E402
@@ -95,7 +94,3 @@ def test_routed_values_match_hashlib(tmp_path):
     target = tmp_path / "r.bin"
     target.write_bytes(blob)
     assert owners.file_range_sha256hex(target, 7, 2500) == hashlib.sha256(blob[7:2507]).hexdigest()
-    assert UNION._digest({"b": 1}) == hashlib.sha256(
-        UNION._json_key({"b": 1}).encode("utf-8")).hexdigest()
-    assert UNION._indent_dump({"b": [1, 2]}) == json.dumps(
-        {"b": [1, 2]}, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False)
