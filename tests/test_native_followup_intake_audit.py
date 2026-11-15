@@ -149,13 +149,18 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
     base = pickle.loads(base_path.read_bytes())
     before = base_path.read_bytes()
     assert set(base['costs']) == {backfill_name}
-    model = load_resident_source_model(str(source), device=torch.device('cpu'), dtype=torch.bfloat16,
-        requires_grad=True, offload_folder=str(tmp_path / 'resident'), resource_check=guard.check,
-        attn_implementation='eager')
-    aura_payload = aura.compute_aura_cost(model, tokens, ['FP8_E4M3', 'BF16'],
-        n_probes=1, n_linear_chunks=1, min_free_gib=0,
-        unit_filter='(?:' + '|'.join(re.escape(name) for name in names) + ')$', allow_packed_expert_omission=True,
-        profile=detect_profile(str(source)), checkpoint_identity_extra={'source_binding': binding})
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    runner = build_streamed_causal_lm(
+        str(source), device=torch.device('cpu'), dtype=torch.bfloat16,
+        profile=detect_profile(str(source)), offload_folder=str(tmp_path / 'streamed'),
+        max_cache_slots=2, prefetch_workers=1, prefetch_min_available_gb=0, cache_headroom_gb=0)
+    try:
+        aura_payload = aura.compute_aura_cost_streamed(runner, tokens, ['FP8_E4M3', 'BF16'],
+            n_probes=1, min_free_gib=0,
+            unit_filter='(?:' + '|'.join(re.escape(name) for name in names) + ')$', allow_packed_expert_omission=True,
+            profile=runner.profile, checkpoint_identity_extra={'source_binding': binding})
+    finally:
+        runner.shutdown()
     dense = {**aura_payload, 'costs': dict(aura_payload['costs'])}
     dense['provenance'].update(model=str(source), cost_mode='aura')
     dense_path = tmp_path / 'dense.pkl'

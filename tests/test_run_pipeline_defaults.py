@@ -209,7 +209,9 @@ def test_aura_streaming_identity_path_is_explicit_and_stage_bound():
 
     assert _shell_default(script, "AURA_COST_STREAMING") == "0"
     assert _shell_default(script, "AURA_COST_CHECKPOINT_DIR") == ""
-    assert "AURA_COST_STREAMING=1 requires an absolute" in script
+    assert "streamed AURA requires an absolute" in script
+    assert "AURA_COST_STREAMING=1" in script
+    assert "--streaming --production-anchors" in script
     assert '--checkpoint-dir "$AURA_COST_CHECKPOINT_DIR"' in script
     assert '"AURA_COST_STREAMING=$AURA_COST_STREAMING"' in script
     assert '"AURA_COST_CHECKPOINT_DIR=$AURA_COST_CHECKPOINT_DIR"' in script
@@ -225,7 +227,7 @@ def test_aura_streaming_also_streams_and_resumes_empirical_expert_tail():
 
     script = _run_pipeline_script()
     expert_block = script.split("AURA_EXPERT_EXECUTION_ARGS=(", 1)[1].split(
-        "# [2b]", 1
+        "# [2c] The AURA cost itself", 1
     )[0]
     invocation = script.split(
         "python3 -m prismaquant.expert_empirical_cost", 1

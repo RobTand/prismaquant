@@ -226,7 +226,7 @@ def test_streamed_causal_lm_forward_uses_explicit_residency_contract():
     assert context.install_require_prefetched == [True, True]
 
 
-def test_streamed_aura_cost_rows_are_exactly_resident_rows():
+def test_streamed_aura_matches_full_graph_gradients():
     torch.manual_seed(104)
     seed_model = _DenseTinyLM().eval()
     state = {
@@ -235,18 +235,18 @@ def test_streamed_aura_cost_rows_are_exactly_resident_rows():
     }
     calib = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]])
     resident = _DenseTinyLM(state).eval()
-    resident_result = aura.compute_aura_cost(
-        resident,
-        calib,
-        ["NVFP4"],
-        n_probes=3,
-        n_linear_chunks=1,
-        min_free_gib=0.0,
-        production_cache=_RenderedCache(resident, "NVFP4"),
-        require_production_cache=True,
-        dw_dtype="float32",
-        profile=DefaultProfile(),
-    )
+    from prismaquant.kl_fisher import fisher_probe_scalar
+    names = sorted(aura._target_linears(resident, profile=DefaultProfile()))
+    parameters = [dict(resident.named_modules())[name].weight for name in names]
+    cache = _RenderedCache(resident, "NVFP4")
+    projections = {name: [] for name in names}
+    for seed in range(7000, 7003):
+        scalar = fisher_probe_scalar(resident(calib).logits, seed=seed,
+                                     token_scope="all", distribution="rademacher")
+        gradients = torch.autograd.grad(scalar, parameters)
+        for name, parameter, gradient in zip(names, parameters, gradients):
+            delta = cache.get(name, "NVFP4").float() - parameter.detach().float()
+            projections[name].append(float((gradient.float() * delta).sum()) ** 2)
 
     streamed_model, context, runner = _dense_runner(state)
     captured = {}
@@ -270,8 +270,10 @@ def test_streamed_aura_cost_rows_are_exactly_resident_rows():
         profile=DefaultProfile(),
     )
 
-    assert streamed_result["stats"] == resident_result["stats"]
-    assert streamed_result["costs"] == resident_result["costs"]
+    for name, samples in projections.items():
+        row = streamed_result["costs"][name]["NVFP4"]
+        assert row["x2_per_probe"] == pytest.approx(samples, rel=1e-6)
+        assert row["predicted_dloss"] == pytest.approx(0.5 * sum(samples) / 3, rel=1e-6)
     assert context.max_active == 1
     assert streamed_result["provenance"]["streamed_gradient_harvest"] == (
         "post_accumulate_per_parameter"

@@ -4,6 +4,7 @@ CUDA admission, tokenizer and calibration sampling are explicit doubles.
 The CLI journal test doubles only the numerical call and uses the real journal.
 """
 import math
+import pickle
 
 import pytest
 import torch
@@ -21,8 +22,20 @@ from tests.native_source_contract_fixtures import (
 )
 
 
+def run_main(tmp_path, args):
+    probe = tmp_path / 'probe.pkl'
+    probe.write_bytes(pickle.dumps({'meta': {'calib_hash': 'render-calibration'}}))
+    act = tmp_path / 'act'
+    act.mkdir(exist_ok=True)
+    extra = ['--streaming', '--production-anchors', '--probe', str(probe),
+             '--activation-cache-dir', str(act)]
+    if '--checkpoint-dir' not in args:
+        extra += ['--checkpoint-dir', str(tmp_path / 'anchor-checkpoints')]
+    return aura.main(args + extra)
+
+
 @pytest.mark.parametrize('streaming,dtype', [
-    (False, torch.bfloat16), (True, torch.bfloat16), (False, torch.float32),
+    (True, torch.bfloat16),
     pytest.param(True, torch.float32, marks=pytest.mark.xfail(
         strict=True, raises=RuntimeError, reason='base native streamed FP32 delivery keeps decoded FP8 weights in BF16')),
 ])
@@ -44,13 +57,6 @@ def test_ordinary_aura_final_cells_retain_qualified_source(tmp_path, monkeypatch
             payload = aura.compute_aura_cost_streamed(runner, tokens, ['FP8_E4M3', 'BF16'], **kwargs)
         finally:
             runner.shutdown()
-    else:
-        guard = producer_cpu_guard(tmp_path, monkeypatch)
-        model = load_resident_source_model(
-            str(source), device=torch.device('cpu'), dtype=dtype, requires_grad=True,
-            offload_folder=str(tmp_path / 'resident'), resource_check=guard.check,
-            attn_implementation='eager')
-        payload = aura.compute_aura_cost(model, tokens, ['FP8_E4M3', 'BF16'], n_linear_chunks=1, **kwargs)
     assert payload['costs']
     for rows in payload['costs'].values():
         assert math.isfinite(rows['FP8_E4M3']['predicted_dloss'])
@@ -60,9 +66,8 @@ def test_ordinary_aura_final_cells_retain_qualified_source(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize('streaming,native,dtype', [
-    (False, True, 'bfloat16'), (True, True, 'bfloat16'), (False, True, 'float32'),
-    (False, False, 'bfloat16'), (True, False, 'bfloat16'),
-    (False, False, 'float32'), (True, False, 'float32'),
+    (True, True, 'bfloat16'), (True, False, 'bfloat16'),
+    (True, False, 'float32'), (True, True, 'auto'),
 ])
 def test_ordinary_aura_main_delivers_declared_values_before_measurement(
         tmp_path, monkeypatch, streaming, native, dtype):
@@ -70,7 +75,7 @@ def test_ordinary_aura_main_delivers_declared_values_before_measurement(
     producer_cli_inputs(monkeypatch)
     guard = producer_cpu_guard(tmp_path, monkeypatch)
     monkeypatch.setattr(memory_management, 'CaptureMemoryGuard', lambda *_args: guard)
-    requested = getattr(torch, dtype)
+    requested = torch.bfloat16 if dtype == 'auto' else getattr(torch, dtype)
     observed = []
 
     def measurement(delivery, *_args, **kwargs):
@@ -93,13 +98,13 @@ def test_ordinary_aura_main_delivers_declared_values_before_measurement(
         observed.append(True)
         return {'costs': {}, 'provenance': {'dw_rendered_rows': 0, 'dw_rtn_fallback_rows': 0, 'seed_base': 7000}}
 
-    monkeypatch.setattr(aura, 'compute_aura_cost_streamed' if streaming else 'compute_aura_cost', measurement)
+    monkeypatch.setattr(aura, 'run_streamed_production_anchor_aura', measurement)
     args = ['--model', str(source), '--output', str(tmp_path / 'cli.pkl'), '--device', 'cpu',
             '--dtype', dtype, '--dataset', 'synthetic-token-draw', '--formats', 'FP8_E4M3']
     if streaming:
         args.append('--streaming')
         monkeypatch.setenv('PREFETCH_MIN_AVAILABLE_GB', '0')
-    assert aura.main(args) == 0
+    assert run_main(tmp_path, args) == 0
     assert observed == [True]
 
 
@@ -126,16 +131,16 @@ def test_ordinary_aura_main_supplies_binding_before_journal_restore(tmp_path, mo
             identity={'extra': kwargs['checkpoint_identity_extra']}, names=['unit'])
         pytest.fail('unbound native journal was admitted')
 
-    monkeypatch.setattr(aura, 'compute_aura_cost_streamed', measurement)
+    monkeypatch.setattr(aura, 'run_streamed_production_anchor_aura', measurement)
     with pytest.raises(RuntimeError, match='native source binding.*fresh checkpoint'):
-        aura.main(['--model', str(source), '--output', str(tmp_path / 'cli.pkl'), '--device', 'cpu',
+        run_main(tmp_path, ['--model', str(source), '--output', str(tmp_path / 'cli.pkl'), '--device', 'cpu',
                    '--dtype', 'bfloat16', '--dataset', 'synthetic-token-draw', '--streaming',
                    '--checkpoint-dir', str(checkpoint), '--resume'])
     assert reads == []
     assert {str(p.relative_to(checkpoint)): p.read_bytes() for p in checkpoint.rglob('*') if p.is_file() and p.name != 'streamed_model_identity.json'} == before
 
 
-@pytest.mark.parametrize('streaming', [False, True], ids=['resident', 'streamed-journal'])
+@pytest.mark.parametrize('streaming', [True], ids=['streamed-journal'])
 def test_hub_native_aura_uses_resolved_original_source(tmp_path, monkeypatch, streaming):
     import huggingface_hub
     from transformers import AutoModelForCausalLM
@@ -170,31 +175,29 @@ def test_hub_native_aura_uses_resolved_original_source(tmp_path, monkeypatch, st
         observed.append(True)
         return {'costs': {}, 'provenance': {'dw_rendered_rows': 0, 'dw_rtn_fallback_rows': 0, 'seed_base': 7000}}
 
-    monkeypatch.setattr(aura, 'compute_aura_cost_streamed' if streaming else 'compute_aura_cost', measurement)
+    monkeypatch.setattr(aura, 'run_streamed_production_anchor_aura', measurement)
     arguments = ['--model', hub_id, '--output', str(tmp_path / 'hub.pkl'),
         '--device', 'cpu', '--dtype', 'bfloat16', '--dataset', 'synthetic-token-draw']
     if streaming:
         arguments += ['--streaming', '--checkpoint-dir', str(tmp_path / 'hub-journal')]
         monkeypatch.setenv('PREFETCH_MIN_AVAILABLE_GB', '0')
-    assert aura.main(arguments) == 0
+    assert run_main(tmp_path, arguments) == 0
     assert observed == [True]
 
 
-@pytest.mark.parametrize('dtype', ['float32', 'auto'])
+@pytest.mark.parametrize('dtype', ['float32'])
 def test_native_streamed_fp32_refuses_before_load(tmp_path, monkeypatch, capsys, dtype):
     from prismaquant import cost_streaming
 
     source, _expected = producer_source(tmp_path)
     producer_cli_inputs(monkeypatch)
-    if dtype == 'auto':
-        monkeypatch.setattr(aura, '_resolve_auto_dtype', lambda *_args: 'float32')
 
     def no_load(*_args, **_kwargs):
         pytest.fail('unsupported native streamed FP32 must refuse before loading')
 
     monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', no_load)
     with pytest.raises(SystemExit) as refused:
-        aura.main(['--model', str(source), '--output', str(tmp_path / 'fp32.pkl'),
+        run_main(tmp_path, ['--model', str(source), '--output', str(tmp_path / 'fp32.pkl'),
             '--device', 'cpu', '--dtype', dtype, '--streaming', '--dataset', 'synthetic-token-draw'])
     assert refused.value.code == 2
     message = capsys.readouterr().err
@@ -249,10 +252,37 @@ def test_ordinary_aura_main_resumes_a_bound_journal(tmp_path, monkeypatch):
             current.publish_state('unit', {'scalar': [1.25]})
         return {'costs': {}, 'provenance': {'dw_rendered_rows': 0, 'dw_rtn_fallback_rows': 0, 'seed_base': 7000}}
 
-    monkeypatch.setattr(aura, 'compute_aura_cost_streamed', measurement)
+    monkeypatch.setattr(aura, 'run_streamed_production_anchor_aura', measurement)
     args = ['--model', str(source), '--output', str(tmp_path / 'bound.pkl'), '--device', 'cpu',
             '--dtype', 'bfloat16', '--dataset', 'synthetic-token-draw', '--streaming',
             '--checkpoint-dir', str(checkpoint)]
-    assert aura.main(args) == 0
-    assert aura.main(args + ['--resume']) == 0
+    assert run_main(tmp_path, args) == 0
+    assert run_main(tmp_path, args + ['--resume']) == 0
     assert seen == ['restored']
+
+
+def test_main_prices_real_production_anchors_from_act_rows(tmp_path, monkeypatch):
+    source, expected = producer_source(tmp_path)
+    producer_cli_inputs(monkeypatch)
+    act = tmp_path / 'act'
+    act.mkdir()
+    names = sorted(name.removesuffix('.weight') for name in expected
+                   if name.endswith('.self_attn.o_proj.weight'))
+    for name in names:
+        torch.save({'inputs': torch.ones(8, expected[name + '.weight'].shape[1]), 'name': name},
+                   act / (name.replace('.', '__') + '.pt'))
+    output = tmp_path / 'production-anchor.pkl'
+    assert run_main(tmp_path, [
+        '--model', str(source), '--output', str(output), '--device', 'cpu',
+        '--dtype', 'auto', '--formats', 'FP8_E4M3,BF16', '--n-probes', '2',
+        '--dataset', 'synthetic-token-draw', '--unit-filter', r'self_attn\.o_proj$',
+        '--enable', '', '--disable', 'gptq', '--min-free-gib', '0',
+        '--allow-packed-expert-omission',
+    ]) == 0
+    payload = pickle.loads(output.read_bytes())
+    assert set(payload['costs']) == set(names)
+    assert payload['provenance']['production_anchor_union_render_count'] == len(names)
+    for rows in payload['costs'].values():
+        assert rows['BF16']['predicted_dloss'] == 0
+        assert math.isfinite(rows['FP8_E4M3']['predicted_dloss'])
+        assert rows['FP8_E4M3']['dw_source'] == 'production_render'
