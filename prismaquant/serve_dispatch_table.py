@@ -594,13 +594,12 @@ def dispatch_family_for_format(fmt: str) -> str:
     ``format_registry``'s coarse ``family`` puts BF16 and FP8_E4M3 in one
     bucket ('fp') and those two have nothing in common at serve time. A
     retired codebook rung (the Gridbook lane, archived 2026-09-25, #1304) is
-    refused through ``get_format`` rather than keyed.
+    refused with ``RetiredFormatError`` rather than keyed.
     """
     from . import format_registry as fr
 
     canonical = fr.canonical_format_name(fmt)
-    if fr.RETIRED_CODEBOOK_FORMAT_RE.fullmatch(canonical.upper()):
-        fr.get_format(canonical)
+    fr.refuse_retired_codebook_format(canonical)
     return canonical
 
 
