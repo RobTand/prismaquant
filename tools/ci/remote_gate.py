@@ -108,8 +108,7 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
     return results
 
 
-def run_manifest(client, args, manifest_uri, raw_manifest, *,
-                 clock=time.monotonic, fallback_concurrency=6):
+def run_manifest(client, args, manifest_uri, raw_manifest, *, clock=time.monotonic):
     """Validate every partition before submitting any run, then join own results."""
     from tools.ci.bazel_gate import GateError, aggregate_shards, check_partition
 
@@ -142,14 +141,12 @@ def run_manifest(client, args, manifest_uri, raw_manifest, *,
                     check_partition(population, shards)
                 elif shards or tests or args.mode != 'pr' or document['selection'] == 'fallback':
                     raise RemoteError('manifest has an invalid empty population')
-            if type(fallback_concurrency) is not int or not 1 <= fallback_concurrency <= 6:
-                raise RemoteError('fallback concurrency must be between one and six')
         except (ValueError, TypeError, AttributeError, KeyError, GateError) as error:
             raise RemoteError('invalid shard manifest') from error
 
     manifest_sha256 = bytes_sha256hex(raw_manifest)
     results = {}
-    concurrency = fallback_concurrency if args.mode == 'pr' else 1
+    concurrency = 6 if args.mode == 'pr' else 1
     for architecture in architectures:
         row = document['architectures'][architecture]
         if not row['population']:
@@ -333,10 +330,10 @@ def main(argv=None):
                 stream.write('Bazel verdict: ' + result['verdict'] + '\n\n')
                 stream.write('Budget warnings: ' + str(len(result['budget_warnings'])) + '\n')
         if result['verdict'] == 'fail':
-            for architecture in result['architectures'].values():
-                for shard in architecture['shards']:
+            for architecture, record in result['architectures'].items():
+                for shard in record['shards']:
                     for label in shard['failed']:
-                        print('::error::failed test ' + label)
+                        print('::error::failed test ' + label + ' on ' + architecture)
         return 0 if result['verdict'] in ('pass', 'skipped') else 1
     except (RemoteError, RuntimeError, OSError, ValueError, KeyError, TypeError):
         if upload.is_symlink():
