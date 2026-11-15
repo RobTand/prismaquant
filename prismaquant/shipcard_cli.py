@@ -29,6 +29,7 @@ from prismaquant.shipcard import (
     assert_weight_stat_attestation,
     compute_model_sha,
     ensure_optional_slot,
+    fill_rank_slot,
     fill_slot,
     load_shipcard,
     record_uniform_control_override,
@@ -266,13 +267,6 @@ def _cmd_fill_control(args: argparse.Namespace) -> int:
     return 0
 
 
-#: A route-evidence fill's exit status when no usable observation exists
-#: (`fill-route-sweep`, and the lane commands that fill `route.trace`).
-#: Distinct from a refusal (1) and a usage error (2), so a wrapper cannot read
-#: "not verified" as either a pass or a disagreement.
-EXIT_NOT_VERIFIED = 3
-
-
 def _cmd_fill_route_sweep(args: argparse.Namespace) -> int:
     """Close `route.sweep` from every rank's served route sweep (#631)."""
     from prismaquant.compressed_route_sweep_gate import (
@@ -280,51 +274,18 @@ def _cmd_fill_route_sweep(args: argparse.Namespace) -> int:
         RouteSweepNotVerified,
     )
 
-    model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
-    card = load_shipcard(args.shipcard)
-    if ROUTE_SWEEP_SLOT not in (card.get("slots") or {}):
-        print(f"[shipcard] REFUSED: {args.shipcard} has no {ROUTE_SWEEP_SLOT} "
-              "slot; open a compressed-tensors lane card first (python -m "
-              "prismaquant.lane_shipcard open --lane compressed-tensors "
-              f"--artifact {model_dir})", file=sys.stderr)
-        return 2
-    try:
-        config_json = (Path(model_dir) / "config.json").read_bytes().decode("utf-8")
-    except (OSError, ValueError) as exc:
-        print(f"[shipcard] REFUSED: cannot read the artifact's config.json: "
-              f"{exc}", file=sys.stderr)
-        return 2
-    sweeps = []
-    for rank, path in enumerate(args.sweep):
-        label = f"rank{rank}:{Path(path).name}"
-        try:
-            sweeps.append((label, Path(path).read_bytes().decode("utf-8")))
-        except FileNotFoundError:
-            sweeps.append((label, None))
-        except (OSError, ValueError) as exc:
-            print(f"[shipcard] NOT VERIFIED: cannot read {path}: {exc}",
-                  file=sys.stderr)
-            return EXIT_NOT_VERIFIED
-    try:
-        record = make_route_sweep_record(
+    def make(rows, *, card, config_json, model_sha):
+        return make_route_sweep_record(
             tool=args.tool or "fill-route-sweep",
-            model_sha=compute_model_sha(model_dir),
-            sweeps=sweeps,
+            model_sha=model_sha,
+            sweeps=rows,
             expected_ranks=args.expected_ranks,
             config_json=config_json,
         )
-    except RouteSweepNotVerified as exc:
-        print("[shipcard] NOT VERIFIED -- route.sweep stays unfilled and the "
-              f"card stays unpublishable: {exc}", file=sys.stderr)
-        return EXIT_NOT_VERIFIED
-    except CompressedRouteSweepError as exc:
-        print(f"[shipcard] REFUSED -- route.sweep: {exc}", file=sys.stderr)
-        return 1
-    fill_slot(args.shipcard, ROUTE_SWEEP_SLOT, record)
-    print(f"[shipcard] filled {ROUTE_SWEEP_SLOT} from {len(sweeps)} rank "
-          f"sweep(s) (passed={record['passed']})")
-    print(f"[shipcard]   {record['detail']}")
-    return 0
+
+    return fill_rank_slot(args, ROUTE_SWEEP_SLOT, "compressed-tensors",
+                          args.sweep, make, RouteSweepNotVerified,
+                          CompressedRouteSweepError)
 
 
 def _confirm_artifact_name(model_dir: str, typed: str | None) -> str | None:
