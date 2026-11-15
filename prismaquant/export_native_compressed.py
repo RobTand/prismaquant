@@ -69,7 +69,6 @@ import math
 import os
 import re
 import shutil
-import sys
 import time
 from contextlib import contextmanager
 from collections import Counter, defaultdict
@@ -81,6 +80,7 @@ from typing import Any, Callable, Iterable, Mapping, NamedTuple, Sequence
 import torch
 import torch.nn as nn
 from .digests import DIRECT_ASCII_SPACED_LAX
+from .cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
 try:
     from accelerate import init_empty_weights
 except ModuleNotFoundError:
@@ -2407,17 +2407,13 @@ def materialize_tensors_streaming(
     offload_folder: str | None = None,
     tensor_sink: Callable[[dict[str, torch.Tensor]], None] | None = None,
     export_cache_dir: str | None = None,
+    layer_range: tuple[int, int] | None = None,
 ) -> tuple[dict[str, torch.Tensor], dict]:
-    """Stream decoder layers through quantize → emit → unload. Never
-    holds the full model in memory. Small models still exercise this
-    path — the LayerCache just keeps everything resident, so load/
-    unload degenerates to a no-op.
+    """Export selected layers, or emit the checkpoint's head and all layers.
 
-    Output: `(out_tensors, hist)` matching the shape the monolithic
-    materialize used to return, ready for `write_sharded_safetensors`.
-    When `tensor_sink` is supplied, each emitted head/layer batch is
-    passed to the sink and cleared immediately; the returned tensor dict
-    is then intentionally empty."""
+    Each cached layer carries tensors, histogram rows, and do-no-harm counts.
+    A tensor sink consumes one batch at a time. Without a sink, return tensors.
+    """
     from prismaquant.model_runtime import initialize_model_runtime
     initialize_model_runtime()
     from transformers import AutoConfig, AutoModelForCausalLM
@@ -2490,6 +2486,11 @@ def materialize_tensors_streaming(
     base_model, layers = _get_layer_list(model)
     base_prefix = _resolve_base_prefix(model, base_model)
     num_layers = len(layers)
+    start, stop = layer_range if layer_range is not None else (0, num_layers)
+    if layer_range is not None and not 0 <= start < stop <= num_layers:
+        raise ValueError(f"invalid layer range {start}:{stop} for {num_layers} layers")
+    if layer_range is not None and export_cache_dir is None:
+        raise ValueError("layer_range requires export_cache_dir")
     layers_prefix = f"{base_prefix}.layers." if base_prefix else "layers."
 
     weight_shard, weight_ckpt = _build_weight_map(
@@ -2580,12 +2581,15 @@ def materialize_tensors_streaming(
           flush=True)
     t0 = time.time()
     head_pfxs = _head_prefixes(None, base_prefix)
-    loaded_n = _materialize(model, head_pfxs, weight_shard, weight_ckpt,
-                            device, dtype,
-                            fp8_scale_inv_map=fp8_scale_inv_map)
+    loaded_n = 0
+    if layer_range is None:
+        loaded_n = _materialize(model, head_pfxs, weight_shard, weight_ckpt,
+                                device, dtype,
+                                fp8_scale_inv_map=fp8_scale_inv_map)
 
     # Rotary's `inv_freq` isn't in the state_dict — compute from config.
-    _init_rotary_inplace(base_model, device, dtype)
+    if layer_range is None:
+        _init_rotary_inplace(base_model, device, dtype)
     print(f"[export-stream] head materialized ({loaded_n} tensors, rotary "
           f"re-init) in {time.time()-t0:.1f}s", flush=True)
 
@@ -2680,13 +2684,7 @@ def materialize_tensors_streaming(
         tensor_sink(out)
         out = {}
 
-    # ----- 3. Per-layer streaming quantize loop -----
-    # v25: per-layer cache. When --export-cache-dir is set, each
-    # layer's emitted tensor dict is torch.save'd to a per-layer file
-    # AFTER quantization succeeds. On a restart the loop checks each
-    # layer's cache file and SKIPS the quantization work for any layer
-    # already cached — instead loads the saved dict and replays it
-    # into tensor_sink. Recovers full progress from a mid-flight kill.
+    # Cache admission binds the complete assignment, source, and render recipe.
     cache_path = Path(export_cache_dir) if export_cache_dir else None
     if cache_path is not None:
         cache_path.mkdir(parents=True, exist_ok=True)
@@ -2707,15 +2705,34 @@ def materialize_tensors_streaming(
     def _layer_cache_file(L: int) -> Path | None:
         return None if cache_path is None else cache_path / f"layer_{L:03d}.pt"
 
+    collected = out
     t_layers = time.time()
     cache_hits = 0
-    for L in range(num_layers):
-        if tensor_sink is not None:
-            out = {}
+    for L in range(start, stop):
+        out = {}
+        hist_before = hist.copy()
+        do_no_harm_before = Counter(_native_render_codec.do_no_harm_stats())
         layer_t0 = time.time()
         layer_qname = f"{layers_prefix}{L}".rstrip(".")
         if layer_qname.endswith("."):
             layer_qname = layer_qname[:-1]
+        # Replay tensors and counts before any production-cache prefetch.
+        cf = _layer_cache_file(L)
+        if cf is not None and cf.exists():
+            cached = torch.load(str(cf), weights_only=False, map_location="cpu")
+            if tensor_sink is not None:
+                tensor_sink(cached["tensors"])
+            else:
+                collected.update(cached["tensors"])
+            hist.update(cached["hist"])
+            _native_render_codec.update_do_no_harm_stats(cached["do_no_harm"])
+            cache_hits += 1
+            if L % 4 == 0 or L == num_layers - 1:
+                print(f"[export-stream] layer {L:02d}  CACHED "
+                      f"keys={len(cached['tensors'])}", flush=True)
+            del cached
+            continue
+
         if _PRODUCTION_WEIGHT_CACHE is not None:
             layer_recipe_prefix = profile.live_to_recipe_name(layer_qname)
             prefetched = _production_cache_prefetch_assignment(
@@ -2729,27 +2746,12 @@ def materialize_tensors_streaming(
                     flush=True,
                 )
 
-        # v25: cache hit — skip quantization, replay cached tensor dict.
-        cf = _layer_cache_file(L)
-        if cf is not None and cf.exists():
-            cached = torch.load(str(cf), weights_only=False, map_location="cpu")
-            if tensor_sink is not None:
-                tensor_sink(cached)
-            else:
-                out.update(cached)
-            cache_hits += 1
-            if L % 4 == 0 or L == num_layers - 1:
-                print(f"[export-stream] layer {L:02d}  CACHED "
-                      f"keys={len(cached)}", flush=True)
-            del cached
-            continue
-
         # 3a. Load layer from safetensors (direct to device). When
         # `fp8_scale_inv_map` is non-empty, the loader applies the
         # 128x128 block dequant inline, so `mod.weight` receives the
         # true dequanted weight rather than raw fp8 codes cast to bf16.
         load_t0 = time.time()
-        read_ahead_source_files(weight_shard, layers_prefix, range(L + 1, num_layers), read_ahead_seen)
+        read_ahead_source_files(weight_shard, layers_prefix, range(L + 1, stop), read_ahead_seen)
         tensors = _read_layer_to_device(
             f"{layers_prefix}{L}.", weight_shard, weight_ckpt, dtype, device,
             fp8_scale_inv_map=fp8_scale_inv_map, pack_experts=expert_packer,
@@ -3297,9 +3299,9 @@ def materialize_tensors_streaming(
         # GPU render, and a silent multi-minute phase is an observability
         # defect on first-live-use exports.
         elapsed = time.time() - layer_t0
-        done_n = L + 1
+        done_n = L - start + 1
         sweep_rate = (time.time() - t_layers) / max(done_n, 1)
-        eta_min = sweep_rate * (num_layers - done_n) / 60.0
+        eta_min = sweep_rate * (stop - start - done_n) / 60.0
         # Memory attribution per layer: rss (process anon), cuda_alloc
         # (live tensors), cuda_reserved (allocator pool). A layer-over-layer
         # ramp in alloc = a real reference leak; in reserved-only =
@@ -3322,28 +3324,22 @@ def materialize_tensors_streaming(
         print(f"[export-stream] layer {L:02d}  linears={linear_count} "
               f"packed={packed_count}  load={load_s:.2f}s  "
               f"total={elapsed:.2f}s  out_keys={len(out)}  "
-              f"({done_n}/{num_layers}, {sweep_rate:.1f}s/layer, "
+              f"({done_n}/{stop - start}, {sweep_rate:.1f}s/layer, "
               f"ETA {eta_min:.1f} min){mem_note}", flush=True)
-        # v25: save layer cache BEFORE tensor_sink consumes the dict.
-        # Use a tmp + rename to keep the cache file atomic — a kill in
-        # the middle of torch.save leaves a .tmp behind which we'll
-        # ignore on the next run (skip and recompute the layer).
+        # Publish the complete layer record before the sink consumes its tensors.
         cf = _layer_cache_file(L)
-        if cf is not None and out:
-            tmp = cf.with_suffix(".pt.tmp")
-            torch.save(out, str(tmp))
+        if cf is not None:
+            tmp = cf.with_name(cf.name + unique_temp_suffix())
+            torch.save({
+                "tensors": out,
+                "hist": hist - hist_before,
+                "do_no_harm": Counter(_native_render_codec.do_no_harm_stats()) - do_no_harm_before,
+            }, str(tmp))
             tmp.rename(cf)
         if tensor_sink is not None:
             tensor_sink(out)
-            out = {}
-        _stop_after = os.environ.get("PRISMAQUANT_EXPORT_STOP_AFTER_LAYER")
-        if _stop_after is not None and L >= int(_stop_after):
-            # Diagnostic runs only: exit AFTER the layer cache save + sink
-            # flush so the rendered layer is resumable. Artifact INCOMPLETE.
-            print(f"[export-stream] PRISMAQUANT_EXPORT_STOP_AFTER_LAYER="
-                  f"{_stop_after}: stopping after layer {L:02d} "
-                  f"(diagnostic run — artifact INCOMPLETE)", flush=True)
-            sys.exit(0)
+        else:
+            collected.update(out)
 
     print(f"[export-stream] layer sweep: {time.time()-t_layers:.1f}s "
           f"(cache_hits={cache_hits}/{num_layers})",
@@ -3353,7 +3349,7 @@ def materialize_tensors_streaming(
         print(f"[export-stream] WARN {len(unmapped_keys)} unmapped assignment "
               f"keys — first 5: {unmapped_keys[:5]}", flush=True)
 
-    return out, dict(hist)
+    return collected, dict(hist)
 
 
 def _materialize_tensors_inmemory(
@@ -4620,18 +4616,7 @@ def _export_resume_fingerprint(
     extra_shard_paths: object = (),
     digest_cache_path: str | Path | None = None,
 ) -> dict:
-    """Everything a `layer_NNN.pt` payload is only valid under.
-
-    `_render_lever_provenance()` says how the export renders; this adds WHAT
-    it renders. Before #340 the manifest carried the levers alone, so a cache
-    dir reused against a different checkpoint replayed the first checkpoint's
-    quantized bytes -- the levers matched and no field named the source. The
-    `assignment_hash` beside them compared nothing: `hashlib` was in scope
-    nowhere inside `materialize_tensors_streaming`, so the call raised
-    NameError and the `except Exception` stamped a null on every manifest
-    ever written (measured on origin/main, PB action 41e6e63eb9dd). The
-    import is explicit here and there is no swallow: a recipe hash that
-    cannot be computed is a crash, not a null that matches the next null.
+    """Bind each layer record to its payload schema, source, dtype, and recipe.
 
     Three bindings, all of which a replayed payload silently bakes in:
 
@@ -4657,6 +4642,7 @@ def _export_resume_fingerprint(
     from prismaquant.streamed_model_identity import build_source_checkpoint_identity
 
     fp_state = _render_lever_provenance()
+    fp_state["layer_payload"] = "tensors_hist_do_no_harm_v1"
     fp_state["assignment_hash"] = DIRECT_ASCII_SPACED_LAX.sha256(assignment)[:16]
     fp_state["source_identity"] = build_source_checkpoint_identity(
         model_path,
@@ -4696,8 +4682,7 @@ def _admit_export_resume_cache(cache_path: Path, fp_state: dict) -> bool:
         for stale in cache_path.glob("layer_*.pt"):
             stale.unlink()
             removed += 1
-        with manifest_path.open("w") as handle:
-            json.dump(fp_state, handle, indent=2)
+        atomic_write_bytes(manifest_path, json.dumps(fp_state, indent=2).encode())
         print(f"[export-stream] resume REFUSED ({reason}); "
               f"discarded {removed} cached layers", flush=True)
         return False
@@ -4705,8 +4690,7 @@ def _admit_export_resume_cache(cache_path: Path, fp_state: dict) -> bool:
     if not manifest_path.exists():
         if next(cache_path.glob("layer_*.pt"), None) is not None:
             return _refuse("cached layers have no manifest binding")
-        with manifest_path.open("w") as handle:
-            json.dump(fp_state, handle, indent=2)
+        atomic_write_bytes(manifest_path, json.dumps(fp_state, indent=2).encode())
         print(f"[export-stream] wrote cache fingerprint to {manifest_path}",
               flush=True)
         return True
@@ -4935,6 +4919,7 @@ def main(argv: Sequence[str] | None = None):
     preflight.add_argument("--model")
     preflight.add_argument("--output")
     preflight.add_argument("--export-cache-dir")
+    preflight.add_argument("--layer-range")
     preflight.add_argument("--keep-export-cache", action="store_true")
     preflight.add_argument("--production-weight-cache")
     known, _unknown = preflight.parse_known_args(parse_argv)
@@ -4947,6 +4932,9 @@ def main(argv: Sequence[str] | None = None):
 
         known.model = str(resolve_source_checkpoint_path(known.model))
         parse_argv = _replace_cli_option(parse_argv, "--model", known.model)
+
+    if known.layer_range is not None:
+        return _main_impl(parse_argv)
 
     requested_output = Path(known.output)
     with transactional_export_directory(
@@ -5092,25 +5080,17 @@ def _main_impl(argv: Sequence[str] | None = None):
                          "0.41 vs RTN 1.0, on Qwen3.6-35B visual+MTP "
                          "Linears.")
     ap.add_argument("--export-cache-dir", default=None,
-                    help="Per-layer cache dir for resumable export. When "
-                         "set, each layer's emitted tensor dict is "
-                         "torch.save'd to <cache_dir>/layer_NNN.pt right "
-                         "after quantization. On a restart, layers whose "
-                         "cache file exists are SKIPPED — their tensors "
-                         "are loaded from cache and replayed into the "
-                         "shard writer without redoing the GPTQ + "
-                         "scale_sweep work. Recovers full progress on a "
-                         "mid-flight kill (which today restarts from "
-                         "layer 0 every time). Cache is removed at end of "
-                         "successful export. Disk overhead: ~2 GB per "
-                         "MoE layer = ~120 GB transient on a 62-layer "
-                         "MiniMax-class model, freed on completion.")
+                    help="Store per-layer tensors and counts for export replay.")
+    ap.add_argument("--layer-range", type=lambda value: tuple(map(int, value.split(":"))),
+                    help="Export layers [a, b) to --export-cache-dir, then stop. Use a:b.")
     ap.add_argument("--keep-export-cache", action="store_true",
                     default=False,
                     help="Don't remove --export-cache-dir on success. "
                          "Useful for debugging or comparing two exports "
                          "against the same cache.")
     args = ap.parse_args(argv)
+    if args.layer_range is not None and (not args.export_cache_dir or len(args.layer_range) != 2):
+        ap.error("--layer-range requires a:b and --export-cache-dir")
 
     out_dir = Path(args.output)
     # Path safety is the first preflight: an in-place/aliased/stale target must
@@ -5412,11 +5392,10 @@ def _main_impl(argv: Sequence[str] | None = None):
         profile=profile,
     )
     print("[export-stream] quantization-config preflight passed", flush=True)
-    out_dir = prepare_fresh_export_directory(
-        args.model,
-        out_dir,
-        where="export_native_compressed",
-    )
+    if args.layer_range is None:
+        out_dir = prepare_fresh_export_directory(
+            args.model, out_dir, where="export_native_compressed",
+        )
 
     from prismaquant.gpu_guard import require_cuda_hot_path
 
@@ -5442,7 +5421,8 @@ def _main_impl(argv: Sequence[str] | None = None):
             for k, v in batch.items()
         }
 
-    writer = IncrementalSafetensorsWriter(out_dir, args.shard_bytes)
+    writer = (IncrementalSafetensorsWriter(out_dir, args.shard_bytes)
+              if args.layer_range is None else None)
     sample_recipe_key = "model.layers.0.self_attn.q_proj.weight"
     sample_source_key = profile.export_tensor_name(sample_recipe_key)
     if sample_source_key != sample_recipe_key:
@@ -5457,9 +5437,12 @@ def _main_impl(argv: Sequence[str] | None = None):
         profile=profile, bf16_passthrough=bf16_passthrough,
         dtype=dtype, device=device,
         offload_folder=args.offload_folder,
-        tensor_sink=lambda batch: writer.add_tensors(_rename_body_batch(batch)),
+        tensor_sink=lambda batch: writer.add_tensors(_rename_body_batch(batch)) if writer else None,
         export_cache_dir=args.export_cache_dir,
+        layer_range=args.layer_range,
     )
+    if args.layer_range is not None:
+        return
     print(f"[export-stream] streamed materialization complete "
           f"resident_tensors={len(tensors)}  hist={hist}",
           flush=True)
@@ -5789,62 +5772,6 @@ class IncrementalSafetensorsWriter:
         )
         print(f"[export-stream] finalized {n} safetensors shards",
               flush=True)
-
-
-def write_sharded_safetensors(
-    tensors: dict[str, torch.Tensor],
-    out_dir: Path,
-    shard_bytes: int,
-) -> None:
-    # Detach + clone any tensors that share underlying storage so
-    # safetensors' dedup check doesn't raise. This covers tied
-    # embeddings (Gemma 4: `lm_head.weight` ≡ `embed_tokens.weight`)
-    # and any other view-ties produced by HF's
-    # `_tied_weights_keys`. Cost: one extra copy of the embed matrix;
-    # correctness: identical bytes on disk, no runtime semantic change.
-    tensors = _clone_shared_storage_for_safetensors(tensors)
-
-    keys = sorted(tensors.keys())
-    sizes = {k: tensors[k].numel() * tensors[k].element_size() for k in keys}
-    total = sum(sizes.values())
-    n_shards = max(1, math.ceil(total / shard_bytes))
-    target = math.ceil(total / n_shards)
-
-    shards: list[list[str]] = [[]]
-    cur = 0
-    for k in keys:
-        if cur + sizes[k] > target and shards[-1]:
-            shards.append([])
-            cur = 0
-        shards[-1].append(k)
-        cur += sizes[k]
-
-    if len(shards) == 1:
-        path = out_dir / "model.safetensors"
-        save_file(
-            {k: tensors[k].contiguous() for k in shards[0]},
-            str(path),
-            metadata={"format": "pt"},
-        )
-        return
-
-    weight_map: dict[str, str] = {}
-    n = len(shards)
-    for i, shard_keys in enumerate(shards):
-        shard_name = f"model-{i+1:05d}-of-{n:05d}.safetensors"
-        save_file(
-            {k: tensors[k].contiguous() for k in shard_keys},
-            str(out_dir / shard_name),
-            metadata={"format": "pt"},
-        )
-        for k in shard_keys:
-            weight_map[k] = shard_name
-
-    with open(out_dir / "model.safetensors.index.json", "w") as f:
-        json.dump({
-            "metadata": {"total_size": total},
-            "weight_map": weight_map,
-        }, f, indent=2)
 
 
 def write_config_with_quantization(

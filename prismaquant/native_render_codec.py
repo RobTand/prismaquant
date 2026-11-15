@@ -61,6 +61,11 @@ def do_no_harm_stats() -> dict[str, int]:
     return dict(_DO_NO_HARM_STATS)
 
 
+def update_do_no_harm_stats(counts: dict[str, int]) -> None:
+    """Add counts from a cached layer."""
+    _DO_NO_HARM_STATS.update(counts)
+
+
 def reset_do_no_harm_stats() -> None:
     """Start a new do-no-harm count, for example at the start of an export."""
     _DO_NO_HARM_STATS.clear()
