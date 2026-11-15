@@ -79,6 +79,7 @@ import os
 import stat
 import re
 import subprocess
+import sys
 import time
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -1730,6 +1731,62 @@ def load_shipcard(path: str | os.PathLike) -> dict[str, Any]:
     if not isinstance(card, dict) or "slots" not in card:
         raise ValueError(f"not a shipcard: {path}")
     return card
+
+
+#: A route-evidence fill's exit status when no usable observation exists
+#: (`fill-route-sweep`, and the lane commands that fill `route.trace`).
+#: Distinct from a refusal (1) and a usage error (2), so a wrapper cannot read
+#: "not verified" as either a pass or a disagreement.
+EXIT_NOT_VERIFIED = 3
+
+
+def fill_rank_slot(args, slot, lane, paths, make, not_verified, refused) -> int:
+    """Fill a route slot from one observation file per rank.
+
+    `make(rows, card=, config_json=, model_sha=)` builds the record.
+    Return 2 for refused input, 3 for not verified, 1 for a refused record
+    and 0 for a filled slot.
+    """
+    model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
+    card = load_shipcard(args.shipcard)
+    if slot not in (card.get("slots") or {}):
+        print(f"[shipcard] REFUSED: {args.shipcard} has no {slot} slot; "
+              f"open a {lane} lane card first (python -m "
+              f"prismaquant.lane_shipcard open --lane {lane} --artifact "
+              f"{model_dir})", file=sys.stderr)
+        return 2
+    try:
+        config_json = (Path(model_dir) / "config.json").read_bytes().decode("utf-8")
+    except (OSError, ValueError) as exc:
+        print(f"[shipcard] REFUSED: cannot read the artifact's config.json: "
+              f"{exc}", file=sys.stderr)
+        return 2
+    rows = []
+    for rank, path in enumerate(paths):
+        label = f"rank{rank}:{Path(path).name}"
+        try:
+            rows.append((label, Path(path).read_bytes().decode("utf-8")))
+        except FileNotFoundError:
+            rows.append((label, None))
+        except (OSError, ValueError) as exc:
+            print(f"[shipcard] NOT VERIFIED: cannot read {path}: {exc}",
+                  file=sys.stderr)
+            return EXIT_NOT_VERIFIED
+    try:
+        record = make(rows, card=card, config_json=config_json,
+                      model_sha=compute_model_sha(model_dir))
+    except not_verified as exc:
+        print(f"[shipcard] NOT VERIFIED -- {slot} stays unfilled and the "
+              f"card stays unpublishable: {exc}", file=sys.stderr)
+        return EXIT_NOT_VERIFIED
+    except refused as exc:
+        print(f"[shipcard] REFUSED -- {slot}: {exc}", file=sys.stderr)
+        return 1
+    fill_slot(args.shipcard, slot, record)
+    print(f"[shipcard] filled {slot} from {len(rows)} rank "
+          f"{slot.rpartition('.')[2]}(s) (passed={record['passed']})")
+    print(f"[shipcard]   {record['detail']}")
+    return 0
 
 
 # ---------------------------------------------------------------------------

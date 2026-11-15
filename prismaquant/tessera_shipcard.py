@@ -26,9 +26,13 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from prismaquant.shipcard import compute_model_sha, fill_slot, load_shipcard
+from prismaquant.shipcard import (
+    compute_model_sha,
+    fill_rank_slot,
+    fill_slot,
+    load_shipcard,
+)
 from prismaquant.shipcard_slots import make_record
-from prismaquant.shipcard_cli import EXIT_NOT_VERIFIED
 
 #: The priced-vs-served route census verdict (PrismaQuant #136).  Tessera's
 #: plugin stamps which decoder ran on every route record, and a serve whose
@@ -444,53 +448,19 @@ def _cmd_fill_route_trace(args: argparse.Namespace) -> int:
         TesseraRouteTraceError,
     )
 
-    model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
-    card = load_shipcard(args.shipcard)
-    if ROUTE_TRACE_SLOT not in (card.get("slots") or {}):
-        print(f"[shipcard] REFUSED: {args.shipcard} has no {ROUTE_TRACE_SLOT} "
-              "slot; open a Tessera lane card first (python -m "
-              f"prismaquant.lane_shipcard open --lane tessera --artifact "
-              f"{model_dir})", file=sys.stderr)
-        return 2
-    try:
-        config_json = (Path(model_dir) / "config.json").read_bytes().decode("utf-8")
-    except (OSError, ValueError) as exc:
-        print(f"[shipcard] REFUSED: cannot read the artifact's config.json: "
-              f"{exc}", file=sys.stderr)
-        return 2
-    traces = []
-    for rank, path in enumerate(args.trace):
-        label = f"rank{rank}:{Path(path).name}"
-        try:
-            traces.append((label, Path(path).read_bytes().decode("utf-8")))
-        except FileNotFoundError:
-            traces.append((label, None))
-        except (OSError, ValueError) as exc:
-            print(f"[shipcard] NOT VERIFIED: cannot read {path}: {exc}",
-                  file=sys.stderr)
-            return EXIT_NOT_VERIFIED
-    try:
-        record = make_route_trace_record(
+    def make(rows, *, card, config_json, model_sha):
+        return make_route_trace_record(
             tool=args.tool or "fill-route-trace",
-            model_sha=compute_model_sha(model_dir),
-            traces=traces,
+            model_sha=model_sha,
+            traces=rows,
             expected_ranks=args.expected_ranks,
             config_json=config_json,
             build=card.get("build"),
             platform=args.platform,
         )
-    except RouteTraceNotVerified as exc:
-        print("[shipcard] NOT VERIFIED -- route.trace stays unfilled and the "
-              f"card stays unpublishable: {exc}", file=sys.stderr)
-        return EXIT_NOT_VERIFIED
-    except TesseraRouteTraceError as exc:
-        print(f"[shipcard] REFUSED -- route.trace: {exc}", file=sys.stderr)
-        return 1
-    fill_slot(args.shipcard, ROUTE_TRACE_SLOT, record)
-    print(f"[shipcard] filled {ROUTE_TRACE_SLOT} from {len(traces)} rank "
-          f"trace(s) (passed={record['passed']})")
-    print(f"[shipcard]   {record['detail']}")
-    return 0
+
+    return fill_rank_slot(args, ROUTE_TRACE_SLOT, "tessera", args.trace,
+                          make, RouteTraceNotVerified, TesseraRouteTraceError)
 
 
 def register_cli(sub: argparse._SubParsersAction) -> None:

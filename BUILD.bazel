@@ -2798,6 +2798,7 @@ pq_py_library(
         ":archive/gridbook_lane_2026-09-02/tools/dsv4_gridbook_contract",
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/shipcard_cli",
         ":tools/__init__",
         ":tools/full_kl_teacher_payload",
         "@pq_pip//pytest",
@@ -8753,7 +8754,6 @@ pq_py_library(
         "prismaquant/serving_profiles.py",
         "prismaquant/shape_runtime_prices.py",
         "prismaquant/shipcard.py",
-        "prismaquant/shipcard_cli.py",
         "prismaquant/shipcard_slots.py",
         "prismaquant/source_format_contracts.py",
         "prismaquant/source_generation.py",
@@ -10598,6 +10598,19 @@ pq_py_library(
         ":tools/__init__",
         ":tools/gold_engine_options",
         "@pq_pip//torch",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/shipcard_cli",
+    srcs = [
+        "prismaquant/shipcard_cli.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/compressed_route_sweep_gate",
+        "@pq_pip//tessera_quant",
     ],
 )
 

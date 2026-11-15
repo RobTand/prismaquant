@@ -26,7 +26,8 @@ from prismaquant import shipcard
 from prismaquant import tessera_route_trace_gate as gate
 from prismaquant.lane_shipcard import open_lane_shipcard
 from prismaquant.lane_spec import load_lane_spec
-from prismaquant.shipcard_cli import EXIT_NOT_VERIFIED, main as shipcard_cli
+from prismaquant.shipcard import EXIT_NOT_VERIFIED
+from prismaquant.shipcard_cli import main as shipcard_cli
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "tessera_route_trace_m44e1"
