@@ -26,6 +26,7 @@ if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from prismaquant.digests import file_sha256hex
+from tools import duplication_inventory
 from tools.bazel import build_files as build
 from tools.ci import graph_impact as core
 from tools.ci import graph_impact_imports as legacy_fanout
@@ -104,6 +105,7 @@ def load_snapshot(root, *, files=None, population=None, source_roots=SOURCE_ROOT
         path_edges.update((test, start_node) for start_node in [*graph.conftests_for(test), *evidence.test_modules(test)])
     loc = {path: len((root / path).read_text(errors='replace').splitlines()) for path in sources}
     live = core.measure(tests, edges, loc, test_packages={test: str(Path(test).parent) for test in tests})
+    live['duplication'] = duplication_inventory.scan(root)
     live['path_edges'] = [list(edge) for edge in sorted(path_edges)]
     live['contents'] = {test: file_sha256hex(root / test) for test in population}
     live['edge_groups'] = {
@@ -166,6 +168,9 @@ def check(before, after, baseline_path, allowlist_path, *, changed_tests=(), wri
                            edge_diff=core.diff_edges(before, after) if before else None)
     if before is not None and after['scc_max'] > before['scc_max']:
         errors.append(f'scc_max rose from {before["scc_max"]} to {after["scc_max"]} against the base commit')
+    if before is not None:
+        errors += [f'new {kind} against the base commit: {entries}' for kind, entries in
+                   duplication_inventory.growth(before['duplication'], after['duplication']).items()]
     if errors:
         if write_baseline:
             print('refusing to record a loss:', file=sys.stderr)
@@ -234,6 +239,7 @@ def align_base(before, renames):
     result['edge_groups'] = {group: sorted(f'{path(a)} -> {path(b)}' for a, b in
                                          (edge.split(' -> ', 1) for edge in edges))
                              for group, edges in before['edge_groups'].items()}
+    result['duplication'] = before['duplication']
     for key in ('recorded_baseline', 'recorded_allowlist', 'recorded_analyzer_sha256'):
         result[key] = before.get(key)
     return result
