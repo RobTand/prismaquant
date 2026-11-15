@@ -32,6 +32,7 @@ SEPARATED = [
     ("prismaquant.staged_whole_file", "prismaquant.stage_inputs"),
     ("prismaquant.cost_stage_checkpoint", "prismaquant.production_weight_cache"),
     ("prismaquant.visual_linears", "prismaquant.allocator"),
+    ("prismaquant.tied_embeddings", "prismaquant.model_profiles"),
 ]
 
 

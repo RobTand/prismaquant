@@ -45,6 +45,7 @@ from prismaquant.tied_embeddings import (
     resolve_tied_output_embedding,
     source_has_lm_head_tensor,
 )
+from prismaquant.model_profiles import DefaultProfile
 
 
 HIDDEN = 32
@@ -139,25 +140,25 @@ class TestTieDetection:
     def test_tied_without_head_tensor_is_an_alias(self, tmp_path):
         p = _write_ckpt(tmp_path, "tied", tied=True, with_lm_head=False)
         assert not source_has_lm_head_tensor(p, "lm_head")
-        assert lm_head_is_tied_alias(p)
+        assert lm_head_is_tied_alias(p, profile=DefaultProfile())
 
     def test_untied_with_head_tensor_is_not_an_alias(self, tmp_path):
         p = _write_ckpt(tmp_path, "untied", tied=False, with_lm_head=True)
         assert source_has_lm_head_tensor(p, "lm_head")
-        assert not lm_head_is_tied_alias(p)
+        assert not lm_head_is_tied_alias(p, profile=DefaultProfile())
 
     def test_declared_tied_but_head_tensor_present_is_not_an_alias(self, tmp_path):
         """The declaration alone is not enough: a checkpoint that ships an
         independent head has one to quantize, whatever the config says."""
         p = _write_ckpt(tmp_path, "both", tied=True, with_lm_head=True)
-        assert not lm_head_is_tied_alias(p)
+        assert not lm_head_is_tied_alias(p, profile=DefaultProfile())
 
     def test_vl_prefixed_embedding_resolves(self, tmp_path):
         """gemma-4-31b-it's embedding key is
         `model.language_model.embed_tokens.weight`; detection must not care."""
         p = _write_ckpt(tmp_path, "vl", tied=True, with_lm_head=False,
                         embed_prefix="model.language_model", vl_wrapper=True)
-        assert lm_head_is_tied_alias(p)
+        assert lm_head_is_tied_alias(p, profile=DefaultProfile())
 
     def test_wrapper_prefixed_head_tensor_counts_as_present(self, tmp_path):
         p = _write_ckpt(tmp_path, "vlhead", tied=True, with_lm_head=False,
@@ -169,7 +170,7 @@ class TestTieDetection:
         (tmp_path / "vlhead" / "model.safetensors.index.json").write_text(
             json.dumps(idx))
         assert source_has_lm_head_tensor(str(tmp_path / "vlhead"), "lm_head")
-        assert not lm_head_is_tied_alias(str(tmp_path / "vlhead"))
+        assert not lm_head_is_tied_alias(str(tmp_path / "vlhead"), profile=DefaultProfile())
 
 
 # --------------------------------------------------------------------------
@@ -333,7 +334,6 @@ class TestExcludedFromCostAndAllocation:
         """Covers probes written before the shard-schedule fix, which still
         carry an lm_head row."""
         from prismaquant.allocator import tied_lm_head_dp_exclusions
-        from prismaquant.model_profiles import DefaultProfile
 
         path = _write_ckpt(tmp_path, "tied", tied=True, with_lm_head=False)
         stats = {"model.layers.0.self_attn.q_proj": {}, "lm_head": {}}
@@ -342,7 +342,6 @@ class TestExcludedFromCostAndAllocation:
 
     def test_allocator_leaves_an_untied_head_alone(self, tmp_path):
         from prismaquant.allocator import tied_lm_head_dp_exclusions
-        from prismaquant.model_profiles import DefaultProfile
 
         path = _write_ckpt(tmp_path, "untied", tied=False, with_lm_head=True)
         stats = {"model.layers.0.self_attn.q_proj": {}, "lm_head": {}}
@@ -355,7 +354,6 @@ class TestExcludedFromCostAndAllocation:
         quality. A tied head has no bytes of its own to trade, and unpinning
         it would quantize the input embedding."""
         import prismaquant.allocator as alloc
-        from prismaquant.model_profiles import DefaultProfile
 
         path = _write_ckpt(tmp_path, "tied", tied=True, with_lm_head=False)
         profile = DefaultProfile()
