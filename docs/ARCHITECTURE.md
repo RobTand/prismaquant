@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-14, unused Tessera schedule, census-tool, dispatcher, and reseal-command removal. Placement requires one eligible online rank. Sources below describe the current implementation.
+As of: 2026-11-15. Removed unused Tessera tools, schedule, census tools, dispatcher, reseal commands, and PrismaBuild mechanisms. Placement requires one eligible online rank. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -173,8 +173,7 @@ Source: `tools/prepare_stageb_after_capture.py`, `tests/test_prismabuild_ban.py`
 the progress-phase text elsewhere in this document describes the retired wrapper. The retired-queue diagnostics, recovery-request and class-evidence tools are deleted; the native-MoE launchers, pq87/pq183 A/B family, LFM mixed-serving drivers, docker launchers and their scenario tests moved to `archive/pq_experiments_2026-11-09/` (not executable). No numerical, GPU, serving or production qualification follows.
 
 As of: 2026-11-09, PB-zero closure in live PrismaQuant source, slice5.
-Source: `tests/test_prismabuild_ban.py`, `tests/test_prismabuild_boundary.py`, `prismaquant/shape_runtime_prices.py`, `prismaquant/recorded_cas_receipt.py`, `prismaquant/staged_lease.py`, based on `0bbf045a0`. The local-scratch charge wire is gone (a container spec naming a retired service setting is refused;
-nothing prices scratch at placement, a named limit). The shape-time checker receipt is v2: it embeds one `native_results` selection, whose authenticated launch source and argv must equal exactly one reviewed pin and whose published artifact must equal the observation bytes; v1 receipts refuse and
+Source: `tests/test_prismabuild_ban.py`, `tests/test_prismabuild_boundary.py`, `prismaquant/shape_runtime_prices.py`, `prismaquant/recorded_cas_receipt.py`, `prismaquant/staged_lease.py`, based on `0bbf045a0`. The local-scratch charge wire is gone. Placement does not price scratch. The shape-time checker receipt is v2: it embeds one `native_results` selection, whose authenticated launch source and argv must equal exactly one reviewed pin and whose published artifact must equal the observation bytes; v1 receipts refuse and
 the v1 config is archived under `experiments/measurements/`. Recorded CAS receipts are checked offline by `recorded_cas_receipt`. The `staged_lease` doorways are deleted; `tools/build_stagea_seed_package.py` refuses without a native data-manifest validator. `gate_evidence` has no pbtest `inventory` kind.
 A ban over live source (text mechanisms plus an AST import/dynamic-load scan, explicit history/definition exclusions, and a shrink-only 4C-14 file list) replaces the PB boundary allowlist and the import-leak guard.
 The `pbsdk` dependency group and every pin and manifest of the retired client (`pyproject.toml`, `uv.lock`, `tools/bazel/requirements*`, `pip_modules.json`, `MODULE.bazel`, the source-identity document and their test guards) are deleted in the slice's final commit; the hosted install in `.github/workflows/bazel-hosted.yml` must drop `--group pbsdk` in the same merge.
@@ -277,12 +276,11 @@ production qualification follows; proofs are in the migration evidence.
 
 As of: 2026-11-08, native private pin/bootstrap, slice4a.
 Source: `tools/{check_tessera_dev_install,provision_tessera_pin,
-accept_tessera_pin_provisioner,resolve_tessera_dev_pin}.py`, based on
+resolve_tessera_dev_pin}.py`, based on
 `84850aed9`. The install check derives expected package and contract bytes
 from the unchanged reviewed Git commit and measures the target interpreter's
 actual import owner and contents under isolated Python. Provenance alone
-cannot authorize execution. Private bootstrap uses explicit owned prefixes,
-and acceptance refuses preexisting work roots. Shared operator provisioning
+cannot authorize execution. Private bootstrap uses explicit owned prefixes. Shared operator provisioning
 remains an operator action. The PB pin resolver, reader pin aliases and
 original-CUDA dependency-pack entry are retired. Remaining PB test/build
 dependencies stay explicit until their callers migrate; the existing Bazel
@@ -3066,7 +3064,6 @@ plan without files or submissions. The fixed-count `dispatch_shards` driver
 and its dependency on a model-specific wrapper are removed. Full exports retain the existing
 preparation, encoding and complete-set assembly paths. The worker calls the
 supported `tessera.export_serving` package, not an experiment wrapper.
-The ladder probe retains its own historical configuration.
 
 Re-stamped 2026-10-07 (PQ #2417, R1): the worker imports the shared partition
 owner only for preparation. Standalone help and atomic publication require
@@ -6419,8 +6416,7 @@ activation policy. The Hessian reference readers take the canonical capture
 authority is `prismaquant/tessera_reuse_authority.py` (stdlib-only; the checks
 moved verbatim, and a 346-construction differential over Tessera's own
 fixtures matched every decision and reason string). `read_cached_unit_bundle`,
-`open_hessian_reference`, `tessera_hessian` and
-`tools/build_tessera_hessian_collection.py` pass it in process. Tessera's
+`open_hessian_reference` and `tessera_hessian` pass it in process. Tessera's
 export drivers take its path as `--producer-authority`, and the packaged
 contract **v40** (`d6768313…`, additive over v39) publishes which drivers do in
 `producer_interface.reuse_authority`. PQ reads that block, never asserts it:
@@ -7007,12 +7003,7 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   (`resident_render_identity`, PQ #1348) compares the tensor's version
   counter with the one recorded at load, so a `torch` write in place fails
   the window before it commits. Bounded non-stream PWC loads (`prefetch`,
-  a lazy `get`) now request this same sealed-buffer decoder. The direct
-  `tools/qualify_t4_overlay.py` caller requests it too, through the existing
-  bounded reader so digest-less first qualification preserves its staging and
-  copy-time digest fences. It closes the descriptor on successful decoding and
-  on decoder failure; the returned private mapping owns the verified pages.
-  Wire verification and GPU finishing remain independent qualification gates.
+  a lazy `get`) now request this same sealed-buffer decoder.
   [The controlled CPU profile](results/2026-09-30_qualifier_sealed_cpu.md)
   records live shmem returning to zero on drop and anonymous temporary growth
   that remains; it does not attribute all retained memory to the decoder.
@@ -9053,8 +9044,8 @@ collection.
 
 The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-09d6559d-tf516`
 carries transformers 5.16.1 and is otherwise the same interpreter. It exists
-on both Sparks. `prismaquant/tessera_runtime/README.md` has the recipe and the
-`pbtest` command for a PR that touches these modules. The full suite also
+on both Sparks. `prismaquant/tessera_runtime/README.md` has the recipe.
+Submit it as a Flux job (see the flux skill). The full suite also
 passes on it (12,040 tests), and no skip names transformers.
 
 Running the six exposed two failing tests. Under transformers 5.16,
@@ -10480,12 +10471,10 @@ read-ahead failure. Every file stat fence now reads one identity,
 `residency_shard_reader` and `tessera_calibration_cache` are gone. The sealed
 overlay catalog projects its four persisted keys from it
 (`joint_catalog_extension.catalog_stat_fence`), byte-identical to the dict #1519
-sealed. The overlay catalog tools (`build_t4_overlay_catalog`,
-`qualify_t4_overlay`) read that projection instead of their own `stamp`; two
+sealed. `build_t4_overlay_catalog` reads that projection instead of its own `stamp`; two
 tensor-bit digests read one `tensor_digests.tensor_sha256`; and the Tessera
 fleet drivers (PQ #1547) share one `atomic_json` (the standard-library
-worker's) and one `common.gb10_row`. The duplication baseline shrinks by two
-groups. Gates: `tests/test_duplication_baseline.py`,
+worker's). Gates: `tests/test_duplication_baseline.py`,
 `tests/test_file_identity.py`.
 
 Gates: `tests/test_io_site_freeze.py`, `tests/test_overlay_fence_pool_1519.py`,
@@ -25655,7 +25644,7 @@ flowchart LR
 
 Run `python -m prismaquant.tessera_materialization plan --request REQUEST
 --census CENSUS --workspace WORKSPACE --spec CAMPAIGN_SPEC`, submit its
-`WORKSPACE/manifest.json` through PrismaBuild's published `pbcampaign.py`, and
+`WORKSPACE/manifest.json` as a Flux job (see the flux skill), and
 run `python -m prismaquant.tessera_materialization finalize --plan
 WORKSPACE/plan.json` inside an admitted action. `final/result.json` names the
 final allocation, capture, scales and wire directory for the export leg.
@@ -26832,11 +26821,9 @@ producer. `submit-joint`, `submit-allocation` and
 (`build_joint_pass_manifest`,
 `build_allocation_manifest`,
 `build_export_manifest`), write it under `<output-root>/data-manifests/` --
-or under `--manifest-dir`, which a frozen output root needs -- and run the
-chain-style `pbrun` command with `--data-manifest` **before** `--detach`,
-since a `pbrun` option after the separator is an argument of the action
-instead. `--dry-run` prints the command and the manifest summary and submits
-nothing. Demand is an argument on every one of them, never a constant: the
+or under `--manifest-dir` for a frozen output root.
+Submit it as a Flux job (see the flux skill).
+`--dry-run` prints the command and the manifest summary and submits nothing. Demand is an argument on every one of them, never a constant: the
 numbers belong to the pass being submitted.
 
 The phase contract is what makes the joint manifest worth building. Each

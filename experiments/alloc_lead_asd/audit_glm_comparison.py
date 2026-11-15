@@ -1,6 +1,6 @@
 """Reconstruct the banked GLM calibration comparison, without a model forward.
 
-Submit this bounded CPU audit through PrismaBuild. It proves saved operand
+Submit it as a Flux job (see the flux skill). It proves saved operand
 identities and score semantics, not the calibration variance or estimator bug.
 """
 from __future__ import annotations

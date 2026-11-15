@@ -1,4 +1,6 @@
-"""Bounded original GLM prefix graph qualification, only through PrismaBuild.
+"""Bounded original GLM prefix graph qualification.
+
+Submit it as a Flux job (see the flux skill).
 
 The deterministic boundary stimuli are not downstream Fisher adjoints. This
 gate allocates no statistics or candidates and emits no cost/quality claim.

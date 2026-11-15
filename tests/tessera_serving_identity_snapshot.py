@@ -15,8 +15,8 @@ taken on ``origin/main`` before #1561 changed any source (run through
 PrismaBuild; the action key is in that PR). ``test_tessera_serving_code_identity``
 requires the output after the change to equal it byte for byte, which is the
 "a v2 pin behaves exactly as before" claim made as a before/after comparison
-rather than as an argument.  A pin move re-takes it through PrismaBuild and
-explains the diff: PQ #1274 (Tessera 38e96012, contract v42) moved only the
+rather than as an argument. For a pin move, submit it as a Flux job (see the flux skill).
+Explain the diff: PQ #1274 (Tessera 38e96012, contract v42) moved only the
 pin's commit, contract digest and extension rows, the reviewed answer's two
 new extensions and four routed cells' launches, and the four q256 1024 routed
 units' recorded launches.

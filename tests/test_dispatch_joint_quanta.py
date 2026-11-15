@@ -742,16 +742,8 @@ def test_stage_a_refuses_a_malformed_memory_bound(tmp_path, campaign, aggregate)
         stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
 
 
-def test_stage_a_refuses_a_spec_naming_a_retired_spool_environment(tmp_path, campaign):
-    """The retired PB spool names refuse at dispatch; the bound is the declaration's."""
-    _write_fixture_spec(with_spool({"container": {"image": "sha256:" + "0" * 64},
-                                     "env": {"PRISMABUILD_PRODUCED_SPOOL_ROOT": SPOOL_ROOT}}))
-    with pytest.raises(DispatchRefused, match="retired service environment"):
-        stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
-
-
 def test_a_quantum_row_seals_no_spool_environment(tmp_path, campaign):
-    """A quantum row has no spool environment. Retired spool settings refuse."""
+    """A quantum row has no spool environment."""
     slices = tmp_path / "slices"
     slices.mkdir()
     record = _bind(_record(campaign, 1, slice_dir=slices), _receipt(campaign),
@@ -763,10 +755,6 @@ def test_a_quantum_row_seals_no_spool_environment(tmp_path, campaign):
     _write_fixture_spec({"container": {"image": "sha256:" + "0" * 64}, "env": {}})
     argv = quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=Path("/out/root"))
     assert _envelope_envs(argv) == []
-    _write_fixture_spec(with_spool({"container": {"image": "sha256:" + "0" * 64},
-                                     "env": {"PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": "1"}}))
-    with pytest.raises(DispatchRefused, match="retired service environment"):
-        quantum_argv(record, timeout_s=3600, record_path=record_path, output_root=Path("/out/root"))
 
 
 def test_stage_a_argv_binds_manifest_digests_into_payload(tmp_path, campaign):
@@ -1410,16 +1398,6 @@ def test_a_band_serial_producer_captures_at_the_chains_batch_size_at_dispatch(
             path, producer, progress=head_only,
             handoff_chain_batch_size=chain_batch_size)
         assert argv[-len(producer):] == producer
-
-
-@pytest.mark.parametrize('name', ['PRISMABUILD_LOCAL_SCRATCH_PAIRS', 'PRISMABUILD_LOCAL_SCRATCH_IO'])
-def test_a_spec_naming_a_retired_scratch_setting_refuses(tmp_path, campaign, name):
-    import dispatch_joint_quanta as dispatch
-    root = '/home/rob/pb-scratch/spill'
-    env = {_SPILL[0]: root, _SPILL[1]: str(1 << 30), name: ''}
-    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
-    with pytest.raises(dispatch.DispatchRefused, match='retired service environment'):
-        build()
 
 
 @pytest.mark.parametrize('bad_pair', [_COTANGENT, _SPILL, _CACHE_2798], ids=['cotangent', 'spill', 'cache'])

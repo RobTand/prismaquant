@@ -107,32 +107,6 @@
       ]
     },
     {
-      "file": "tools/build_tessera_hessian_collection.py",
-      "kind": "Package-dependent argument/help entry",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.build_tessera_hessian_collection",
-        "--help"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
-      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
-    },
-    {
-      "file": "tools/build_tessera_mtp_cached_units.py",
-      "kind": "Package-dependent argument/help entry",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.build_tessera_mtp_cached_units",
-        "--help"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
-      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
-    },
-    {
       "file": "tools/capture_glm_routing_replay.py",
       "kind": "Package-dependent argument/help entry",
       "supported_probe": [
@@ -157,19 +131,6 @@
       "working_directory": "Outside the repository; no coordinator PYTHONPATH",
       "whole_body_standard_library": false,
       "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
-    },
-    {
-      "file": "tools/check_campaign_activation_identity.py",
-      "kind": "Package-dependent argument/help entry",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.check_campaign_activation_identity",
-        "--help"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
-      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
     },
     {
       "file": "tools/check_stageb_a4_group_quantizer.py",
@@ -300,19 +261,6 @@
       "working_directory": "Outside the repository; no coordinator PYTHONPATH",
       "whole_body_standard_library": false,
       "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
-    },
-    {
-      "file": "tools/qualify_t4_overlay.py",
-      "kind": "Package-dependent argument/help entry",
-      "supported_probe": [
-        "Qualified SDK4 interpreter",
-        "-m",
-        "tools.qualify_t4_overlay",
-        "--help"
-      ],
-      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
-      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
-      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
     },
     {
       "file": "tools/regenerate_joint_quanta.py",

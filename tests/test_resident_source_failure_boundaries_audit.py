@@ -1,6 +1,6 @@
 """Actual resident source ownership and configured dense-shape admission.
 
-Root submits these tiny CPU fixtures through admitted PrismaBuild. Observers
+Submit it as a Flux job (see the flux skill). Observers
 retain the actual factory model/context to inspect cleanup; they do not replace
 source reads, decode, installation, memory admission or initialization witnesses.
 """

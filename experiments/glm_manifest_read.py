@@ -4,7 +4,7 @@ The point is the three-way split of a row's bytes: what the ARC already held,
 what the L2ARC NVMe served, and what the spindles had to fetch. Counters are
 read on this box, around the read, so the bracket is the read itself.
 
-Run it on the storage box, pinned, through PrismaBuild.
+Submit it as a Flux job (see the flux skill).
 """
 
 from __future__ import annotations

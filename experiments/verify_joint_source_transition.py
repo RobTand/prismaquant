@@ -1,4 +1,4 @@
-"""Read-only original-artifact acceptance; execute through PrismaBuild on CPU."""
+"""Read-only original-artifact acceptance. Submit it as a Flux job (see the flux skill)."""
 from __future__ import annotations
 
 import argparse
