@@ -262,6 +262,7 @@ def test_ordinary_aura_main_resumes_a_bound_journal(tmp_path, monkeypatch):
 
 
 def test_main_prices_real_production_anchors_from_act_rows(tmp_path, monkeypatch):
+    monkeypatch.setenv('PRISMAQUANT_IDENTITY_GIT_COMMIT', '1' * 40)
     source, expected = producer_source(tmp_path)
     producer_cli_inputs(monkeypatch)
     act = tmp_path / 'act'
