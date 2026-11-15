@@ -948,6 +948,12 @@ The default batch waits up to 10 minutes. Bazel and hosted gate jobs run only
 on authenticated Mergify batches or `gate-canary` PRs. Graph impact still runs
 on every PR. The post-merge CPU suite remains on Python 3.12.
 
+As of: 2026-11-14, item 17 removes the known-failure quarantine after cause fixes
+and dead-test deletion. Source: `tools/ci/gate_select.py`, `tools/ci/gate_collect.py`,
+and `tools/bazel/build_files.py`, based on `b766d4e86`.
+The gate selects every test file. The graph check keeps its dedicated job.
+Planning and post-merge collection read no failure list and need no issue lookup.
+
 As of: 2026-11-02, read-ahead growth reserve, PQ #2602 (child of #1347).
 `GuardReadBudget` subtracts a per-window growth reserve derived from the
 stream's measured evictions; the derivation and its CPU-proven bounds are in

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 import json
 import os
 import re
@@ -40,6 +41,7 @@ torch.set_num_threads(int(os.environ.get("NTHREADS", os.environ.get("OMP_NUM_THR
 
 
 # ============================================================== (c) the activation contract
+@functools.cache
 def _pinned_namespace():
     """The pinned test's input classes and `_kernel_arithmetic`, executed from its own source."""
     route = ast.parse((PIN / "tests" / "test_serving_fp8_route.py").read_text())
@@ -67,9 +69,6 @@ def _pinned_namespace():
     return ns
 
 
-NS = _pinned_namespace()
-
-
 def test_contract_table_names_fp8_per_token_dynamic_for_e4m3_on_sm121():
     contract = json.loads((PIN / "src" / "tessera" / "serving" / "runtime_contract.json").read_text())
     executes = contract["lane_eligibility"]["platforms"]["sm_121"]["executes"]
@@ -80,27 +79,28 @@ def test_contract_table_names_fp8_per_token_dynamic_for_e4m3_on_sm121():
 
 
 def test_min_scale_is_the_pinned_floor():
-    assert L.MIN_SCALE == NS["MIN_SCALE"]
+    assert L.MIN_SCALE == _pinned_namespace()["MIN_SCALE"]
     assert L.FP8_MAX == 448.0
 
 
-@pytest.mark.parametrize("name", sorted(NS["CLASSES"]))
-def test_qdq_is_the_pinned_kernel_arithmetic(name):
-    x = NS["CLASSES"][name]()
-    q_k, s_k = NS["_kernel_arithmetic"](x)
-    q, s = L.fp8_per_token_dynamic(x)
-    codes_differ = int((q.view(torch.uint8) != q_k.view(torch.uint8)).sum())
-    scales_differ = int((s != s_k).sum())
-    deq = L.qdq_rows(x, 1)
-    ref = (q_k.float() * s_k).to(x.dtype)
-    deq_differ = int((deq.view(torch.int16) != ref.view(torch.int16)).sum())
-    print(f"QDQ {name} shape={tuple(x.shape)} codes_differ={codes_differ} scales_differ={scales_differ} "
-          f"deq_differ={deq_differ}")
-    assert codes_differ == 0 and scales_differ == 0 and deq_differ == 0
+def test_qdq_is_the_pinned_kernel_arithmetic():
+    ns = _pinned_namespace()
+    for name in sorted(ns["CLASSES"]):
+        x = ns["CLASSES"][name]()
+        q_k, s_k = ns["_kernel_arithmetic"](x)
+        q, s = L.fp8_per_token_dynamic(x)
+        codes_differ = int((q.view(torch.uint8) != q_k.view(torch.uint8)).sum())
+        scales_differ = int((s != s_k).sum())
+        deq = L.qdq_rows(x, 1)
+        ref = (q_k.float() * s_k).to(x.dtype)
+        deq_differ = int((deq.view(torch.int16) != ref.view(torch.int16)).sum())
+        print(f"QDQ {name} shape={tuple(x.shape)} codes_differ={codes_differ} scales_differ={scales_differ} "
+              f"deq_differ={deq_differ}")
+        assert (codes_differ, scales_differ, deq_differ) == (0, 0, 0), name
 
 
 def _deq_kernel(x2d):
-    q, s = NS["_kernel_arithmetic"](x2d)
+    q, s = _pinned_namespace()["_kernel_arithmetic"](x2d)
     return (q.float() * s).to(x2d.dtype)
 
 

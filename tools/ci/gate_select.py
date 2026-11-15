@@ -9,12 +9,9 @@ import importlib.util
 import heapq
 import json
 import math
-import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
-import urllib.error
-import urllib.request
 
 import sys
 
@@ -232,90 +229,7 @@ def estimate(files: list[str], durations: dict, workers: int = 4) -> dict:
             'workers': workers, 'missing_files': [], 'source': durations.get('source')}
 
 
-def exclusion_entries(quarantine: dict) -> list[dict]:
-    entries = [dict(row, kind=kind) for kind in ('entries', 'cost_exclusions', 'environment_lanes')
-               for row in quarantine.get(kind, [])]
-    for row in entries:
-        target = row.get('target', '')
-        path = PurePosixPath(target.split('::', 1)[0])
-        issue = row.get('issue')
-        if (not target or not str(path).startswith('tests/') or path.is_absolute() or
-            '..' in path.parts or not str(path).endswith('.py') or
-            not isinstance(issue, int) or isinstance(issue, bool) or issue <= 0 or issue == 3180 or
-            not isinstance(row.get('reason'), str) or not row['reason'].strip()):
-            raise ValueError(f'invalid gate exclusion or missing owner: {target!r}')
-        if row['kind'] == 'environment_lanes' and (not isinstance(row.get('lane'), str) or not row['lane'].strip()):
-            raise ValueError('environment lane needs a named capability')
-        if row['kind'] == 'cost_exclusions' and '::' in target:
-            raise ValueError('cost exclusions must name complete files')
-    if len({row['target'] for row in entries}) != len(entries):
-        raise ValueError('duplicate gate exclusions')
-    return entries
-
-
-QUARANTINE_PATH = 'tools/ci/gate_quarantine.json'
-
-
-def quarantine_policy(current: dict, baseline: dict | None, changed: list[str]) -> None:
-    entries = exclusion_entries(current)
-    if baseline is None:
-        return  # Initial policy, like the budget bootstrap, is reviewed with the gate.
-    previous = {row['target']: row for row in exclusion_entries(baseline)}
-    def covered(row):
-        target = row['target']
-        old = previous.get(target, previous.get(target.split('::', 1)[0]))
-        return old is not None and row['issue'] == old['issue']
-    growth = [row['target'] for row in entries if not covered(row)]
-    isolated = QUARANTINE_PATH in changed and all(
-        path == QUARANTINE_PATH or path.startswith('docs/') and path.endswith(('.md', '.rst')) or
-        path in {'README.md', 'CHANGELOG.md'} for path in changed)
-    if growth and not isolated:
-        raise ValueError('Quarantine growth requires a quarantine-only PR with optional docs: ' + ', '.join(growth))
-
-
-def fetch_quarantine_owner(issue: int) -> dict:
-    headers = {'Accept': 'application/vnd.github+json', 'User-Agent': 'prismaquant-gate'}
-    # Anonymous REST shares a small per-IP limit across hosted runners; the
-    # workflow's read-only job token has its own allowance.
-    if token := os.environ.get('GITHUB_TOKEN'):
-        headers['Authorization'] = f'Bearer {token}'
-    request = urllib.request.Request(
-        f'https://api.github.com/repos/RobTand/prismaquant/issues/{issue}', headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return json.load(response)
-    except urllib.error.HTTPError as error:
-        if error.code in (404, 410):
-            raise ValueError(f'Quarantine owner #{issue} must be an open issue') from error
-        raise
-
-
-def check_quarantine_owners(entries: list[dict], *, fetch=fetch_quarantine_owner) -> None:
-    for issue in sorted({row['issue'] for row in entries}):
-        try:
-            owner = fetch(issue)
-        except urllib.error.HTTPError as error:
-            raise RuntimeError(f'Quarantine owner #{issue}: no verdict, GitHub HTTP {error.code}') from error
-        except (OSError, TimeoutError, json.JSONDecodeError) as error:
-            raise RuntimeError(f'Quarantine owner #{issue}: no verdict, GitHub unavailable: {error}') from error
-        if not isinstance(owner, dict) or owner.get('state') not in {'open', 'closed'}:
-            raise RuntimeError(f'Quarantine owner #{issue}: no verdict, invalid GitHub response')
-        if owner['state'] != 'open' or 'pull_request' in owner:
-            raise ValueError(f'Quarantine owner #{issue} must be an open issue')
-
-
-def base_quarantine(root: Path, base: str) -> dict | None:
-    subprocess.run(['git', 'cat-file', '-e', f'{base}^{{commit}}'], cwd=root,
-                   capture_output=True, check=True)
-    tree = subprocess.run(['git', 'ls-tree', base, '--', QUARANTINE_PATH], cwd=root,
-                          capture_output=True, text=True, check=True)
-    if not tree.stdout.strip():
-        return None
-    return json.loads(subprocess.check_output(['git', 'show', f'{base}:{QUARANTINE_PATH}'],
-                                             cwd=root, text=True))
-
-
-def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: dict,
+def create_plan(root: Path, changed: list[str], *, durations: dict,
                 index: dict | None = None, mode: str = 'selection', helper_graph: dict | None = None) -> dict:
     root = Path(root)
     triggers = sorted(path for path in set(changed) if
@@ -342,11 +256,8 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
                      for path in sorted((root / 'tests').rglob('*.py'))}
     if mode not in {'selection', 'full'}:
         raise ValueError('mode must be selection or full')
-    all_tests = {path for path in index if path.startswith('tests/') and Path(path).name.startswith('test_')}
-    exclusions = exclusion_entries(quarantine)
-    by_file = {row['target']: row for row in exclusions if '::' not in row['target']}
-    population = all_tests - by_file.keys()
-    version_body = {'policy': POLICY, 'files': sorted(population), 'exclusions': exclusions, 'durations': durations}
+    population = {path for path in index if path.startswith('tests/') and Path(path).name.startswith('test_')}
+    version_body = {'policy': POLICY, 'files': sorted(population), 'durations': durations}
     version = DIRECT_ASCII_LAX.sha256(version_body)
     reasons: dict[str, list[str]] = {}
     explained = set()
@@ -406,19 +317,14 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
     selected = shadow if mode == 'selection' else [
         {'path': name, 'reasons': ['full queue population'],
          'estimated_seconds': durations['files'].get(name)} for name in sorted(population)]
-    deferred = [{'path': row['target'], 'reason': row['reason'], 'issue': row['issue'],
-                  'kind': row['kind'], **({'lane': row['lane']} if row['kind'] == 'environment_lanes' else {}), 'selected_by': reasons.get(row['target'].split('::')[0], [])}
-                 for row in exclusions]
-    deselect = sorted(row['target'] for row in exclusions if '::' in row['target'] and
-                      row['target'].split('::')[0] in {item['path'] for item in selected})
-    deselect = sorted(set(deselect) | {node for node in DEDICATED_NODEIDS
-                      if node.split('::', 1)[0] in {item['path'] for item in selected}})
+    deselect = sorted(node for node in DEDICATED_NODEIDS
+                      if node.split('::', 1)[0] in {item['path'] for item in selected})
     files = [row['path'] for row in selected]
     return {'schema': 'prismaquant.gate_plan.v1', 'policy': POLICY,
             'population': {'size': len(population), 'version': version,
                            'estimate': estimate(sorted(population), durations)},
             'mode': mode, 'changed_files': sorted(set(changed)), 'selected': selected,
-            'shadow_selected': shadow, 'deferred': deferred,
+            'shadow_selected': shadow,
             'deselect': deselect, 'estimate': estimate(files, durations),
             'budget': {'target_wall_seconds': 300, 'maximum_wall_seconds': 600,
                        'includes_pickup': False, 'policy': 'never truncate relevant coverage'}}
@@ -435,19 +341,14 @@ def summary(plan: dict) -> str:
              f"Selected {len(plan['selected'])} of {plan['population']['size']} files.",
              f"Conservative single-job test seconds at 4 workers: {plan['estimate']['wall_seconds']!s}.",
              'Runner pickup and setup are additional. Missing durations mean an unknown estimate.',
-             'Complete selection, reasons and exclusions are in the plan.json artifact.', '',
+             'Complete selection and reasons are in the plan.json artifact.', '',
              'Selection reasons: ' + '; '.join(f'{cell(reason)}: {count}' for reason, count in sorted(counts.items())[:50]), '',
              '| Test file | Reasons | Estimated seconds |', '| --- | --- | ---: |']
     lines.extend(f"| {cell(row['path'])} | {cell('; '.join(row['reasons']))} | {cell(row['estimated_seconds'])} |"
                  for row in plan['selected'][:preview_entries])
     if len(plan['selected']) > preview_entries:
         lines += ['', f"{len(plan['selected']) - preview_entries} more selected files in plan.json."]
-    lines += ['', '<details><summary>Other lanes and exclusions</summary>', '',
-              f"{len(plan['deferred'])} entries; complete record in plan.json.", '',
-              '| Test | Reason | Owning issue |', '| --- | --- | --- |']
-    lines.extend(f"| {cell(row['path'])} | {cell(row['reason'])} | {('#' + str(row['issue'])) if row['issue'] else 'separate lane'} |"
-                 for row in plan['deferred'][:preview_entries])
-    lines += ['', '</details>', '']
+    lines.append('')
     return '\n'.join(lines)
 
 
@@ -464,9 +365,6 @@ def main(argv: list[str] | None = None) -> int:
     root = args.root.resolve()
     try:
         changed = changed_files(root, args.base, args.head)
-        quarantine = load_gate_json(root / QUARANTINE_PATH)
-        quarantine_policy(quarantine, base_quarantine(root, args.base), changed)
-        check_quarantine_owners(exclusion_entries(quarantine))
     except ValueError as error:
         print('GATE_POLICY_FAILURE: ' + str(error), file=sys.stderr)
         return 1
@@ -474,7 +372,7 @@ def main(argv: list[str] | None = None) -> int:
         print('NO_VERDICT: ' + str(error), file=sys.stderr)
         return 75
     plan = create_plan(root, changed, durations=load_gate_json(root / 'tools/ci/gate_durations.json'),
-                       quarantine=quarantine, mode=args.mode)
+                       mode=args.mode)
     plan.update(base_sha=args.base, head_sha=args.head)
     output = json.dumps(plan, indent=2) + '\n'
     if args.output:

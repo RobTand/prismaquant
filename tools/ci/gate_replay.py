@@ -81,9 +81,8 @@ def replay_selection(root: Path, history: dict) -> dict:
     index = select.dependency_index(root)
     helper_graph = select.helper_importers(index, [])
     durations = select.load_gate_json(root / 'tools/ci/gate_durations.json')
-    quarantine = select.load_gate_json(root / 'tools/ci/gate_quarantine.json')
     def plan(paths):
-        return select.create_plan(root, paths, durations=durations, quarantine=quarantine, index=index, helper_graph=helper_graph)
+        return select.create_plan(root, paths, durations=durations, index=index, helper_graph=helper_graph)
     rows = []
     for pull in history['pulls']:
         selected = plan(pull['changed_files'])

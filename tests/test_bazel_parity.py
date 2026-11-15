@@ -13,9 +13,7 @@ bazel_parity = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bazel_parity)
 
 PLAN = {'selected': [{'path': 'tests/test_a.py'}, {'path': 'tests/test_b.py'}],
-        'deselect': ['tests/test_a.py::test_flaky'],
-        'deferred': [{'path': 'tests/test_root.py', 'lane': 'root'},
-                     {'path': 'tests/test_a.py::test_flaky', 'issue': 2000}]}
+        'deselect': ['tests/test_a.py::test_flaky']}
 
 
 def rule(path, *, args=(), tags=(), name=None):
@@ -41,7 +39,6 @@ def test_matching_bazel_targets_pass_static_parity():
     ([rule('tests/test_a.py', args=['--deselect=tests/test_a.py::test_flaky'], tags=['manual'])] + MATCHING[1:],
      'Bazel does not run tests/test_a.py'),
     ([rule('tests/test_a.py')] + MATCHING[1:], 'tests/test_a.py deselects'),
-    (MATCHING[:2], 'tests/test_root.py has no Bazel target'),
     (MATCHING + [rule('tests/test_b.py', name='//tests:twice')], 'two Bazel targets run tests/test_b.py'),
 ])
 def test_drift_fails_naming_the_file_and_the_fix(lines, message):
@@ -61,14 +58,13 @@ def test_hosted_lane_targets_count_as_run_and_plain_manual_ones_do_not():
 
 def test_an_empty_population_is_refused():
     with pytest.raises(RuntimeError, match='empty'):
-        bazel_parity.compare_static({'selected': [], 'deselect': [], 'deferred': []}, {})
+        bazel_parity.compare_static({'selected': [], 'deselect': []}, {})
 
 
 def test_the_population_comes_from_the_gate_selector_without_reading_imports():
     plan = bazel_parity.population(ROOT)
     paths = {row['path'] for row in plan['selected']}
     assert 'tests/test_bazel_parity.py' in paths
-    assert 'tests/g3job/test_g3.py' not in paths  # quarantined whole file (#3181)
 
 
 def junit(path, cases):

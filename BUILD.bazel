@@ -11921,7 +11921,6 @@ pq_py_library(
         "//tools/bazel:python_runner.py",
         "tools/ci/bazel_parity.py",
         "tools/ci/gate_durations.json",
-        "tools/ci/gate_quarantine.json",
         "tools/ci/gate_select.py",
     ],
 )
@@ -11982,9 +11981,6 @@ pq_py_library(
     srcs = [
         "tools/ci/gate_collect.py",
     ],
-    data = [
-        "tools/ci/gate_quarantine.json",
-    ],
     deps = [
         ":tools/ci/gate_partition",
         "@pq_pip//pytest",
@@ -12035,7 +12031,6 @@ pq_py_library(
     ],
     data = [
         "tools/ci/gate_durations.json",
-        "tools/ci/gate_quarantine.json",
         "tools/ci/gate_replay.py",
         "tools/ci/gate_select.py",
     ],
@@ -12075,7 +12070,6 @@ pq_py_library(
         "pytest.ini",
         "tools/ci/gate_durations.json",
         "tools/ci/gate_paths.py",
-        "tools/ci/gate_quarantine.json",
         "tools/ci/gate_select.py",
         "tools/resolve_tessera_dev_pin.py",
         "uv.lock",
@@ -12116,7 +12110,6 @@ pq_py_library(
     data = [
         "//tools/bazel:build_files.py",
         "tools/ci/gate_durations.json",
-        "tools/ci/gate_quarantine.json",
         "tools/ci/graph_impact_imports.py",
     ],
 )
@@ -13346,20 +13339,6 @@ pq_py_library(
         ":prismaquant/io_spans",
         ":prismaquant/staged_tier_policy",
         ":prismaquant/tessera_reader",
-    ],
-)
-
-pq_py_library(
-    name = "tools/prove_glm_source_adoption",
-    srcs = [
-        "tools/prove_glm_source_adoption.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
-        ":prismaquant/tessera_source_digest_adoption",
-        "@pq_pip//tessera_quant",
     ],
 )
 
