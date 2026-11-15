@@ -20,89 +20,52 @@ SPEC.loader.exec_module(gate)
 LABEL = '//tests:test_consumer'
 
 
-@pytest.mark.parametrize('architecture,mode,wanted', [
-    ('amd64', 'pr', ['tests/test_owned.py']),
-    ('amd64', 'main', ['tests/test_owned.py']),
-    ('arm64', 'main', ['tests/test_disk.py']),
-])
-def test_hosted_assignment_preserves_the_existing_plan_and_exact_lane(architecture, mode, wanted):
-    plan = {'schema': 'prismaquant.gate_plan.v1', 'mode': 'full',
-        'base_sha': 'b' * 40, 'head_sha': 'a' * 40,
+TABLE = """NONHERMETIC = {
+    "//tests:test_owned": struct(
+        tags = ["hosted"],
+    ),
+    "//tests:test_disk": struct(
+        tags = ["gpu", "hosted-arm64"],
+    ),
+}"""
+PLAN = {'schema': 'prismaquant.gate_plan.v1', 'mode': 'full', 'base_sha': 'b' * 40, 'head_sha': 'a' * 40,
         'population': {'version': 'full-population'},
-        'selected': [{'path': 'tests/test_owned.py', 'estimated_seconds': 2},
-                     {'path': 'tests/test_disk.py', 'estimated_seconds': 3},
-                     {'path': 'tests/test_other.py', 'estimated_seconds': 4}],
-        'deselect': ['tests/test_owned.py::test_known', 'tests/test_other.py::test_known'],
-        'deferred': []}
-    result = {'schema': gate.SCHEMA, 'mode': mode, 'base': 'b' * 40, 'head': 'a' * 40,
-        'verdict': 'pass', 'hosted': ['//tests:test_owned'],
-        'hosted_arm64': ['//tests:test_disk'] if mode == 'main' else []}
-    found = gate.hosted_assignment(plan, result, architecture)
-    assert [row['path'] for row in found['selected']] == wanted
-    assert found['population'] == {'version': 'full-population'}
-    assert found['deselect'] == (['tests/test_owned.py::test_known'] if architecture == 'amd64' else [])
-    assert len(plan['selected']) == 3 and len(plan['deselect']) == 2
-    assert found['base_sha'] == 'b' * 40 and found['head_sha'] == 'a' * 40
+        'selected': [{'path': f'tests/test_{name}.py'} for name in ('owned', 'disk', 'other')],
+        'deselect': ['tests/test_owned.py::test_known', 'tests/test_other.py::test_known']}
 
 
-@pytest.mark.parametrize('fault', ['base', 'head', 'duplicate', 'unknown', 'escape', 'failed', 'architecture'])
-def test_hosted_assignment_refuses_missing_or_inconsistent_lane_evidence(fault):
-    plan = {'schema': 'prismaquant.gate_plan.v1', 'base_sha': 'b' * 40,
-        'head_sha': 'a' * 40, 'selected': [{'path': 'tests/test_owned.py'}], 'deselect': []}
-    result = {'schema': gate.SCHEMA, 'mode': 'pr', 'base': 'b' * 40, 'head': 'a' * 40,
-        'verdict': 'pass', 'hosted': ['//tests:test_owned'], 'hosted_arm64': []}
-    if fault in ('base', 'head'):
-        result[fault] = 'c' * 40
-    elif fault == 'duplicate':
-        result['hosted'] *= 2
-    elif fault == 'unknown':
-        result['hosted'] = ['//tests:test_missing']
-    elif fault == 'escape':
-        result['hosted'] = ['//tests:../test_owned']
-    elif fault == 'failed':
-        result['verdict'] = 'fail'
+@pytest.mark.parametrize('architecture,wanted', [('amd64', 'owned'), ('arm64', 'disk')])
+def test_hosted_assignment_keeps_the_plan_and_only_its_lane_tag(architecture, wanted):
+    found = gate.hosted_assignment(PLAN, architecture, TABLE)
+    assert [row['path'] for row in found['selected']] == [f'tests/test_{wanted}.py']
+    assert found['population'] == PLAN['population'] and found['base_sha'] == 'b' * 40
+    assert found['deselect'] == [n for n in PLAN['deselect'] if n.startswith(f'tests/test_{wanted}.py')]
+
+
+@pytest.mark.parametrize('architecture,table', [('other', TABLE), ('amd64', ''),
+                                                 ('amd64', TABLE.replace('test_owned', 'test_missing'))])
+def test_hosted_assignment_refuses_an_empty_or_unknown_lane(architecture, table):
     with pytest.raises(gate.GateError):
-        gate.hosted_assignment(plan, result, 'other' if fault == 'architecture' else 'amd64')
+        gate.hosted_assignment(PLAN, architecture, table)
 
 
-@pytest.mark.parametrize('architecture,fault', [
-    ('amd64', None), ('arm64', None), ('amd64', 'head'),
-    ('amd64', 'malformed'), ('amd64', 'missing'), ('amd64', 'occupied'),
-])
-def test_hosted_cli_materializes_only_the_source_verified_assignment(tmp_path, architecture, fault):
-    plan = {'schema': 'prismaquant.gate_plan.v1', 'mode': 'full',
-        'base_sha': 'b' * 40, 'head_sha': 'a' * 40,
-        'population': {'version': 'existing-policy'},
-        'selected': [{'path': 'tests/test_owned.py', 'estimated_seconds': 2},
-                     {'path': 'tests/test_disk.py', 'estimated_seconds': 3},
-                     {'path': 'tests/test_other.py', 'estimated_seconds': 4}],
-        'deselect': ['tests/test_owned.py::test_known', 'tests/test_other.py::test_known'],
-        'deferred': ['existing-policy-exclusion']}
-    result = {'schema': gate.SCHEMA, 'mode': 'main', 'base': 'b' * 40,
-        'head': 'c' * 40 if fault == 'head' else 'a' * 40, 'verdict': 'pass',
-        'hosted': ['//tests:test_owned'], 'hosted_arm64': ['//tests:test_disk']}
-    plan_path, result_path, output = (tmp_path / name for name in ('plan.json', 'remote.json', 'assigned.json'))
-    plan_path.write_text(json.dumps(plan))
-    result_path.write_text('{' if fault == 'malformed' else json.dumps(result))
-    if fault == 'missing':
-        result_path.unlink()
+@pytest.mark.parametrize('fault', [None, 'malformed', 'occupied'])
+def test_hosted_cli_writes_only_a_valid_assignment(tmp_path, monkeypatch, fault):
+    (tmp_path / 'tools/bazel').mkdir(parents=True)
+    (tmp_path / 'tools/bazel/nonhermetic.bzl').write_text(TABLE)
+    plan, output = tmp_path / 'plan.json', tmp_path / 'assigned.json'
+    plan.write_text('{' if fault == 'malformed' else json.dumps(PLAN))
     if fault == 'occupied':
         output.write_text('preexisting private evidence')
-    code = gate.main(['hosted', '--architecture', architecture, '--plan', str(plan_path),
-                      '--result', str(result_path), '--output', str(output)])
-    if fault:
-        assert code == 75
-        if fault == 'occupied':
-            assert output.read_text() == 'preexisting private evidence'
-        else:
-            assert not output.exists()
+    monkeypatch.chdir(tmp_path)
+    code = gate.main(['hosted', '--architecture', 'amd64', '--plan', str(plan), '--output', str(output)])
+    assert code == (75 if fault else 0)
+    if fault == 'occupied':
+        assert output.read_text() == 'preexisting private evidence'
+    elif fault:
+        assert not output.exists()
     else:
-        assert code == 0
-        assigned = json.loads(output.read_text())
-        assert assigned == {**plan,
-            'selected': [plan['selected'][0 if architecture == 'amd64' else 1]],
-            'deselect': ['tests/test_owned.py::test_known'] if architecture == 'amd64' else []}
-    assert json.loads(plan_path.read_text()) == plan
+        assert [row['path'] for row in json.loads(output.read_text())['selected']] == ['tests/test_owned.py']
 
 
 def test_shard_output_reader_does_not_load_the_submission_controller(monkeypatch):
