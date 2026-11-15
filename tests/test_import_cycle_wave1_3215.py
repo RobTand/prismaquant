@@ -30,6 +30,7 @@ SEPARATED = [
     ("prismaquant.joint_adjoint_band", "prismaquant.joint_cost_stage_a"),
     ("prismaquant.tessera_joint_allocation", "prismaquant.joint_quanta_join"),
     ("prismaquant.staged_whole_file", "prismaquant.stage_inputs"),
+    ("prismaquant.tessera_lane", "prismaquant.tessera_materialization"),
     ("prismaquant.cost_stage_checkpoint", "prismaquant.production_weight_cache"),
     ("prismaquant.visual_linears", "prismaquant.allocator"),
 ]
