@@ -118,13 +118,14 @@ The shrink-only exceptions preserve existing broad tests in that lane.
 
 ## Remote gate execution
 
-The cutover sends Bazel actions to `selfhosted-amd64` or `selfhosted-arm64`,
-with no cloud fallback. Remote Bazel runners keep their existing four-CPU
-cloud placement. Hosted pytest exception lanes stay on GitHub-hosted runners.
+The cutover sends amd64 Bazel actions to `selfhosted-amd64` and arm64 actions
+to BuildBuddy's hosted arm64 executors, with no fallback. Remote Bazel runners
+keep their existing four-CPU cloud placement. Hosted pytest exception lanes stay
+on GitHub-hosted runners.
 
 Selected gates and post-merge records submit one Remote Bazel shard at a
 time. The gate's fail-closed `//...` PR fallback uses six shards and may submit six
-concurrent Remote Bazel runs per controller on the self-hosted pools, each with
+concurrent Remote Bazel runs per controller on the self-hosted amd64 pool, each with
 `--jobs=16`. The controller rejects concurrency above six, and rejects
 concurrency above one outside PR fallback. Post-merge and development runs
 remain serial. The shard request cap remains 55 minutes and the controller's
