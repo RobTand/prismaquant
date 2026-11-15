@@ -12,8 +12,7 @@ its markers for each Linux architecture. It generates:
   distribution that provides it, so tools/bazel/build_files.py gives every
   library the @pq_pip packages it really imports.
 
---check needs no network: each export must name the current sources' sha256
-and pin every package the constraints pin, and Tessera at the pinned commit.
+--check verifies source hashes, package constraints, and the Tessera pin without network access.
 """
 import argparse
 import json
@@ -32,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # PrismaQuant's one digest owner, as tools/ci/gate_select.py imports it.
 sys.path.insert(0, str(ROOT))
 from prismaquant.digests import bytes_sha256hex  # noqa: E402
+from tools.resolve_tessera_dev_pin import resolve_tessera_dev_pin  # noqa: E402
 
 SOURCES = ('pyproject.toml', 'uv.lock', '.github/ci-constraints.txt', 'prismaquant/tessera_runtime_contract.py')
 PLATFORMS = {'linux_x86_64': 'x86_64-manylinux_2_28', 'linux_aarch64': 'aarch64-manylinux_2_28'}
@@ -55,15 +55,12 @@ def pins(text):
 
 def _literal_pin(root):
     """The Tessera commit, read the way tools/resolve_tessera_dev_pin.py reads it."""
-    output = subprocess.run([sys.executable, '-s', str(root / 'tools/resolve_tessera_dev_pin.py')], cwd=root,
-                            capture_output=True, text=True, check=True).stdout.strip()
-    if not re.fullmatch(r'[0-9a-f]{40}', output):
-        raise SystemExit(f'tools/resolve_tessera_dev_pin.py printed {output!r}, not a commit')
-    return output
+    return resolve_tessera_dev_pin(root / SOURCES[-1])
 
 
 def source_digest(root):
-    return bytes_sha256hex(b''.join(name.encode() + b'\0' + (root / name).read_bytes() + b'\0' for name in SOURCES))
+    return bytes_sha256hex(_literal_pin(root).encode() + b'\0' + b''.join(
+        name.encode() + b'\0' + (root / name).read_bytes() + b'\0' for name in SOURCES[:-1]))
 
 
 def header(root, platform):
