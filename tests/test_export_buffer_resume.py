@@ -12,7 +12,7 @@ from prismaquant import export_native_compressed as export
 from prismaquant import layer_streaming, sensitivity_probe, streaming_model
 
 
-def _export_fixture(tmp_path, monkeypatch, layers=1):
+def _export_fixture(tmp_path, monkeypatch, layers=1, width=2):
     """Replace architecture construction only; source reads and emission are real."""
     expected = torch.tensor([0.5, 0.5 + 2.0 ** -12], dtype=torch.float32)
     source = tmp_path / "source"
@@ -20,7 +20,7 @@ def _export_fixture(tmp_path, monkeypatch, layers=1):
     save_file({
         key: tensor for i in range(layers) for key, tensor in {
             f"model.layers.{i}.expert_bias": expected.clone(),
-            f"model.layers.{i}.proj.weight": torch.eye(2, dtype=torch.bfloat16),
+            f"model.layers.{i}.proj.weight": torch.eye(width, dtype=torch.bfloat16),
         }.items()
     }, str(source / "model.safetensors"))
 
@@ -31,7 +31,7 @@ def _export_fixture(tmp_path, monkeypatch, layers=1):
             model.model = nn.Module()
             model.model.layers = nn.ModuleList([nn.Module() for _ in range(layers)])
             for layer in model.model.layers:
-                layer.proj = nn.Linear(2, 2, bias=False, device="meta")
+                layer.proj = nn.Linear(width, width, bias=False, device="meta")
                 layer.register_buffer("expert_bias", torch.empty(2, device="meta", dtype=torch.float32))
             return model
 
@@ -49,12 +49,12 @@ def _export_fixture(tmp_path, monkeypatch, layers=1):
     monkeypatch.setattr(streaming_model, "_init_rotary_inplace", lambda *a: None)
     monkeypatch.setattr(export, "_PRODUCTION_WEIGHT_CACHE", None)
 
-    def run(cache=None, layer_range=None):
+    def run(cache=None, layer_range=None, assignment=None):
         emitted = {}
         def sink(tensors):
             emitted.update(tensors)
         _, run.hist = export.materialize_tensors_streaming(
-            str(source), {}, profile=profile, bf16_passthrough=set(),
+            str(source), assignment or {}, profile=profile, bf16_passthrough=set(),
             device=torch.device("cpu"), tensor_sink=sink,
             export_cache_dir=None if cache is None else str(cache), layer_range=layer_range)
         path = tmp_path / "emitted.safetensors"
@@ -96,7 +96,7 @@ def test_streaming_export_invalidates_resume_from_old_buffer_policy(tmp_path, mo
 
 
 def test_range_replay_preserves_tensors_and_counts(tmp_path, monkeypatch):
-    run, _ = _export_fixture(tmp_path, monkeypatch, layers=2)
+    run, _ = _export_fixture(tmp_path, monkeypatch, layers=2, width=32)
     stats = Counter()
     monkeypatch.setattr(export._native_render_codec, "_DO_NO_HARM_STATS", stats)
     reads = []
@@ -132,3 +132,56 @@ def test_export_refuses_invalid_layer_range(tmp_path, monkeypatch, bounds):
     run, _ = _export_fixture(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="invalid layer range"):
         run(tmp_path / "ranges", bounds)
+
+
+def test_recache_render_units_feed_export(tmp_path, monkeypatch):
+    from prismaquant.measure_quant_cost import ActivationIndex
+    from prismaquant.model_profiles import DefaultProfile
+    from prismaquant.streaming_production_cache import run_streaming_render
+    from prismaquant import streaming_production_cache as streaming
+
+    run, _ = _export_fixture(tmp_path, monkeypatch, layers=2, width=32)
+    model = nn.Module()
+    model.model = nn.Module()
+    model.model.layers = nn.ModuleList([nn.Module() for _ in range(2)])
+    model.root = nn.Linear(32, 32, bias=False)
+    for layer in model.model.layers:
+        layer.proj = nn.Linear(32, 32, bias=False)
+    names = [name for name, module in model.named_modules() if isinstance(module, nn.Linear)]
+    act = tmp_path / "act"
+    act.mkdir()
+    for name in names:
+        torch.save({"name": name, "inputs": torch.eye(32)}, act / (name.replace(".", "__") + ".pt"))
+    monkeypatch.setattr(streaming, "render_production_weight", lambda weight, *a, **kw: weight.detach().clone())
+    installed = []
+    def render(bounds=None):
+        return run_streaming_render(
+            model, layers_prefix="model.layers.", num_layers=2,
+            render_assignment=dict.fromkeys(names, "FP8_E4M3"),
+            act_index=ActivationIndex(act, []), formats=["FP8_E4M3"], levers={"gptq": False},
+            cache_dir_path=None, profile=DefaultProfile(), skip_tokens=[], device=torch.device("cpu"),
+            layer_range=bounds, install=installed.append, unload=lambda layer: None, progress=False)
+    single = render()
+    installed.clear()
+    units = [render((layer, layer + 1)) for layer in (1, 0)]
+    assert installed == [1, 0]
+    assert set(units[0].weights).isdisjoint(units[1].weights)
+    assert ("root", "FP8_E4M3") in units[1].weights
+    assert ("root", "FP8_E4M3") not in units[0].weights
+    for cache in units:
+        assert cache.metadata["requested_entries"] == len(cache)
+        for key in cache.weights:
+            assert torch.equal(cache.get(*key), single.get(*key))
+    monkeypatch.setattr(export, "_PRODUCTION_WEIGHT_CACHE", single)
+    assignment = {name: "FP8_E4M3" for name in names if name != "root"}
+    baseline = run(assignment=assignment)
+    baseline_bytes = (tmp_path / "emitted.safetensors").read_bytes()
+    baseline_hist = run.hist
+    union = units[1]
+    union.weights.update(units[0].weights)
+    union.activation_max_abs.update(units[0].activation_max_abs)
+    monkeypatch.setattr(export, "_PRODUCTION_WEIGHT_CACHE", union)
+    replay = run(assignment=assignment)
+    assert (tmp_path / "emitted.safetensors").read_bytes() == baseline_bytes
+    assert run.hist == baseline_hist
+    assert all(torch.equal(replay[name], tensor) for name, tensor in baseline.items())

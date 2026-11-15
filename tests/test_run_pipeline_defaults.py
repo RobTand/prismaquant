@@ -249,3 +249,11 @@ def test_large_or_moe_validated_frontier_has_pre_gpu_inplace_gate():
     assert "|| exit $?" in gate
 
 
+def test_selected_cache_keeps_resident_expert_gate_before_recache():
+    script = _run_pipeline_script()
+    block = script.split('if [[ ! -f "$PROD_CACHE_RECACHED" ]]; then')[-1]
+    build, recache = block.split("python3 -m prismaquant.production_recache", 1)
+    assert "--streaming" not in build
+    assert '--expert-gate-dataset "$EXPERT_GATE_DATASET"' in build
+    assert '--output "$PROD_CACHE_RAW"' in build
+    assert '--production-weight-cache "$PROD_CACHE_RAW"' in recache

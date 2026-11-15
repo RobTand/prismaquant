@@ -404,6 +404,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/production_recache",
         ":prismaquant/source_prefetch",
         "@pq_pip//torch",
     ],
@@ -3994,6 +3995,7 @@ pq_py_library(
         ":prismaquant/calibration_data",
         ":prismaquant/gpu_guard",
         ":prismaquant/memory_management",
+        ":prismaquant/production_recache",
         "@pq_pip//torch",
         "@pq_pip//transformers",
     ],
@@ -8137,6 +8139,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/production_recache",
         "@pq_pip//torch",
     ],
 )
@@ -8736,7 +8739,6 @@ pq_py_library(
         "prismaquant/perturbed_x_cache.py",
         "prismaquant/priced_cell.py",
         "prismaquant/probe_inventory.py",
-        "prismaquant/production_recache.py",
         "prismaquant/production_weight_cache.py",
         "prismaquant/quality_prefill_contract.py",
         "prismaquant/quality_prefill_knee.py",
@@ -9134,6 +9136,7 @@ pq_py_library(
         ":prismaquant/memory_management",
         ":prismaquant/model_runtime",
         ":prismaquant/mtp_production_cache",
+        ":prismaquant/production_recache",
         "@pq_pip//torch",
         "@pq_pip//transformers",
     ],
@@ -10299,6 +10302,24 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/production_recache",
+    srcs = [
+        "prismaquant/production_recache.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/calibration_data",
+        ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/digests",
+        ":prismaquant/gpu_guard",
+        ":prismaquant/memory_management",
+        "@pq_pip//torch",
+        "@pq_pip//transformers",
     ],
 )
 
