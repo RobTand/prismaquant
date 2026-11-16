@@ -84636,6 +84636,10 @@ pq_py_library(
     srcs = [
         "test_tessera_contract_v11.py",
     ],
+    data = [
+        "fixtures/shape_runtime_contract_v60.json",
+        "test_tessera_contract_v11.py",
+    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",

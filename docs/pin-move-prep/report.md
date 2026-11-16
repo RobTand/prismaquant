@@ -13,7 +13,9 @@ The packaged contract gives SHA-256 `145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4
 | `joint_catalog_extension.R13_ADDED_FORMAT` | Same scope; historical source records grant no extra scope |
 | Campaign BF16/E2M1 source proofs | BF16 requires IMG-N; E2M1 requires IMG-G; old bytes need new encoding and prices |
 | PQ2471 authorization | BF16 IMG-N TP2 loses its receipt; narrow to TP1; E4M3 keeps TP2 |
-| Research profile | TP1 stays the default; no export lane or shipping grant |
+| `tessera_reuse_authority.SERVED_POLICY_V1_FORMAT` | Same R896 scope; authenticates old policy bytes and grants no new serving scope |
+| Native MoE panel `FORMAT` | E4M3 R1024; explicit image required; matching IMG-G and IMG-N routed cells remain |
+| Lane-spec family prices and research profile | Prices grant no cell; profile stays TP1 and has no export lane |
 | Pipeline and optional Qwen3 Tessera lane | Pipeline uses compressed-tensors; the optional vanilla image has no routed R768 cell |
 
 The initial gaps were BF16 on IMG-G and BF16/E2M1 at TP2.
@@ -23,7 +25,8 @@ The lead chose OPTION A on 2026-11-16 at 02:54Z. No missing receipt is inferred.
 PQ2471 adds no E2M1 IMG-N grant, image, rung, or world size.
 IMG-G routed E4M3 R768 gains only upstream v66 evidence, not a PrismaQuant grant.
 Its receipt is `experiments/results/glm53_r768_stub_base_tp2_eager_census.json` at the target commit.
-Explicit research/custom targets can reach this cell. No current shipping default reaches it.
+An explicit IMG-G target can reach R768 through the production assignment-scope check and export path.
+No current default reaches it. Publication still requires independent shipcard gates.
 
 ## Evidence
 
