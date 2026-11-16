@@ -13,6 +13,7 @@ if [ "${1:-}" = --merge-main ]; then
   export GATE_BASE="$(git rev-parse origin/main)" GATE_GRAPH_BASE_MODE=batch
 fi
 base="${GATE_BASE:?GATE_BASE names the base commit}"
+[ -z "${UV:-}" ] || PATH="$(dirname "$UV"):$PATH"  # a sandbox can name uv without putting it on PATH
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-$HOME/tmp}}/static-checks-XXXXXX")"
 python tools/ci/bazel_generated.py & generated=$!
 python tools/ci/gate_select.py --base "$base" --head "$(git rev-parse HEAD)" --mode full --output "$work/plan.json" > /dev/null & policy=$!
