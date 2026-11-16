@@ -10,12 +10,10 @@ skipped, cancelled, or missing graph verdict fails the aggregate. The verdict is
 `pass` only when the command exits 0. The synthetic unit tests of
 `tests/test_graph_impact.py` stay in the normal population.
 
-PQ's baseline uses `"test_to_test": "reach"`, a minimum edge count, and
-`"test_to_test_strict_by": "2026-11-16"`. It has no count-based switch trigger.
-After that date in UTC, the live check fails until you set `"test_to_test": "strict"`
-in `tests/fixtures/graph_impact_baseline.json` and fix or allowlist any new
-test→test edges. Injected dates cover before, on, and after the deadline, and the
-live check also asserts the real UTC date. The shared core remains unchanged.
+PQ's baseline uses `"test_to_test": "strict"` (PQ #3821). A PR that adds a test→test
+import fails unless the allowlist names the edge; removing one passes. The edge history
+comes from the base commit's graph, not from the baseline. The baseline check refuses a
+change to `"test_to_test_strict_by"`, which stays as a record. The shared core remains unchanged.
 
 TODO after PR A: switch the graph job from the Python-import bridge to Bazel's
 `deps.json` plus the source-label query fallback described in [bazel.md](bazel.md).
