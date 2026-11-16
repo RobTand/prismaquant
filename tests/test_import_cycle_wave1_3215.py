@@ -32,6 +32,7 @@ SEPARATED = [
     ("prismaquant.tessera_shipcard", "prismaquant.shipcard_cli"),
     ("prismaquant.tessera_joint_allocation", "prismaquant.joint_quanta_join"),
     ("prismaquant.staged_whole_file", "prismaquant.stage_inputs"),
+    ("prismaquant.tessera_lane", "prismaquant.tessera_materialization"),
     ("prismaquant.cost_stage_checkpoint", "prismaquant.production_weight_cache"),
     ("prismaquant.visual_linears", "prismaquant.allocator"),
     ("prismaquant.tied_embeddings", "prismaquant.model_profiles"),

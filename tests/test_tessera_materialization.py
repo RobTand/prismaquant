@@ -16,6 +16,7 @@ from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_materialization as tm
+from prismaquant import tessera_lane
 from prismaquant import tessera_campaign as tc
 from prismaquant import tessera_expert_projection as tep
 from prismaquant.layer_config import canonicalize_assignment, load_assignment
@@ -56,8 +57,8 @@ def selection(case, tmp_path):
     cost_path.write_bytes(pickle.dumps(cost))
     request_path = tmp_path / 'request.json'
     output = tmp_path / 'final-layer-config.json'
-    tm.write_selection_request(request_path, layer_config=config, assignment=assignment,
-                               cost_path=cost_path, cost_payload=cost, output_path=output)
+    tessera_lane.write_allocation_selection_request(request_path, layer_config=config, assignment=assignment,
+        cost_path=cost_path, cost_payload=cost, output_path=output)
     census = dict(schema=campaign_table.CENSUS_SCHEMA, model=str(case.model), nsamples=2, seqlen=4, seed=0,
         layer_stride=1, text_sha256='a'*64, fit_ids_sha256='b'*64,
         counts={n:8 for n in _units()}, max_abs={n:1.0 for n in _units()},
@@ -197,7 +198,7 @@ def _completed(selection, monkeypatch, *, hessian=False):
         s.config['__prismaquant__']['tessera_hessian'].update(supplied=True,
             **calibration, capture_sha256=digest)
         s.cost_path.write_bytes(pickle.dumps(s.cost))
-        tm.write_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
+        tessera_lane.write_allocation_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
             cost_path=s.cost_path, cost_payload=s.cost, output_path=s.output)
     path, data, _calls = _plan(selection, monkeypatch)
     monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda:ReceiptAPI())
@@ -288,7 +289,7 @@ def test_complete_selected_stack_needs_no_materialization_quantum(selection, mon
     s = selection
     s.cost[tep.EXPERT_WIRES_KEY][s.missing] = {FMT:s.case.receipts[s.missing]}
     s.cost_path.write_bytes(pickle.dumps(s.cost))
-    tm.write_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
+    tessera_lane.write_allocation_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
         cost_path=s.cost_path, cost_payload=s.cost, output_path=s.output)
     _path, result, calls = _plan(s, monkeypatch)
     assert result['groups'] == calls == []
@@ -305,7 +306,7 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
         expected_missing.append(f'{STACK}.1.w3')
         del s.cost[tep.EXPERT_WIRES_KEY][expected_missing[-1]]
         s.cost_path.write_bytes(pickle.dumps(s.cost))
-        tm.write_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
+        tessera_lane.write_allocation_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
             cost_path=s.cost_path, cost_payload=s.cost, output_path=s.output)
     if reuse:
         from prismaquant import tessera_calibration_cache as cc
@@ -323,7 +324,7 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
             hessians={n:torch.eye(N) for n in _units()},counts=census['counts'],maxima=census['max_abs'])
         s.cost['provenance']['calibration_cache'] = record
         s.cost_path.write_bytes(pickle.dumps(s.cost))
-        tm.write_selection_request(s.request,layer_config=s.config,assignment=s.assignment,
+        tessera_lane.write_allocation_selection_request(s.request,layer_config=s.config,assignment=s.assignment,
             cost_path=s.cost_path,cost_payload=s.cost,output_path=s.output)
     path, _data, _calls = _plan(s, monkeypatch)
     api = ReceiptAPI()
@@ -480,7 +481,7 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
     config['__prismaquant__'] = {'tessera_hessian':{'supplied':False}}
     request = tmp_path/'request.json'
     output = tmp_path/'allocation.json'
-    tm.write_selection_request(request, layer_config=config, assignment=assignment,
+    tessera_lane.write_allocation_selection_request(request, layer_config=config, assignment=assignment,
         cost_path=cost_path, cost_payload=cost, output_path=output)
     spec = tmp_path/'spec.json'
     spec.write_text(json.dumps(dict(model=argv[1], campaign_argv=[], cwd=str(tmp_path),
@@ -577,7 +578,7 @@ def test_materialization_refuses_unbound_producer_source(selection, monkeypatch)
     s = selection
     s.cost[tep.EXPERT_WIRES_KEY] = {}
     s.cost_path.write_bytes(pickle.dumps(s.cost))
-    tm.write_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
+    tessera_lane.write_allocation_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
         cost_path=s.cost_path, cost_payload=s.cost, output_path=s.output)
     path, _data, _calls = _plan(s, monkeypatch)
     monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda:ReceiptAPI())

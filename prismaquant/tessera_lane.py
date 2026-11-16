@@ -606,6 +606,9 @@ def allocation_selection_meta(*, menu_report, menu_report_agg, menu_widths,
     }
 
 
+SELECTION_REQUEST_SCHEMA = "prismaquant.tessera_selected_wire_request.v1"
+
+
 def allocation_selection_request_path(args):
     """Where ``--tessera-materialization-plan`` asks for a selection request."""
     return getattr(args, "tessera_materialization_plan", None)
@@ -614,11 +617,23 @@ def allocation_selection_request_path(args):
 def write_allocation_selection_request(path, *, layer_config, assignment,
                                        cost_path, cost_payload, output_path) -> None:
     """Write the non-exportable selected-wire request instead of a layer config."""
-    from .tessera_materialization import write_selection_request
+    from pathlib import Path
 
-    write_selection_request(path,
-        layer_config=layer_config, assignment=assignment,
-        cost_path=cost_path, cost_payload=cost_payload, output_path=output_path)
+    from . import tessera_expert_projection as tep
+    from .cost_stage_checkpoint import atomic_write_bytes
+    from .digests import file_sha256hex, indent2_json_file_bytes
+    from .layer_config import canonicalize_assignment
+
+    if canonicalize_assignment(layer_config) != dict(assignment):
+        raise RuntimeError('selection layer config disagrees with resolved assignment')
+    block = tep.selection_expert_projection_block(cost_payload, assignment)
+    if not block.get(tep.PROJECTION_KEY):
+        raise RuntimeError('selected-wire materialization requires a producer projection')
+    request = dict(schema=SELECTION_REQUEST_SCHEMA, status='selection_only_nonexportable',
+                   layer_config={**layer_config, '__prismaquant__': {**layer_config['__prismaquant__'], **block}},
+                   assignment=dict(assignment), cost_path=str(Path(cost_path).resolve()),
+                   cost_sha256=file_sha256hex(cost_path), output_path=str(Path(output_path).resolve()))
+    atomic_write_bytes(Path(path), indent2_json_file_bytes(request))
     print(f"[alloc] non-exportable selected-wire request → {path}")
 
 
