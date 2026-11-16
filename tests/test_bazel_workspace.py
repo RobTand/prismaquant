@@ -88,9 +88,11 @@ def test_special_tests_carry_a_reason_and_a_known_lane():
     table = (ROOT / 'tools/bazel/nonhermetic.bzl').read_text()
     entries = re.findall(r'"(//[^"]+)": struct\(\n        tags = \[([^\]]*)\],\n        reason = "([^"]+)",', table)
     assert entries and len(entries) == table.count('struct(')
+    targets = set(re.findall(r'pq_py_test\(\n    name = "([^"]+)"', (ROOT / 'tests/BUILD.bazel').read_text()))
     for label, tags, reason in entries:
         assert set(re.findall(r'"([^"]+)"', tags)) <= {'gpu', 'runner', 'hosted', 'hosted-arm64', 'requires-network'}, label
         assert len(reason) > 20 and 'TBD' not in reason, label
+        assert label.removeprefix('//tests:') in targets, f'{label} names no test target'
 
 
 def test_every_extra_test_input_carries_a_reason():
