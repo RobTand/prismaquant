@@ -15,7 +15,7 @@ fi
 base="${GATE_BASE:?GATE_BASE names the base commit}"
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-$HOME/tmp}}/static-checks-XXXXXX")"
 python tools/ci/bazel_generated.py & generated=$!
-python tools/ci/gate_select.py --base "$base" --head HEAD --mode full --output "$work/plan.json" > /dev/null & policy=$!
+python tools/ci/gate_select.py --base "$base" --head "$(git rev-parse HEAD)" --mode full --output "$work/plan.json" > /dev/null & policy=$!
 python tools/ci/graph_impact_pq.py --write base --snapshots "$work" & graph_base=$!
 python tools/ci/graph_impact_pq.py --write head --snapshots "$work" & graph_head=$!
 status=0
