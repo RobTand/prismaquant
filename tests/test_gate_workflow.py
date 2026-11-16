@@ -57,6 +57,10 @@ def test_remote_planner_uses_queue_aware_refs_and_requires_scope_upload():
     assert steps['controller']['env']['BASE'] == '${{ steps.refs.outputs.base }}'
     assert steps['controller']['env']['HEAD'] == '${{ steps.refs.outputs.head }}'
     assert 'remote_gate.py pr' in steps['controller']['run']
+    # A cancelled run kills the controller; a cancelled() step cancels the shards it recorded.
+    cancel = next(step for step in remote['steps'] if 'CANCEL_SHARDS' in step.get('run', ''))
+    assert cancel['if'] == '${{ cancelled() }}' and 'cancel_runs' in cancel['run']
+    assert cancel['env']['REMOTE_SHARDS'] == steps['controller']['env']['REMOTE_SHARDS']
     assert 'MERGIFY_TOKEN' in steps['token']['env']
     assert 'scopes_ready' in steps['token']['if']
     assert 'steps.scopes.outcome' in steps['scope-verdict']['env']['OUTCOME']
