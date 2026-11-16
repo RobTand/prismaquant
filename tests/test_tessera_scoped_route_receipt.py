@@ -119,7 +119,7 @@ def fixture(tmp_path, monkeypatch, *, structure="routed_moe"):
               "runtime": {"image": IMAGE, "execution_modes": ["eager"],
                           "vllm": "0.0.0+fixture", "torch": "0.0.0+fixture"},
               # Minimal v10 evidence for this synthetic binding fixture.
-              # The installed-v11 regression below restores the real loader.
+              # The installed-v12 regression below restores the real loader.
               "evidence": {"grade": "route_only", "kl": [],
                            "smoke": {"status": "not_recorded", "receipt": None,
                                      "attribution": "unattributed",
@@ -127,7 +127,7 @@ def fixture(tmp_path, monkeypatch, *, structure="routed_moe"):
                            "artifact": None}}
              for regime in ("decode", "batch")]
     # This synthetic fixture deliberately stays v10; scoped membership
-    # must preserve it while admitting the independently installed v11 table.
+    # must preserve it while admitting the independently installed v12 table.
     block = {"schema": lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
              "platforms": {"sm_121": {"backend": "cuda", "compute_capability": [12, 1],
                                       "serve_image": IMAGE,
@@ -182,11 +182,11 @@ def test_raw_v2_positive_retains_runtime_phase_owner_and_exact_price(tmp_path, m
         card={"build": data[2]}, model_dir=data[3]) == []
 
 
-def test_installed_v11_scoped_census_fill_and_replay(tmp_path, monkeypatch):
+def test_installed_v12_scoped_census_fill_and_replay(tmp_path, monkeypatch):
     """Use the exact installed table, not a v10 stand-in, for the v2 policy."""
     loader = receipt._current_scoped_contract
     table, _formats = loader()
-    assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11
+    assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V12
     cell = next(c for c in table.cells
                 if c.id == "tessera_e4m3_k1_dense_sm121_decode")
     monkeypatch.setitem(globals(), "IMAGE", cell.runtime_image)
