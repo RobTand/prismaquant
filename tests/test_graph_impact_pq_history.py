@@ -209,8 +209,8 @@ def test_removing_a_base_edge_needs_no_list_edit(repo, capsys):
     assert code == 0, output
 
 
-@pytest.mark.parametrize('budget,passes', [(None, True), (0, False)])
-def test_no_history_with_edges_enforces_only_absolute_limits(repo, capsys, budget, passes):
+@pytest.mark.parametrize('budget', [None, 0])
+def test_no_history_fails_closed_and_compares_no_edges(repo, capsys, budget):
     import shutil
     with (repo / 'tests/test_a.py').open('a') as out:
         out.write('from tests import test_b\n')
@@ -224,7 +224,7 @@ def test_no_history_with_edges_enforces_only_absolute_limits(repo, capsys, budge
     shutil.rmtree(repo / '.git')
     code = pq.main(['--root', str(repo)])
     output = capsys.readouterr()
-    assert (code == 0) is passes, output.out + output.err
+    assert code == 1 and 'no base graph' in output.err, output.out + output.err
     assert 'no base available' in output.out
     assert 'new test_to_test' not in output.err and 'new conftest' not in output.err
 

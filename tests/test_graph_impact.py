@@ -241,6 +241,20 @@ def test_pq_no_git_reports_no_base_and_enforces_absolute_budget(tmp_path, capsys
     assert 'no base available' in output.out and 'reach 1 exceeds budget 0' in output.err
 
 
+@pytest.mark.parametrize('field,value,message', [('analyzer_sha256', '0' * 64, 'analyzer_sha256 is stale'),
+                                                 ('scc_max', 3, 'baseline figure scc_max may only shrink'),
+                                                 ('test_to_test_count', 1, 'test_to_test_count may only shrink')])
+def test_pq_check_refuses_a_baseline_the_measured_base_does_not_meet(tmp_path, capsys, field, value, message):
+    from tools.ci import graph_impact_pq as pq
+    base = {**measure(edges={('a', 'b'), ('b', 'a')}), 'duplication': pq.duplication_inventory.scan(tmp_path)}
+    recorded = baseline(base, analyzer_sha256=pq.file_sha256hex(pq.ROOT / 'tools/bazel/build_files.py'))
+    (recorded['figures'] if field == 'scc_max' else recorded)[field] = value
+    (tmp_path / 'baseline.json').write_text(json.dumps(recorded))
+    (tmp_path / 'allowlist.json').write_text('{}')
+    assert pq.check(base, base, tmp_path / 'baseline.json', tmp_path / 'allowlist.json') == 1
+    assert message in capsys.readouterr().err
+
+
 from tools.ci import graph_impact_imports as fanout
 
 
