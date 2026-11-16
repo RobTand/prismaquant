@@ -139,6 +139,6 @@ def test_graph_check_remains_parallel_and_requires_exactly_one_pass():
     checkout=next(s for s in graph['steps'] if s.get('uses', '').startswith('actions/checkout@'))
     assert checkout['with']['fetch-depth']==0
     check=next(s for s in graph['steps'] if s.get('id')=='check')
-    assert 'graph_impact_pq' in check['run']
-    assert 'build_files.py --check' in check['run']
+    # One list of the checks that execute no test: the gate's job and a lead's pre-queue run read the same script.
+    assert 'tools/ci/static_checks.sh' in check['run']
     assert 'graph-impact' in jobs['gate']['needs']
