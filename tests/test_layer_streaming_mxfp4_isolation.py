@@ -9,6 +9,7 @@ _WRAPPER_REFUSAL = (
     "../test_streaming_text_only_wrapper_config.py::"
     "test_vl_wrapper_config_reproduces_issue_12")
 _NATIVE_GUARD = "sample_dsv4_native_guard.py"
+_MXFP4 = "../test_layer_streaming_mxfp4.py"
 
 
 def native_dsv4_session(tmp_path, *targets):
@@ -20,8 +21,7 @@ def _assert_mixed_session_passes(tmp_path, *targets):
     """Use the real lazy-mapping import trigger, not a fake module or profile."""
     proc, output, outcomes, _out = native_dsv4_session(
         tmp_path,
-        *([f"../test_layer_streaming_mxfp4.py::{name}" for name in targets]
-          if targets else ["../test_layer_streaming_mxfp4.py"]))
+        *([f"{_MXFP4}::{name}" for name in targets] if targets else [_MXFP4]))
     controls = {
         "test_vl_wrapper_config_reproduces_issue_12",
         "test_native_dsv4_import_still_refuses_the_vendored_override",

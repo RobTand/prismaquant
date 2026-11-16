@@ -16306,7 +16306,16 @@ pq_py_test(
     deps = [
         "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
         "//:pqtel/__init__",
+        "//:prismaquant/allocator_cycle",
+        "//:prismaquant/aura_additivity_gate",
+        "//:prismaquant/build_production_cache",
+        "//:prismaquant/expert_empirical_cost",
+        "//:prismaquant/export_gguf",
+        "//:prismaquant/incremental_measure_quant_cost",
+        "//:prismaquant/incremental_probe",
         "//:prismaquant/lane_shipcard",
+        "//:prismaquant/prepriced_cost",
+        "//:prismaquant/production_recache",
         "//:prismaquant/shipcard_cli",
         "//:tools/build_streamed_full_kl_teacher",
         "//:tools/dsv4_wikitext_inputs",
@@ -16320,6 +16329,7 @@ pq_py_test(
         "//:tools/pq_profile_child",
         "//:tools/prepare_dsv4_wikitext_inputs",
         "//:tools/prismaquant_source_bootstrap",
+        "//:tools/publish_artifact",
         "//:tools/spec_decode_guard",
         "//:tools/tessera_campaign_container",
         "//:tools/tessera_fleet/__init__",
@@ -16334,7 +16344,12 @@ pq_py_library(
         "test_dsv4_fixture_isolation.py",
     ],
     deps = [
+        ":test_deepseek_v4_profile_lib",
+        ":test_dsv4_layer_streaming_rename_lib",
+        ":test_dsv4_nested_rotary_init_lib",
+        ":test_grouped_linear_fisher_lib",
         ":test_layer_streaming_mxfp4_isolation_lib",
+        ":test_model_walk_export_gate_lib",
         "@pq_pip//pytest",
     ],
 )
@@ -39426,11 +39441,6 @@ pq_py_library(
     name = "test_layer_streaming_mxfp4_isolation_lib",
     srcs = [
         "test_layer_streaming_mxfp4_isolation.py",
-    ],
-    data = [
-        "//:files",
-        "//tools/bazel:files",
-        ":files",
     ],
     deps = [
         ":test_layer_streaming_mxfp4_lib",
