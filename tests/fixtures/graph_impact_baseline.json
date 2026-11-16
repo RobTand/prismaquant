@@ -3,7 +3,7 @@
   "figures": {
     "u_pct": 51.145946653361364,
     "loc_u_pct": 64.55189830927246,
-    "scc_max": 161,
+    "scc_max": 143,
     "median_selected_pct": 13.2,
     "p90_selected_pct": 87.2,
     "modules_over_half": 268,
@@ -20,7 +20,7 @@
   },
   "reach_budget": 295,
   "test_to_test": "reach",
-  "test_to_test_count": 845,
+  "test_to_test_count": 783,
   "test_to_test_strict_by": "2026-11-16",
   "analyzer_sha256": "bc2875fcb7998f9b1128136fb555878e0dd2153bc14fed4789bd3c9de74b89e1"
 }

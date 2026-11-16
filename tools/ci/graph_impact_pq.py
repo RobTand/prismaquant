@@ -36,6 +36,8 @@ ROOT = Path(__file__).resolve().parents[2]
 BASELINE = Path('tests/fixtures/graph_impact_baseline.json')
 ALLOWLIST = Path('tests/fixtures/graph_impact_allowlist.json')
 SOURCE_ROOTS = ('prismaquant/', 'tools/')
+ANALYZER = 'tools/bazel/build_files.py'
+RATCHET = (ANALYZER, 'tools/ci/graph_impact.py', 'tools/ci/graph_impact_pq.py')
 LEGACY_TOLERANCES = {'median_selected_pct': 1.0, 'p90_selected_pct': 1.0,
                      'modules_over_half': 2, 'conftest_source_modules': 0}
 
@@ -126,30 +128,41 @@ def numeric_baseline(value):
 
 def record(live, previous=None):
     previous = numeric_baseline(previous) if previous is not None else None
-    if previous is not None and 'test_to_test_count' not in previous:
-        previous = {**previous, 'test_to_test_count': len(core.test_to_test_edges(live))}
     return {**numeric_baseline(core.baseline_record(live, previous, tolerances=LEGACY_TOLERANCES)),
-            'analyzer_sha256': file_sha256hex(ROOT / 'tools/bazel/build_files.py')}
+            'analyzer_sha256': file_sha256hex(ROOT / ANALYZER)}
 
 
-def baseline_history(before):
-    """The base commit's recorded baseline, if any."""
-    return numeric_baseline(before['recorded_baseline']) if before and before.get('recorded_baseline') else None
+def ratchet_digests(root):
+    return {path: file_sha256hex(root / path) for path in RATCHET if (root / path).is_file()}
 
 
 def check(before, after, baseline_path, allowlist_path, *, changed_tests=(), write_baseline=False):
     baseline = numeric_baseline(json.loads(baseline_path.read_text()))
+    # A write records each minimum over the base, the head and the prior record.
+    kept = record(after, record(before, baseline)) if write_baseline and before is not None else baseline
     allowlist = json.loads(allowlist_path.read_text())
-    previous = baseline_history(before)
+    previous = numeric_baseline(before['recorded_baseline']) if before and before.get('recorded_baseline') else None
     base_allowlist = before.get('recorded_allowlist') if before else None
     mode = core.policy_mode(baseline)
     print(core.summary(before, after, baseline['reach_budget'], test_to_test=mode), flush=True)
     for reminder in core.policy_reminders(after, baseline):
         print(reminder, flush=True)
-    errors = core.baseline_errors(baseline, previous)
+    inputs = ratchet_digests(ROOT)
+    errors = [] if kept.get('analyzer_sha256') == inputs[ANALYZER] else [
+        f'graph baseline analyzer_sha256 is stale; record it with the current {ANALYZER}']
+    if previous is None:  # Also a renamed fixture: nothing at the base would bound the record.
+        errors.append(f'no base graph or no base {BASELINE}; the baseline cannot be checked against the base')
+    elif kept != previous or before.get('recorded_inputs') != inputs:
+        # A change to the ratchet or its inputs records minima no looser than the measured base.
+        count = len(core.test_to_test_edges(before))
+        if kept.get('test_to_test_strict_by') != previous.get('test_to_test_strict_by'):
+            errors.append('baseline test_to_test_strict_by may not change')
+        previous = {**previous, 'test_to_test_count': min(count, previous['test_to_test_count']),
+                    'figures': {**previous['figures'], 'scc_max': min(before['scc_max'], previous['figures']['scc_max'])}}
+    errors += core.baseline_errors(kept, previous)
     errors += core.allowlist_errors(allowlist, base_allowlist if base_allowlist is not None else allowlist)
-    # Supply live edge history to the frozen core.
-    policy = {**baseline, 'edge_groups': (before if before is not None else after)['edge_groups']}
+    # Supply live edge history to the frozen core; a write must leave a record the head meets.
+    policy = {**kept, 'edge_groups': (before if before is not None else after)['edge_groups']}
     errors += core.compare(before, after, policy, changed_tests=changed_tests, allowlist=allowlist,
                            record_gains=True, test_packages=after['test_packages'],
                            base_package_max_reach=core.package_max_reach(before) if before else {},
@@ -165,7 +178,7 @@ def check(before, after, baseline_path, allowlist_path, *, changed_tests=(), wri
         print('\n'.join(errors), file=sys.stderr)
         return 1
     if write_baseline:
-        baseline_path.write_text(json.dumps(record(after, baseline), indent=2) + '\n')
+        baseline_path.write_text(json.dumps(kept, indent=2) + '\n')
     return 0
 
 
@@ -228,7 +241,7 @@ def align_base(before, renames):
                                          (edge.split(' -> ', 1) for edge in edges))
                              for group, edges in before['edge_groups'].items()}
     result['duplication'] = before['duplication']
-    for key in ('recorded_baseline', 'recorded_allowlist', 'recorded_analyzer_sha256'):
+    for key in ('recorded_baseline', 'recorded_allowlist', 'recorded_inputs'):
         result[key] = before.get(key)
     return result
 
@@ -253,11 +266,7 @@ def snapshot_at(root, revision, *, legacy=True):
                     files.append(member.name)
         live = load_snapshot(tree, files=sorted(files), legacy=legacy)
         live['recorded_baseline'] = json.loads((tree / BASELINE).read_text()) if (tree / BASELINE).exists() else None
-        analyzer = tree / 'tools/bazel/build_files.py'
-        if analyzer.is_file():
-            live['recorded_analyzer_sha256'] = file_sha256hex(analyzer)
-            if live['recorded_baseline'] is not None:
-                live['recorded_baseline'].setdefault('analyzer_sha256', live['recorded_analyzer_sha256'])
+        live['recorded_inputs'] = ratchet_digests(tree)
         live['recorded_allowlist'] = json.loads((tree / ALLOWLIST).read_text()) if (tree / ALLOWLIST).exists() else None
         return live
 
