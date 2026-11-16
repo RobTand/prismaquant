@@ -620,17 +620,26 @@ def test_manifest_and_aggregate_refusals_report_fixed_validation_phase(capsys, p
 @pytest.mark.parametrize('leak', [False, True])
 def test_failed_test_excerpt_prints_its_scanned_text_without_workflow_commands(
         tmp_path, monkeypatch, capsys, leak):
+    from tools.ci.bazel_gate import aggregate_shards, failure_excerpts
     monkeypatch.setattr(remote.artifacts, 'require_scan_python', lambda: None)
     monkeypatch.setattr(remote.artifacts, 'scan_runtime_available', lambda: True)
     monkeypatch.setenv('BUILDBUDDY_API_KEY', 'excerpt-secret-sentinel')
     for name in ('GITHUB_OUTPUT', 'GITHUB_STEP_SUMMARY', 'MERGIFY_TOKEN', 'GITHUB_TOKEN'):
         monkeypatch.delenv(name, raising=False)
     label, upload = '//tests:test_0', tmp_path / 'upload'
-    excerpt = ('E   AssertionError: seeded\n::warning::forged\r::endgroup::\n  ::error::forged'
-               + ('\nexcerpt-secret-sentinel' if leak else ''))
+    log = ['E   AssertionError: seeded', '##[add-mask]excerpt-mask', '##[error]forged',
+           '::stop-commands::token', 'mid ::error::forged', 'carriage\r::warning::forged',
+           '\x1b[31m::notice::red\x1b[0m'] + (['excerpt-secret-sentinel'] if leak else [])
+    bep = json.dumps({'id': {'testResult': {'label': label}}, 'testResult': {
+        'status': 'FAILED', 'testActionOutput': [{'name': 'test.log', 'uri': 'bytestream://log'}]}})
+    record = {'index': 0, 'invocation_status': 'COMPLETE_INVOCATION_STATUS', 'budget_warnings': [],
+              'run': {'statuses': {label: 'FAILED'}, 'invocation': 'child', 'returncode': 3,
+                      'executed_by_label': {label: 1}},
+              'excerpts': failure_excerpts(bep, [label], lambda uri, limit: '\n'.join(log).encode())}
+    summary = aggregate_shards([label], [[label]], [record])
     monkeypatch.setattr(remote, 'run_gate', lambda client, args: {
         'verdict': 'fail', 'scopes': [], 'all_scopes': True, 'budget_warnings': [],
-        'architectures': {'arm64': {'shards': [{'failed': [label], 'excerpts': {label: excerpt}}]}}})
+        'architectures': {'arm64': summary}})
     code = remote.main(['main', '--base', BASE, '--head', HEAD, '--branch', 'main',
                         '--output', str(upload)])
     out = capsys.readouterr().out.splitlines()
@@ -642,5 +651,6 @@ def test_failed_test_excerpt_prints_its_scanned_text_without_workflow_commands(
     assert code == 1
     assert out[0] == f'::error::failed test {label} on arm64'
     assert [line.removeprefix('| ') for line in out[1:]] == published['architectures'][
-        'arm64']['shards'][0]['excerpts'][label].splitlines() == excerpt.splitlines()
-    assert len(out) == 5 and not any(line.lstrip().startswith('::') for line in out[1:])
+        'arm64']['shards'][0]['excerpts'][label].split('\n')
+    assert len(out) == 1 + len(log) + 1
+    assert not any(token in line for line in out[1:] for token in ('::', '##[', '\r', '\x1b'))

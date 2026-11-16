@@ -389,9 +389,7 @@ def log_event(label, uri, status='FAILED'):
             'testResult': {'status': status, 'testActionOutput': [{'name': 'test.log', 'uri': uri}]}}
 
 
-@pytest.mark.parametrize('error', [OSError(errno.EIO, 'private'),
-                                   gate.ShardEvidenceError('inventory-remote-fetch', 'network-dns')])
-def test_failed_test_log_excerpt_keeps_error_lines_and_tail_and_survives_fetch_failure(tmp_path, error):
+def test_failed_test_log_excerpt_keeps_error_lines_and_tail_and_survives_fetch_failure(tmp_path):
     from types import SimpleNamespace
     other = '//tests:test_other'
     tail = [f'line {number}' for number in range(30)]
@@ -406,9 +404,10 @@ def test_failed_test_log_excerpt_keeps_error_lines_and_tail_and_survives_fetch_f
                                log_event(other, 'bytestream://lost-log', status='TIMEOUT')))
         return SimpleNamespace(returncode=3)
 
-    def fetch(uri):
+    def fetch(uri, limit):
+        assert limit == 1 << 20
         if uri == 'bytestream://lost-log':
-            raise error
+            raise OSError(errno.EIO, 'private')
         return '\n'.join(['header', 'E   AssertionError: seeded', *tail]).encode()
 
     found = gate.execute_shard(manifest, root=tmp_path, runner=run, fetch=fetch)
@@ -417,27 +416,145 @@ def test_failed_test_log_excerpt_keeps_error_lines_and_tail_and_survives_fetch_f
                                  other: 'excerpt unavailable'}
 
 
-def test_failure_excerpts_are_capped_and_skip_passed_or_logless_results():
+def test_failure_excerpts_keep_whole_first_error_lines_cut_the_tail_and_skip_passed_results():
     labels = [f'//tests:test_{index}' for index in range(7)]
     text = events(*(log_event(label, 'bytestream://' + label) for label in labels),
                   log_event(LABEL, 'bytestream://passed', status='PASSED'))
-    raw = '\n'.join(f'FAILED {number} ' + 'x' * 200 for number in range(100)).encode()
-    found = gate.failure_excerpts(text, ['//tests:a_build_failure', LABEL, *labels], lambda uri: raw)
+    log = [f'FAILED {number} ' + 'x' * 200 for number in range(100)]
+    found = gate.failure_excerpts(text, ['//tests:a_build_failure', LABEL, *labels],
+                                  lambda uri, limit: '\n'.join(log).encode())
     assert sorted(found) == labels[:5]
-    assert all(len(text) == 4096 and len(text.splitlines()) <= 40 for text in found.values())
+    for excerpt in found.values():
+        assert excerpt.splitlines() == log[:len(excerpt.splitlines())]
+        assert 4096 - 211 < len(excerpt) <= 4096
+    assert gate.failure_excerpts(text, labels[:1], lambda uri, limit: b'E' * 5000) == {
+        labels[0]: 'E' * 4096}
+    wide = [('\u00e9' * 120 + str(number)) for number in range(30)]
+    found = gate.failure_excerpts(text, labels[:1], lambda uri, limit: '\n'.join(wide).encode())[labels[0]]
+    assert found.split('\n') == wide[10:10 + len(found.split('\n'))] and len(found.split('\n')) < 20
+    assert 4096 - 245 < len(found.encode()) <= 4096
+    assert gate.failure_excerpts(text, labels[:1], lambda uri, limit: ('a' + '\u00e9' * 3000).encode()) == {
+        labels[0]: 'a' + '\u00e9' * 2047}
 
 
-@pytest.mark.parametrize('excerpts', [None, {LABEL: 'E   AssertionError: seeded'}, {LABEL: 3}, ['x']])
-def test_shard_excerpts_reach_the_aggregate_or_refuse_when_malformed(excerpts):
-    records = [shard_record(0, [LABEL])]
+HOSTILE = ['E   AssertionError: seeded', '##[add-mask]excerpt-mask', '##[error]forged',
+           '::stop-commands::token', 'mid ::error::forged', 'carriage\r::warning::forged',
+           '\x1b[31m::notice::red\x1b[0m', 'triple:::colon #[x ###[y']
+
+
+def test_failure_excerpts_leave_no_workflow_command_control_character_or_carriage_return():
+    text = events(log_event(LABEL, 'bytestream://own-log'))
+    found = gate.failure_excerpts(text, [LABEL], lambda uri, limit: '\n'.join(HOSTILE).encode())[LABEL]
+    assert len(found.split('\n')) == len(HOSTILE) + 1
+    assert not any(token in found for token in ('::', '##[', '\r', '\x1b'))
+    assert 'excerpt-mask' in found and 'forged' in found
+
+
+def test_excerpt_fetch_streams_a_bounded_prefix_then_reconnects(inventory_transport, tmp_path, monkeypatch):
+    import http.client
+    state, read, received = inventory_transport, http.client.HTTPResponse.read1, []
+
+    def counted(self, amount=-1):
+        received.append(len(chunk := read(self, amount)))
+        return chunk
+
+    monkeypatch.setattr(http.client.HTTPResponse, 'read1', counted)
+    big = b'E   AssertionError: large log\n' * 120000
+    uri = ('bytestream://remote.buildbuddy.io/instance/blobs/'
+           + hashlib.sha256(big).hexdigest() + '/' + str(len(big)))
+    inventory = next(iter(state.payloads))
+    state.payloads[uri] = big
+    with gate.InventoryFetcher() as fetch:
+        assert fetch(uri, limit=1 << 20) == big[:1 << 20]
+        assert fetch.connection is None and sum(received) <= (1 << 20) + 1
+        assert fetch(inventory) == state.payloads[inventory]
+    assert state.connections == 2
+    local = tmp_path / 'test.log'
+    local.write_bytes(big)
+    assert gate.fetch_artifact(local.as_uri(), 1 << 20) == big[:1 << 20]
+
+
+@pytest.mark.parametrize('fault', ['io', 'dns', 'no-uri'])
+def test_unreadable_test_log_keeps_the_fail_verdict_and_its_publication(tmp_path, monkeypatch, fault):
+    from types import SimpleNamespace
+    upload = tmp_path / 'upload'
+    manifest = {'mode': 'pr', 'base': 'b' * 40, 'head': 'a' * 40, 'branch': 'probe',
+                'architecture': 'amd64', 'index': 0, 'targets': [LABEL], 'tests': [LABEL],
+                'require_execution': False}
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    monkeypatch.setenv('PQ_BAZEL_SHARD', json.dumps({'manifest_sha256': 'c' * 64,
+                                                     'partition_sha256': 'd' * 64}))
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'excerpt-cli-sentinel')
+    monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(gate.artifacts, 'scan_runtime_available', lambda: True)
+    monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: None)
+    monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
+    failed = log_event(LABEL, 'bytestream://own-log')
+    if fault == 'no-uri':
+        del failed['testResult']['testActionOutput'][0]['uri']
+
+    def native(command, **_):
+        path = Path(next(word.split('=', 1)[1] for word in command
+                         if word.startswith('--build_event_json_file=')))
+        path.write_text(events(failed, summary('FAILED')))
+        return SimpleNamespace(returncode=3)
+
+    def fetch(uri, limit):
+        raise (OSError(errno.EIO, 'private') if fault == 'io' else
+               gate.ShardEvidenceError('inventory-remote-fetch', 'network-dns'))
+
+    execute = gate.execute_shard
+    monkeypatch.setattr(gate, 'execute_shard', lambda document: execute(
+        document, root=tmp_path, runner=native, fetch=None if fault == 'no-uri' else fetch))
+    assert gate.main(['shard']) == 1
+    found = json.loads((upload / 'gate-result.json').read_text())
+    assert found['verdict'] == 'fail' and found['excerpts'] == {LABEL: 'excerpt unavailable'}
+
+
+SIX = [f'//tests:test_{index}' for index in range(6)]
+
+
+@pytest.mark.parametrize('excerpts,valid', [
+    (None, True), ({SIX[0]: 'E   AssertionError: seeded\nexcerpt unavailable'}, True),
+    ({SIX[0]: '\u00e9' * 2048}, True), ({SIX[0]: 3}, False), (['x'], False),
+    ({SIX[0]: '\u00e9' * 2049}, False), ({'//tests:foreign': 'x'}, False),
+    (dict.fromkeys(SIX, 'x'), False), ({SIX[0]: 'mid ::error::forged'}, False),
+    ({SIX[0]: '##[add-mask]x'}, False), ({SIX[0]: 'a\rb'}, False)])
+def test_shard_excerpts_reach_the_aggregate_or_refuse_when_malformed(excerpts, valid):
+    record = shard_record(0, SIX)
+    record['run']['statuses'] = dict.fromkeys(SIX, 'FAILED')
     if excerpts is not None:
-        records[0]['excerpts'] = excerpts
-    if excerpts in ({LABEL: 3}, ['x']):
+        record['excerpts'] = excerpts
+    if not valid:
         with pytest.raises(gate.GateError, match='excerpts'):
-            gate.aggregate_shards([LABEL], [[LABEL]], records)
+            gate.aggregate_shards(SIX, [SIX], [record])
     else:
-        found = gate.aggregate_shards([LABEL], [[LABEL]], records)
-        assert found['shards'][0]['excerpts'] == (excerpts or {})
+        assert gate.aggregate_shards(SIX, [SIX], [record])['shards'][0]['excerpts'] == (excerpts or {})
+
+
+@pytest.mark.parametrize('status,code', [('PASSED', 0), ('FAILED', 3)])
+def test_excerpts_skip_null_or_partial_events_and_read_logs_only_for_failures(tmp_path, status, code):
+    from types import SimpleNamespace
+    manifest = {'mode': 'pr', 'base': 'b' * 40, 'head': 'a' * 40, 'branch': 'probe',
+                'architecture': 'amd64', 'index': 0, 'targets': [LABEL], 'tests': [LABEL],
+                'require_execution': False}
+    calls = []
+
+    def run(command, **_):
+        path = Path(next(word.split('=', 1)[1] for word in command
+                         if word.startswith('--build_event_json_file=')))
+        path.write_text(events({'id': {'testResult': None}}, {'id': {'testResult': {'label': LABEL}}},
+                               log_event(LABEL, 'bytestream://own-log', status), summary(status)))
+        return SimpleNamespace(returncode=code)
+
+    def fetch(uri, limit):
+        calls.append(uri)
+        return b'E   AssertionError: seeded'
+
+    found = gate.execute_shard(manifest, root=tmp_path, runner=run, fetch=fetch)
+    assert found['verdict'] == ('pass' if status == 'PASSED' else 'fail')
+    assert found['excerpts'] == ({} if status == 'PASSED' else {LABEL: 'E   AssertionError: seeded'})
+    assert calls == ([] if status == 'PASSED' else ['bytestream://own-log'])
 
 
 @pytest.mark.parametrize('fault', [None, 'digest', 'head', 'union', 'partition'])
