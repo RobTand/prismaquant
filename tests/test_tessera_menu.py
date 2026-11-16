@@ -1341,9 +1341,6 @@ def test_the_menu_token_expands_to_the_attested_subset_and_reports_the_rest(dev_
         expected = ["NVFP4", "TESSERA_E2M1_K2_R896",
                     "TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896"]
         expected_dropped = ["TESSERA_E2M1_K2_R640", "TESSERA_E2M1_K1_R256"]
-        if context.structure == "routed_moe":
-            expected.remove("TESSERA_E2M1_K2_R896")
-            expected_dropped.append("TESSERA_E2M1_K2_R896")
         if covers_r512:
             expected.append("TESSERA_E4M3_K1_R512")
         else:
