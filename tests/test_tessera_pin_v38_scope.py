@@ -1,6 +1,6 @@
-"""Admission follows the v39 scope, not the cell ids inherited from v38.
+"""Admission follows the current packaged scope, not inherited cell ids.
 
-The GLM image now carries all six family/structure combinations; routed
+The GLM image carries E4M3 and E2M1 dense and routed cells; routed
 E4M3 includes q1024 again on that image, not on the withdrawn v34 image.
 Vanilla vLLM retains its dense E4M3 q1024 cells. These are packaged route
 claims, not new served-quality measurements. Keep this regression's filename
@@ -63,7 +63,7 @@ def test_the_reused_ids_attest_the_v39_routed_rungs_on_the_glm_image(rung):
     assert route.requires_serve_flags == ("TESSERA_SERVE_MODE=resident",)
 
 
-@pytest.mark.parametrize("image,rung", [(OLD_IMAGE, 1024), (NEW_IMAGE, 768)])
+@pytest.mark.parametrize("image,rung", [(OLD_IMAGE, 1024), (NEW_IMAGE, 767)])
 def test_a_withdrawn_image_or_unattested_rung_still_refuses(image, rung):
     route = _resolve(_routed(rung), image)
     assert route.route_status == lane.ROUTE_STATUS_UNATTESTED, route.as_dict()
@@ -87,20 +87,24 @@ def test_vanilla_retains_dense_e4m3_q1024(residency):
         "tessera_e4m3_k1_dense_sm121_decode", "tessera_e4m3_k1_dense_sm121_batch"}
 
 
-def test_glm_image_carries_all_six_family_structure_combinations():
-    """Pin the v39 admission decision; derive each cell's rates from its bytes."""
+def test_glm_image_carries_only_its_qualified_families():
+    """Read each current cell's scope from the packaged contract."""
     cells = json.loads(_packaged_bytes())["lane_eligibility"]["cells"]
     glm = [c for c in cells if c["runtime"]["image"] == NEW_IMAGE]
     assert {(c["family"], c["structure"], c["regime"]) for c in glm} == {
         (family, structure, regime)
-        for family in ("TESSERA_E4M3_K1", "TESSERA_BF16_K1", "TESSERA_E2M1_K2")
+        for family in ("TESSERA_E4M3_K1", "TESSERA_E2M1_K2")
         for structure in ("dense", "routed_moe") for regime in ("decode", "batch")}
     for cell in glm:
         for rung in cell["rungs_q256"]:
             facts = replace(_routed(rung, cell["family"]), structure=cell["structure"])
             route = _resolve(facts, NEW_IMAGE)
-            assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
-            assert cell["id"] in {r.cell_id for r in route.regimes}
+            if cell["family"] == "TESSERA_E2M1_K2" and cell["structure"] == "routed_moe":
+                assert route.route_status == lane.ROUTE_STATUS_UNATTESTED
+                assert all("start_state" in regime.detail for regime in route.regimes)
+            else:
+                assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
+                assert cell["id"] in {r.cell_id for r in route.regimes}
     for cell in cells:
         if cell["runtime"]["image"] == VANILLA_IMAGE:
             assert (cell["family"], cell["structure"], cell["rungs_q256"]) == (
@@ -212,10 +216,13 @@ def test_layer43s_routed_e4m3_pick_passes_the_export_scope_gate(tmp_path, rung):
         assert admits and sorted(launches) == sorted(want)
 
 
-def test_layer43_at_uncovered_q768_is_refused_by_the_export_scope_gate(tmp_path):
-    """V11 coverage does not invent the uncensused single-rate table [3]."""
+def test_layer43_q768_admits_only_the_v66_receipt_launch(tmp_path):
+    """Upstream v66 qualifies R768; PQ2471 grants do not include it."""
     from prismaquant import tessera_export_lane as export
 
     model, assignment = _layer43_case(tmp_path, "TESSERA_E4M3_K1_R768")
-    with pytest.raises(export.TesseraExportLaneError, match="unattested"):
-        export.require_assignment_scope(model, assignment, target=_Target())
+    report = export.require_assignment_scope(model, assignment, target=_Target())
+    route = report["by_unit"][LAYER43_EXPERT]
+    assert route["route_status"] == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
+    for row in route["regime_routes"]:
+        assert [pair["decoder"] for pair in row["executes"]] == ["native_routed_window_classes_e4m3mma"]

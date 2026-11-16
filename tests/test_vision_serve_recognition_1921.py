@@ -252,7 +252,7 @@ def test_installed_pin_exports_real_bf16_source_names_not_visual_lowbit_claims(
     # Supply the reviewed pin for the producer stamp in its fresh subprocess.
     monkeypatch.setenv("TESSERA_GIT", resolve_tessera_dev_pin())
     pin = load_tessera_serving_runtime_pin()
-    assert pin.producer_commit == "aaa417003f0ee690e8ace138acd18df7f9531369"
+    assert pin.producer_commit == "8bf496abdb7d598a3132f6b4b7cb7d7e96199d13"
     contract_path = packaged_contract_path()
     assert hashlib.sha256(contract_path.read_bytes()).hexdigest() == pin.contract_sha256
     contract = json.loads(contract_path.read_text())

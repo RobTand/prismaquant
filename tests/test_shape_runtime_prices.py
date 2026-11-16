@@ -1,17 +1,9 @@
 """PACT shape-time price table (PQ #1583): parse, admit, derive, price.
 
-The contract fixture is the INSTALLED pinned contract, read as published.
-Since the pin moved to contract v42 (PQ #1274) it carries Tessera #685's fused
-routed lanes itself: the routed E4M3 and BF16 cells name the fused launch
-beside the compact one, and each lane publishes its ``requires`` predicate on
-its own ``native_extensions`` row. The fixtures assert that instead of
-grafting it. Contract v56 (PQ #2264) publishes routed column rates 1 to 8
-for both fused lanes, E4M3 column rates 1 to 8 and BF16 column rates 1 to 14,
-and the E4M3 MMA launch beside compact and fused. The refusal legs still
-rewind the two original fused lanes to v44's rate-4 predicate. The lane
-decision itself is Tessera's
-(``decide_lane_requirements``) reached through
-``lane_eligibility.cell_lane_admits``; nothing here restates its rule.
+The GLM TP2 rows are historical bench data from contract v60 at aaa417003f.
+Their consumers test price composition, pooling, and dispersion. They use the
+frozen contract fixture, never the current serving contract. v68 withdraws
+BF16 on IMG-G and changes E2M1 from span-2 to WINDOW L14.
 """
 import copy
 import hashlib
@@ -19,7 +11,6 @@ import json
 import types
 import random
 import statistics
-from importlib.resources import as_file
 from pathlib import Path
 
 import pytest
@@ -68,8 +59,7 @@ FOLDED_FUSED_LANE = {
 
 
 def _payload():
-    with as_file(contract.contract_path()) as path:
-        payload = json.loads(path.read_bytes())
+    payload = json.loads((Path(__file__).parent / "fixtures" / "shape_runtime_contract_v60.json").read_bytes())
     # The v56 pin publishes distinct E4M3/BF16 rate sets and the E4M3 MMA
     # extension. Each routed cell must name its family's published launches.
     lanes = {row["module_name_prefix"]: row.get("lane")
@@ -143,7 +133,7 @@ def _doc(rows, pools=(), regimes=(2048,), **context):
             "context": base, "rows": list(rows), "rate_pools": list(pools)}
 
 
-#: The five GLM-5.3 serving shapes at TP2, as the after-#640 bench timed them.
+#: Historical GLM-5.3 TP2 bench rows. They grant no current admission.
 GLM_ROWS = [
     ("routed_moe", ROUTED, BF16, 1024, FUSED | {"decoder": "native_routed_fused_window_folded"}, 20.9),
     ("routed_moe", ROUTED, E4M3, 1024, FUSED, 17.5),
@@ -165,8 +155,7 @@ def _glm_table(eligibility, rows=GLM_ROWS, ms=(2048,)):
 
 @pytest.fixture(scope="module")
 def glm_eligibility(eligibility):
-    # The after-#640 bench timed BF16 routed stacks on the folded fused lane,
-    # which the pinned contract publishes itself (asserted in _payload).
+    # Historical v60 scope for the after-#640 bench rows.
     return eligibility
 
 
@@ -805,9 +794,8 @@ def test_observation_itself_refuses_a_tp2_scope(tmp_path):
         _consume_observations([tmp_path / "obs" / "observation.json"], table_id="tp2")
 
 
-def test_observation_is_admitted_against_pq_pinned_scope(tmp_path, eligibility):
-    from dataclasses import replace
-    eligibility = replace(eligibility, contract_sha256=OBS_CONTRACT, runtime_commit=OBS_COMMIT)
+def test_observation_is_admitted_against_pq_pinned_scope(tmp_path):
+    eligibility = contract.installed_runtime_snapshot().eligibility
     observation_fixture(tmp_path)
     table = _consume_observations(
         [tmp_path / "obs" / "observation.json"], table_id="pilot",
@@ -1107,3 +1095,11 @@ def test_relative_observation_and_checker_paths_convert(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     table = _consume_observations([Path("obs/observation.json")], table_id="relative")
     assert len(table.rows) == 1
+
+
+def test_current_contract_refuses_the_historical_glm_tp2_rows():
+    payload = json.loads(Path(str(contract.contract_path())).read_bytes())
+    table = lane._parse_table(payload["lane_eligibility"], payload["formats"], "", COMMIT, SHA,
+                              native_extensions=payload["native_extensions"])
+    with pytest.raises(srp.ShapeRuntimeError, match="no pinned lane cell covers|not the row's launch"):
+        _glm_table(table)

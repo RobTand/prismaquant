@@ -66,7 +66,7 @@ def test_v10_remains_the_legacy_schema_constant():
     assert (lane.LANE_ELIGIBILITY_SCHEMA_TESSERA
             == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
             == "tessera.lane-eligibility.v10")
-    # The legacy aliases agree; the active package uses the supported v11.
+    # The legacy aliases agree; the active package uses the supported v12.
     assert contract.TESSERA_LANE_SCHEMA == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA
 
 
@@ -105,7 +105,7 @@ def test_v10_joins_every_set_v9_is_in():
 # The packaged contract, at the pinned digest
 # ---------------------------------------------------------------------------
 def test_the_packaged_contract_has_the_pinned_digest():
-    """The active pin uses v11; historical v10 refusal cases remain below."""
+    """The active pin uses v12; historical v10 refusal cases remain below."""
     raw = _packaged_bytes()
     assert (hashlib.sha256(raw).hexdigest()
             == TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256), (
@@ -113,7 +113,7 @@ def test_the_packaged_contract_has_the_pinned_digest():
         "commit rather than relaxing this check")
     payload = json.loads(raw)
     assert (payload["lane_eligibility"]["schema"]
-            == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11)
+            == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V12)
 
 
 def _packaged_table():
@@ -125,7 +125,7 @@ def test_the_packaged_table_publishes_the_three_platforms():
     """The reviewed cells use sm_121; AMD declares no cells."""
     table = _packaged_table()
     assert table.present
-    assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11
+    assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V12
     assert {"sm_121", "gfx1151", "gfx1201"} <= set(table.platforms)
     assert {cell.platform for cell in table.cells} == {"sm_121"}
     # The withdrawal is total off sm_121: both AMD platforms ship no cell.
@@ -227,9 +227,9 @@ def test_a_v9_closed_contract_reader_refuses_a_v10_table(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The active answer names v11; unused identity fields remain outside it
+# The active answer names v12; unused identity fields remain outside it
 # ---------------------------------------------------------------------------
-def test_the_pin_answer_names_v11_without_an_unused_platform_axis():
+def test_the_pin_answer_names_v12_without_an_unused_platform_axis():
     """Only the projection an admission gate reads belongs in the answer.
 
     ``TESSERA_DEV_PIN_ANSWER`` is the projection an ADMISSION gate reads, and
@@ -240,6 +240,6 @@ def test_the_pin_answer_names_v11_without_an_unused_platform_axis():
     would then land with no diff to review.
     """
     answer = contract.TESSERA_DEV_PIN_ANSWER
-    assert answer["lane_schema"] == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11
+    assert answer["lane_schema"] == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V12
     assert "platforms" not in answer
     assert "contract_version" not in answer

@@ -403,7 +403,7 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
 
 @pytest.mark.parametrize('rung', [640, 768])
 def test_selected_subcap_identity_verifies_real_served_wire_and_refuses_research_recipe(selection, rung):
-    from prismaquant.tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe
+    from prismaquant.tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe, tessera_wire_recipe
     from prismaquant.tessera_render import encode_tessera_unit
 
     api = campaign_wire.require_checkpoint_identity_api()
@@ -419,7 +419,9 @@ def test_selected_subcap_identity_verifies_real_served_wire_and_refuses_research
     _, blob = encode_tessera_unit(weight, fmt, hessian_required=False, recipe=served)
     record = api.make_unit_record(blob, expected, filename='selected.tessera')
     api.verify_cached_unit(blob, record, expected)
-    research = api.unit_input_identity(weight, unit, family.payload_grid(), rung)
+    assert api.unit_input_identity(weight, unit, family.payload_grid(), rung) == expected
+    research = {**expected, 'recipe': {**expected['recipe'],
+                                     **tessera_wire_recipe(family, rung).to_config()}}
     assert research['recipe'] != expected['recipe']
     with pytest.raises(ValueError, match='identity|inputs'):
         api.verify_cached_unit(blob, record, research)

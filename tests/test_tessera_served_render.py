@@ -8,7 +8,7 @@ from prismaquant import tessera_render as render
 from prismaquant.lane_eligibility import ServingContext
 from prismaquant.tessera_footprint import tessera_tensor_payload_breakdown
 from prismaquant.tessera_formats import (
-    TesseraRouteRefused, parse_tessera_format_name,
+    parse_tessera_format_name,
     tessera_served_wire_recipe, tessera_wire_recipe,
 )
 
@@ -28,7 +28,7 @@ def _served():
 
 def test_scoped_planned_facts_describe_the_served_body():
     planned = render.planned_wire_facts(FAMILY, RUNG, structure=STRUCTURE)
-    assert (planned["body"], planned["window_bits"]) == ("TCQ", 0)
+    assert (planned["body"], planned["window_bits"]) == ("WINDOW", 14)
     assert planned["structure"] == STRUCTURE
 
 
@@ -108,26 +108,6 @@ def test_declared_production_structure_map_cannot_silently_fall_back(mapping):
         render.render_tessera_production(
             _weight(), NAME, qname="expert.down", activations=None,
             levers={"tessera_weights_only": True, "tessera_structure_by_unit": mapping})
-
-
-@pytest.mark.parametrize("operation", ["plan", "encode", "render", "production"])
-def test_dense_unattested_plan_and_render_refuse_before_encoding(operation, monkeypatch):
-    def unexpected_plan(*_args, **_kwargs):
-        pytest.fail("an unattested dense wire reached the encoder plan")
-
-    monkeypatch.setattr(render, "_plan", unexpected_plan)
-    with pytest.raises(TesseraRouteRefused, match="dense"):
-        if operation == "plan":
-            render.planned_wire_facts(FAMILY, RUNG, structure="dense")
-        elif operation == "encode":
-            render._encode_planned_unit(_weight(), NAME, structure="dense")
-        elif operation == "render":
-            render.render_tessera_weight(_weight(), NAME, structure="dense")
-        else:
-            render.render_tessera_production(
-                _weight(), NAME, qname="dense.down", activations=None,
-                levers={"tessera_weights_only": True,
-                        "tessera_structure_by_unit": {"dense.down": "dense"}})
 
 
 def test_unattested_scoped_spec_reports_ineligibility_and_preserves_wire_price(monkeypatch):

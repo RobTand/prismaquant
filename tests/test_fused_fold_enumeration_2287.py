@@ -1,22 +1,8 @@
-"""Qualify mixed-rate enumeration limits at real fused-group shapes (#2287).
+"""Re-take fused-group enumeration at the v68 image scopes, PQ #3677.
 
-Independent review of #2285 found paired covariance retains complete
-combinations and may hit the combination cap on a real fused group. This
-file derives GLM fused members and per-member menu sizes from the pinned
-contracts and folds the largest real fused group on CPU.
-
-Result: the dense gate/up group (2 members at (12288, 4096)) refuses in
-complete-combination mode at 11,082,241 pairs over the 8,000,000 guard.
-The cap fails closed and yields no wrong artifact. The routed expert
-group fits (261,123 options, 261,121 max step pairs).
-
-Repair before adoption: attach whole-module runtime measurements and
-reduce on measured dominance in the measured solver
-(``reduce_continuous_menu`` stamps this owner as
-``deferred_to_measured_runtime_solver``). Member pre-reduction on
-unpaired byte/loss costs is unsound for the paired objective: the paired
-price comes from matched probe samples, a different cost function from
-the one dominance was computed on. #2282 stays closed.
+IMG-N dense BF16 and E4M3 each cover 511 rates. IMG-G routed E4M3
+covers 512 rates, including upstream R768. Routed E2M1 lacks start state.
+Both groups fit below the unchanged complete-combination guard.
 """
 from __future__ import annotations
 
@@ -107,34 +93,24 @@ def test_glm_fused_members_come_from_the_runtime():
     assert sorted(licence.per_member_fields()) == ["q256", "rows"]
 
 
-def test_dense_gate_up_refuses_in_complete_combination_mode(dense_menu):
-    """5,123 rungs per member; the BF16 cell alone builds 11,082,241
-    pairs over the guard. The fold refuses instead of pruning."""
+def test_dense_gate_up_fits_in_complete_combination_mode(dense_menu):
     by_family: dict[str, int] = {}
     for rung in dense_menu:
         by_family[rung.family] = by_family.get(rung.family, 0) + 1
-    assert by_family == {"TESSERA_BF16_K1": 3329,
-                         "TESSERA_E4M3_K1": 1793,
-                         "TESSERA_E2M1_K2": 1}
+    assert by_family == {"TESSERA_BF16_K1": 511, "TESSERA_E4M3_K1": 511}
     members = ["model.layers.0.mlp.gate_proj", "model.layers.0.mlp.up_proj"]
-    cands = _candidates(members, dense_menu)
-    report: dict = {}
-    with pytest.raises(AssertionError, match=r"11,082,241.*8,000,000 guard"):
-        ac.tessera_group_composites(
-            members, cands, 2 * 12288 * 4096,
-            licence=_installed_fused_licence(), report=report,
-            preserve_runtime_frontier=True)
+    options = ac.tessera_group_composites(
+        members, _candidates(members, dense_menu), 2 * 12288 * 4096,
+        licence=_installed_fused_licence(), preserve_runtime_frontier=True)
+    assert len(options) == 522242 < GUARD_PAIRS
 
 
 def test_routed_gate_up_fits_in_complete_combination_mode(routed_menu):
-    """513 rungs per member; the E4M3 cell builds 261,121 max step
-    pairs under the guard and completes with 261,123 options."""
+    """The upstream R768 receipt adds one E4M3 rate on IMG-G."""
     by_family: dict[str, int] = {}
     for rung in routed_menu:
         by_family[rung.family] = by_family.get(rung.family, 0) + 1
-    assert by_family == {"TESSERA_E4M3_K1": 511,
-                         "TESSERA_E2M1_K2": 1,
-                         "TESSERA_BF16_K1": 1}
+    assert by_family == {"TESSERA_E4M3_K1": 512}
     members = ["model.layers.3.mlp.experts.0.gate_proj",
                "model.layers.3.mlp.experts.0.up_proj"]
     cands = _candidates(members, routed_menu)
@@ -143,14 +119,14 @@ def test_routed_gate_up_fits_in_complete_combination_mode(routed_menu):
         members, cands, 2 * 2048 * 4096,
         licence=_installed_fused_licence(), report=report,
         preserve_runtime_frontier=True)
-    assert len(options) == 261123
+    assert len(options) == 262144
     e4m3 = report["TESSERA_E4M3_K1[grid=E4M3,body=WINDOW,plane=channel]"]
-    assert e4m3["member_menu"] == [511, 511]
-    assert e4m3["fold_frontier"] == [511, 261121]
-    assert e4m3["options"] == 261121
+    assert e4m3["member_menu"] == [512, 512]
+    assert e4m3["fold_frontier"] == [512, 262144]
+    assert e4m3["options"] == 262144
     assert max(step for cell in report.values()
                if isinstance(cell, dict) and "fold_frontier" in cell
-               for step in cell["fold_frontier"]) == 261121 < GUARD_PAIRS
+               for step in cell["fold_frontier"]) == 262144 < GUARD_PAIRS
 
 
 def test_six_member_kda_group_carries_no_tessera_menu():

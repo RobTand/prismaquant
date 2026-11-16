@@ -1,38 +1,15 @@
-"""A unit whose columns are not whole 256-column superblocks is priced (#1849).
+"""Price trailing partial superblocks with the recipe that each caller uses.
 
-GLM-5.3's KDA gate up-projections, ``self_attn.f_b_proj`` and
-``self_attn.g_b_proj``, are ``[8192, 128]``: 34 layers of each, 68 units the
-attention census (#1842) has to price.  ``tessera_menu.tessera_shape_legal``
-admitted them, because the Bresenham schedule closes over 128 columns, and
-``tessera_footprint.tessera_tensor_payload_breakdown`` refused any column count
-that is not a multiple of 256.  So ``expand_tessera_menu`` raised straight out
-of the census before its first forward pass (PB d3f57e6c).
-
-The wire holds a trailing partial superblock: ``tessera.grammar.
-superblock_count`` rounds the partition up, ``superblock_quota_ok`` constrains
-only complete superblocks, and ``layout.build_planes`` gives the partial block
-a granule.  The fix prices the shape instead of refusing it.  These tests check
-three things:
-
-* The census's own call, the readable menu at ``[8192, 128]``, returns a
-  priced menu instead of raising.  This is the reproduction.
-* The price is Tessera's price.  The breakdown equals ``tessera.control.
-  unit_wire_bits`` at the real shape for every realisable rung of every menu
-  family.  It also equals the bytes ``encode_linear`` writes at a small
-  128-column shape, for the TCQ family (both arities) and both window
-  families.
-* The menu and the accountant agree about which rungs exist:
-  ``tessera_shape_legal`` admits a rung if and only if the breakdown prices it
-  and Tessera's accountant prices it.
-
-CPU only.  ``exact_bytes`` is a property of the layout, not of the weights.
+The research encoder keeps its research recipe. Tessera's control accountant
+prices the served recipe at v68. Each comparison uses the same recipe on
+both sides. The real GLM KDA gate shape is 8192x128.
 """
 
 import pytest
 import torch
 from tessera.control import grid_for_name, unit_wire_bits
 from tessera.errors import GrammarError
-from tessera.export import encode_linear
+from tessera.export import encode_linear, served_recipe
 
 from prismaquant.tessera_footprint import tessera_tensor_payload_breakdown
 from prismaquant.tessera_formats import (
@@ -96,17 +73,17 @@ def test_the_breakdown_prices_what_the_exporter_writes_at_128_columns(
     assert breakdown["payload_bytes"] == exported, (family, rung)
     assert (breakdown["total_bytes"] - int(breakdown["container_side_bytes"])
             == exported), (family, rung)
-    assert unit_wire_bits(grid, rung, rows, columns) == 8 * exported
+    serving = tessera_tensor_payload_breakdown(
+        SMALL_128, family=family, body_rate_q256=rung,
+        recipe=served_recipe(grid_for_name(grid), rung))
+    assert unit_wire_bits(grid, rung, rows, columns) == 8 * serving["payload_bytes"]
 
 
 def test_every_rung_at_the_kda_gate_shape_is_tesseras_price_or_tesseras_refusal():
-    """The sweep at the real shape: price, existence and legality are one fact.
+    """The real shape has the same legal quotas on research and served wires.
 
-    For every rung of every menu family: either all three of the breakdown,
-    ``unit_wire_bits`` and ``tessera_shape_legal`` refuse it (its quota does
-    not close over 128 columns), or all three admit it and the two byte
-    figures are equal.  Nothing is refused by only one of them, which is the
-    disagreement that crashed the census.
+    Compare explicit served prices with the control accountant. Geometry
+    grants no cell. The independent serving gate can refuse a legal wire.
     """
     rows, columns = KDA_GATE
     priced = refused = 0
@@ -117,7 +94,8 @@ def test_every_rung_at_the_kda_gate_shape_is_tesseras_price_or_tesseras_refusal(
             legal, why = tessera_shape_legal(spec, rung, KDA_GATE)
             try:
                 breakdown = tessera_tensor_payload_breakdown(
-                    KDA_GATE, family=spec.name, body_rate_q256=rung
+                    KDA_GATE, family=spec.name, body_rate_q256=rung,
+                    recipe=served_recipe(grid_for_name(grid), rung)
                 )
             except TesseraFormatError:
                 assert not legal, (spec.name, rung, "menu admits, accountant refuses")

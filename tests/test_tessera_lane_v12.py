@@ -3,7 +3,7 @@
 The table below is the two routed ``resident`` cells of Tessera contract v66
 (branch ``kernels/t8-routed-cells-20261007``, PR #1045): the three historical
 launches cover census rungs 832-1088, the class decoder covers 768 alone.
-No pin moves here: the serving and export pins stay at lane schema v11.
+PQ #3677 moves the serving and export pins to lane schema v12.
 """
 import copy
 import json
@@ -221,6 +221,6 @@ def test_v12_scope_change_moves_the_contract_answer():
                for line in drift)
 
 
-def test_v12_keeps_the_pin_at_v11():
+def test_v12_matches_the_current_pin():
     assert runtime.TESSERA_DEV_PIN_ANSWER["lane_schema"] == (
-        "tessera.lane-eligibility.v11")
+        "tessera.lane-eligibility.v12")

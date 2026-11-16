@@ -23,7 +23,8 @@ def test_exact_serving_pin_attests_only_the_published_tp_ceiling(pinned_payload,
     unit = next(row for row in pinned_payload["tensor_parallel"]["units"]
                 if row["unit"] == family)
     ceiling = unit["max_world_size"]
-    assert ceiling > 1
+    assert ceiling == {"TESSERA_E2M1_K2": 1, "TESSERA_BF16_K1": 1,
+                       "TESSERA_E4M3_K1": 2}[family]
 
     assert menu.tessera_tp_world_attested(family, ceiling) == (True, "")
     attested, reason = menu.tessera_tp_world_attested(family, ceiling + 1)
@@ -47,7 +48,8 @@ def test_tp2_menu_keeps_only_the_same_scoped_native_rungs(pinned_payload):
         parallel_kind=menu.PARALLEL_COLUMN, serving_context=context)
 
     assert whole
-    assert [row.format_name for row in sharded] == [row.format_name for row in whole]
+    assert [row.format_name for row in sharded] == [
+        row.format_name for row in whole if row.family == "TESSERA_E4M3_K1"]
     assert all(row.admission.attested for row in sharded)
     assert menu.expand_tessera_menu(
         shape, mode=menu.MENU_ATTESTED, tp_degree=2,
@@ -135,7 +137,10 @@ def test_exact_pin_refused_axis_refuses_a_tp2_column_cut(
         E2M1, rung, SHAPE, tp_degree=2, parallel_kind=menu.PARALLEL_COLUMN,
         require_attested_world=require_attested_world)
     assert not legal
-    assert reason == f"tp_axis_refused:{E2M1}:{E2M1}:row"
+    if require_attested_world:
+        assert f"no world_size_receipt covers {E2M1} at world size 2" in reason
+    else:
+        assert reason == f"tp_axis_refused:{E2M1}:{E2M1}:row"
 
 
 def test_exact_pin_tp2_menu_drops_only_the_refused_cut(refused_row_axis):
@@ -151,7 +156,8 @@ def test_exact_pin_tp2_menu_drops_only_the_refused_cut(refused_row_axis):
     assert E2M1 in _families(whole)
     assert [r.format_name for r in column] == [
         r.format_name for r in whole if r.family != E2M1]
-    assert [r.format_name for r in row] == [r.format_name for r in whole]
+    assert [r.format_name for r in row] == [
+        r.format_name for r in whole if r.family != E2M1]
 
 
 @pytest.mark.parametrize("tp_degree,parallel_kind", [
@@ -164,7 +170,8 @@ def test_exact_pin_refused_axis_is_not_asked_without_a_cut(
     controlled = menu.expand_tessera_menu(
         SHAPE, mode=menu.MENU_ATTESTED, tp_degree=tp_degree,
         parallel_kind=parallel_kind, serving_context=refused_row_axis)
-    assert [r.format_name for r in controlled] == [r.format_name for r in whole]
+    assert [r.format_name for r in controlled] == [
+        r.format_name for r in whole if tp_degree == 1 or r.family != E2M1]
 
 
 def test_menu_expansion_reads_tp_facts_from_its_one_capture(

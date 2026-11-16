@@ -152,29 +152,20 @@ def test_every_cells_evidence_block_is_closed():
             "status", "receipt", "attribution", "control", "record"}, row["id"]
 
 
-def test_the_projection_is_positional_and_its_width_is_uniform(monkeypatch):
-    """The reviewed projection retains its positional columns.
-
-    A row that grew or lost a column is a WIDENED or narrowed projection, and
-    the pin's own rule says that is a re-review even when no published value
-    moved. The width is read off the answer rather than typed so that the
-    re-review lands on the comment block, not here.
-    """
+def test_the_projection_keeps_positional_columns_and_optional_launch_scopes(monkeypatch):
+    """V12 inserts launch scopes before runtime fields when the cell has them."""
     rows = contract.TESSERA_DEV_PIN_ANSWER["cells"]
-    widths = {len(row) for row in rows}
-    # 18 columns: 0-12 unconditional, 13-15 runtime, 16 evidence, 17 coverage.
-    assert widths == {18}, sorted(widths)
-    # The parsed development answer is opt-in, just as it is for menu tests.
+    assert {len(row) for row in rows} == {18, 19}
     monkeypatch.setenv(contract.TESSERA_DEV_PIN_ENV, contract.TESSERA_DEV_PIN_COMMIT)
     parsed = {cell.id: cell for cell in contract.load_tessera_contract().cells}
     for row in rows:
-        assert isinstance(row[13], dict) and set(row[13]) == {
-            "image", "execution_modes"}
-        assert len(row[16]) == 7, row[0]
-        assert isinstance(row[17], dict) and set(row[17]) == {
-            "run_tables", "covered_rungs_q256"}, row[0]
+        offset = int("launch_scopes" in row[13])
+        assert len(row) == 18 + offset
+        assert isinstance(row[13 + offset], dict) and set(row[13 + offset]) == {
+            "image", "execution_modes", "kernel_build"}
+        assert len(row[16 + offset]) == 7, row[0]
         cell = parsed[row[0]]
-        assert row[17] == {
+        assert row[17 + offset] == {
             "run_tables": [list(table) for table in sorted(cell.run_tables)],
             "covered_rungs_q256": sorted(cell.covered_rungs_q256),
         }, row[0]
