@@ -428,14 +428,14 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: from PB bb291153; no compiled or full-artifact qualification is inferred.
 #: Re-pinned 2026-10-16 to API-only aaa417003f; the v60 table bytes are unchanged.
 #: The installed contract supplies the generated admission answer.
-TESSERA_DEV_PIN_COMMIT = "aaa417003f0ee690e8ace138acd18df7f9531369"
+TESSERA_DEV_PIN_COMMIT = "8bf496abdb7d598a3132f6b4b7cb7d7e96199d13"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
+    "145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4"
 )
 
 #: Reviewed admission values, separate from the installed runtime's identity.

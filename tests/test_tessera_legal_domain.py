@@ -247,9 +247,8 @@ def test_producer_legal_and_reader_supported_genuinely_diverge_on_the_control(
     real: the producer wrote R128-R896 while the pinned reader declared
     R896-R896 only, so R256 was producer-legal and reader-unsupported --
     exactly the gap #560's full-domain widen existed to close, and its red
-    receipts were this test's fixture.  At this pin every published reader
-    range equals its family's producer domain, so the witness is
-    CONSTRUCTED: the reader range is narrowed for the duration of the test,
+    receipts were this test's fixture.  The witness below is
+    constructed: the reader range is narrowed for the duration of the test,
     and the two facts are asserted to move APART under it -- a ledger that
     collapsed them into one read would report the candidate as simply
     absent, which is the failure this test refuses.
@@ -260,7 +259,7 @@ def test_producer_legal_and_reader_supported_genuinely_diverge_on_the_control(
         span = real(family)
         if span is None or family != E2:
             return span
-        return (span[1], span[1])  # the pre-#560 shape: R896-R896 only
+        return (family_q256_bounds(E2)[1],) * 2  # R896 only
 
     monkeypatch.setattr(domain, "_reader_range", narrowed)
     lo, hi = family_q256_bounds(E2)
@@ -743,24 +742,7 @@ def test_recipe_labels_come_through_the_canonicalisers(family, rate, body, plane
 # ---------------------------------------------------------------------------
 
 def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
-    """Every derived number must come from a pinned state, named in the report.
-
-    ``import tessera`` resolves to whatever is installed.  On this box the
-    editable install points at a working checkout at ``a9eb572e``, which is
-    neither pin and is a descendant of neither, and whose ``export.py`` --
-    where ``_window_bits_for`` and ``wire_recipe`` live -- is a third distinct
-    file.  A roster derived through it would match the audit only by
-    coincidence.  This test refuses that silently happening: it hashes the
-    bytes actually imported and requires them to be one of the two pins.
-
-    State identity is the ``export.py`` digest.  ``export.py`` moved at the
-    2026-09-19 union-head pin (Tessera ``cc739a55``): #563's rework carries
-    docstring corrections into the exporter, so an install at the pin
-    resolves under the ``reader-pin-cc739a55`` name -- the additive state
-    this re-pin records.  The edits are prose-only; the wire bytes they
-    document are the frozen study producer's, and the grammar the pin
-    carries is checked separately, one test down.
-    """
+    """The installed exporter must match a source state with a completed domain audit."""
     state = domain.tessera_source_state()
     assert state["state"] is not None, state["verdict"]
     assert state["is_a_pin"], state["verdict"]

@@ -139,7 +139,9 @@ def tessera_attesting_cells(
         name: str, *, table=None, formats=None,
         serving_context: ServingContext | None = None,
         ignore_evidence: bool = False) -> tuple:
-    """The native device-qualified cells covering this rung, or ``()``.
+    """Native cells with ``qualification=device_qualified``, or ``()``.
+
+    Read each returned cell's ``evidence.grade`` for its evidence level.
 
     The match predicate of :func:`tessera_lane_admission`'s first conjunct,
     factored so :func:`prismaquant.tessera_menu.route_admission` can ask the
@@ -202,7 +204,9 @@ def snapshot_rung_admission(name: str, snapshot, *, serving_context=None):
         cell = verdict.cells[0]
         return NativeRungVerdict(
             "pin", f"the packaged Tessera contract attests {len(verdict.cells)} native "
-            f"cell(s) for {cell.family} R{verdict.rate_q256}, but the installed Tessera is not "
+            f"cell(s) for {cell.family} R{verdict.rate_q256} "
+            f"(qualification=device_qualified, evidence grades {verdict.evidence_grades}), "
+            "but the installed Tessera is not "
             "the pinned commit/contract digest, so no rung is producer-eligible",
             cells=verdict.cells, rate_q256=verdict.rate_q256)
     return verdict

@@ -378,11 +378,11 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: owns smoke grammar, lane decisions, fused ownership and image replay.
 #: Contract bytes, native qualification and both admission policies are unchanged.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "aaa417003f0ee690e8ace138acd18df7f9531369"
+    "8bf496abdb7d598a3132f6b4b7cb7d7e96199d13"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
+    "145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4"
 )
 #: The v3 split (#1561).  ``TESSERA_SERVING_RUNTIME_PINNED_COMMIT`` above is
 #: the SERVING commit; the producer commit and the serving code digest are
@@ -392,7 +392,7 @@ TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
 #: which names the venv; ``tests/test_tessera_serving_code_identity.py``
 #: enforces that, because this module imports nothing from the package.
 TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT = (
-    "aaa417003f0ee690e8ace138acd18df7f9531369"
+    "8bf496abdb7d598a3132f6b4b7cb7d7e96199d13"
 )
 TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 

@@ -339,3 +339,12 @@ Its numeric fixture file hashes to `65b336caa1622ea559ea2f16673b0aa0f5594ffbd484
 The new CPU smoke records the same two file digests.
 These matching bytes bind the retained suite to the delivered test and fixture scope without another suite run.
 
+
+## Scope amendment, 2026-11-16, PQ #3677
+
+OPTION A replaces the TP authorization above for the current v68 pin.
+BF16 is authorized at TP1 on IMG-N only. E4M3 keeps TP2.
+E2M1 remains excluded on IMG-N. Its IMG-G R896 cells cover TP1 only.
+No E2M1 scope joins this authorization. No family gains a new authorized rung.
+BF16 and E2M1 at TP2 lack a current family world-size receipt and are refused.
+The dated measurements and receipts above remain historical evidence.

@@ -70,13 +70,13 @@ def test_v2_window_zero_width_remains_a_producer_refusal(publication):
 
 
 def _native_tcq_publication(publication):
-
     _path, table = _versioned_publication(publication)
     family = "TESSERA_E2M1_K2"
     entry = copy.deepcopy(_formats()[family])
     step = entry["reader_rate_step_q256"]
-    stamp = next(stamp for stamp in entry["attested_wire"] if stamp["q256"] == 896)
-    recipe = {key: value for key, value in stamp.items() if key != "q256"}
+    recipe = {"body": "tcq", "span": 2, "plane": "lut16", "window_bits": 0,
+        "seed": 0, "sigma": None, "channel_sigma": None}
+    entry["attested_wire"] = [{"q256": 896, **recipe}]
     table["format"] = family
     table["scope"].update(rung_min=896, rung_max=896, grid_step_q256=step)
     table["rungs"] = table["rungs"][:1]
@@ -117,12 +117,11 @@ def _native_tcq_publication(publication):
             "path": str(target.relative_to(publication)), "table_schema": table["schema"],
             "table_status": table["table_status"]}}}}}}}
     (publication / "index.json").write_text(json.dumps(index))
-    # A test-only v11 rule over this already published census rung. It does not
-    # widen the production pin or assert a new serving cell or wire.
+    # This test-only TCQ rule and wire do not depend on the production pin.
     entry["allowable_rungs"] = {"rule": "window_rate_set", "code_arity": 2,
         "range_q256": [896, 896], "step_q256": step, "run_tables": [[7]],
         "excluded_run_tables": [], "excluded_q256": [],
-        "wire": {key: value for key, value in stamp.items() if key != "q256"},
+        "wire": copy.deepcopy(recipe),
         "evidence": ["docs/measurements/fixture.json"]}
     return target, table, entry
 

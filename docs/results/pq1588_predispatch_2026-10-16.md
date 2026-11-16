@@ -73,3 +73,19 @@ This packet covers the 14 requested rows only.
 
 The October 9 packet recorded no price row for these requested rungs. That is
 the state retained here; live campaign outputs were not reconciled.
+
+## Contract v68 refresh, 2026-11-16
+
+The packet now records the v68 API values from Flux mode A.
+The source is `/mnt/shared/flux-jobs/pq-3694-packet-20261116T072543Z/A-3516cc085a009f280440e85e56556e9a0234310e/values.json`.
+
+- Old Tessera pin: `aaa417003f0ee690e8ace138acd18df7f9531369`.
+- Old contract SHA-256: `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
+- New Tessera pin: `8bf496abdb7d598a3132f6b4b7cb7d7e96199d13`.
+- New contract SHA-256: `145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4`.
+
+Three requested rows have changed cell state:
+
+- `TESSERA_BF16_K1 R1408 dense`: qualified structures changed from `["dense"]` to `[]`; `cell_for_requested_class` changed from `true` to `false`.
+- `TESSERA_BF16_K1 R1792 dense`: qualified structures changed from `["dense"]` to `[]`; `cell_for_requested_class` changed from `true` to `false`.
+- `TESSERA_E4M3_K1 R768 routed`: qualified structures changed from `["dense"]` to `["dense", "routed_moe"]`; `cell_for_requested_class` changed from `false` to `true`.

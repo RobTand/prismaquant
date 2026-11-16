@@ -287,6 +287,10 @@ TESSERA_SOURCE_STATES = {
         "export.py":
             "3538d1275321e625682de38ef40107cf541d0cf1eadbf32d8d08dba5672373ba",
     },
+    "reader-pin-8bf496ab": {
+        "commit": "8bf496abdb7d598a3132f6b4b7cb7d7e96199d13",
+        "export.py": "fe4ad3b27f6a9423e45e3b6fc9a5d60f9ac10633f175590051da16977265ec51",
+    },
     "unpinned-working-checkout-a9eb572e": {
         "commit": "a9eb572e1b90b17f716562192910681e65430fba",
         "export.py":
@@ -332,7 +336,7 @@ TESSERA_EQUIVALENT_SOURCE_STATES = (
     "reader-pin-387eda36", "study-producer-d403cc5a", "reader-pin-cc739a55",
     "reader-pin-09d6559d", "reader-pin-f94929de", "reader-pin-38e96012",
     "reader-pin-a5f3b232", "reader-pin-b40c93cb",
-    "reader-pin-2dbac191", "reader-pin-fca4c6ce0",
+    "reader-pin-2dbac191", "reader-pin-fca4c6ce0", "reader-pin-8bf496ab",
 )
 
 
@@ -625,18 +629,22 @@ def live_pins() -> DomainPins:
 #: Re-taken 2026-10-16 for the aaa417003f public API delivery. The v60
 #: contract, export.py fingerprint and grammar.py fingerprint are unchanged;
 #: the existing source-state match and audited rate counts remain authoritative.
+#: Re-taken 2026-11-16 for 8bf496ab / v68 in Flux, PQ #3677.
+#: The full rate walk retains E4M3 1793 and BF16 3841 legal rates, with no holes.
+#: BF16 table widths still change at R3585 and R3841. Grammar bytes are unchanged.
+#: The exporter changes E2M1 serving bytes; primary E4M3/BF16 recipes stay unchanged.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="aaa417003f0ee690e8ace138acd18df7f9531369",
+    reader_dev_pin_commit="8bf496abdb7d598a3132f6b4b7cb7d7e96199d13",
     reader_dev_pin_contract_sha256=(
-        "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
+        "145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4"
     ),
-    serving_runtime_pinned_commit="aaa417003f0ee690e8ace138acd18df7f9531369",
+    serving_runtime_pinned_commit="8bf496abdb7d598a3132f6b4b7cb7d7e96199d13",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
+        "145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4"
     ),
     producer_installed_contract_sha256=(
-        "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
+        "145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4"
     ),
 )
 

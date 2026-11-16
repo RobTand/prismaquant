@@ -255,7 +255,7 @@ def refuse_before_source(config: dict, surface, research_input=None) -> None:
                         "either, so no planned expert stack can")
 
 
-def model_plan_context(model: Path, config: dict, surface, *, research_selected: bool = False):
+def model_plan_context(model: Path, config: dict, surface):
     """Use the exporter's classification and its carried projection, never guess slices."""
     _shards, dense, packed, routed = surface.quantizable(model)
     stacks = surface.expert_stacks(routed)
@@ -281,8 +281,7 @@ def model_plan_context(model: Path, config: dict, surface, *, research_selected:
                 != surface.source_roster_identity(model)):
             raise PlanError("carried expert projection source identity disagrees with this checkpoint")
         current = surface.project_expert_plan({**dense, **packed, **routed},
-                    json.loads((Path(model) / "config.json").read_text()), request,
-                    research_selected=research_selected)
+                    json.loads((Path(model) / "config.json").read_text()), request)
         if current["stacks"] != producer.get("stacks"):
             raise PlanError("carried expert projection disagrees with the producer's current source projection")
         bindings = carried.get("stacks")
@@ -690,8 +689,7 @@ def plan_from_assignment(config: dict, shapes: dict, members: dict, layouts: dic
         _shards, dense, packed, routed = surface.quantizable(model)
         surface.project_expert_plan({**dense, **packed, **routed},
                                     json.loads((Path(model) / "config.json").read_text()),
-                                    selected_stacks,
-                                    research_selected=research_input is not None)
+                                    selected_stacks)
     provenance["expert_stacks"] = {stack: {"units": stack_members, "planned_as": plan[stack]}
                                    for stack, stack_members in members.items()}
     provenance["immutable_bf16_routers"] = sorted(routers)
@@ -737,7 +735,7 @@ def main(argv=None):
         research_input = ResearchSelectedMoeInput.read(args.research_selected_moe_json)
     refuse_before_source(config, surface, research_input)
     shapes, stack_members, layouts = model_plan_context(
-        args.model, config, surface, research_selected=research_input is not None)
+        args.model, config, surface)
     plan, provenance, logical_plan = plan_from_assignment(
         config, shapes, stack_members, layouts, model=args.model, cover=args.cover,
         allow_disagreement=args.allow_fused_disagreement, surface=surface,

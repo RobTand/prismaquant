@@ -381,9 +381,11 @@ CELL_QUALIFICATIONS = frozenset({
 #: gets read as a measured one.
 EVIDENCE_KL_KIND_TOPK_LOWER_BOUND = "topk_intersection_lower_bound"
 EVIDENCE_KL_KIND_FULL_VOCAB = "full_vocab"
+EVIDENCE_KL_KIND_GRAPH_EQUALITY = "graph_equality"
 EVIDENCE_KL_KINDS = frozenset({
     EVIDENCE_KL_KIND_TOPK_LOWER_BOUND,
     EVIDENCE_KL_KIND_FULL_VOCAB,
+    EVIDENCE_KL_KIND_GRAPH_EQUALITY,
 })
 
 #: A greedy smoke's outcome, in the receipt's own words. ``repetitive`` is not
@@ -1241,8 +1243,10 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
                     f"intersection bound, got {top_k!r}")
         elif top_k is not None:
             raise LaneEligibilityError(
-                f"{spot}.top_k must be null for a full-vocabulary KL, got {top_k!r}")
+                f"{spot}.top_k must be null for {kind}, got {top_k!r}")
         regime = entry["regime"]
+        if kind == EVIDENCE_KL_KIND_GRAPH_EQUALITY and regime != "decode":
+            raise LaneEligibilityError(f"{spot}: graph_equality requires decode regime")
         if cell_regime and regime != cell_regime:
             raise LaneEligibilityError(
                 f"{spot}.regime {regime!r} is not the cell's regime "
@@ -3030,6 +3034,11 @@ def native_rung_cells(
     return matched
 
 
+def cell_evidence_grades(cells: Sequence[EligibilityCell]) -> dict[str, str]:
+    """The parsed evidence grade for each cell that publishes evidence."""
+    return {cell.id: cell.evidence.grade for cell in cells if cell.evidence is not None}
+
+
 @dataclass(frozen=True)
 class NativeRungVerdict:
     """One rung decision and the matched cells that produced it."""
@@ -3046,6 +3055,10 @@ class NativeRungVerdict:
             not self.cells or type(self.rate_q256) is not int or self.rate_q256 <= 0
         ):
             raise ValueError("native verdict requires matched cells and a positive integer rate")
+
+    @property
+    def evidence_grades(self) -> dict[str, str]:
+        return cell_evidence_grades(self.cells)
 
     @property
     def admitted(self) -> bool:
@@ -3108,9 +3121,9 @@ def native_rung_verdict(
         if lane_refused:
             return NativeRungVerdict('lane_requirements', f"{name}: the packaged Tessera contract's lane predicate refuses this producer's plan on this route. " + ' '.join(sorted(set(lane_refused))))
         if scoped:
-            return NativeRungVerdict('regime_population', f'the packaged Tessera contract has no complete device-qualified native regime population for {family} R{rate} in serving context {serving_context.as_dict()}')
+            return NativeRungVerdict('regime_population', f'the packaged Tessera contract has no complete native regime population with qualification=device_qualified for {family} R{rate} in serving context {serving_context.as_dict()}')
         published = sorted(int(r) for r in formats.get(family, {}).get("candidate_rungs_q256", ()))
-        return NativeRungVerdict('cell_missing', f'the packaged Tessera contract publishes {family} at rungs {published} and no device-qualified native cell names R{rate}')
+        return NativeRungVerdict('cell_missing', f'the packaged Tessera contract publishes {family} at rungs {published} and no native cell with qualification=device_qualified names R{rate}')
     unstated = [cell.id for cell in matched if cell.requires_plugin != TESSERA_SERVING_PLUGIN_NAME]
     if unstated:
         raise LaneEligibilityError(f"{name}: cell(s) {unstated} claim a native Tessera route without declaring requires_plugin={TESSERA_SERVING_PLUGIN_NAME!r}. Stock vLLM has no reader for Tessera bytes, so every such route is plugin-gated; a cell that omits the requirement would let an artifact be admitted whose serve command need not install the runtime that reads it. This is a contract defect -- fix the packaged table, never this gate.")
@@ -3942,6 +3955,7 @@ __all__ = [
     "SmokeRecord",
     "SmokeRecordRow",
     "cell_evidence_admits",
+    "cell_evidence_grades",
     "cell_lane_admits",
     "cell_rung_launches",
     "cell_serving_code_admits",

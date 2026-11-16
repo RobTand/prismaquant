@@ -1,6 +1,5 @@
 """CPU estimates use the existing structure-specific wire, not a new encoding."""
 from fractions import Fraction
-from types import SimpleNamespace
 
 import pytest
 
@@ -11,7 +10,7 @@ from prismaquant.tessera_footprint import (
     validate_tessera_tensor_payload_breakdown,
 )
 from prismaquant.tessera_formats import (
-    TesseraFormatError, TesseraRouteRefused, get_tessera_family,
+    TesseraFormatError, get_tessera_family,
     tessera_served_wire_recipe, tessera_wire_recipe,
 )
 from prismaquant.tessera_legal_domain import byte_account
@@ -36,7 +35,7 @@ def test_routed_breakdown_prices_the_existing_served_recipe(rung):
     expected = _payload(recipe=_served(rung), rung=rung)
     actual = _payload(structure="routed_moe", rung=rung)
     assert actual == expected
-    assert (actual["body_kind"], actual["trellis_span"]) == ("tcq", 2)
+    assert (actual["body_kind"], actual["trellis_span"]) == ("window", 1)
     assert validate_tessera_tensor_payload_breakdown(actual) == actual
 
 
@@ -63,22 +62,18 @@ def test_legal_domain_byte_account_uses_the_requested_structure():
     expected = _payload(recipe=_served())
     actual = byte_account(FAMILY, 640, SHAPE, structure="routed_moe")
     assert actual.total_bytes == expected["total_bytes"]
-    assert actual.body_kind == "tcq"
+    assert actual.body_kind == "window"
     assert sum(actual.components().values()) == actual.total_bytes
     assert byte_account(FAMILY, 640, SHAPE).body_kind == "window"
 
 
-def _allow_menu(monkeypatch):
-    # Isolate byte/geometry selection from the independently tested admission gate.
-    monkeypatch.setattr(menu, "route_admission", lambda *_a, **_kw: SimpleNamespace(
-        admits=lambda _mode: True, act_bits=4))
-    monkeypatch.setattr(menu, "tessera_tp_axis_legal", lambda *_a, **_kw: (True, ""))
+def _context():
     return ServingContext("cuda", "routed_moe", "resident",
                           "fixture@sha256:" + "a" * 64, "eager")
 
 
-def test_context_scoped_menu_prices_the_served_wire(monkeypatch):
-    context = _allow_menu(monkeypatch)
+def test_context_scoped_menu_prices_the_served_wire():
+    context = _context()
     rows = menu.expand_tessera_menu(
         SHAPE, mode=menu.MENU_RESEARCH, families=[get_tessera_family(FAMILY)],
         step_q256=128, serving_context=context,
@@ -88,27 +83,23 @@ def test_context_scoped_menu_prices_the_served_wire(monkeypatch):
     assert row.bits_per_param == Fraction(row.memory_bytes * 8, SHAPE[0] * SHAPE[1])
 
 
-def test_routed_shape_and_tp_checks_require_whole_span_two_units(monkeypatch):
-    _allow_menu(monkeypatch)
-    assert menu.tessera_shape_legal(FAMILY, 640, (6, 256))[0]
-    legal, reason = menu.tessera_shape_legal(
-        FAMILY, 640, (6, 256), structure="routed_moe")
-    assert not legal and "span" in reason
+def test_window_geometry_does_not_grant_a_tp2_receipt():
+    assert menu.tessera_shape_legal(FAMILY, 640, (6, 256), structure="routed_moe")[0]
     legal, reason = menu.tessera_tp_legal(
         FAMILY, 640, (12, 256), tp_degree=2,
-        parallel_kind=menu.PARALLEL_COLUMN, structure="routed_moe")
-    assert not legal and "granularity" in reason
+        parallel_kind=menu.PARALLEL_COLUMN, structure="routed_moe",
+        require_attested_world=True)
+    assert not legal and f"no world_size_receipt covers {FAMILY}" in reason
 
 
-def test_menu_does_not_price_a_shape_that_cannot_hold_the_served_span(monkeypatch):
-    context = _allow_menu(monkeypatch)
-    assert menu.expand_tessera_menu(
-        (6, 256), mode=menu.MENU_RESEARCH, families=[get_tessera_family(FAMILY)],
-        step_q256=128, serving_context=context) == []
+def test_research_prices_the_window_shape_without_serving_admission():
+    context = _context()
+    kwargs = dict(families=[get_tessera_family(FAMILY)], step_q256=128, serving_context=context)
+    assert menu.expand_tessera_menu((6, 256), mode=menu.MENU_RESEARCH, **kwargs)
+    assert menu.expand_tessera_menu((6, 256), mode=menu.MENU_ATTESTED, **kwargs) == []
 
 
-def test_explicit_dense_unattested_wire_is_not_silently_priced():
-    with pytest.raises(TesseraRouteRefused, match="dense"):
-        _payload(structure="dense")
+def test_dense_prices_the_shared_window_but_invalid_structure_refuses():
+    assert _payload(structure="dense") == _payload(structure="routed_moe")
     with pytest.raises(TesseraFormatError, match="structure"):
         _payload(structure="stacked")
