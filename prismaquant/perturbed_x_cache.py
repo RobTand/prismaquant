@@ -526,10 +526,8 @@ def release_activation_cache_file_pages(path, *, expected_stat, durable=True):
     requires the complete seal. Advice is not proof of physical release; the
     caller's guard remains final.
 
-    ``durable=False`` skips the fsync fence for a file that is never the
-    only copy of committed work (a produced-output spool entry, PQ #1225).
-    The advice then starts the file's writeback without waiting for it, and
-    pages still dirty or under writeback stay cached until they are clean.
+    Completed-entry readers may pass ``durable=False`` after writer file
+    and directory fsyncs. Provisional output spools may also skip this fence.
     """
     flags = os.O_RDONLY | os.O_NOFOLLOW
     descriptor = os.open(path, flags)
@@ -1930,7 +1928,7 @@ def _exact_entry_prechecks(ref, *, expected_session, session_for_reference, path
 
 
 def _read_exact_entry(ref, *, path, signature, source, source_before, lease_fd,
-                      owned, release_file_pages, source_offset=0):
+                      owned, release_file_pages, source_offset=0, durable=True):
     """Read, hash and deserialize one entry; returns its verified tensor.
 
     ``lease_fd`` is the pinned descriptor under the strict policy (read, not
@@ -1979,7 +1977,7 @@ def _read_exact_entry(ref, *, path, signature, source, source_before, lease_fd,
     if _activation_file_signature(path) != signature:
         raise RuntimeError("exact activation entry changed during prefetch")
     if release_file_pages:
-        release_activation_cache_file_pages(source, expected_stat=source_before)
+        release_activation_cache_file_pages(source, expected_stat=source_before, durable=durable)
     return tensor
 
 
@@ -2100,7 +2098,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             window._tensors[ref] = _read_exact_entry(
                 ref, path=path, signature=signature, source=source,
                 source_before=source_before, lease_fd=lease_fd, owned=buffer,
-                release_file_pages=release_file_pages,
+                release_file_pages=release_file_pages, durable=False,
                 source_offset=0 if lease_window is None else _staged.get('object_offset', 0))
         _record_served_bytes(lease_resolver, path, tier, ref.file_bytes)
         if lease_window is not None:
@@ -2129,7 +2127,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                     ref, path=path, signature=signature,
                     source=Path(lease_window.stage_path(key) or path),
                     source_before=os.fstat(lease_fd), lease_fd=lease_fd,
-                    owned=buffer, release_file_pages=release_file_pages,
+                    owned=buffer, release_file_pages=release_file_pages, durable=False,
                     source_offset=lease_window.entries[key].get('object_offset', 0))
                 lease_window.check_fd(lease_fd)
         finally:

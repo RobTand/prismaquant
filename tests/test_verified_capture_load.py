@@ -15,6 +15,23 @@ def policy(*, buffer=1024**2, scratch=1024**2):
                 max_buffer_bytes=buffer, max_scratch_bytes=scratch)
 
 
+def test_completed_capture_reader_does_not_fsync(capture, monkeypatch):
+    _root, _path, census, identity, acts, hessians, record = capture
+    calls = []
+    fsync = os.fsync
+
+    def counted(descriptor):
+        calls.append(descriptor)
+        return fsync(descriptor)
+
+    monkeypatch.setattr(os, 'fsync', counted)
+    values, _ = cc.prefetch_capture(record['path'], expected_identity=identity,
+        census=census, names=['a'], device='cpu', release_file_pages=True)
+    assert torch.equal(values[0]['a'], acts['a'])
+    assert torch.equal(values[1]['a'], hessians['a'])
+    assert calls == []
+
+
 def test_prefetch_reads_selected_artifact_bytes_once(capture, monkeypatch):
     root, _path, census, identity, acts, hessians, record = capture
     artifact = root / 'inputs/a.pt'
