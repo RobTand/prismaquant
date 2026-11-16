@@ -102,8 +102,7 @@ and git materialization outside the shared core. Its bitsets project that
 existing graph onto source files; they do not invent narrower import rules.
 The bridge prints the shortest path through conftests to the farthest hub.
 
-The old `import_fanout` CLI forwards to this check and supplies its original
-evidence. SCC gains need no baseline edit. The head's `scc_max` must not exceed
+SCC gains need no baseline edit. The head's `scc_max` must not exceed
 the live merge base or batch base value, or the absolute baseline ceiling.
 Without a base, only the absolute ceiling applies. Explicit baseline writes
 record gains and refuse structural losses. New-edge checks compare the aligned
