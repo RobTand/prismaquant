@@ -49,7 +49,7 @@ def test_remote_planner_uses_queue_aware_refs_and_requires_scope_upload():
     jobs = workflows()['gate.yml']['jobs']
     remote = jobs['remote']
     # A stop job cancels the run at the first red job; gate still runs and reports red.
-    assert jobs['gate']['if'] == remote['if'].replace('!cancelled()', 'always()')
+    assert jobs['gate']['if'] == remote['if'].replace('!cancelled()', "(!cancelled() || contains(needs.*.result, 'failure'))")
     # Only PR and queue gates stop early; records (ci.yml, the hosted lane workflow) run every lane to the end.
     assert set(workflows()['gate.yml']['on']) == {'pull_request'}
     assert not any('gh run cancel' in (ROOT / '.github/workflows' / name).read_text()

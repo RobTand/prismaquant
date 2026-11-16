@@ -523,18 +523,6 @@ def check_stats_format_applicability(
     )
 
 
-def _flashinfer_kernel_accepts(fmt_name: str, in_features: int,
-                               out_features: int) -> bool | None:
-    """Compatibility wrapper for the config-backed FlashInfer validator."""
-    from .runtime_shape_validators import flashinfer_mxfp8_problem_size_accepts
-
-    return flashinfer_mxfp8_problem_size_accepts(
-        fmt_name,
-        in_features=in_features,
-        out_features=out_features,
-    )
-
-
 #: The Tessera anchor campaign's fitted rows (``tessera_campaign.py``). Kept
 #: as its own spelling rather than reusing the retired RD ladder's
 #: ``band_interpolated``/``mixed`` (codebook lane, archived 2026-09-25, #1304;

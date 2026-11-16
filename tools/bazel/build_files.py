@@ -801,9 +801,12 @@ class Evidence:
         tree = self.trees.get(path)
         if tree is None:
             return set()
+        # A string that is only a statement (a docstring) is text, not a path.
+        text = {id(node.value) for node in walk(tree) if isinstance(node, ast.Expr)}
         found = set()
         for node in walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str) and '.py' in node.value:
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str) and '.py' in node.value
+                    and id(node) not in text):
                 found.update(name for name in EMBEDDED_PY_PATH.findall(node.value) if name in self.file_set)
         return found
 
