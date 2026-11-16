@@ -105,6 +105,8 @@ from .joint_quantum_handoff import (
 from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE, PROGRESS_GRACE_FLAG)
 from .tessera_joint_aura import restores_activation_scale_env
 from .joint_run_progress import log_progress
+from .joint_served_activation import (activate_policy, bind_joint_served_quantizer,
+    joint_activation_maxima, operator_policy_record)
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
 #: the clean gap (status.json says gapped; PB retries the sealed action key).
@@ -1599,33 +1601,6 @@ def await_retained_window_read(window_index: int, *, record: Mapping,
 # --------------------------------------------------------------------------
 
 
-def bind_joint_served_quantizer(formats_by_qname, *,
-                                context="joint Stage B activation pricing"):
-    """Require the actual served static-A4 operator before activation pricing.
-
-    A registered binding includes the inspected image and extension build.
-    A missing operator refuses; the Torch arithmetic model is never a price.
-    A16/dynamic-only rosters do not load the serving extension.
-
-    This is the one owner of the rule. Stage B calls it, and so does the
-    Stage A campaign seam (``tessera_cell_measurement._bind_served_quantizer``,
-    RobTand/prismaquant#1481), naming its own ``context``.
-    """
-    from . import format_registry as fr
-    from .nvfp4_activation_contract import bind_served_quantizer_identity
-    from .perturbed_x_cache import _served_nvfp4_act_qdq_enabled
-
-    served_override = _served_nvfp4_act_qdq_enabled()
-    for fmt in sorted({fmt for formats in formats_by_qname.values() for fmt in formats}):
-        contract = fr.get_format(fmt).static_activation_contract
-        if contract is not None and (contract.measured_as_served or served_override):
-            identity = bind_served_quantizer_identity(require=True, context=context)
-            if contract.served_quantizer is not None and contract.served_quantizer != identity:
-                raise RuntimeError(f"{context}: format overrides the served quantizer binding")
-            return identity.as_record()
-    return None
-
-
 def build_quantum_source_runner(config, *, offload_folder,
                                 sealed_head_tensors=None, source_authentication=None):
     """Rebuild the same sealed BF16 source used by Stage A.
@@ -1975,7 +1950,6 @@ def run_layer_quantum_core(
     packed_members = roster.packed_members
     unit_topology = roster.unit_topology
     served_quantizer = bind_joint_served_quantizer(unit_formats)
-    from .joint_served_activation import joint_activation_maxima, operator_policy_record
     pricing_maxima = joint_activation_maxima(production_cache)
     activation_policy = getattr(production_cache, "_joint_served_activation", None)
     resource_policy = getattr(production_cache, "_joint_stage_b_resource_policy", None)
@@ -2272,7 +2246,6 @@ def run_layer_quantum_core(
                 ReplayRegimeInadmissible,
                 require_row_local_activation_qdq,
             )
-            from .joint_served_activation import joint_activation_maxima
             try:
                 checked = require_row_local_activation_qdq(
                     {name: linears[name] for name in spill_pending},
@@ -4096,7 +4069,6 @@ def run_layer_quantum(
             if config.get("served_activation_policy") is not None:
                 if record.get("catalog_extension") is None:
                     raise RuntimeError("served activation policy requires an explicit catalog extension")
-                from .joint_served_activation import activate_policy
                 activate_policy(cache, config["served_activation_policy"])
             expected_renders = {pair: cache.metadata["verified_cells"][pair]["render_file_sha256"]
                                 for pair in data.cells}
