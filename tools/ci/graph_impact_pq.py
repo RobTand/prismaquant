@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+from concurrent.futures import ProcessPoolExecutor
 import io
 import json
+from multiprocessing import get_context
 import os
 from pathlib import Path
 import subprocess
@@ -286,8 +288,11 @@ def main(argv=None):
     started = time.perf_counter()
     head_sha = args.head or 'HEAD'
     base_sha = base_revision(args.root, args.base, head=head_sha)
-    before = snapshot_at(args.root, base_sha, temp_dir=args.temp_dir) if base_sha else None
-    after = snapshot_at(args.root, args.head, temp_dir=args.temp_dir) if args.head else load_snapshot(args.root)
+    # The base graph and the head graph are independent: build them at the same time.
+    with ProcessPoolExecutor(1, mp_context=get_context('fork')) as pool:
+        base_job = pool.submit(snapshot_at, args.root, base_sha, temp_dir=args.temp_dir) if base_sha else None
+        after = snapshot_at(args.root, args.head, temp_dir=args.temp_dir) if args.head else load_snapshot(args.root)
+        before = base_job.result() if base_job else None
     if before is not None:
         before = align_base(before, rename_paths(args.root, base_sha, head_sha))
     changed = {test for test, digest in after['contents'].items()
