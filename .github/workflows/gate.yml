@@ -205,8 +205,8 @@ jobs:
       run: gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
   gate:
     name: gate
-    # A stop job cancels the run at the first red job; gate still reports red, not interrupted.
-    if: ${{ always() && github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) }}
+    # A stop job cancels the run at the first red job; gate still reports red. A cancel with no red job stays cancelled.
+    if: ${{ (!cancelled() || contains(needs.*.result, 'failure')) && github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) }}
     needs:
     - remote
     - hosted
