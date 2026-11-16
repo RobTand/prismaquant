@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import signal
 import sys
 import time
 
@@ -73,7 +74,8 @@ def shard_request(args, architecture, index, manifest_uri, manifest_sha256,
     return request
 
 
-def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic):
+def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic,
+                  sleep=time.sleep):
     """Only a PR gate may admit up to six runs; drain each batch without retries."""
     if type(concurrency) is not int or not 1 <= concurrency <= 6:
         raise RemoteError('shard concurrency must be between one and six')
@@ -81,7 +83,7 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
                for request in requests]
     if concurrency > 1 and (not planned or any(expected['mode'] != 'pr' for _, expected in planned)):
         raise RemoteError('concurrency above one is allowed only for a PR gate')
-    results = []
+    fail_fast, results = any(expected['mode'] == 'pr' for _, expected in planned), []
     for start in range(0, len(planned), concurrency):
         pending, error = [], None
         for request, expected in planned[start:start + concurrency]:
@@ -95,17 +97,48 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
             except RemoteError as failure:
                 error = failure
                 break
-        # A failed sibling cannot abandon an already admitted run or permit
-        # a new batch. Read each known run's own terminal evidence first.
-        for invocation_id, expected, deadline in pending:
-            try:
-                results.append(verify_shard_result(client, invocation_id, expected,
-                                                   head, deadline, clock=clock))
-            except RemoteError as failure:
-                error = error or failure
+        red = error is not None
+        try:
+            # Read each admitted run's own evidence as it ends. In a PR gate the first shard
+            # that does not pass ends the wait, and the finally cancels its admitted siblings.
+            while pending and not (fail_fast and red):
+                for item in list(pending):
+                    invocation_id, expected, deadline = item
+                    try:
+                        with _evidence_phase('shard-await', invocation_id):
+                            record = poll_invocation(client, invocation_id, deadline, clock=clock)
+                        if record is None:
+                            continue
+                        pending.remove(item)
+                        results.append(verify_shard_record(client, record, invocation_id,
+                                                           expected, head))
+                        red = red or results[-1]['verdict'] == 'fail'
+                    except RemoteError as failure:
+                        if item in pending:
+                            pending.remove(item)
+                        error, red = error or failure, True
+                    if fail_fast and red:
+                        break
+                else:
+                    if pending:
+                        sleep(15)
+        finally:
+            cancel_runs(client, [invocation_id for invocation_id, _, _ in pending])
         if error:
             raise error
+        if fail_fast and red:
+            break
     return results
+
+
+def cancel_runs(client, invocation_ids):
+    """Stop own admitted runs; a failed cancel names the run and never hides the verdict."""
+    for invocation_id in invocation_ids:
+        try:
+            client.call('CancelExecutions', {'invocation_id': invocation_id}, timeout=15)
+            print('Remote Bazel shard cancelled: ' + invocation_id, flush=True)
+        except RemoteError:
+            print('Remote Bazel shard not cancelled: ' + invocation_id, flush=True)
 
 
 def run_manifest(client, args, manifest_uri, raw_manifest, *, clock=time.monotonic):
@@ -219,9 +252,7 @@ def run_gate(client, args, *, clock=time.monotonic):
     return result
 
 
-def verify_shard_result(client, invocation_id, expected, head, deadline, *, clock):
-    with _evidence_phase('shard-await', invocation_id):
-        record = await_invocation(client, invocation_id, deadline, clock=clock)
+def verify_shard_record(client, record, invocation_id, expected, head):
     with _evidence_phase('shard-validate', invocation_id):
         artifacts = [row for row in record.get('artifacts', []) if row.get('name') == RESULT]
         if len(artifacts) != 1:
@@ -255,25 +286,31 @@ def succeeded(record):
             and record.get('success') is True and code in (None, 0, 'OK', 'SUCCESS'))
 
 
+def poll_invocation(client, invocation_id, deadline, *, clock=time.monotonic):
+    """The run's own terminal record, or None while it runs before its deadline."""
+    records = client.call('GetInvocation', {'selector': {'invocation_id': invocation_id},
+                                           'include_artifacts': True}).get('invocation', [])
+    if len(records) > 1:
+        raise RemoteError('remote run evidence is ambiguous')
+    record = records[0] if records else {}
+    identity = record.get('invocationId') or record.get('id', {}).get('invocationId')
+    if record and identity != invocation_id:
+        raise RemoteError('remote run evidence has the wrong invocation ID')
+    status = record.get('invocationStatus')
+    if status == 'COMPLETE_INVOCATION_STATUS':
+        return record
+    if status == 'DISCONNECTED_INVOCATION_STATUS':
+        raise RemoteError(f'remote run {invocation_id} disconnected')
+    if clock() >= deadline:
+        raise RemoteError(f'remote run {invocation_id} did not finish before its deadline')
+    return None
+
+
 def await_invocation(client, invocation_id, deadline, *, interval=15,
                      clock=time.monotonic, sleep=time.sleep):
-    while True:
-        records = client.call('GetInvocation', {'selector': {'invocation_id': invocation_id},
-                                               'include_artifacts': True}).get('invocation', [])
-        if len(records) > 1:
-            raise RemoteError('remote run evidence is ambiguous')
-        record = records[0] if records else {}
-        identity = record.get('invocationId') or record.get('id', {}).get('invocationId')
-        if record and identity != invocation_id:
-            raise RemoteError('remote run evidence has the wrong invocation ID')
-        status = record.get('invocationStatus')
-        if status == 'COMPLETE_INVOCATION_STATUS':
-            return record
-        if status == 'DISCONNECTED_INVOCATION_STATUS':
-            raise RemoteError(f'remote run {invocation_id} disconnected')
-        if clock() >= deadline:
-            raise RemoteError(f'remote run {invocation_id} did not finish before its deadline')
+    while (record := poll_invocation(client, invocation_id, deadline, clock=clock)) is None:
         sleep(min(interval, max(0, deadline - clock())))
+    return record
 
 
 def parse_result(raw, head):
@@ -349,4 +386,6 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
+    # A cancelled workflow sends SIGTERM; exiting through Python runs the cancel of own shards.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     raise SystemExit(main())
