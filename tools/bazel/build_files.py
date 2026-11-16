@@ -1073,18 +1073,18 @@ def hosted_plan(root, files, gate_select=None):
     durations = json.loads((root / 'tools/ci/gate_durations.json').read_text())
     plan = gate_select.create_plan(root, [], durations=durations,
                                    index=index, mode='full')
-    return plan, durations['files']
+    return plan, durations
 
 
 def test_attributes(path, durations):
-    """Set the shard count and timeout for one test file."""
+    """Shard by hosted file time; time out at 3x the slowest shard measured on any architecture."""
     attributes = {}
-    seconds = durations.get(path)
-    if seconds is not None and seconds > SHARD_SECONDS:
+    seconds = durations['files'].get(path) or 0
+    if seconds > SHARD_SECONDS:
         shards = min(MAX_SHARDS, math.ceil(seconds / SHARD_SECONDS))
         attributes['shard_count'] = shards
         seconds /= shards
-    attributes['timeout'] = 'long' if seconds is not None and seconds * 3 > 300 else 'moderate'
+    attributes['timeout'] = 'long' if max(seconds, durations.get('slowest_shard', {}).get(path, 0)) * 3 > 300 else 'moderate'
     return attributes
 
 

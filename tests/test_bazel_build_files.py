@@ -438,10 +438,10 @@ def test_the_graph_record_names_edges_cycles_tests_and_uncertain_modules(tmp_pat
 
 
 def test_long_files_are_sharded_and_given_a_long_timeout_only_when_needed():
-    slow = build_files.test_attributes('tests/test_slow.py', {'tests/test_slow.py': 170.2})
+    slow = build_files.test_attributes('tests/test_slow.py', {'files': {'tests/test_slow.py': 170.2}})
     assert slow['shard_count'] == 5 and slow['timeout'] == 'moderate'
-    quick = build_files.test_attributes('tests/test_in.py', {'tests/test_in.py': 3.0})
-    assert 'shard_count' not in quick and quick['timeout'] == 'moderate'
+    quick = build_files.test_attributes('tests/test_in.py', {'files': {'tests/test_in.py': 3.0}, 'slowest_shard': {'tests/test_in.py': 120.0}})
+    assert 'shard_count' not in quick and quick['timeout'] == 'long'  # a measured shard ran 120 s somewhere
 
 
 def test_a_test_importing_another_test_depends_on_its_library_not_its_test():
