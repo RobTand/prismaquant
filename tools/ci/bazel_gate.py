@@ -29,6 +29,7 @@ from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_s
 
 SCHEMA = 'prismaquant.bazel-gate.v1'
 NONHERMETIC = Path(__file__).resolve().parents[2] / 'tools/bazel/nonhermetic.bzl'
+EXCERPT_LABELS, EXCERPT_BYTES, EXCERPT_READ = 5, 4096, 1 << 20
 
 
 class GateError(RuntimeError):
@@ -179,7 +180,14 @@ def aggregate_shards(population, shards, records, *, require_execution=False,
             raise GateError('shard evidence has a different test population')
         result = architecture_result(selected_tests, run,
                                      budget_warnings=record['budget_warnings'])
-        results.append(result)
+        excerpts = record.get('excerpts', {})
+        if (not isinstance(excerpts, dict) or len(excerpts) > EXCERPT_LABELS
+                or not set(excerpts) <= set(result['failed'])
+                or any(type(text) is not str or len(text.encode()) > EXCERPT_BYTES
+                       or any(inert(line) != line for line in text.split('\n'))
+                       for text in excerpts.values())):
+            raise GateError('shard failure excerpts are malformed')
+        results.append({**result, 'excerpts': excerpts})
     executed = sum(result['executed_test_actions'] for result in results)
     missing_execution = require_execution and executed == 0
     return {'verdict': 'fail' if missing_execution or any(
@@ -350,25 +358,61 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
         text = bep.read_text()
     with evidence_phase('bep-parse'):
         run = bep_run(text, returncode=outcome.returncode)
-    if fetch is None:
-        with InventoryFetcher() as inventory_fetch:
-            inventory = inventory_evidence(text, inventory_fetch)
-    else:
+    with InventoryFetcher() as own_fetch:
+        fetch = fetch or own_fetch
         inventory = inventory_evidence(text, fetch)
-    with evidence_phase('result-validation'):
-        result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
-                                     require_execution=manifest['require_execution'] and bool(tests))
+        with evidence_phase('result-validation'):
+            result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
+                                         require_execution=manifest['require_execution'] and bool(tests))
+        excerpts = failure_excerpts(text, result['failed'], fetch)
     if not tests and result['verdict'] == 'skipped':
         result['verdict'] = 'pass'
     return {'schema': SCHEMA, 'mode': manifest['mode'], 'head': manifest['head'],
             'base': manifest['base'], 'architecture': manifest['architecture'],
             'index': manifest['index'], 'targets': targets, 'run': run,
-            'nodes': inventory['nodes'], **result}
+            'nodes': inventory['nodes'], 'excerpts': excerpts, **result}
 
 
-def fetch_artifact(uri):
+def inert(line):
+    """No control character, and no '::' or '##[' that the runner could read as a command."""
+    return re.sub(':(?=:)', ': ', re.sub(r'#\[', '# [', re.sub(r'[\x00-\x08\x0a-\x1f\x7f-\x9f]', '', line)))
+
+
+def failure_excerpts(text, failed, fetch):
+    """First error lines and last lines of the own test.log of up to five failed tests."""
+    logs = {}
+    for line in text.splitlines() if failed else ():
+        try:  # bep_run judges the build events; an excerpt skips an event it cannot read.
+            event = json.loads(line)
+            label, evidence = event['id']['testResult']['label'], event['testResult']
+            if label in failed and evidence.get('status') != 'PASSED':
+                logs.update({label: row.get('uri') for row in evidence['testActionOutput']
+                             if row.get('name') == 'test.log'})
+        except (ValueError, TypeError, KeyError, AttributeError):
+            continue
+    excerpts = {}
+    for label, uri in sorted(logs.items())[:EXCERPT_LABELS]:
+        try:  # The test already failed; an unreadable log cannot change that verdict.
+            lines = fetch(uri, limit=EXCERPT_READ).decode('utf-8', 'replace').splitlines()
+        except (OSError, RuntimeError, ValueError, TypeError, AttributeError):
+            excerpts[label] = 'excerpt unavailable'
+            continue
+        errors = [line for line in lines[:-20] if re.search('Error|FAILED|Traceback|assert', line)]
+        kept = []
+        for line in map(inert, errors[:20] + lines[-20:]):
+            if len('\n'.join(kept + [line]).encode()) > EXCERPT_BYTES:
+                kept = kept or [line.encode()[:EXCERPT_BYTES].decode('utf-8', 'ignore')]
+                break
+            kept.append(line)
+        excerpts[label] = '\n'.join(kept)
+    return excerpts
+
+
+def fetch_artifact(uri, limit=None):
+    """A limit caps only a local read; InventoryFetcher caps its own remote stream."""
     if uri.startswith('file://'):
-        return Path(unquote(urlsplit(uri).path)).read_bytes()
+        with open(unquote(urlsplit(uri).path), 'rb') as stream:
+            return stream.read(limit)
     if not uri.startswith('bytestream://'):
         raise GateError('artifact has an unsupported URI')
     return artifacts.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
@@ -404,15 +448,17 @@ class InventoryFetcher:
             sock.settimeout(remaining)
         return remaining
 
-    def __call__(self, uri):
+    def __call__(self, uri, limit=None):
+        """With a limit, return an unverified prefix of at most limit bytes."""
         if uri.startswith('file://'):
-            return fetch_artifact(uri)
+            return fetch_artifact(uri, limit)
         parsed = urlsplit(uri)
         identity = re.fullmatch(r'.*/blobs/([0-9a-f]{64})/(0|[1-9][0-9]*)', parsed.path)
         if (parsed.scheme != 'bytestream' or not parsed.hostname or parsed.username
                 or parsed.password or parsed.query or parsed.fragment or not identity):
             raise GateError('inventory source is not immutable')
         digest, size = identity[1], int(identity[2])
+        want = size if limit is None else min(size, limit)
         key = os.environ.get('BUILDBUDDY_API_KEY')
         if not key:
             raise GateError('inventory fetch key unavailable')
@@ -433,9 +479,9 @@ class InventoryFetcher:
                         raise HTTPError('https://app.buildbuddy.io/api/v1/GetFile',
                                         response.status, 'inventory fetch refused', None, None)
                     chunks, received = [], 0
-                    while not response.isclosed() and received <= size:
+                    while not response.isclosed() and received <= want:
                         self.remaining(deadline, sock)
-                        chunk = response.read1(min(65536, size + 1 - received))
+                        chunk = response.read1(min(65536, want + 1 - received))
                         if not chunk:
                             break
                         chunks.append(chunk)
@@ -443,6 +489,9 @@ class InventoryFetcher:
                     if time.monotonic() >= deadline:
                         raise TimeoutError('inventory fetch deadline exhausted')
                 raw = b''.join(chunks)
+                if want < size:  # The unread rest of the body makes this connection unusable.
+                    self.close()
+                    return raw[:want]
                 if len(raw) != size or bytes_sha256hex(raw) != digest:
                     raise GateError('inventory artifact digest or size mismatch')
                 return raw

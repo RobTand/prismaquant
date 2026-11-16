@@ -334,6 +334,9 @@ def main(argv=None):
                 for shard in record['shards']:
                     for label in shard['failed']:
                         print('::error::failed test ' + label + ' on ' + architecture)
+                        # A fixed prefix keeps test output from reading as a workflow command.
+                        for line in shard['excerpts'].get(label, '').splitlines():
+                            print('| ' + line)
         return 0 if result['verdict'] in ('pass', 'skipped') else 1
     except (RemoteError, RuntimeError, OSError, ValueError, KeyError, TypeError):
         if upload.is_symlink():
