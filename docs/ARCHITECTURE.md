@@ -2447,9 +2447,9 @@ Contract v68, lane schema v12, has 18 cells and raw SHA-256
 `145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4`.
 E2M1 R896 cells name dense and routed units on IMG-G `f8dbe1a0` at TP1 only.
 PrismaQuant admits dense units.
-Tessera's published routed predicate refuses this scope because it requires `start_state: True` with decision mode `carries`.
+Tessera's published v68 routed predicate refuses this scope because it requires `start_state: True` with decision mode `carries`.
 A whole TP1 unit has no start state, although the v68 receipt served these bytes.
-[tessera#1716](https://github.com/RobTand/tessera/issues/1716) owns the decision: correct the predicate for whole TP1 units or withdraw the routed cell.
+[tessera#1716](https://github.com/RobTand/tessera/issues/1716) and [tessera#1719](https://github.com/RobTand/tessera/pull/1719) correct this predicate in v69. This pin stays at v68.
 BF16 covers dense R769-R1279 and routed R1024 on IMG-N `5be13705` at TP1 only.
 The five measured BF16 dense rungs are 832, 880, 960, 1024, and 1088.
 E4M3 keeps its TP2 ceiling. IMG-G routed R768 uses the v66 class-launch receipt.
