@@ -143,7 +143,10 @@ jobs:
       id: check
       run: |
         unset BUILDBUDDY_API_KEY
-        python tools/ci/graph_impact_pq.py
+        python tools/ci/graph_impact_pq.py --write base --snapshots "$RUNNER_TEMP" & base=$!
+        python tools/ci/graph_impact_pq.py --write head --snapshots "$RUNNER_TEMP" & head=$!
+        wait $base; wait $head
+        python tools/ci/graph_impact_pq.py --snapshots "$RUNNER_TEMP"
         echo verdict=pass >> "$GITHUB_OUTPUT"
   gate:
     name: gate

@@ -12,12 +12,11 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
-from concurrent.futures import ProcessPoolExecutor
 import io
 import json
-from multiprocessing import get_context
 import os
 from pathlib import Path
+import pickle
 import subprocess
 import sys
 import tarfile
@@ -39,8 +38,6 @@ ALLOWLIST = Path('tests/fixtures/graph_impact_allowlist.json')
 SOURCE_ROOTS = ('prismaquant/', 'tools/')
 LEGACY_TOLERANCES = {'median_selected_pct': 1.0, 'p90_selected_pct': 1.0,
                      'modules_over_half': 2, 'conftest_source_modules': 0}
-PR_A_ANALYZERS = ('8e949f05f9cddf82f3353d459f6463920671a00c1dd20dee474350610a79a07f',
-                 '9ad443c9fc2cd96d1c35c488c422742d09b746e91745d8011a8c74562e58a3c7')
 
 
 def files_in(root):
@@ -135,26 +132,15 @@ def record(live, previous=None):
             'analyzer_sha256': file_sha256hex(ROOT / 'tools/bazel/build_files.py')}
 
 
-def baseline_history(before, current):
-    """Recognize PR A's one-shot remeasurement, never a new-to-new increase."""
-    previous = numeric_baseline(before['recorded_baseline']) if before and before.get('recorded_baseline') else None
-    if (previous is not None and previous.get('analyzer_sha256') == PR_A_ANALYZERS[0]
-            and before.get('recorded_analyzer_sha256') == PR_A_ANALYZERS[0]
-            and current.get('analyzer_sha256') == PR_A_ANALYZERS[1]
-            and file_sha256hex(ROOT / 'tools/bazel/build_files.py') == PR_A_ANALYZERS[1]
-            and previous.get('test_to_test_count') == 875 and previous['figures']['scc_max'] == 168
-            and len(core.test_to_test_edges(before)) == 889 and before['scc_max'] == 174
-            and current.get('test_to_test_count') == 889 and current['figures']['scc_max'] == 174):
-        # Only these two measurements changed; retain every historical limit.
-        return {**previous, 'figures': {**previous['figures'], 'scc_max': 174},
-                'test_to_test_count': 889, 'analyzer_sha256': PR_A_ANALYZERS[1]}
-    return previous
+def baseline_history(before):
+    """The base commit's recorded baseline, if any."""
+    return numeric_baseline(before['recorded_baseline']) if before and before.get('recorded_baseline') else None
 
 
 def check(before, after, baseline_path, allowlist_path, *, changed_tests=(), write_baseline=False):
     baseline = numeric_baseline(json.loads(baseline_path.read_text()))
     allowlist = json.loads(allowlist_path.read_text())
-    previous = baseline_history(before, baseline)
+    previous = baseline_history(before)
     base_allowlist = before.get('recorded_allowlist') if before else None
     mode = core.policy_mode(baseline)
     print(core.summary(before, after, baseline['reach_budget'], test_to_test=mode), flush=True)
@@ -247,10 +233,10 @@ def align_base(before, renames):
     return result
 
 
-def snapshot_at(root, revision, *, temp_dir=None, legacy=True):
+def snapshot_at(root, revision, *, legacy=True):
     """Materialize tracked files via git archive; never run base revision code."""
     archive = subprocess.check_output(['git', 'archive', '--format=tar', revision], cwd=root)
-    with tempfile.TemporaryDirectory(prefix='graph-impact-', dir=temp_dir) as directory:
+    with tempfile.TemporaryDirectory(prefix='graph-impact-') as directory:
         tree = Path(directory)
         with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
             # Git paths are repository-relative. Refuse links and traversals;
@@ -281,24 +267,29 @@ def main(argv=None):
     parser.add_argument('--root', type=Path, default=ROOT)
     parser.add_argument('--base')
     parser.add_argument('--head', help='an optional historical head revision, otherwise the working tree')
-    parser.add_argument('--temp-dir', type=Path)
     parser.add_argument('--write-baseline', action='store_true')
-    parser.add_argument('--json', type=Path)
+    parser.add_argument('--snapshots', type=Path, help='with --write, keep one graph here; alone, check both')
+    parser.add_argument('--write', choices=['base', 'head'])
     args = parser.parse_args(argv)
     started = time.perf_counter()
     head_sha = args.head or 'HEAD'
     base_sha = base_revision(args.root, args.base, head=head_sha)
-    # The base graph and the head graph are independent: build them at the same time.
-    with ProcessPoolExecutor(1, mp_context=get_context('fork')) as pool:
-        base_job = pool.submit(snapshot_at, args.root, base_sha, temp_dir=args.temp_dir) if base_sha else None
-        after = snapshot_at(args.root, args.head, temp_dir=args.temp_dir) if args.head else load_snapshot(args.root)
-        before = base_job.result() if base_job else None
+    build = {'base': lambda: snapshot_at(args.root, base_sha) if base_sha else None,
+             'head': lambda: snapshot_at(args.root, args.head) if args.head else load_snapshot(args.root)}
+    if args.write:  # Two processes build the base and head graphs at the same time.
+        (args.snapshots / f'{args.write}.pickle').write_bytes(pickle.dumps((base_sha, build[args.write]())))
+        return 0
+    if args.snapshots:
+        (base_of_base, before), (base_of_head, after) = (
+            pickle.loads((args.snapshots / f'{name}.pickle').read_bytes()) for name in ('base', 'head'))
+        if {base_of_base, base_of_head} != {base_sha}:
+            raise SystemExit(f'graph snapshots are for base {base_of_base}/{base_of_head}, not {base_sha}')
+    else:
+        before, after = build['base'](), build['head']()
     if before is not None:
         before = align_base(before, rename_paths(args.root, base_sha, head_sha))
     changed = {test for test, digest in after['contents'].items()
                if before is None or before['contents'].get(test) != digest}
-    if args.json:
-        args.json.write_text(json.dumps(after, indent=2) + '\n')
     try:
         code = check(before, after, args.root / BASELINE, args.root / ALLOWLIST,
                      changed_tests=changed, write_baseline=args.write_baseline)
