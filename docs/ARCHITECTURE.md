@@ -949,10 +949,10 @@ The full no-cache Bazel record (amd64 and arm64) runs every 6 hours when main's 
 than 7 hours, and on every manual dispatch. A push to main runs the hosted amd64 and arm64 lanes and the
 import surface, each push in its own concurrency group; records run one at a time.
 
-As of: 2026-11-15, FIFO merge queue, PQ #3642.
+As of: 2026-11-16, FIFO merge queue in batches of 3, PQ #3773 (after #3642).
 Source: `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.mergify.yml`.
 One serial queue requires `linked issue` on original PRs and `gate` on each draft.
-Each draft checks one PR on the newest main, in `queue` label order.
+Each draft checks up to 3 PRs on the newest main, in `queue` label order; a failed batch is split.
 Bazel and hosted gate jobs run only on authenticated Mergify drafts or `gate-canary` PRs.
 Graph impact runs on every PR. The post-merge CPU suite remains on Python 3.12.
 
