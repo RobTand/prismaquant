@@ -190,3 +190,7 @@ def test_certified_mode_refuses_a_re_declared_plan(
         assert report['gaps'][0]['detail'] == (
             f"campaign inputs: plan at {plan_path} does not hash to its sealed digest")
         assert "1 source read(s) of 1 row(s) are not declared" in err
+
+
+def test_the_unused_slice_layer_manifest_stays_deleted():
+    assert not hasattr(jl, "slice_layer_manifest")
