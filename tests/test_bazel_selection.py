@@ -218,13 +218,6 @@ def test_v42_hashes_each_actual_wheel_repository_and_keeps_edges_private(tmp_pat
     assert '--bazelCommandOptions=--config=ci' in command
 
 
-def test_missing_test_status_fails_and_budget_warning_cannot_change_status():
-    verdict, failed = selection.verdict_of(TESTS, {'//tests:test_consumer': 'PASSED'})
-    assert verdict == 'fail'
-    assert failed == ['//tests:test_unrelated']
-    assert selection.verdict_of({'//tests:test_consumer'}, {'//tests:test_consumer': 'PASSED'}) == ('pass', [])
-
-
 def test_selection_manifest_preserves_exact_action_population_and_hosted_routes():
     populations = {
         'amd64': {'targets': ['//:core', '//tests:one', '//tests:two'],

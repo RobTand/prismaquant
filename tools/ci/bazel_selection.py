@@ -344,11 +344,6 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
         hosted_arm64=population['hosted_arm64'], base=base, head=head, mode=mode, durations=durations)
 
 
-def verdict_of(selected, statuses):
-    failed = sorted(label for label in selected if statuses.get(label) != 'PASSED')
-    return ('fail' if failed else 'pass' if selected else 'skipped'), failed
-
-
 def selection_manifest(decision, populations, *, hosted, base, head, mode,
                        hosted_arm64=frozenset(), shard_counts=None, durations=None):
     """Freeze selection and lane routes before any test shard is submitted."""

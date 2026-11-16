@@ -18,12 +18,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOTS = ('prismaquant/', 'tools/')
 SCANNED_ROOTS = ('tests', 'prismaquant', 'tools', 'experiments', 'scripts', 'pqtel')
 
-#: How far a summary figure may move without a baseline change. Adding an
-#: ordinary test shifts the fractions by about 0.1 percentage points, so this
-#: absorbs routine work while a structural regression still fails.
-PERCENT_TOLERANCE = 1.0
-MODULE_TOLERANCE = 2
-
 # The Bazel graph generator owns the conftest rule; it also loads the gate's selector.
 GRAPH_SPEC = importlib.util.spec_from_file_location('bazel_build_files_for_fanout',
                                                     ROOT / 'tools/bazel/build_files.py')
