@@ -89,7 +89,7 @@ campaign samples from and the dense menu it fills in.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from fractions import Fraction
 from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
@@ -294,7 +294,7 @@ class RouteAdmission:
     readable: bool = False
     # None means no measurement input on an emulation-only allocation.
     measured_allowable: bool | None = None
-    evidence_grades: Mapping[str, str] = field(default_factory=dict)
+    evidence_grades: tuple[tuple[str, str], ...] = ()
 
 
     @property
@@ -753,10 +753,10 @@ def _route_admission(
             )
     grades = cell_evidence_grades(cells)
     if grades:
-        detail += f"; evidence grades {grades}"
+        detail += f"; qualification=device_qualified, evidence grades {grades}"
     return RouteAdmission(
         format_name=name,
-        evidence_grades=grades,
+        evidence_grades=tuple(sorted(grades.items())),
         payload_family=family.name,
         activation_contract=route.contract,
         terminal_format=route.terminal_format,

@@ -1034,8 +1034,8 @@ acceptance assertions or acceptance test files were changed.
 geometry, full populations and receipt authentication, not measured production
 wires or numerical/serving performance. The fresh-process installed producer test
 writes a deliberate `--layers 0` BF16 copy and checks artifact names, dtype/values,
-plan and manifest using PQ's runtime-pin/packaged-contract readers. The configured
-pin remains `aaa417003f0ee690e8ace138acd18df7f9531369`; packaged-contract SHA256 is
+plan and manifest using PQ's runtime-pin/packaged-contract readers.
+Historical at v60: the configured pin was `aaa417003f0ee690e8ace138acd18df7f9531369`; packaged-contract SHA256 was
 `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
 Supplied exploratory evidence observed producer git stamps of both that pin
 and `027103d9a8417e06c7f13356e58779a313cd7088` despite matching packaged-contract

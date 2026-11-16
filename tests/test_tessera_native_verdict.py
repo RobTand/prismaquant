@@ -41,7 +41,8 @@ def test_native_verdict_carries_the_admitted_conditions(reference, monkeypatch, 
         monkeypatch.setenv(runtime.TESSERA_DEV_PIN_ENV, runtime.TESSERA_DEV_PIN_COMMIT)
     admission = menu.route_admission("TESSERA_E2M1_K2_R896", serving_context=context)
     assert admission.attested
-    assert admission.evidence_grades == expected
+    assert admission.evidence_grades == tuple(sorted(expected.items()))
+    assert isinstance(hash(admission), int)
     assert all(grade in admission.detail for grade in expected.values())
     assert all(cell_id in admission.detail for cell_id in expected)
 
@@ -85,7 +86,8 @@ def test_one_menu_expansion_captures_one_runtime_for_routes_and_tp(reference, mo
     assert [row.format_name for row in rows] == (["TESSERA_E2M1_K2_R896"] if tp == 1 else [])
     assert calls == [snapshot.sha256]
     for row in rows:
-        assert row.as_dict()["evidence_grades"] == row.admission.evidence_grades
+        assert row.as_dict()["evidence_grades"] == dict(row.admission.evidence_grades)
+        assert isinstance(hash(row), int)
         assert row.admission.evidence_grades
 
 
