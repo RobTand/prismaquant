@@ -951,7 +951,8 @@ import surface, each push in its own concurrency group; records run one at a tim
 
 As of: 2026-11-15, FIFO merge queue, PQ #3642.
 Source: `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.mergify.yml`.
-One serial queue requires `linked issue` on original PRs and `gate` on each draft.
+One serial queue requires an issue line and a `prismaquant-<N>` branch on original PRs (PQ #3786;
+text only, no issue lookup) and `gate` on each draft.
 Each draft checks one PR on the newest main, in `queue` label order.
 Bazel and hosted gate jobs run only on authenticated Mergify drafts or `gate-canary` PRs.
 Graph impact runs on every PR. The post-merge CPU suite remains on Python 3.12.

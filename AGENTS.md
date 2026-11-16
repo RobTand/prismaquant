@@ -16,11 +16,10 @@ through a pull request. Never push commits directly to `main`. When the change
 completes an issue, put a supported closing reference such as `Closes #123` in
 the pull request description so GitHub links its native closing relationship.
 For a partial slice, instead add an explicit `Refs #123` or `Part of #123` line
-naming an OPEN parent issue in this repository. The required `linked issue`
-check verifies that parent through GitHub without closing it. Do not create a
-bookkeeping issue just to deliver a slice. Plain mentions, quoted code examples,
-pull request numbers, nonexistent parents, closed non-closing parents and
-references to another repository do not satisfy this check.
+naming an OPEN parent issue in this repository. The merge queue reads only the
+text: it needs one such line in the body and a `prismaquant-<N>` branch. It does
+not check that the issue exists or is open, so name a real OPEN issue yourself.
+Do not create a bookkeeping issue just to deliver a slice.
 
 ## Core Principles
 

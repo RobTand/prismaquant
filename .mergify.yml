@@ -2,7 +2,7 @@
 # Each draft contains the newest main and requires a passing "gate".
 # No batches, parallel checks, priority lanes, splits or automatic retries.
 # Add "queue" to queue. Remove it to dequeue. After failure, use "@mergifyio queue".
-# Keep the issue check on original PRs and the TL3b App command allowance.
+# Original PRs name their issue in the body and the branch; keep the TL3b App command allowance.
 
 commands_restrictions:
   queue:
@@ -31,7 +31,12 @@ queue_rules:
       - base = main
       - -draft
       - label = queue
-      - check-success = linked issue
+      # A PR names its issue; Mergify cannot check that the issue exists or is open.
+      - body ~= (?im)^\s*(closes|fixes|resolves|refs|part of)\s+#[0-9]+
+      - or:
+          - head ~= ^prismaquant-[0-9]+(-[a-z0-9][a-z0-9-]*)?$
+          - head ~= ^(ig|pg|pg-train)/
+          - head ~= ^release
     merge_conditions:
       - check-success = gate
     merge_method: merge
