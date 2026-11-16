@@ -4439,6 +4439,12 @@ takes `--visual-format` (default BF16) outside the DP. `CALIBRATION_MODALITY`
 and its `probe` settings key are removed, so a `probe.pkl` whose manifest
 records that key refuses with exit 2 until it is deleted.
 
+Superseded 2026-11-16 (PQ #3786): the `linked issue` workflow, its validator and
+`linked_issue.test.cjs` are deleted, because GitHub blocks `pull_request_target`
+by default from 2026-12-02. The merge queue now reads only the PR text (an issue
+line and a `prismaquant-<N>` branch) and checks no issue state. The text below
+is history.
+
 Re-stamped 2026-10-09 (PQ #2518): the trusted-base `linked issue` metadata
 check keeps native same-repository closing references and explicit
 `Refs #N` or `Part of #N` directives to an OPEN same-repository Issue.
