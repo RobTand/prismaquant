@@ -17,25 +17,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
-  actions: read
 jobs:
-  due:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    outputs:
-      run: ${{ steps.due.outputs.run }}
-    steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        persist-credentials: false
-    - id: due
-      env:
-        GH_TOKEN: ${{ github.token }}
-        GH_REPO: ${{ github.repository }}
-      run: python3 tools/ci/record_due.py
   tests:
-    needs: due
-    if: needs.due.outputs.run == 'true'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     name: Post-merge Bazel record (amd64 and arm64)
     runs-on: ubuntu-24.04
     timeout-minutes: 360
@@ -47,11 +31,15 @@ jobs:
         ref: ${{ github.sha }}
         fetch-depth: 0
         persist-credentials: false
+    - id: due  # A schedule records main only when it moved within the interval and a margin.
+      run: echo "run=$([ "$GITHUB_EVENT_NAME" != schedule ] || [ -n "$(git log -1 --since='7 hours ago' --format=%H)" ] && echo true)" >> "$GITHUB_OUTPUT"
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      if: steps.due.outputs.run == 'true'
       id: scan-python
       with:
         python-version: '3.14'
     - name: Run source-bound Remote Bazel controller
+      if: steps.due.outputs.run == 'true'
       id: controller
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}

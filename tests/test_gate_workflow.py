@@ -63,23 +63,10 @@ def test_remote_planner_uses_queue_aware_refs_and_requires_scope_upload():
     assert 'github.event.pull_request.head.repo.full_name == github.repository' in remote['if']
 
 
-def test_a_scheduled_record_is_due_only_when_main_moved_since_a_record_job_ran():
-    from tools.ci import record_due
-
-    def gh(runs, jobs):
-        return lambda *args: ([{'databaseId': n, 'event': 'schedule', 'status': 'completed', 'headSha': sha}
-                               for n, sha in runs] if args[0] == 'run' else
-                              {'jobs': [{'name': record_due.RECORD, 'conclusion': jobs[int(args[1].split('/')[5])]}]})
-    ran, skipped, failed = 'success', 'skipped', 'failure'
-    assert not record_due.due('B', gh([(2, 'B'), (1, 'B')], {2: skipped, 1: failed}))  # A red record is not re-run.
-    assert record_due.due('B', gh([(2, 'B'), (1, 'A')], {2: skipped, 1: ran}))  # A failed due job (#3765 review).
-    assert record_due.due('B', gh([(1, 'B')], {1: skipped}))
-
-
 def test_postmerge_has_one_serial_controller_for_both_architectures():
     ci = workflows()['ci.yml']
     controller = ci['jobs']['tests']
-    assert controller['if'] == "needs.due.outputs.run == 'true'" and controller['needs'] == 'due'
+    assert controller['if'] == "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
     assert ci['on']['schedule'] == [{'cron': '17 */6 * * *'}]  # Not at every push (#3763).
     assert {ci['jobs'][job]['if'] for job in ('hosted-amd64', 'hosted-arm64')} == {"github.event_name == 'push'"}
     checkout = next(step for step in controller['steps']
