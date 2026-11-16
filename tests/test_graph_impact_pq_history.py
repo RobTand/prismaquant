@@ -182,8 +182,9 @@ def test_scc_below_baseline_keeps_gains_against_base(repo, capsys, base_scc, hea
         graph['duplication'] = pq.duplication_inventory.scan(repo)
     before, after = graphs[base_scc], graphs[head_scc]
     path = repo / pq.BASELINE
-    config = pq.core.baseline_record(before)
-    config['figures']['scc_max'] = 3
+    config = {**pq.core.baseline_record(before), 'analyzer_sha256': pq.file_sha256hex(pq.ROOT / pq.ANALYZER)}
+    config['figures']['scc_max'] = 3  # An unrecorded base gain stays legal while no ratchet input changes.
+    before.update(recorded_baseline=config, recorded_inputs=pq.ratchet_digests(pq.ROOT))
     put(repo, str(pq.BASELINE), json.dumps(config))
     assert pq.check(before, after, path, repo / pq.ALLOWLIST) == int(head_scc > base_scc)
     assert ('scc_max rose from 1 to 2 against the base commit' in capsys.readouterr().err) == (head_scc > base_scc)
@@ -225,7 +226,7 @@ def test_no_history_fails_closed_and_compares_no_edges(repo, capsys, budget):
     code = pq.main(['--root', str(repo)])
     output = capsys.readouterr()
     assert code == 1 and 'no base graph' in output.err, output.out + output.err
-    assert 'no base available' in output.out
+    assert 'no base available' in output.out and (budget is None) is ('exceeds budget 0' not in output.err)
     assert 'new test_to_test' not in output.err and 'new conftest' not in output.err
 
 

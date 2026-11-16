@@ -102,10 +102,11 @@ and git materialization outside the shared core. Its bitsets project that
 existing graph onto source files; they do not invent narrower import rules.
 The bridge prints the shortest path through conftests to the farthest hub.
 
-SCC gains need no baseline edit. The head's `scc_max` must not exceed
-the live merge base or batch base value, or the absolute baseline ceiling.
-Without a base, only the absolute ceiling applies. Explicit baseline writes
-record gains and refuse structural losses. New-edge checks compare the aligned
+The head's `scc_max` must not exceed the live merge base or batch base value, or the
+absolute baseline ceiling. The baseline's `analyzer_sha256` must match `build_files.py`.
+A PR that changes the baseline, `build_files.py` or a graph_impact module also records
+`scc_max` and `test_to_test_count` no higher than its base, measured by its analyzer.
+Explicit baseline writes record gains and refuse structural losses. New-edge checks compare the aligned
 base graph with the head graph, without stored edge lists. New source files
 inherit a package when their existing-test consumers fit a peer's base consumers.
 The separate allowlist holds reasoned exceptions.
@@ -116,8 +117,8 @@ New pairs, same-name groups or members, and primitive digest sites fail.
 `tools/duplication_inventory.py --write-baseline` can record gains but is optional.
 
 The full check belongs in Bazel's runner-VM lane because attribution requires
-a git checkout and history. Without git, it reports `no base available` and
-still checks absolute figures, the count limit and every test's reach budget.
+a git checkout and history. Without a base, or without the baseline at the same
+path in the base, it checks the absolute limits and reach budgets, and fails.
 The shrink-only exceptions preserve existing broad tests in that lane.
 
 ## Remote gate execution
