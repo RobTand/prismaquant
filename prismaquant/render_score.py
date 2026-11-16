@@ -187,61 +187,6 @@ def gate_render_candidate(
     )
 
 
-def output_error_distribution_stats(
-    reference_weight: torch.Tensor,
-    rendered_weight: torch.Tensor,
-    activations: torch.Tensor,
-    *,
-    row_chunk: int = 128,
-) -> dict[str, float]:
-    rows, cols = reference_weight.shape
-    if (
-        rendered_weight.shape != reference_weight.shape
-        or activations.shape[-1] != cols
-    ):
-        return {
-            "mse": float("inf"),
-            "p50_abs": float("inf"),
-            "p99_abs": float("inf"),
-            "max_abs": float("inf"),
-            "tail_ratio_p99_p50": float("inf"),
-        }
-    device = reference_weight.device
-    diff_t = (
-        reference_weight.detach().to(device=device, dtype=torch.float32)
-        - rendered_weight.detach().to(device=device, dtype=torch.float32)
-    ).t().contiguous()
-    x = activations.detach().to(device=device, dtype=torch.float32).reshape(-1, cols)
-    chunks: list[torch.Tensor] = []
-    total_sq = torch.zeros((), dtype=torch.float32, device=device)
-    n_values = 0
-    with torch.no_grad():
-        for start in range(0, x.shape[0], int(row_chunk)):
-            y_abs = (x[start:start + int(row_chunk)] @ diff_t).abs()
-            total_sq = total_sq + y_abs.pow(2).sum()
-            n_values += int(y_abs.numel())
-            chunks.append(y_abs.detach().flatten())
-    if n_values <= 0:
-        return {
-            "mse": 0.0,
-            "p50_abs": 0.0,
-            "p99_abs": 0.0,
-            "max_abs": 0.0,
-            "tail_ratio_p99_p50": 0.0,
-        }
-    values = torch.cat(chunks).to(torch.float32)
-    p50 = float(values.quantile(0.50).item())
-    p99 = float(values.quantile(0.99).item())
-    max_abs = float(values.max().item())
-    return {
-        "mse": float(total_sq.item()) / n_values,
-        "p50_abs": p50,
-        "p99_abs": p99,
-        "max_abs": max_abs,
-        "tail_ratio_p99_p50": float(p99 / max(p50, 1e-12)),
-    }
-
-
 @dataclass(frozen=True)
 class RenderMechanismSpec:
     name: str
@@ -272,10 +217,6 @@ def register_render_mechanism(spec: RenderMechanismSpec) -> None:
     if not spec.name:
         raise ValueError("render mechanism name must be non-empty")
     _REGISTRY[spec.name] = spec
-
-
-def render_mechanism(name: str) -> RenderMechanismSpec:
-    return _REGISTRY[str(name)]
 
 
 def registered_render_mechanisms() -> Mapping[str, RenderMechanismSpec]:
