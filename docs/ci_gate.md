@@ -335,6 +335,9 @@ The queue configuration lands in the same PR as this gate. Landing order:
    which then needs only `linked issue`.
 4. Once merged, the new `.mergify.yml` queues by label with `pr-gate` and `gate`.
 
+This landing order is history: since PQ #3786 there is no `linked issue` check, and
+the queue reads the PR text instead (see `docs/merge_queue.md`).
+
 The post-merge tests job keeps its name and runs on main pushes and manual
 dispatches. PR import and boundary checks remain in `ci.yml`. Only the lead changes
 branch protection or queues this PR. See [the merge queue guide](merge_queue.md).
