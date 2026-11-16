@@ -1,9 +1,10 @@
-"""CI's concurrency cancels superseded PR runs only (#962), and main runs one at a time.
+"""CI's concurrency cancels superseded PR runs only (#962), and the record runs one at a time.
 
 A running main run is never cancelled, so a busy day still certifies trees
-(#962). Main shares one group: GitHub then runs one main run at a time and
-keeps only the newest pending one, so the newest commit always gets a run and
-overlapping full-population runs no longer overload the executor (mode B).
+(#962). Scheduled and manual records share one group: GitHub runs one at a time
+and keeps only the newest pending one, so overlapping full-population runs never
+overload the executor (mode B). Each push has its own group: every merge gets its
+cheap hosted lanes (#3763).
 
 The two expressions are evaluated here for each trigger with a small
 translation of GitHub's ``&&``/``||``/``==`` (which, like Python's
@@ -37,9 +38,8 @@ def _evaluate(value: str, github: dict[str, str]):
     return {"True": True, "False": False, "true": True, "false": False}.get(rendered, rendered)
 
 
-def _run(event: str, ref: str, run_id: str) -> dict:
-    github = {"workflow": "CI", "event_name": event, "ref": ref, "run_id": run_id,
-              "sha": "0" * 40}
+def _run(event: str, ref: str, run_id: str, sha: str = "0" * 40) -> dict:
+    github = {"workflow": "CI", "event_name": event, "ref": ref, "run_id": run_id, "sha": sha}
     concurrency = _concurrency()
     return {"group": _evaluate(concurrency["group"], github),
             "cancel": _evaluate(concurrency["cancel-in-progress"], github)}
@@ -54,9 +54,14 @@ def test_a_new_pr_push_cancels_the_superseded_run_of_that_pr():
     assert other["group"] != first["group"]
 
 
-@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
-def test_main_runs_queue_in_one_group_and_a_running_one_is_never_cancelled(event):
-    first = _run(event, "refs/heads/main", "1")
-    second = _run(event, "refs/heads/main", "2")
+@pytest.mark.parametrize("event", ["schedule", "workflow_dispatch"])
+def test_records_queue_in_one_group_and_a_running_one_is_never_cancelled(event):
+    first = _run(event, "refs/heads/main", "1", "a" * 40)
+    second = _run(event, "refs/heads/main", "2", "b" * 40)
     assert first["cancel"] is False and second["cancel"] is False
-    assert first["group"] == second["group"]
+    assert first["group"] == second["group"] != _run("push", "refs/heads/main", "3", "b" * 40)["group"]
+
+
+def test_each_push_to_main_has_its_own_group_and_is_never_cancelled():
+    first, second = (_run("push", "refs/heads/main", run, sha) for run, sha in (("1", "a" * 40), ("2", "b" * 40)))
+    assert first["group"] != second["group"] and first["cancel"] is False is second["cancel"]
