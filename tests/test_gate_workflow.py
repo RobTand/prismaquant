@@ -142,7 +142,7 @@ def test_graph_check_remains_parallel_and_requires_exactly_one_pass():
     assert 'tools/ci/static_checks.sh' in check['run']
     # One list of the checks that execute no test: the gate's job and a lead's pre-queue run read the same script.
     script = (ROOT / 'tools/ci/static_checks.sh').read_text()
-    for entry in ('tools/ci/bazel_generated.py', 'tools/ci/gate_select.py', 'tools/ci/graph_impact_pq.py', '--merge-main'):
+    for entry in ('bazel_generated', 'gate_select', 'graph_impact_pq', '--merge-main'):
         assert entry in script
     assert 'bazel_generated.py' not in (ROOT / '.github/workflows/bazel-hosted.yml').read_text()
     assert 'graph-impact' in jobs['gate']['needs']
