@@ -13,7 +13,7 @@ as admitted Flux jobs; cite their job IDs and results in the PR body.
 2. Reference the same issue in the PR body. A partial change uses
    `Refs #<issue>.` with an open parent issue in this repository. A completed
    issue uses a supported closing reference such as `Closes #<issue>`.
-   The `linked issue` check verifies both the reference and branch number.
+   Put the reference at the start of its own line.
 3. Wait for `pr-gate` to pass.
 
 Classic branch protection requires a pull request but no status checks.
