@@ -8708,7 +8708,6 @@ pq_py_library(
         "prismaquant/joint_catalog_extension.py",
         "prismaquant/joint_forward_campaign.py",
         "prismaquant/joint_forward_resume.py",
-        "prismaquant/joint_head_walk_quanta.py",
         "prismaquant/joint_incoming_plane.py",
         "prismaquant/joint_layer_quanta.py",
         "prismaquant/joint_price_step.py",
@@ -8896,6 +8895,7 @@ pq_py_library(
         ":prismaquant/joint_campaign_ledger",
         ":prismaquant/joint_cost_read_schedule",
         ":prismaquant/joint_eval_observation",
+        ":prismaquant/joint_head_walk_quanta",
         ":prismaquant/joint_prewarm_phases",
         ":prismaquant/joint_projection_backend",
         ":prismaquant/joint_projection_contract",
@@ -9929,6 +9929,19 @@ pq_py_library(
     name = "prismaquant/joint_eval_observation",
     srcs = [
         "prismaquant/joint_eval_observation.py",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/joint_head_walk_quanta",
+    srcs = [
+        "prismaquant/joint_head_walk_quanta.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/digests",
+        ":prismaquant/schemas",
     ],
 )
 

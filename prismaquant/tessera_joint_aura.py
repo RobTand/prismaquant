@@ -34,7 +34,7 @@ from .cost_stage_checkpoint import (
 )
 from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning, seal_check
 from .interned_json import load_json_file
-from .joint_head_walk_quanta import check_quantum_for_roster
+from .joint_head_walk_quanta import HEAD_WALK_JOURNAL_SCHEMA, HEAD_WALK_STAGE, HEAD_WALK_STATE_SCHEMA, check_quantum_for_roster
 from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
 )
@@ -83,15 +83,6 @@ HISTORICAL_ENCODER_REUSE_ENTRY_FIELDS = frozenset(
 CAMPAIGN_SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 CURRENCY = "output_mse_under_route_activation_contract"
 STAGE = campaign_table.STAGE
-# The head walk's own durable journal (#754). Every restart re-paid the whole
-# roster walk -- the withdrawn campaign night paid it three times -- so the
-# walk banks each verified unit under the checkpoint machinery every other
-# stage of this campaign already uses (``prepare_journal``/``write_unit``),
-# and a resume re-verifies the banked prefix against the bytes it was banked
-# from before trusting one row of it.
-HEAD_WALK_STAGE = "joint head walk"
-HEAD_WALK_STATE_SCHEMA = "prismaquant.tessera_joint_aura.head_walk_unit.v1"
-HEAD_WALK_JOURNAL_SCHEMA = "prismaquant.tessera_joint_aura.head_walk.v1"
 #: The campaign inputs the head walk reads, each bound by digest in a plan's
 #: ``inputs`` block (``load_measured_anchor_input``).
 HEAD_WALK_INPUT_KEYS = ("campaign_plan", "census", "campaign_receipts", "merged_cost",

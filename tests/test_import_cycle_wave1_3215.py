@@ -31,6 +31,7 @@ SEPARATED = [
     ("prismaquant.joint_adjoint_band", "prismaquant.joint_cost_stage_a"),
     ("prismaquant.tessera_shipcard", "prismaquant.shipcard_cli"),
     ("prismaquant.tessera_joint_allocation", "prismaquant.joint_quanta_join"),
+    ("prismaquant.joint_head_walk_quanta", "prismaquant.tessera_joint_aura"),
     ("prismaquant.tessera_cell_measurement", "prismaquant.joint_cost_quantum"),
     ("prismaquant.staged_whole_file", "prismaquant.stage_inputs"),
     ("prismaquant.tessera_lane", "prismaquant.tessera_materialization"),
