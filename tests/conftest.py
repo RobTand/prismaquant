@@ -834,3 +834,5 @@ def _golden_rows_all_used(request):
                 f"golden table {table.name} has {len(unused)} frozen row(s) that no "
                 f"passing call used: {unused[:10]}. Restore the call, or archive the "
                 "rows of a retired test with its archive wall.", pytrace=False)
+
+# Canary 4a for #3777 (cancel mid-run, cancelled() step): this comment changes every test input.
