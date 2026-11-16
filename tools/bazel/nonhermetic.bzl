@@ -12,6 +12,18 @@ NONHERMETIC = {
         tags = ["gpu", "hosted-arm64"],
         reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU. Stage B spill requires local ext4/xfs/btrfs; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
     ),
+    "//tests:test_band_serial_handoff_disposal_real_pb": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/produced_output_spool.py:109) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_band_serial_handoff_produced": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/produced_output_spool.py:109) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_band_serial_handoff_spool_real_pb": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/produced_output_spool.py:109) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
     "//tests:test_band_serial_scratch_plane": struct(
         tags = ["hosted-arm64"],
         reason = "Cotangent scratch requires local disk; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
@@ -33,8 +45,8 @@ NONHERMETIC = {
         reason = "CaptureWriter free-space check sees 0 bytes on arm64 tmpfs; hosted arm64 has a real disk.",
     ),
     "//tests:test_capture_layer_chain_glm": struct(
-        tags = ["gpu"],
-        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+        tags = ["gpu", "hosted-arm64"],
+        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU. A disk-space guard (prismaquant/tessera_calibration_cache.py:1832) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
     ),
     "//tests:test_capture_single_pass_source_1896": struct(
         tags = ["gpu", "hosted-arm64"],
@@ -76,9 +88,25 @@ NONHERMETIC = {
         tags = ["hosted-arm64"],
         reason = "CaptureWriter free-space check sees 0 bytes on arm64 tmpfs; hosted arm64 has a real disk.",
     ),
+    "//tests:test_glm_attention_measurement": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/tessera_calibration_cache.py:1832) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_glm_campaign_streaming": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/tessera_calibration_cache.py:1832) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
     "//tests:test_glm_full_capture_profile": struct(
         tags = ["gpu"],
         reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_glm_mtp_capture": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/tessera_calibration_cache.py:1832) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_glm_mtp_final_hidden_source_audit": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/tessera_calibration_cache.py:1832) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
     ),
     "//tests:test_glm_mtp_priced_wires_1413": struct(
         tags = ["requires-network"],
@@ -87,6 +115,10 @@ NONHERMETIC = {
     "//tests:test_glm_mtp_selection": struct(
         tags = ["requires-network"],
         reason = "it fetches Tessera's rung_allowability.py from GitHub at a declared commit (cannot fetch declared dependency); hosted shards have a network.",
+    ),
+    "//tests:test_glm_mtp_source_scope": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/tessera_calibration_cache.py:1832) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
     ),
     "//tests:test_glm_routing_capture": struct(
         tags = ["gpu"],
@@ -160,6 +192,10 @@ NONHERMETIC = {
         tags = ["runner"],
         reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git.",
     ),
+    "//tests:test_native_strict_app_consumers": struct(
+        tags = ["hosted-arm64"],
+        reason = "A local-disk guard (prismaquant/perturbed_x_cache.py:1099) refuses any tmpfs scratch, and arm64 executors use a tmpfs execroot with 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
     "//tests:test_no_secret_on_command_line": struct(
         tags = ["runner"],
         reason = "It scans tracked files with git ls-files in the actual ROOT checkout; remote runfiles have no .git. The amd64 runner covers it; arm64 action coverage is excluded.",
@@ -208,9 +244,25 @@ NONHERMETIC = {
         tags = ["gpu"],
         reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
+    "//tests:test_pb905_real_produced_lifecycle": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/produced_output_spool.py:109) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
     "//tests:test_pilot_verified_result_1293": struct(
         tags = ["hosted"],
         reason = "needs os.pidfd_open/P_PIDFD/signal.pidfd_send_signal, absent from python-build-standalone 3.12 (rules_python 2.4.6) on amd64; arm64 standalone has pidfd and is excluded only for table simplicity. Hosted setup-python retains amd64 coverage.",
+    ),
+    "//tests:test_produced_native_lifecycle": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/produced_output_spool.py:109 and prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_produced_output_spool": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/produced_output_spool.py:109 and prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_produced_output_spool_real_pb": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
     ),
     "//tests:test_production_cache_source_model_binding": struct(
         tags = ["runner"],
@@ -248,9 +300,61 @@ NONHERMETIC = {
         tags = ["hosted-arm64"],
         reason = "Stage B spill requires local ext4/xfs/btrfs; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
     ),
+    "//tests:test_stage_a_io_overlap_1128": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
     "//tests:test_stage_a_plane_window_1121": struct(
         tags = ["hosted-arm64"],
         reason = "The produced-output two-plane window reads statvfs free space; arm64 tmpfs reports 0 bytes. The forced-zero probe reproduced ProducedWindowRefused at its real bind.",
+    ),
+    "//tests:test_stage_a_produced_boundary_chain": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_stage_a_produced_failfast": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_stage_a_produced_fused_windows": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_stage_a_produced_lookahead": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_stage_a_produced_ownership": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_stage_a_produced_readahead": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_stage_a_resume_local_readback": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_stage_a_retirement_1073": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_stage_a_retirement_forward_1088": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_stage_a_retirement_pb_1073": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_stage_a_same_box_readback": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+    ),
+    "//tests:test_stage_a_split_produced_range": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/streamed_boundary_artifacts.py:2178) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
     ),
     "//tests:test_stage_b_pass_profile": struct(
         tags = ["gpu"],
@@ -267,6 +371,10 @@ NONHERMETIC = {
     "//tests:test_stage_b_workspace_profile": struct(
         tags = ["gpu"],
         reason = "2 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_stagea_byte_cycle_ownership": struct(
+        tags = ["hosted-arm64"],
+        reason = "A disk-space guard (prismaquant/produced_output_spool.py:109) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
     ),
     "//tests:test_stageb_checkpoint_incoming_1802": struct(
         tags = ["hosted-arm64"],
