@@ -23,7 +23,8 @@ def reference(monkeypatch):
     return payload, snapshot, context
 
 
-def test_native_verdict_carries_the_admitted_conditions(reference):
+@pytest.mark.parametrize("dev_pin", [False, True])
+def test_native_verdict_carries_the_admitted_conditions(reference, monkeypatch, dev_pin):
     _, _, context = reference
     verdict = render.tessera_lane_admission("TESSERA_E2M1_K2_R896", serving_context=context)
     assert verdict.admitted
@@ -34,6 +35,15 @@ def test_native_verdict_carries_the_admitted_conditions(reference):
     assert verdict.requires_serve_flags == ("TESSERA_SERVE_MODE=resident",)
     assert verdict.requires_plugins == ("tessera",)
     assert {cell.regime for cell in verdict.cells} == {"decode", "batch"}
+    expected = {cell.id: cell.evidence.grade for cell in verdict.cells}
+    assert verdict.evidence_grades == expected
+    if dev_pin:
+        monkeypatch.setenv(runtime.TESSERA_DEV_PIN_ENV, runtime.TESSERA_DEV_PIN_COMMIT)
+    admission = menu.route_admission("TESSERA_E2M1_K2_R896", serving_context=context)
+    assert admission.attested
+    assert admission.evidence_grades == expected
+    assert all(grade in admission.detail for grade in expected.values())
+    assert all(cell_id in admission.detail for cell_id in expected)
 
 
 def test_unbound_population_reports_a_context_refusal(reference):
@@ -42,6 +52,7 @@ def test_unbound_population_reports_a_context_refusal(reference):
     assert not verdict.admitted
     assert verdict.route_status == "unattested"
     assert verdict.cells == ()
+    assert verdict.evidence_grades == {}
 
 
 def test_pin_refusal_keeps_matched_cells_without_admitted_conditions(reference, monkeypatch):
@@ -54,6 +65,8 @@ def test_pin_refusal_keeps_matched_cells_without_admitted_conditions(reference, 
     assert not verdict.admitted
     assert verdict.route_status == "unattested"
     assert verdict.requires_serve_flags == verdict.requires_plugins == ()
+    assert verdict.evidence_grades == {cell.id: cell.evidence.grade for cell in verdict.cells}
+    assert all(grade in verdict.reason for grade in verdict.evidence_grades.values())
     assert {cell.regime for cell in verdict.cells} == {"decode", "batch"}
 
 
@@ -71,6 +84,9 @@ def test_one_menu_expansion_captures_one_runtime_for_routes_and_tp(reference, mo
         tp_degree=tp, parallel_kind=menu.PARALLEL_COLUMN)
     assert [row.format_name for row in rows] == (["TESSERA_E2M1_K2_R896"] if tp == 1 else [])
     assert calls == [snapshot.sha256]
+    for row in rows:
+        assert row.as_dict()["evidence_grades"] == row.admission.evidence_grades
+        assert row.admission.evidence_grades
 
 
 def test_returned_predicate_values_cannot_mutate_later_queries(reference, monkeypatch):

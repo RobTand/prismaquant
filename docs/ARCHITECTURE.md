@@ -2454,6 +2454,8 @@ BF16 covers dense R769-R1279 and routed R1024 on IMG-N `5be13705` at TP1 only.
 The five measured BF16 dense rungs are 832, 880, 960, 1024, and 1088.
 E4M3 keeps its TP2 ceiling. IMG-G routed R768 uses the v66 class-launch receipt.
 PQ2471 grants narrow to BF16 TP1 and E4M3 TP2. They add no new rung or image.
+All 18 v68 cells have evidence grade `route_only`; none has an arithmetic receipt.
+Admission records show each parsed cell grade without changing a verdict. Tessera issue [#1717](https://github.com/RobTand/tessera/issues/1717) owns the arithmetic-receipt rule.
 Graph-equality records remain route-only evidence. Export and serving gates stay independent.
 The plan writer uses the v68 projection API and the producer's native class geometry check.
 The default pipeline uses compressed-tensors and cannot reach a Tessera cell.

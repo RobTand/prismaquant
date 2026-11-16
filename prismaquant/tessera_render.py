@@ -202,7 +202,8 @@ def snapshot_rung_admission(name: str, snapshot, *, serving_context=None):
         cell = verdict.cells[0]
         return NativeRungVerdict(
             "pin", f"the packaged Tessera contract attests {len(verdict.cells)} native "
-            f"cell(s) for {cell.family} R{verdict.rate_q256}, but the installed Tessera is not "
+            f"cell(s) for {cell.family} R{verdict.rate_q256} "
+            f"(evidence grades {verdict.evidence_grades}), but the installed Tessera is not "
             "the pinned commit/contract digest, so no rung is producer-eligible",
             cells=verdict.cells, rate_q256=verdict.rate_q256)
     return verdict

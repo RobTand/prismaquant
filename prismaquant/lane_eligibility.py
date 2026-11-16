@@ -3034,6 +3034,11 @@ def native_rung_cells(
     return matched
 
 
+def cell_evidence_grades(cells: Sequence[EligibilityCell]) -> dict[str, str]:
+    """The parsed evidence grade for each cell that publishes evidence."""
+    return {cell.id: cell.evidence.grade for cell in cells if cell.evidence is not None}
+
+
 @dataclass(frozen=True)
 class NativeRungVerdict:
     """One rung decision and the matched cells that produced it."""
@@ -3050,6 +3055,10 @@ class NativeRungVerdict:
             not self.cells or type(self.rate_q256) is not int or self.rate_q256 <= 0
         ):
             raise ValueError("native verdict requires matched cells and a positive integer rate")
+
+    @property
+    def evidence_grades(self) -> dict[str, str]:
+        return cell_evidence_grades(self.cells)
 
     @property
     def admitted(self) -> bool:
@@ -3946,6 +3955,7 @@ __all__ = [
     "SmokeRecord",
     "SmokeRecordRow",
     "cell_evidence_admits",
+    "cell_evidence_grades",
     "cell_lane_admits",
     "cell_rung_launches",
     "cell_serving_code_admits",

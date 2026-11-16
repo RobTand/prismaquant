@@ -4,7 +4,7 @@
   "extends": ["tessera_research_sm121"],
   "runtime": "vllm+tessera_plugin",
   "emulation_only": true,
-  "description": "Opt-in GLM packed-research allocation on sm_121. Routed logical expert units and aggregate stacks retain the full legal research menu: Tessera E4M3 K1, Tessera BF16 K1, Tessera E2M1 K2 and plain BF16 source passthrough. This allocation restriction is not a serving qualification or export lane; per-unit context, shape and source-precision gates remain mandatory, routed E2M1 remains unqualified, and TP2 qualification is separate.",
+  "description": "This opt-in profile allows routed GLM allocations from the declared families and plain BF16. It declares no export lane. Source-precision, shape, cell and TP receipt checks remain active.",
   "format_rules": [
     {
       "id": "glm_routed_packed_research_families",
@@ -12,7 +12,7 @@
       "allow_formats": ["BF16"],
       "allow_tessera_families": ["TESSERA_E4M3_K1", "TESSERA_BF16_K1", "TESSERA_E2M1_K2"],
       "reason": "profile_mismatch",
-      "detail": "GLM packed research retains E4M3, BF16 and E2M1 Tessera routed rungs plus plain BF16 source passthrough. This is an allocation menu, not serving qualification: routed E2M1 and per-expert mixed rates remain unqualified, while the research-selected route supplies the separately gated E4M3/BF16 execution semantics."
+      "detail": "The family table grants allocation only. Route admission reports the parsed cell evidence grade. Existing routed E2M1 and mixed-rate gates remain active."
     }
   ]
 }

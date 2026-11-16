@@ -48,6 +48,8 @@ Tessera's published routed predicate refuses this scope because it requires `sta
 A whole TP1 unit has no start state, although the v68 receipt served these bytes.
 [tessera#1716](https://github.com/RobTand/tessera/issues/1716) owns the decision: correct the predicate for whole TP1 units or withdraw the routed cell.
 BF16 covers IMG-N at TP1. E4M3 keeps TP2.
+All 18 cell grades are `route_only`; none has an arithmetic receipt. Admission records show the parsed grade.
+Tessera issue [#1717](https://github.com/RobTand/tessera/issues/1717) owns the arithmetic-receipt rule. These annotations change no verdict.
 PQ #3677 narrows PrismaQuant-owned grants and records all upstream evidence changes.
 Historical results below retain their measured source identity.
 

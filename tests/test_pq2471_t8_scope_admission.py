@@ -45,13 +45,15 @@ def _context(family, structure, regime):
 
 @pytest.mark.parametrize("family,structure,regime,rungs,tp", AUTHORIZED)
 def test_the_authorized_scope_admits_at_each_stated_rung(
-        family, structure, regime, rungs, tp):
+        family, structure, regime, rungs, tp, record_property):
     table = _table()
     cells = [c for c in table.cells
              if c.family == family and c.structure == structure
              and c.regime == regime and c.runtime_image == IMAGE_5BE13705]
     assert len(cells) == 1, (family, structure, regime)
     cell = cells[0]
+    record_property("cell_id", cell.id)
+    record_property("evidence_grade", cell.evidence.grade)
     assert tuple(cell.rungs_q256) == rungs
     assert cell.qualification == "device_qualified"
     assert cell.requires_plugin == "tessera"

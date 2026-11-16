@@ -101,6 +101,7 @@ from .lane_eligibility import (
     SCOPED_LANE_SCHEMAS,
     NATIVE_ROUTE_STATUSES,
     legacy_runtime_scope_refusal,
+    cell_evidence_grades,
     ROUTE_STATUS_BACKED,
     ROUTE_STATUS_BACKED_WITH_SERVE_FLAG,
     ROUTE_STATUS_UNATTESTED,
@@ -293,6 +294,7 @@ class RouteAdmission:
     readable: bool = False
     # None means no measurement input on an emulation-only allocation.
     measured_allowable: bool | None = None
+    evidence_grades: Mapping[str, str] = field(default_factory=dict)
 
 
     @property
@@ -734,23 +736,27 @@ def _route_admission(
         readable = _rate_is_readable(rung, runtime.reader_rate_range(family.name))
         requires_context = runtime.requires_serving_context
         verdict = snapshot_rung_admission(name, runtime, serving_context=serving_context)
-        attesting = verdict.cells
+        cells = verdict.cells
         if verdict.admitted:
-            status, flags = _attested_cell_conditions(name, attesting)
+            status, flags = _attested_cell_conditions(name, cells)
             world = runtime.tensor_parallel[0].get(family.name)
             detail = (
-                "the packaged Tessera contract attests a device-qualified "
-                "native cell naming this rate, under the exact serving pin")
+                "the packaged Tessera contract attests a native cell "
+                "naming this rate, under the exact serving pin")
         else:
             status = ROUTE_STATUS_UNATTESTED
             detail = verdict.reason
-        if attesting:
+        if cells:
             check_tessera_activation_agreement(
                 name, route,
-                [cell.activation_contract for cell in attesting],
+                [cell.activation_contract for cell in cells],
             )
+    grades = cell_evidence_grades(cells)
+    if grades:
+        detail += f"; evidence grades {grades}"
     return RouteAdmission(
         format_name=name,
+        evidence_grades=grades,
         payload_family=family.name,
         activation_contract=route.contract,
         terminal_format=route.terminal_format,
@@ -1387,6 +1393,7 @@ class MenuRung:
             "activation_contract": self.admission.activation_contract,
             "route_status": self.admission.route_status,
             "route_status_source": self.admission.source,
+            "evidence_grades": dict(self.admission.evidence_grades),
             "terminal_format": self.admission.terminal_format,
             "act_bits": self.admission.act_bits,
             "min_capability_sm": self.admission.min_capability_sm,
