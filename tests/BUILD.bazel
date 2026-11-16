@@ -6330,6 +6330,7 @@ pq_py_library(
         "//:MODULE.bazel.lock",
         "//tools/bazel:BUILD.bazel",
         "//tools/bazel:files",
+        "BUILD.bazel",
         "test_bazel_workspace.py",
     ],
     deps = [
