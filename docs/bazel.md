@@ -171,11 +171,6 @@ Only valid UTF-8 JSON receipts are uploaded.
 Raw execution logs, BEP, archives and other diagnostics stay private on the
 runner. Renaming a binary artifact to `.json` does not make it eligible.
 
-Before a shard starts, the Remote Bazel runner hydrates full Git history for
-checkout-dependent tests, including the archived-main graph baseline contract.
-Git children receive the same allowlisted environment without credentials.
-Missing history or a source-head mismatch refuses the shard before tests run.
-
 The test population retains Python 3.12. Scanner unit tests isolate runtime
 admission; CLI tests isolate interpreter bootstrap. Each trusted upload step
 runs tests/bazel_scan_runtime.py explicitly with Python 3.14 to prove native

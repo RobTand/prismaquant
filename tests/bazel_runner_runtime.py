@@ -75,7 +75,6 @@ def main():
                     'partition_sha256': hashlib.sha256((label + '\n').encode()).hexdigest()}
                 os.environ['PQ_BAZEL_SHARD'] = json.dumps(reference)
                 with patch.object(bazel_gate, 'fetch_artifact', return_value=raw), \
-                     patch.object(bazel_artifacts, 'prepare_history'), \
                      patch.object(bazel_gate, 'execute_shard', return_value=result):
                     code = bazel_gate.main(['shard'])
             else:

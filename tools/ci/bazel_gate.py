@@ -548,8 +548,6 @@ def main(argv=None):
         phase = 'manifest'
         reference = json.loads(os.environ['PQ_BAZEL_SHARD'])
         manifest = load_shard_manifest(reference, fetch_artifact)
-        phase = 'history'
-        artifacts.prepare_history(manifest['head'])
         phase = 'execution'
         result = execute_shard(manifest)
         result.update({key: reference[key] for key in ('manifest_sha256', 'partition_sha256')})
