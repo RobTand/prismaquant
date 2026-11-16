@@ -217,6 +217,32 @@ def require_priced_activation(bound, policy, name, fmt, qualification_activation
     return group[1]["input_global_scale"]
 
 
+def bind_joint_served_quantizer(formats_by_qname, *, context="joint Stage B activation pricing"):
+    """Require the actual served static-A4 operator before activation pricing.
+
+    A registered binding includes the inspected image and extension build.
+    A missing operator refuses; the Torch arithmetic model is never a price.
+    A16/dynamic-only rosters do not load the serving extension.
+
+    This is the one owner of the rule. Stage B calls it, and so does the
+    Stage A campaign seam (``tessera_cell_measurement._bind_served_quantizer``,
+    RobTand/prismaquant#1481), naming its own ``context``.
+    """
+    from . import format_registry as fr
+    from .nvfp4_activation_contract import bind_served_quantizer_identity
+    from .perturbed_x_cache import _served_nvfp4_act_qdq_enabled
+
+    served_override = _served_nvfp4_act_qdq_enabled()
+    for fmt in sorted({fmt for formats in formats_by_qname.values() for fmt in formats}):
+        contract = fr.get_format(fmt).static_activation_contract
+        if contract is not None and (contract.measured_as_served or served_override):
+            identity = bind_served_quantizer_identity(require=True, context=context)
+            if contract.served_quantizer is not None and contract.served_quantizer != identity:
+                raise RuntimeError(f"{context}: format overrides the served quantizer binding")
+            return identity.as_record()
+    return None
+
+
 def main(argv=None):
     from .cost_stage_checkpoint import publish_new_bytes
     parser = argparse.ArgumentParser(description=__doc__)
