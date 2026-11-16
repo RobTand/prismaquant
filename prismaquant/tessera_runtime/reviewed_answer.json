@@ -8304,21 +8304,27 @@
       ],
       [
         [
-          "tessera.native_window_moe.NativeWindowMoE.__call__",
-          "native_window_moe_compact"
-        ],
-        [
           "tessera.routed_fused.FusedRoutedWindowMoE.__call__",
-          "native_routed_fused_window"
-        ],
-        [
-          "tessera.routed_fused.FusedRoutedWindowMoE.__call__",
-          "native_routed_fused_window_e4m3mma"
+          "native_routed_window_classes_e4m3mma"
         ]
       ],
       [
         "resident"
       ],
+      {
+        "launch_scopes": [
+          {
+            "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__",
+            "decoder": "native_routed_window_classes_e4m3mma",
+            "rungs_q256": [
+              896,
+              928,
+              1024,
+              1088
+            ]
+          }
+        ]
+      },
       {
         "image": "localhost/prismaquant/spark-vllm-nccl230@sha256:5be13705acaecc7b4aaf342a84f80d67844c9970ff8375bf9fbeecc9c98ce84a",
         "execution_modes": [
@@ -9538,21 +9544,27 @@
       ],
       [
         [
-          "tessera.native_window_moe.NativeWindowMoE.__call__",
-          "native_window_moe_compact"
-        ],
-        [
           "tessera.routed_fused.FusedRoutedWindowMoE.__call__",
-          "native_routed_fused_window"
-        ],
-        [
-          "tessera.routed_fused.FusedRoutedWindowMoE.__call__",
-          "native_routed_fused_window_e4m3mma"
+          "native_routed_window_classes_e4m3mma"
         ]
       ],
       [
         "resident"
       ],
+      {
+        "launch_scopes": [
+          {
+            "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__",
+            "decoder": "native_routed_window_classes_e4m3mma",
+            "rungs_q256": [
+              896,
+              928,
+              1024,
+              1088
+            ]
+          }
+        ]
+      },
       {
         "image": "localhost/prismaquant/spark-vllm-nccl230@sha256:5be13705acaecc7b4aaf342a84f80d67844c9970ff8375bf9fbeecc9c98ce84a",
         "execution_modes": [

@@ -43,6 +43,7 @@ from lane_table_fixtures import set_cell_census
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_render as render
 from prismaquant import tessera_runtime_contract as contract
+from prismaquant import shape_runtime_prices as prices
 
 
 WINDOW_LANE = "tessera_window_gemv"
@@ -73,6 +74,7 @@ FUSED_LANES = ("tessera_routed_fused_e4m3", "tessera_routed_fused_value",
 FUSED_ROUTED_CELLS = {
     row[0] for row in contract.TESSERA_DEV_PIN_ANSWER["cells"]
     if row[3] == "routed_moe" and row[2] in {E4M3, CLAIMING_FAMILY}
+    and "_runtime_" not in row[0]
 }
 COMPACT_E4M3 = ("tessera.native_window_moe.NativeWindowMoE.__call__",
                 "native_window_moe_compact")
@@ -463,18 +465,29 @@ def test_lane_gated_cells_on_a_synthetic_table_check_the_producer_plan(payload):
 
 
 def test_routed_e4m3_launches_keep_their_per_rung_scope(payload):
-    """The class launch covers R768 only; the old launches keep their scope."""
+    """IMG-N uses the class pair. IMG-G retains its historical pairs."""
     table = _table(payload)
-    for cell_id in (GATED_CARRIER, GATED_CARRIER.replace("_decode_", "_batch_")):
-        cell = _parsed_cell(table, cell_id)
-        assert {768, 896, 1024} <= set(cell.rungs_q256)
-        assert set(cell.executes) == {COMPACT_E4M3, FUSED_E4M3, FUSED_MMA_E4M3, CLASSES_E4M3}
+    for cell in table.cells:
+        if cell.family != E4M3 or cell.structure != "routed_moe":
+            continue
+        img_n = "_runtime_" in cell.id
+        assert set(cell.rungs_q256) == ({896, 928, 1024, 1088} if img_n else
+                                      {768, 832, 864, 896, 928, 944, 960, 1024, 1088})
+        assert set(cell.executes) == ({CLASSES_E4M3} if img_n else
+                                      {COMPACT_E4M3, FUSED_E4M3, FUSED_MMA_E4M3, CLASSES_E4M3})
         for rung in cell.rungs_q256:
             admits, why, launches = lane.cell_rung_launches(cell, rung, table.lanes)
-            assert admits and why == "", (cell_id, rung, why)
-            expected = ({CLASSES_E4M3} if rung == 768 else
+            assert admits and why == "", (cell.id, rung, why)
+            expected = ({CLASSES_E4M3} if img_n or rung == 768 else
                         {COMPACT_E4M3, FUSED_E4M3, FUSED_MMA_E4M3})
-            assert set(launches) == expected, (cell_id, rung, launches)
+            assert set(launches) == expected, (cell.id, rung, launches)
+            scope = prices.ShapeTableScope(table.contract_sha256, table.runtime_commit, cell.runtime_image,
+                                           2, cell.platform, "resident", "eager")
+            for pair in (COMPACT_E4M3, FUSED_E4M3, FUSED_MMA_E4M3, CLASSES_E4M3):
+                _, refusal = prices._launch_refusal(
+                    table, scope, structure=cell.structure, family=cell.family, rate=rung,
+                    m=1 if cell.regime == "decode" else 16, lane=prices.KernelLane(*pair))
+                assert (refusal is None) == (pair in expected), (cell.id, rung, pair, refusal)
     assert {claim.decoder for claim in table.lanes if claim.requires is not None} == {
         "window_gemv", "native_routed_fused_window", "native_routed_fused_window_bf16",
         "native_routed_fused_window_e4m3mma", "native_routed_fused_window_e2m1"}

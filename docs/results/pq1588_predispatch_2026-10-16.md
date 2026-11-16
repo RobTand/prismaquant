@@ -99,3 +99,10 @@ The contract SHA-256 is `e819d2e90c0b5fe27f11283890d1fec53054d88fbe29d7f9cc473a0
 The exporter and grammar retain the `reader-pin-8bf496ab` byte state.
 All 14 requested rows retain their cell state, unpriced flags, and hour estimates.
 The new routed E2M1 admission covers R896, outside these requested rows.
+
+## Contract v70 refresh, 2026-11-16
+
+Flux job `ƒ2uG9dFkssD` refreshes the live pin values at `c3a3ca52ad2620b460223e46d82cd19bdc1c9c2e`.
+The contract SHA-256 is `703871fa2c2e6f8c14f0b5fbaa1634ed589a70b737f16220391f3702e3c7fdd8`.
+All 14 requested rows retain their cell state. Prices and hour estimates remain unchanged.
+The exporter and grammar retain the `reader-pin-8bf496ab` byte state.
