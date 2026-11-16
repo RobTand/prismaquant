@@ -67,18 +67,19 @@ CLAIMING_RATE = 896
 WINDOW_LAUNCH = {"symbol": "tessera_window_gemv::gemv", "decoder": "window_gemv"}
 #: The current three routed extension lanes, including the E4M3 MMA variant.
 FUSED_LANES = ("tessera_routed_fused_e4m3", "tessera_routed_fused_value",
-               "tessera_routed_fused_mma_e4m3")
+               "tessera_routed_fused_mma_e4m3", "tessera_routed_fused_e2m1")
 #: Exact routed roster from the independently reviewed answer, including
 #: the separately image-scoped v56 cells.
 FUSED_ROUTED_CELLS = {
     row[0] for row in contract.TESSERA_DEV_PIN_ANSWER["cells"]
-    if row[3] == "routed_moe" and row[2] in {E4M3, BF16}
+    if row[3] == "routed_moe" and row[2] in {E4M3, CLAIMING_FAMILY}
 }
 COMPACT_E4M3 = ("tessera.native_window_moe.NativeWindowMoE.__call__",
                 "native_window_moe_compact")
 FUSED_E4M3 = ("tessera.routed_fused.FusedRoutedWindowMoE.__call__",
               "native_routed_fused_window")
 FUSED_MMA_E4M3 = (FUSED_E4M3[0], "native_routed_fused_window_e4m3mma")
+CLASSES_E4M3 = (FUSED_E4M3[0], "native_routed_window_classes_e4m3mma")
 #: Contract v34's dense window-GEMM launch, verbatim: a qualified symbol
 #: that is NOT an extension launch -- no native_extensions row declares
 #: `tessera`, and no lane serves `native_window_gemm`.
@@ -436,37 +437,24 @@ def test_the_planned_decoration_is_the_render_decoration():
 # ---------------------------------------------------------------------------
 # The gate
 # ---------------------------------------------------------------------------
-def test_the_pinned_lane_gated_cells_are_the_fused_routed_cells_and_every_plan_admits(
-        table):
-    """Since contract v42 the four window routed cells launch through a lane.
+def _assert_current_plan(cell, rung, table):
+    admits, why = lane.cell_lane_admits(cell, rung, table.lanes)
+    if cell.family == CLAIMING_FAMILY and cell.structure == "routed_moe":
+        assert not admits and "start_state" in why, (cell.id, why)
+    else:
+        assert admits and why == "", (cell.id, why)
 
-    The streamed E4M3 cells that executed the window-GEMV lane were withdrawn
-    at v31, and until v42 no pinned cell launched through an extension.  v42
-    names the fused routed pair in the four window routed cells, beside the
-    compact pair, so those four are lane-gated -- and every rung they list
-    still admits, because where the fused lane refuses the plan the compact
-    launch is left (PQ #1274).
-    """
+
+def test_the_pinned_lane_gated_cells_check_the_producer_plan(table):
     gated = {cell.id for cell in table.cells
              if lane.lane_claim_for_cell(cell, table.lanes) is not None}
-    assert gated == FUSED_ROUTED_CELLS, (
-        "the cells subject to a lane predicate are exactly the ones that "
-        "execute through it; a decoder no lane names is the route's own path")
+    assert gated == FUSED_ROUTED_CELLS
     for cell in table.cells:
         for rung in cell.rungs_q256:
-            admits, why = lane.cell_lane_admits(cell, rung, table.lanes)
-            assert admits, (cell.id, why)
-            assert why == ""
+            _assert_current_plan(cell, rung, table)
 
 
-def test_every_lane_gated_cell_on_a_synthesised_table_admits_this_producers_plan(
-        payload):
-    """The lane-only gated shape the pinned table no longer carries.
-
-    A cell claiming the window lane at a rung whose plan passes (the routed
-    E4M3 decode cell at rate 4) is subject to the predicate and admitted.
-    This is the pre-v31 pinned behaviour, synthesised rather than lost; the
-    other gated cells are v42's fused routed cells, which admit every rung."""
+def test_lane_gated_cells_on_a_synthetic_table_check_the_producer_plan(payload):
     table = _table(_gated_carrier(payload))
     gated = {cell.id for cell in table.cells
              if lane.lane_claim_for_cell(cell, table.lanes) is not None}
@@ -474,33 +462,25 @@ def test_every_lane_gated_cell_on_a_synthesised_table_admits_this_producers_plan
     for cell_id in gated:
         cell = _parsed_cell(table, cell_id)
         for rung in cell.rungs_q256:
-            admits, why = lane.cell_lane_admits(cell, rung, table.lanes)
-            assert admits, (cell_id, why)
-            assert why == ""
+            _assert_current_plan(cell, rung, table)
 
 
-def test_the_shipped_routed_e4m3_cells_make_all_declared_launches_at_every_rung(payload):
-    """The current pin declares compact, fused and fused-MMA routed launches.
-
-    Historical v44 rate-four and v45 routed-subset refusals remain covered
-    by explicit predicate fixtures; v56 publishes routed rates1..8.
-    """
+def test_routed_e4m3_launches_keep_their_per_rung_scope(payload):
+    """The class launch covers R768 only; the old launches keep their scope."""
     table = _table(payload)
     for cell_id in (GATED_CARRIER, GATED_CARRIER.replace("_decode_", "_batch_")):
         cell = _parsed_cell(table, cell_id)
-        assert {896, 1024} <= set(cell.rungs_q256)
-        assert set(cell.executes) == {COMPACT_E4M3, FUSED_E4M3, FUSED_MMA_E4M3}
-        claim = lane.lane_claim_for_cell(cell, table.lanes)
-        assert claim is not None and claim.extension == "tessera_routed_fused_e4m3"
+        assert {768, 896, 1024} <= set(cell.rungs_q256)
+        assert set(cell.executes) == {COMPACT_E4M3, FUSED_E4M3, FUSED_MMA_E4M3, CLASSES_E4M3}
         for rung in cell.rungs_q256:
             admits, why, launches = lane.cell_rung_launches(cell, rung, table.lanes)
             assert admits and why == "", (cell_id, rung, why)
-            assert set(launches) == {COMPACT_E4M3, FUSED_E4M3, FUSED_MMA_E4M3}, (cell_id, rung, launches)
-    gated_decoders = {claim.decoder for claim in table.lanes
-                      if claim.requires is not None}
-    assert gated_decoders == {"window_gemv", "native_routed_fused_window",
-                              "native_routed_fused_window_folded",
-                              "native_routed_fused_window_e4m3mma"}, gated_decoders
+            expected = ({CLASSES_E4M3} if rung == 768 else
+                        {COMPACT_E4M3, FUSED_E4M3, FUSED_MMA_E4M3})
+            assert set(launches) == expected, (cell_id, rung, launches)
+    assert {claim.decoder for claim in table.lanes if claim.requires is not None} == {
+        "window_gemv", "native_routed_fused_window", "native_routed_fused_window_folded",
+        "native_routed_fused_window_e4m3mma", "native_routed_fused_window_e2m1"}
 
 
 def _lane_beside_compact(payload, rung):

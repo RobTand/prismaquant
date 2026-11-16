@@ -1286,8 +1286,8 @@ def tessera_shape_legal(
     tracing has already paid for it.  The rules, each with the raise site it
     mirrors:
 
-    * ``rows % arity`` -- ``tessera.export`` / ``tessera.slicing._counts_for``
-    * ``steps % span`` -- ``tessera.encode`` / ``tessera.slicing._counts_for``
+    * ``rows % arity`` -- ``tessera.export`` / ``tessera.layout._counts_for``
+    * ``steps % span`` -- ``tessera.encode`` / ``tessera.layout._counts_for``
     * the Bresenham root realisable over the column count -- asked by *calling*
       ``family.column_schedule``, which is ``tessera.grammar``'s own scheduler,
       so this cannot drift from what the encoder will do

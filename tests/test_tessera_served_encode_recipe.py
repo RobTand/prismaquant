@@ -41,6 +41,15 @@ def test_where_the_research_wire_is_attested_the_encode_is_unchanged(fmt, struct
     assert _served(fmt, structure).to_config() == _attested(fmt)
 
 
+@pytest.mark.parametrize("rung", [640, 768])
+def test_subcap_wire_planning_grants_no_dense_route(rung):
+    from prismaquant.tessera_formats import tessera_served_route_refusal
+    from prismaquant import tessera_runtime_contract as contract
+    assert tessera_served_route_refusal("TESSERA_E2M1_K2", rung, structure="dense") is None
+    table = contract.installed_runtime_snapshot().eligibility
+    assert not any(c.family == "TESSERA_E2M1_K2" and c.covers_rate(rung) for c in table.cells)
+
+
 def _weight():
     import torch
     return torch.randn(64, 64, generator=torch.Generator().manual_seed(1502)).bfloat16()
@@ -95,7 +104,11 @@ def test_the_campaign_uses_the_shared_dense_and_routed_window_wire():
     for structure in ("dense", "routed_moe"):
         assert campaign._served_route_refusals(
             "TESSERA_E2M1_K2", {896}, ["u"],
-            encode_structure={"u": structure}, projected_units={}) == {}
+            encode_structure={"u": structure}, projected_units={"u": {}}) == {}
+    refusal = campaign._served_route_refusals(
+        "TESSERA_E2M1_K2", {896}, ["u"],
+        encode_structure={"u": "routed_moe"}, projected_units={})
+    assert "no producer projection" in refusal["896"]["reason"]
 
 
 def test_a_routed_checkpoint_identity_stamps_the_served_wire(monkeypatch):
@@ -112,10 +125,10 @@ def test_a_routed_checkpoint_identity_stamps_the_served_wire(monkeypatch):
                   calibration_source=None, static_scales={})
     # The A-side gate is not under test here.
     monkeypatch.setattr(cell_measurement, "require_resumable_cell", lambda *_a, **_k: None)
-    research = campaign._checkpoint_anchor_identity(anchor, **kwargs)
-    assert research == cached_unit.encoding_input_identity(
+    default = campaign._checkpoint_anchor_identity(anchor, **kwargs)
+    assert default == cached_unit.encoding_input_identity(
         weight, "u", family.payload_grid(), int(rung))
-    assert campaign._checkpoint_anchor_identity(anchor, structure="dense", **kwargs)["recipe"] != research["recipe"]
+    assert campaign._checkpoint_anchor_identity(anchor, structure="dense", **kwargs)["recipe"] == default["recipe"]
     tensor = "model.layers.3.mlp.experts.0.gate_proj.weight"
     projection = {"tensor": tensor, "source_tensor": tensor, "source_layout": "unpacked_per_expert",
                   "expert": 0, "source_slice": {"expert": 0, "selector": "whole",
@@ -125,12 +138,8 @@ def test_a_routed_checkpoint_identity_stamps_the_served_wire(monkeypatch):
         anchor, projected_units={"u": projection}, structure="routed_moe", **kwargs)
     assert routed["recipe"] == {"grid": family.payload_grid().name, "q256": int(rung),
                                 **_served(fmt, "routed_moe").to_config()}
-    # The predicate the overlay catalog applies to every cell
-    # (tools/build_t4_overlay_catalog.py: "recipe is not the pinned
-    # contract's"): a fresh routed receipt now passes it; the research one
-    # the campaign stamped before #1502 does not.
     assert routed["recipe"] == dict(added_format_recipe(fmt))
-    assert research["recipe"] != dict(added_format_recipe(fmt))
+    assert default["recipe"] == dict(added_format_recipe(fmt))
 
 
 def test_a_resumed_row_stamped_on_the_research_wire_is_diverted_not_adopted():

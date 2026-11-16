@@ -1,19 +1,7 @@
-"""Routed E2M1_K2 admission is derived from the pinned contract, never asserted.
+"""The v68 routed E2M1 lane requires start state; this producer plans none.
 
-Through contract v27 the pinned Tessera contract attested ``TESSERA_E2M1_K2``
-at R896 for ``dense`` units only, so the rung a readable-menu census priced on
-a routed expert stack resolved ``unattested``.  Contract v28 (Tessera #517's
-pin, PrismaQuant #632) publishes two ``routed_moe`` E2M1_K2 cells at q896 on
-``sm_121`` -- decode and batch, resident, eager, grade ``route_only``,
-``smoke.status: not_recorded`` -- and the same read now admits it on a routed
-unit with no producer change.  That flip IS the principle-14 property this file
-exists for, observed on a real pin move rather than on a constructed table;
-whether ``not_recorded`` evidence should admit a routed-MoE rung is a
-principle-9 decision held in #198, not this file's.
-
-The second half keeps it a derivation and not a grant: a contract that drops
-the routed E2M1 cells flips the verdict back to ``unattested``, on both the
-dev-pin and the packaged-table paths.
+Dense R896 remains attested. Routed R896 stays readable but cannot pass
+the lane predicate, with or without the optional development pin.
 """
 import json
 from dataclasses import replace
@@ -57,7 +45,7 @@ def _context(cell, structure):
 
 
 @pytest.mark.parametrize("dev_pin", [False, True])
-def test_routed_e2m1_is_attested_on_the_pinned_contract(monkeypatch, dev_pin):
+def test_routed_e2m1_refuses_the_missing_start_state_on_the_pinned_contract(monkeypatch, dev_pin):
     monkeypatch.delenv(contract.TESSERA_DEV_PIN_ENV, raising=False)
     require_pinned_tessera_runtime()  # The real pin, no substitute.
     _table, _formats, dense, routed = _packaged_reference()
@@ -76,13 +64,10 @@ def test_routed_e2m1_is_attested_on_the_pinned_contract(monkeypatch, dev_pin):
     assert on_dense.act_bits == 4
 
     on_routed = menu.route_admission(RUNG, serving_context=routed_context)
-    assert on_routed.attested
-    # Read off the routed cell, not typed.
-    assert on_routed.route_status == routed[0].route_status
-    assert on_routed.requires_serve_flags == tuple(sorted(routed[0].requires_serve_flags))
+    assert not on_routed.attested
+    assert on_routed.route_status == menu.ROUTE_STATUS_UNATTESTED
+    assert "start_state" in on_routed.detail
     assert on_routed.readable is True
-    # Same wire, same priced A-side contract on both structures.
-    assert on_routed.activation_contract == on_dense.activation_contract
     assert on_routed.act_bits == on_dense.act_bits == 4
 
 
@@ -144,11 +129,10 @@ def test_readable_menu_spans_a4_a8_a16_on_a_routed_unit_and_stamps_the_gap(monke
     assert (a4.admission.act_bits, a8.admission.act_bits, a16.admission.act_bits) == (4, 8, 16)
     assert len({a4.admission.activation_contract, a8.admission.activation_contract,
                 a16.admission.activation_contract}) == 3
-    # 3.5 bpp body plus the attested 0.5 bpp UE4M3 block-scale plane.
-    assert float(a4.bits_per_param) == pytest.approx(4.0, abs=1e-2)
-    # v39 attests routed BF16 q1024 here; the readable neighbouring q1023
-    # still has no cell. Readability must not fill that attestation gap.
-    assert a4.admission.attested
+    # The readable census prices the research wire, without a served grant.
+    assert float(a4.bits_per_param) == pytest.approx(3.766407012939453)
+    assert not a4.admission.attested
+    assert "start_state" in a4.admission.detail
     assert a16.route_status == menu.ROUTE_STATUS_UNATTESTED
     assert a16.admission.readable
     routed_e4m3_here = any(
@@ -160,6 +144,6 @@ def test_readable_menu_spans_a4_a8_a16_on_a_routed_unit_and_stamps_the_gap(monke
     attested = menu.expand_tessera_menu(shape, mode=menu.MENU_ATTESTED, families=families,
                                         serving_context=routed_context)
     names = {rung.format_name for rung in attested}
-    assert RUNG in names
-    assert "TESSERA_BF16_K1_R1024" in names
+    assert RUNG not in names
+    assert "TESSERA_BF16_K1_R1024" not in names
     assert "TESSERA_BF16_K1_R1023" not in names

@@ -1,4 +1,4 @@
-"""Admission follows the v39 scope, not the cell ids inherited from v38.
+"""Admission follows the current packaged scope, not inherited cell ids.
 
 The GLM image carries E4M3 and E2M1 dense and routed cells; routed
 E4M3 includes q1024 again on that image, not on the withdrawn v34 image.
@@ -88,7 +88,7 @@ def test_vanilla_retains_dense_e4m3_q1024(residency):
 
 
 def test_glm_image_carries_only_its_qualified_families():
-    """Pin the v39 admission decision; derive each cell's rates from its bytes."""
+    """Read each current cell's scope from the packaged contract."""
     cells = json.loads(_packaged_bytes())["lane_eligibility"]["cells"]
     glm = [c for c in cells if c["runtime"]["image"] == NEW_IMAGE]
     assert {(c["family"], c["structure"], c["regime"]) for c in glm} == {
@@ -99,8 +99,12 @@ def test_glm_image_carries_only_its_qualified_families():
         for rung in cell["rungs_q256"]:
             facts = replace(_routed(rung, cell["family"]), structure=cell["structure"])
             route = _resolve(facts, NEW_IMAGE)
-            assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
-            assert cell["id"] in {r.cell_id for r in route.regimes}
+            if cell["family"] == "TESSERA_E2M1_K2" and cell["structure"] == "routed_moe":
+                assert route.route_status == lane.ROUTE_STATUS_UNATTESTED
+                assert "start_state" in route.detail
+            else:
+                assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
+                assert cell["id"] in {r.cell_id for r in route.regimes}
     for cell in cells:
         if cell["runtime"]["image"] == VANILLA_IMAGE:
             assert (cell["family"], cell["structure"], cell["rungs_q256"]) == (

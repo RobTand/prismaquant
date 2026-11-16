@@ -2445,7 +2445,8 @@ active. Package-root resource traversal reads the exact packaged JSON.
 The producer and serving pin is `8bf496abdb7d598a3132f6b4b7cb7d7e96199d13` under schema v2.
 Contract v68, lane schema v12, has 18 cells and raw SHA-256
 `145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4`.
-E2M1 R896 covers dense and routed units on IMG-G `f8dbe1a0` at TP1 only.
+E2M1 R896 cells name dense and routed units on IMG-G `f8dbe1a0` at TP1 only.
+PrismaQuant admits dense units. Its routed plan has no start state and fails the existing lane predicate.
 BF16 covers dense R769-R1279 and routed R1024 on IMG-N `5be13705` at TP1 only.
 The five measured BF16 dense rungs are 832, 880, 960, 1024, and 1088.
 E4M3 keeps its TP2 ceiling. IMG-G routed R768 uses the v66 class-launch receipt.

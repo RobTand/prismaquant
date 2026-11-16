@@ -247,9 +247,8 @@ def test_producer_legal_and_reader_supported_genuinely_diverge_on_the_control(
     real: the producer wrote R128-R896 while the pinned reader declared
     R896-R896 only, so R256 was producer-legal and reader-unsupported --
     exactly the gap #560's full-domain widen existed to close, and its red
-    receipts were this test's fixture.  At this pin every published reader
-    range equals its family's producer domain, so the witness is
-    CONSTRUCTED: the reader range is narrowed for the duration of the test,
+    receipts were this test's fixture.  The witness below is
+    constructed: the reader range is narrowed for the duration of the test,
     and the two facts are asserted to move APART under it -- a ledger that
     collapsed them into one read would report the candidate as simply
     absent, which is the failure this test refuses.
@@ -260,7 +259,7 @@ def test_producer_legal_and_reader_supported_genuinely_diverge_on_the_control(
         span = real(family)
         if span is None or family != E2:
             return span
-        return (span[1], span[1])  # the pre-#560 shape: R896-R896 only
+        return (family_q256_bounds(E2)[1],) * 2  # R896 only
 
     monkeypatch.setattr(domain, "_reader_range", narrowed)
     lo, hi = family_q256_bounds(E2)

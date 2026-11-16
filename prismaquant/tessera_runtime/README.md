@@ -43,7 +43,8 @@ contain, which nobody else can re-derive.
 
 The pin names `8bf496abdb7d598a3132f6b4b7cb7d7e96199d13`, contract v68, lane schema v12, with 18 cells.
 The packaged contract SHA-256 is `145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4`.
-E2M1 R896 covers IMG-G at TP1. BF16 covers IMG-N at TP1. E4M3 keeps TP2.
+E2M1 R896 covers IMG-G at TP1. PrismaQuant refuses its routed plan because it has no start state.
+BF16 covers IMG-N at TP1. E4M3 keeps TP2.
 PQ #3677 narrows PrismaQuant-owned grants and records all upstream evidence changes.
 Historical results below retain their measured source identity.
 

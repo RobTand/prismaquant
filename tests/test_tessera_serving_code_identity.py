@@ -121,7 +121,8 @@ def test_a_cell_that_names_no_code_serializes_as_it_always_did(tmp_path):
     path.write_text(json.dumps(contract), encoding="utf-8")
     for cell in lane.load_eligibility_table("0.1.0", contract_path=path).cells:
         assert cell.runtime_serving_source_sha256 == ""
-        assert set(cell.as_dict()["runtime"]) == {"image", "execution_modes"}
+        assert set(cell.as_dict()["runtime"]) == ({"image", "execution_modes"}
+            | ({"kernel_build"} if cell.runtime_kernel_build else set()))
 
 
 @pytest.mark.parametrize("fields", [

@@ -490,11 +490,13 @@ def test_the_scoped_table_answers_nothing_without_a_scope(dev_pin):
 def test_routed_admission_requires_scope_and_run_table_coverage(dev_pin):
     """Census neighbours can be covered, but a census rate need not be.
 
-    These routed E4M3 cells cover R897's [3, 4] table, not R768's [3]."""
+    The v66 receipt covers R768 separately; R767 still has no cell."""
     context = _routed_context("TESSERA_E4M3_K1")
     on = tm.route_admission("TESSERA_E4M3_K1_R896", serving_context=context)
     covered = tm.route_admission("TESSERA_E4M3_K1_R897", serving_context=context)
-    off = tm.route_admission("TESSERA_E4M3_K1_R768", serving_context=context)
+    upstream = tm.route_admission("TESSERA_E4M3_K1_R768", serving_context=context)
+    assert upstream.attested
+    off = tm.route_admission("TESSERA_E4M3_K1_R767", serving_context=context)
     assert on.route_status == tm.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
     assert covered.route_status == tm.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
     assert off.route_status == tm.ROUTE_STATUS_UNATTESTED
@@ -504,7 +506,7 @@ def test_routed_admission_requires_scope_and_run_table_coverage(dev_pin):
     published = next(r["attested_rungs_q256"] for r in rows
                      if r["family"] == "TESSERA_E4M3_K1")
     assert 896 in published and 768 in published
-    assert "R768" in off.detail and "no native cell" in off.detail
+    assert "R767" in off.detail and "no native cell" in off.detail
 
 
 def test_a_prose_only_tessera_edit_does_not_re_stale_the_pin(dev_pin, monkeypatch, tmp_path):
@@ -975,7 +977,7 @@ def test_tp_above_the_attested_world_size_is_refused_in_the_attested_menu(dev_pi
 
 @pytest.mark.parametrize("parallel_kind", [tm.PARALLEL_COLUMN, tm.PARALLEL_ROW])
 @pytest.mark.parametrize("context", ["dense", "routed"], ids=["dense", "routed"])
-def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(
+def test_tp2_keeps_only_families_with_a_current_receipt(
         dev_pin, parallel_kind, context):
     """TP2 retains only families with a current world-size receipt."""
     contract = trc.load_tessera_contract()
@@ -1339,6 +1341,9 @@ def test_the_menu_token_expands_to_the_attested_subset_and_reports_the_rest(dev_
         expected = ["NVFP4", "TESSERA_E2M1_K2_R896",
                     "TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896"]
         expected_dropped = ["TESSERA_E2M1_K2_R640", "TESSERA_E2M1_K1_R256"]
+        if context.structure == "routed_moe":
+            expected.remove("TESSERA_E2M1_K2_R896")
+            expected_dropped.append("TESSERA_E2M1_K2_R896")
         if covers_r512:
             expected.append("TESSERA_E4M3_K1_R512")
         else:

@@ -57,7 +57,8 @@ def test_pin_refusal_keeps_matched_cells_without_admitted_conditions(reference, 
     assert {cell.regime for cell in verdict.cells} == {"decode", "batch"}
 
 
-def test_one_menu_expansion_captures_one_runtime_for_routes_and_tp(reference, monkeypatch):
+@pytest.mark.parametrize("tp", [1, 2])
+def test_one_menu_expansion_captures_one_runtime_for_routes_and_tp(reference, monkeypatch, tp):
     _, snapshot, context = reference
     calls = []
     def capture():
@@ -67,8 +68,8 @@ def test_one_menu_expansion_captures_one_runtime_for_routes_and_tp(reference, mo
     rows = menu.expand_tessera_menu(
         (2048, 4096), families=(get_tessera_family("TESSERA_E2M1_K2"),),
         step_q256=256, serving_context=context,
-        tp_degree=2, parallel_kind=menu.PARALLEL_COLUMN)
-    assert [row.format_name for row in rows] == ["TESSERA_E2M1_K2_R896"]
+        tp_degree=tp, parallel_kind=menu.PARALLEL_COLUMN)
+    assert [row.format_name for row in rows] == (["TESSERA_E2M1_K2_R896"] if tp == 1 else [])
     assert calls == [snapshot.sha256]
 
 

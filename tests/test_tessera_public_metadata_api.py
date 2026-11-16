@@ -242,13 +242,15 @@ def test_package_keeps_the_serving_runtime_outside_the_dependency_boundary():
 @pytest.mark.parametrize('change', [{}, {'top_k': 1024}, {'regime': 'batch'}, {'grade': 'kl_full_vocab'}])
 def test_graph_equality_records_never_claim_served_kl(change):
     entry = dict(kind='graph_equality', top_k=None, regime='decode',
-                 execution_modes=['eager'], receipt='docs/graph-equality.md')
+                 execution_modes=['eager'], receipt='docs/measurements/2026-09-30-glm-nightly-cells-and-graph-equivalence.md')
     payload = dict(grade=change.get('grade', 'route_only'), kl=[entry],
                    smoke=dict(status='not_recorded', receipt=None))
     entry.update({k: v for k, v in change.items() if k != 'grade'})
     if change:
         with pytest.raises(lane.LaneEligibilityError):
-            lane.parse_cell_evidence(payload, 'graph', cell_regime=entry['regime'], execution_modes=['eager'])
+            lane.parse_cell_evidence(payload, 'graph', cell_regime=entry['regime'], execution_modes=['eager'],
+                                     schema=lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V6)
     else:
-        evidence = lane.parse_cell_evidence(payload, 'graph', cell_regime='decode', execution_modes=['eager'])
+        evidence = lane.parse_cell_evidence(payload, 'graph', cell_regime='decode', execution_modes=['eager'],
+                                            schema=lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V6)
         assert evidence.grade == 'route_only'
