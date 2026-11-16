@@ -260,3 +260,8 @@ def test_seal_roster_refuses_a_drifted_manifest(change, match):
         manifest["stage"] = "other"
     with pytest.raises(CensusCacheError, match=match):
         seal_roster(manifest)
+
+
+def test_the_unused_plan_layer_config_projection_stays_deleted():
+    from prismaquant import tessera_census_cache
+    assert not hasattr(tessera_census_cache, "plan_layer_config_projection")

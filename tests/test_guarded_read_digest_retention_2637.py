@@ -58,8 +58,8 @@ CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('cf7f382046d38975ed
                             'e8ab9ab2d8afd9fcbc3bc6fd57401247405bd17ec850fefb71e4694edb2dbb99'),
  'prismaquant/tensor_digests.py': ('0777758650869edc365cbf545280250e6fa175f2',
                                    '8baeaf7541a23481b9d233a7c65ee5f679f4fcc248c004e83ad0ca16ea8ee50a'),
- 'prismaquant/tessera_census_cache.py': ('7c7cae9ba7ee4f647b9009dba8c01e84059c18dd',
-                                          '0914cddfc0694d00b530a06a5dab6511530ae95e8cddfe4ffe5a72456f7f6ed1')}
+ 'prismaquant/tessera_census_cache.py': ('2f8143e6af37a0c49ec223b14873cdbdc8f9d44d',
+                                          '7ba5d7ba64fb617910fdaa16ee1923189454b5b26d9c198abd13cbef0414c143')}
 
 # The original producer test is archived, not runnable current coverage. Keep its
 # historical evidence string below and check the active calibration-hash oracle.
