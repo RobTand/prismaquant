@@ -443,66 +443,6 @@ def measure_kl(model, calib_ids, ref_log_probs, device) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Chunked save — the KEY to avoiding OOM during save
-# ---------------------------------------------------------------------------
-
-def save_weights_chunked(out_path: Path, weights: Dict[str, torch.Tensor],
-                         chunk_size_gb: float = 8.0):
-    """Save a weight dict as multiple .safetensors files, streaming one chunk
-    at a time. Frees each chunk's tensors from the input dict after saving
-    so peak memory never exceeds (remaining_dict + one_chunk)."""
-    from safetensors.torch import save_file
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    # Partition keys into size-balanced chunks
-    chunk_bytes = int(chunk_size_gb * 1024 ** 3)
-    keys = list(weights.keys())
-    shards: List[List[str]] = []
-    current: List[str] = []
-    current_bytes = 0
-    for k in keys:
-        sz = weights[k].numel() * weights[k].element_size()
-        if current and current_bytes + sz > chunk_bytes:
-            shards.append(current)
-            current = []
-            current_bytes = 0
-        current.append(k)
-        current_bytes += sz
-    if current:
-        shards.append(current)
-
-    n_shards = len(shards)
-    print(f"  saving {len(keys)} tensors across {n_shards} shards", flush=True)
-    for i, shard_keys in enumerate(shards):
-        shard_path = out_path.parent / f"{out_path.stem}-{i:02d}-of-{n_shards:02d}.safetensors"
-        chunk = {k: weights[k] for k in shard_keys}
-        save_file(chunk, str(shard_path))
-        # Free chunk's tensors from both the chunk dict AND the parent dict
-        for k in shard_keys:
-            del weights[k]
-        del chunk
-        gc.collect()
-        torch.cuda.empty_cache()
-        print(f"  shard {i+1}/{n_shards} written: {shard_path.name}", flush=True)
-
-
-def load_weights_chunked(path_prefix: str) -> Dict[str, torch.Tensor]:
-    """Load a sharded cache (new format) or single-file cache (legacy)."""
-    from safetensors.torch import load_file
-    p = Path(path_prefix)
-    parent = p.parent
-    stem = p.stem  # e.g. "fp4_weights"
-    shards = sorted(parent.glob(f"{stem}-*-of-*.safetensors"))
-    if shards:
-        merged: Dict[str, torch.Tensor] = {}
-        for s in shards:
-            merged.update(load_file(str(s)))
-        return merged
-    if p.exists():
-        return load_file(str(p))
-    raise FileNotFoundError(f"no shards or single file at {path_prefix}")
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
