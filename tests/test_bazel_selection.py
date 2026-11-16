@@ -135,6 +135,15 @@ def test_query_population_keeps_package_groups_as_dependency_records(architectur
     assert population['wheel_repositories'] == ['rules_python++pip+pq_pip_numpy']
 
 
+def popen_of(run):
+    """Run a subprocess.run double when the planner starts its child process."""
+    def popen(command, *, stdout, stderr, **kwargs):
+        result = run(command, **kwargs)
+        stdout.write(getattr(result, 'stdout', '')), stderr.write(getattr(result, 'stderr', ''))
+        return SimpleNamespace(wait=lambda: result.returncode)
+    return popen
+
+
 @pytest.mark.parametrize('phase', ['command', 'json', 'population'])
 def test_revision_query_refusal_names_check_without_private_diagnostics(
         tmp_path, monkeypatch, capsys, phase):
@@ -144,7 +153,7 @@ def test_revision_query_refusal_names_check_without_private_diagnostics(
             stdout='private-path-token-query' if phase == 'json' else '{}',
             stderr='private-path-token-query')
     with pytest.raises(selection.SelectionError):
-        selection.query_revision(tmp_path, tmp_path / 'private', 'amd64', runner=query)
+        selection.query_revision(tmp_path, tmp_path / 'private', 'amd64', popen=popen_of(query))()
     output = capsys.readouterr()
     assert 'Revision query refused at ' + phase in output.err
     assert 'private-path-token-query' not in output.err + output.out
@@ -153,7 +162,7 @@ def test_revision_query_refusal_names_check_without_private_diagnostics(
     monkeypatch.setattr(selection.artifacts, 'require_scan_python', lambda: None)
     monkeypatch.setattr(selection.artifacts, 'scan_runtime_available', lambda: True)
     monkeypatch.setattr(selection, 'plan_revisions', lambda root, directory, **kwargs:
-                        selection.query_revision(root, directory, 'amd64', runner=query))
+                        selection.query_revision(root, directory, 'amd64', popen=popen_of(query))())
     monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(tmp_path / 'upload'))
     monkeypatch.setenv('BUILDBUDDY_API_KEY', 'plan-test-secret-sentinel')
     assert selection.main(['plan', '--mode', 'pr', '--base', 'b' * 40,
@@ -346,8 +355,9 @@ def test_revision_graph_retains_wheel_hashes_and_source_edges_privately(tmp_path
             json.dumps({'//tests:test_consumer': ['//prismaquant:core.py']}))
         return SimpleNamespace(returncode=0, stdout='private diagnostic')
 
-    graph = selection.collect_revision(ROOT, tmp_path, 'amd64', java='java',
-        jar=tmp_path / 'v42.jar', runner=remote_command)
+    popen = popen_of(remote_command)
+    graph = selection.collect_revision(ROOT, tmp_path, selection.query_revision(ROOT, tmp_path, 'amd64',
+        popen=popen)(), java='java', jar=tmp_path / 'v42.jar', popen=popen)()
     assert graph['population']['tests'] == ['//tests:test_consumer']
     assert graph['population']['used_sources'] == ['prismaquant/core.py']
     assert graph['hashes'].parent == graph['edges'].parent == graph['query'].parent == tmp_path
@@ -374,9 +384,8 @@ def test_v42_adapter_qualifies_the_native_sdist_repository_failure_shape(tmp_pat
         Path(command[command.index('--depEdgesFile') + 1]).write_text('{}')
         return SimpleNamespace(returncode=0)
 
-    selection.collect_revision(ROOT, tmp_path, 'amd64', java='java',
-        jar=tmp_path / 'v42.jar', runner=hashes,
-        queried={'population': population, 'query': tmp_path / 'query.jsonl'})
+    selection.collect_revision(ROOT, tmp_path, {'population': population, 'query': tmp_path / 'query.jsonl'},
+        java='java', jar=tmp_path / 'v42.jar', popen=popen_of(hashes))()
 
 
 @pytest.mark.parametrize('fault', ['query_exit', 'query_invalid', 'missing_hashes', 'empty_hashes'])
@@ -394,8 +403,9 @@ def test_revision_graph_refuses_partial_external_evidence(tmp_path, fault):
         return SimpleNamespace(returncode=0, stdout='')
 
     with pytest.raises(selection.SelectionError, match='graph'):
-        selection.collect_revision(ROOT, tmp_path, 'amd64', java='java',
-            jar=tmp_path / 'v42.jar', runner=incomplete)
+        popen = popen_of(incomplete)
+        selection.collect_revision(ROOT, tmp_path, selection.query_revision(ROOT, tmp_path, 'amd64',
+            popen=popen)(), java='java', jar=tmp_path / 'v42.jar', popen=popen)()
 
 
 @pytest.mark.parametrize('cached', [None, b'wrong jar', b'pinned v42 jar'])
@@ -588,7 +598,7 @@ def test_fallback_planner_maps_measured_file_times_into_six_balanced_shards(
         *[{'rule': {'name': label, 'ruleClass': 'py_test'}} for label in tests],
         {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg', 'ruleClass': 'py_library'}},
     ], 'amd64')
-    monkeypatch.setattr(selection, 'query_revision', lambda *args, **kwargs: {'population': population})
+    monkeypatch.setattr(selection, 'query_revision', lambda *args, **kwargs: lambda: {'population': population})
     # An empty source diff takes the full fallback without launching an impact query.
     document = selection.plan_revisions(root, tmp_path / 'private', base=head, head=head, mode='pr')
     row = document['architectures']['amd64']
@@ -604,7 +614,7 @@ def test_fallback_planner_maps_measured_file_times_into_six_balanced_shards(
 
 @pytest.mark.parametrize('mode,fault', [
     ('pr', None), ('pr', 'missing_base'), ('pr', 'hash_failure'),
-    ('pr', 'comparison_failure'), ('main', None),
+    ('pr', 'comparison_failure'), ('pr', 'head_failure'), ('main', None),
 ])
 def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
         tmp_path, planning_history, mode, fault):
@@ -621,7 +631,8 @@ def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
         if command[0] == 'git':
             return subprocess.run(command, **kwargs)
         if command[1] == 'query':
-            return SimpleNamespace(returncode=0, stdout='\n'.join(map(json.dumps, rows)))
+            return SimpleNamespace(returncode=int(fault == 'head_failure' and kwargs['cwd'] == root),
+                                   stdout='\n'.join(map(json.dumps, rows)), stderr='')
         if command[3] == 'generate-hashes':
             hashed_sources.append((Path(kwargs['cwd']) / 'prismaquant/core.py').read_text())
             Path(command[-1]).write_text('{"hashes": {"//tests:test_consumer": "Rule#hash"}}')
@@ -633,9 +644,15 @@ def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
         Path(command[command.index('--output') + 1]).write_text('//tests:test_consumer\n')
         return SimpleNamespace(returncode=1 if fault == 'comparison_failure' else 0)
 
-    found = selection.plan_revisions(root, tmp_path / 'private',
-        base='c' * 40 if fault == 'missing_base' else base, head=head, mode=mode,
-        java='java', jar=tmp_path / 'v42.jar', runner=planning_command)
+    plan = lambda: selection.plan_revisions(root, tmp_path / 'private',
+        base='c' * 40 if fault == 'missing_base' else base, head=head, mode=mode, java='java',
+        jar=tmp_path / 'v42.jar', runner=planning_command, popen=popen_of(planning_command))
+    if fault == 'head_failure':  # The base query still starts; the head failure stays fatal.
+        with pytest.raises(selection.SelectionError, match='revision graph query'):
+            plan()
+        assert [command[1] for command in calls if command[0] == 'bazel'] == ['query', 'query']
+        return
+    found = plan()
     assert found['head'] == head
     assert found['base'] == ('c' * 40 if fault == 'missing_base' else base)
     assert set(found['architectures']) == ({'amd64', 'arm64'} if mode == 'main' else {'amd64'})
