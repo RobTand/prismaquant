@@ -48,7 +48,16 @@ def test_job_environment_does_not_reference_runtime_only_contexts():
 def test_remote_planner_uses_queue_aware_refs_and_requires_scope_upload():
     jobs = workflows()['gate.yml']['jobs']
     remote = jobs['remote']
-    assert remote['if'] == jobs['gate']['if']
+    # A stop job cancels the run at the first red job; gate still runs and reports red.
+    assert jobs['gate']['if'] == remote['if'].replace('!cancelled()', 'always()')
+    # Only PR and queue gates stop early; records (ci.yml, the hosted lane workflow) run every lane to the end.
+    assert set(workflows()['gate.yml']['on']) == {'pull_request'}
+    assert not any('gh run cancel' in (ROOT / '.github/workflows' / name).read_text()
+                   for name in ('ci.yml', 'bazel-hosted.yml'))
+    for name in ('remote', 'hosted', 'graph-impact'):
+        stop = jobs['stop-after-' + name]
+        assert (stop['needs'], stop['if'], stop['permissions']) == (name, '${{ failure() }}', {'actions': 'write'})
+        assert stop['steps'][0]['run'] == 'gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"'
     assert jobs['hosted']['if'] == remote['if'] and 'needs' not in jobs['hosted']
     steps = {step.get('id'): step for step in remote['steps']}
     assert steps['refs']['with']['action'] == 'scopes-git-refs'
@@ -131,4 +140,5 @@ def test_graph_check_remains_parallel_and_requires_exactly_one_pass():
     assert checkout['with']['fetch-depth']==0
     check=next(s for s in graph['steps'] if s.get('id')=='check')
     assert 'graph_impact_pq' in check['run']
+    assert 'build_files.py --check' in check['run']
     assert 'graph-impact' in jobs['gate']['needs']
