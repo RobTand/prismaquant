@@ -946,14 +946,14 @@ manifest validation; hosted routing and unknown-target refusal remain enforced.
 
 As of: 2026-11-16, post-merge record schedule, PQ #3763. Source: `.github/workflows/ci.yml`.
 The full no-cache Bazel record (amd64 and arm64) runs every 6 hours when main's head commit is younger
-than 7 hours, and on every manual dispatch. A push to main runs the hosted amd64 and arm64 lanes and the
-import surface, each push in its own concurrency group; records run one at a time.
+than 7 hours, and on every manual dispatch. A push to main runs the hosted amd64 and arm64 lanes, each push in its own concurrency group;
+records run one at a time. The import surface runs only on pull requests and drafts (PQ #3791).
 
-As of: 2026-11-15, FIFO merge queue, PQ #3642.
+As of: 2026-11-16, FIFO merge queue in batches of 3, PQ #3773 (after #3642).
 Source: `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.mergify.yml`.
 One serial queue requires an issue line and a `prismaquant-<N>` branch on original PRs (PQ #3786;
 text only, no issue lookup) and `gate` on each draft.
-Each draft checks one PR on the newest main, in `queue` label order.
+Each draft checks up to 3 PRs on the newest main, in `queue` label order; a failed batch is split.
 Bazel and hosted gate jobs run only on authenticated Mergify drafts or `gate-canary` PRs.
 Graph impact runs on every PR. The post-merge CPU suite remains on Python 3.12.
 
