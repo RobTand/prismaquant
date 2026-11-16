@@ -174,3 +174,8 @@ def test_conflicting_lane_facts_refuse_before_any_artifact_write(tessera_artifac
         else:
             open_shipcard(tessera_artifact, build=conflict, lane="tessera")
     assert {path.name: path.read_bytes() for path in tessera_artifact.iterdir()} == before
+
+
+def test_the_retired_gridbook_extension_closure_stays_deleted():
+    retired = {"_gold_extension_requirements", "_CB_FORMAT_RE", "_FP8_SOURCE_W8A16_WIRE_IDS", "_MXFP8_DENSE_WIRE_IDS"}
+    assert not retired & set(vars(shipcard))

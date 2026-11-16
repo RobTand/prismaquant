@@ -631,8 +631,8 @@ def test_the_wire_id_is_pinned_and_globally_unique():
 # ``_requant_pack`` is bit-for-bit the codec ``format_registry`` prices, so
 # emulation and shipped bytes are one rendering.  Both modules are archived
 # and ``mxfp8_e4m3_e8m0_g32`` has no surviving writer anywhere in
-# prismaquant/: the id is still NAMED --- by the shipcard's
-# ``_MXFP8_DENSE_WIRE_IDS``, the allocator's ``REQUANT_WIRE_FORMAT_IDS`` and
+# prismaquant/: the id is still NAMED --- by the allocator's
+# ``REQUANT_WIRE_FORMAT_IDS`` and
 # two comments in mxfp4_widen.py --- but nothing packs bytes for it.  There is no
 # exporter to test, so no importorskip: the modules are gone permanently.
 #
