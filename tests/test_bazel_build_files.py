@@ -588,6 +588,14 @@ def test_a_py_path_inside_a_longer_string_is_a_reference(tmp_path):
     assert 'experiments/manifests.py' in found.of('tests/test_snippet.py')[0]
 
 
+def test_a_py_path_named_in_a_docstring_is_text_not_an_input(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/conftest.py': '"""Fixtures. ``tests/test_other.py`` pins this."""\n',
+        'tests/test_other.py': 'import json\n'})
+    modules, data = found.of('tests/conftest.py')
+    assert 'tests/test_other.py' not in modules | data
+
+
 def test_entry_points_a_test_runs_from_its_own_data_table_are_its_inputs(tmp_path):
     found = evidence(tmp_path, {
         'tests/test_entrypoints.py': ('import json, subprocess, sys\nfrom pathlib import Path\n'
