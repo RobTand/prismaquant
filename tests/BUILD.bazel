@@ -6170,6 +6170,7 @@ pq_py_library(
     ],
     deps = [
         "//:tools/__init__",
+        "//:tools/ci/bazel_artifacts",
         "//:tools/ci/bazel_gate",
         "//:tools/ci/bazel_selection",
         "//:tools/ci/remote_gate",
