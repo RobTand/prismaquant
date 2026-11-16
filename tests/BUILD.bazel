@@ -4441,7 +4441,7 @@ pq_py_test(
     deps = [
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -12000,7 +12000,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -12075,7 +12075,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -16325,7 +16325,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -32928,7 +32928,7 @@ pq_py_test(
         "test_workspace_netdata.py",
         "test_workspace_receipt_digest_routing_1826.py",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -34753,7 +34753,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -36184,7 +36184,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -39419,7 +39419,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -45874,7 +45874,7 @@ pq_py_test(
         ":conftest",
     ],
     shard_count = 5,
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -56878,7 +56878,7 @@ pq_py_test(
         ":conftest",
     ],
     shard_count = 6,
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -62342,7 +62342,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -65065,7 +65065,7 @@ pq_py_test(
         ":conftest",
     ],
     shard_count = 8,
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -68960,7 +68960,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -70816,7 +70816,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -70913,7 +70913,7 @@ pq_py_test(
         ":conftest",
     ],
     shard_count = 2,
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -70965,7 +70965,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -71156,7 +71156,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -71252,7 +71252,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -71925,7 +71925,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -72176,7 +72176,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -72350,7 +72350,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -72536,7 +72536,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -78636,7 +78636,7 @@ pq_py_test(
         "test_workspace_receipt_digest_routing_1826.py",
     ],
     shard_count = 2,
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -84134,7 +84134,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -84225,7 +84225,7 @@ pq_py_test(
         ":conftest",
     ],
     shard_count = 3,
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -85502,7 +85502,7 @@ pq_py_test(
         ":conftest",
     ],
     shard_count = 2,
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -85546,7 +85546,7 @@ pq_py_test(
         ":conftest",
     ],
     shard_count = 3,
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
@@ -87907,7 +87907,7 @@ pq_py_test(
         "//:files/prismaquant/serving_profile_specs",
     ],
     shard_count = 8,
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_test(
@@ -89577,7 +89577,7 @@ pq_py_test(
         ":conftest",
     ],
     shard_count = 2,
-    timeout = "moderate",
+    timeout = "long",
 )
 
 pq_py_library(
