@@ -15,12 +15,8 @@ that need per-expert counterfactual prices.
 """
 from __future__ import annotations
 
-import json
-import math
-import pickle
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from . import format_registry as fr
@@ -212,58 +208,3 @@ def price_row(
         activation_pricing=pricing,
         policy=pricing_policy,
     )
-
-
-def _recorded_artifact_path(
-    selection_dir: Path,
-    manifest: Mapping[str, Any],
-    key: str,
-    fallback_name: str,
-) -> Path:
-    recorded = manifest.get(key)
-    if isinstance(recorded, str) and recorded:
-        path = Path(recorded)
-        if path.exists():
-            return path
-    fallback = selection_dir / fallback_name
-    if fallback.exists():
-        return fallback
-    raise FileNotFoundError(
-        f"selection artifact has no readable {key!r} path and {fallback} "
-        "does not exist"
-    )
-
-
-def reconcile_selection(selection_dir: str | Path) -> tuple[float, float, float]:
-    """Return ``(reconstructed_dloss, recorded_dloss, ratio)`` for a cell.
-
-    The selection's applicability manifest is the provenance authority for
-    its probe and cost-table paths.  Source-passthrough rows are synthesized
-    exactly as candidate construction synthesizes them, and the selection's
-    own P5a factors are replayed without refitting.
-    """
-    root = Path(selection_dir)
-    selection = json.loads((root / "selection.json").read_text())
-    applicability = json.loads(
-        (root / "format_applicability.json").read_text()
-    )
-    assignment = json.loads((root / "layer_config.json").read_text())
-    probe_path = _recorded_artifact_path(root, applicability, "probe", "probe.pkl")
-    cost_path = _recorded_artifact_path(root, applicability, "costs", "cost.pkl")
-    with probe_path.open("rb") as handle:
-        stats = pickle.load(handle)
-    with cost_path.open("rb") as handle:
-        costs = pickle.load(handle)
-    prices = reprice_assignment(
-        assignment,
-        stats,
-        costs,
-        activation_pricing=selection.get("activation_fair_pricing"),
-    )
-    reconstructed = math.fsum(prices.values())
-    recorded = float(selection["predicted_dloss"])
-    if recorded == 0.0:
-        ratio = 1.0 if reconstructed == 0.0 else math.inf
-    else:
-        ratio = reconstructed / recorded
-    return reconstructed, recorded, ratio
