@@ -37,10 +37,6 @@ TEST_INPUTS = {
         modules = ["tools/ci/gate_collect.py"],
         reason = "its child pytest loads the gate_collect plugin by name (-p gate_collect) and runs xdist (-n).",
     ),
-    "//tests:test_import_fanout": struct(
-        data = ["//:files", "//tests:files"],
-        reason = "tools/ci/import_fanout.py scans tests, prismaquant, tools, experiments, scripts and pqtel under the root its caller passes.",
-    ),
     "//tests:test_io_site_freeze": struct(
         data = ["//:files/prismaquant", "//:files/tools"],
         reason = "it scans every module under prismaquant and tools from a root it computes.",

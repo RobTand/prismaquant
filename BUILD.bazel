@@ -7298,6 +7298,7 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/joint_adjoint_slices",
+        ":prismaquant/joint_cost_quantum",
         ":prismaquant/joint_cost_stage_a",
         ":prismaquant/joint_retained_window_plan",
         "@pq_pip//numpy",
@@ -8034,6 +8035,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/joint_adjoint_slices",
+        ":prismaquant/joint_cost_quantum",
         ":prismaquant/joint_retained_window_plan",
         ":prismaquant/staged_tier_policy",
     ],
@@ -8704,17 +8706,14 @@ pq_py_library(
         "prismaquant/joint_aura_transition_base.py",
         "prismaquant/joint_aura_transitions.py",
         "prismaquant/joint_catalog_extension.py",
-        "prismaquant/joint_cost_quantum.py",
         "prismaquant/joint_forward_campaign.py",
         "prismaquant/joint_forward_resume.py",
         "prismaquant/joint_head_walk_quanta.py",
         "prismaquant/joint_incoming_plane.py",
         "prismaquant/joint_layer_quanta.py",
         "prismaquant/joint_price_step.py",
-        "prismaquant/joint_quantum_handoff.py",
         "prismaquant/joint_replay_spill.py",
         "prismaquant/joint_served_activation.py",
-        "prismaquant/joint_stage_b_head.py",
         "prismaquant/joint_stageb_resources.py",
         "prismaquant/joint_statistics_plan.py",
         "prismaquant/joint_statistics_replay.py",
@@ -8886,7 +8885,6 @@ pq_py_library(
         ":prismaquant/fp8_dynamic",
         ":prismaquant/gguf_formats",
         ":prismaquant/gguf_kl_evaluator",
-        ":prismaquant/glm_kda_capture_kernel",
         ":prismaquant/glm_source_derivative",
         ":prismaquant/gpu_guard",
         ":prismaquant/incremental_shards",
@@ -8895,9 +8893,7 @@ pq_py_library(
         ":prismaquant/io_spans",
         ":prismaquant/joint_adjoint_slices",
         ":prismaquant/joint_campaign_ledger",
-        ":prismaquant/joint_checkpoint_publication",
         ":prismaquant/joint_cost_read_schedule",
-        ":prismaquant/joint_dispatch_pilot",
         ":prismaquant/joint_eval_observation",
         ":prismaquant/joint_prewarm_phases",
         ":prismaquant/joint_projection_backend",
@@ -8937,7 +8933,6 @@ pq_py_library(
         ":prismaquant/source_prefetch",
         ":prismaquant/source_read_plan",
         ":prismaquant/stage_a_produced_output",
-        ":prismaquant/stage_b_pass_profile",
         ":prismaquant/stage_inputs",
         ":prismaquant/staged_launch",
         ":prismaquant/staged_lease",
@@ -9821,6 +9816,50 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "prismaquant/joint_cost_quantum",
+    srcs = [
+        "prismaquant/joint_cost_quantum.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/calibration_data",
+        ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/dev_mode",
+        ":prismaquant/digests",
+        ":prismaquant/glm_kda_capture_kernel",
+        ":prismaquant/gpu_guard",
+        ":prismaquant/io_engine",
+        ":prismaquant/io_spans",
+        ":prismaquant/joint_adjoint_slices",
+        ":prismaquant/joint_campaign_ledger",
+        ":prismaquant/joint_checkpoint_publication",
+        ":prismaquant/joint_dispatch_pilot",
+        ":prismaquant/joint_eval_observation",
+        ":prismaquant/joint_prewarm_phases",
+        ":prismaquant/joint_projection_backend",
+        ":prismaquant/joint_quantum_handoff",
+        ":prismaquant/joint_quantum_row",
+        ":prismaquant/joint_replay_regime",
+        ":prismaquant/joint_retained_window_plan",
+        ":prismaquant/joint_run_progress",
+        ":prismaquant/joint_stage_b_head",
+        ":prismaquant/kl_fisher",
+        ":prismaquant/matmul_arithmetic",
+        ":prismaquant/residency_map",
+        ":prismaquant/residency_shard_reader",
+        ":prismaquant/source_read_plan",
+        ":prismaquant/stage_a_produced_output",
+        ":prismaquant/stage_b_pass_profile",
+        ":prismaquant/stage_inputs",
+        ":prismaquant/staged_lease",
+        ":prismaquant/staged_tier_policy",
+        ":prismaquant/tessera_reader",
+        "@pq_pip//torch",
+    ],
+)
+
+pq_py_library(
     name = "prismaquant/joint_cost_read_schedule",
     srcs = [
         "prismaquant/joint_cost_read_schedule.py",
@@ -9848,6 +9887,7 @@ pq_py_library(
         ":prismaquant/digests",
         ":prismaquant/gpu_guard",
         ":prismaquant/io_spans",
+        ":prismaquant/joint_cost_quantum",
         ":prismaquant/joint_projection_backend",
         ":prismaquant/joint_quantum_row",
         ":prismaquant/joint_run_progress",
@@ -9957,6 +9997,26 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "prismaquant/joint_quantum_handoff",
+    srcs = [
+        "prismaquant/joint_quantum_handoff.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/digests",
+        ":prismaquant/glm_kda_capture_kernel",
+        ":prismaquant/io_spans",
+        ":prismaquant/joint_adjoint_slices",
+        ":prismaquant/joint_campaign_ledger",
+        ":prismaquant/joint_quantum_row",
+        ":prismaquant/staged_tier_policy",
+        ":prismaquant/staged_whole_file",
+    ],
+)
+
+pq_py_library(
     name = "prismaquant/joint_quantum_row",
     srcs = [
         "prismaquant/joint_quantum_row.py",
@@ -10003,6 +10063,24 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/residency_map",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/joint_stage_b_head",
+    srcs = [
+        "prismaquant/joint_stage_b_head.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/calibration_data",
+        ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/dev_mode",
+        ":prismaquant/digests",
+        ":prismaquant/joint_run_progress",
+        ":prismaquant/staged_tier_policy",
+        ":prismaquant/staged_whole_file",
     ],
 )
 
@@ -11408,6 +11486,7 @@ pq_py_library(
         ":prismaquant/calibration_data",
         ":prismaquant/digests",
         ":prismaquant/joint_adjoint_slices",
+        ":prismaquant/joint_quantum_handoff",
         ":prismaquant/joint_quantum_row",
         ":prismaquant/joint_replay_regime",
         ":prismaquant/native_results",
@@ -11607,6 +11686,7 @@ pq_py_library(
         ":prismaquant/dev_mode",
         ":prismaquant/digests",
         ":prismaquant/glm_routing_capture",
+        ":prismaquant/joint_cost_quantum",
         ":prismaquant/joint_run_progress",
         ":prismaquant/matmul_arithmetic",
         ":prismaquant/memory_management",
@@ -11629,6 +11709,7 @@ pq_py_library(
         ":prismaquant/calibration_data",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/glm_routing_replay",
+        ":prismaquant/joint_cost_quantum",
         ":prismaquant/matmul_arithmetic",
         ":prismaquant/stage_inputs",
         "@pq_pip//torch",
@@ -11649,6 +11730,7 @@ pq_py_library(
         ":prismaquant/calibration_data",
         ":prismaquant/digests",
         ":prismaquant/io_spans",
+        ":prismaquant/joint_cost_quantum",
         ":prismaquant/produced_output_spool",
         ":prismaquant/residency_map",
         ":prismaquant/source_read_plan",
@@ -11700,6 +11782,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/joint_cost_quantum",
         "@pq_pip//torch",
     ],
 )
@@ -11715,6 +11798,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/joint_cost_quantum",
         "@pq_pip//torch",
     ],
 )
@@ -12038,20 +12122,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/ci/import_fanout",
-    srcs = [
-        "tools/ci/import_fanout.py",
-    ],
-    data = [
-        "tools/ci/import_fanout.py",
-    ],
-    deps = [
-        ":tools/__init__",
-        ":tools/ci/graph_impact_pq",
-    ],
-)
-
-pq_py_library(
     name = "tools/ci/remote_gate",
     srcs = [
         "tools/ci/remote_gate.py",
@@ -12206,8 +12276,10 @@ pq_py_library(
         ":prismaquant/glm_kda_capture_kernel",
         ":prismaquant/joint_adjoint_slices",
         ":prismaquant/joint_campaign_ledger",
+        ":prismaquant/joint_cost_quantum",
         ":prismaquant/joint_dispatch_pilot",
         ":prismaquant/joint_projection_backend",
+        ":prismaquant/joint_quantum_handoff",
         ":prismaquant/joint_quantum_row",
         ":prismaquant/joint_replay_regime",
         ":prismaquant/matmul_arithmetic",
@@ -12553,6 +12625,7 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/calibration_data",
         ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/joint_cost_quantum",
         ":prismaquant/model_runtime",
         "@pq_pip//torch",
         "@pq_pip//transformers",
@@ -13113,6 +13186,7 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/calibration_data",
         ":prismaquant/io_spans",
+        ":prismaquant/joint_stage_b_head",
         ":prismaquant/stage_inputs",
         ":prismaquant/staged_tier_policy",
         ":prismaquant/tessera_reader",
@@ -13228,6 +13302,8 @@ pq_py_library(
         ":prismaquant/digests",
         ":prismaquant/joint_adjoint_slices",
         ":prismaquant/joint_campaign_ledger",
+        ":prismaquant/joint_cost_quantum",
+        ":prismaquant/joint_stage_b_head",
         ":prismaquant/source_read_plan",
         ":prismaquant/stage_a_produced_output",
         ":prismaquant/staged_tier_policy",
