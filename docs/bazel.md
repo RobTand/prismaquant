@@ -18,13 +18,9 @@ test can retain its own base reach; a new package uses the recorded global
 budget. New edges that expand existing-source fanout among existing tests,
 or deepen existing-test reach, fail. Conftest source imports remain forbidden.
 The shared core supports `test_to_test: strict|reach`. Strict mode refuses every
-new test-to-test edge. PQ uses reach mode until November 16, 2026: an edge may
-inherit the importer's base package maximum, but deeper reach fails. The total
-edge count may rise by at most five above its recorded minimum, and baseline
-writes retain the minimum. [The CI gate guide](ci_gate.md) describes PQ's
-mandatory switch test and date-only trigger. Every SCC is checked for growth
-or mergers, even when an unrelated larger cycle hides the size change. The
-SCC maximum can only shrink.
+new test-to-test edge; PQ uses it since November 16, 2026 ([the CI gate guide](ci_gate.md)).
+Every SCC is checked for growth or mergers, even when an unrelated larger cycle
+hides the size change. The SCC maximum can only shrink.
 U and LOC-weighted U are reported trends and never fail a PR. Baseline writes
 keep their minimum. The diagnostic attributes structural growth to added edges.
 
