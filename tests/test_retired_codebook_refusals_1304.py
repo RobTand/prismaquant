@@ -320,3 +320,8 @@ def test_a_cost_table_bound_to_a_format_plan_refuses(part, key):
     assert fr.RETIRED_CODEBOOK_ARCHIVE in str(info.value)
     payload[part][key] = None
     schemas.validate_cost_payload(payload, "cost.pkl")
+
+
+def test_the_uncalled_selection_reconciler_stays_deleted():
+    from prismaquant import per_row_pricing
+    assert not hasattr(per_row_pricing, "reconcile_selection")
