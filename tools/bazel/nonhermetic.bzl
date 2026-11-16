@@ -420,10 +420,6 @@ NONHERMETIC = {
         tags = ["gpu", "runner"],
         reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git; 1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
-    "//tests:test_strict_reader_tier_enforcement": struct(
-        tags = ["hosted-arm64"],
-        reason = "The local_scratch=True checkpoint test constructs ExactCotangentScratch on tmp_path; its disk guard refuses arm64 tmpfs. Static audit; runtime validation pending.",
-    ),
     "//tests:test_tensor_digest_owner_recipes_2638": struct(
         tags = ["gpu"],
         reason = "3 of its test functions (3 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
