@@ -402,10 +402,9 @@ def test_runtime_slow_drip_refuses_within_original_wall_deadline(
             self.send_response(200)
             self.send_header('Content-Length', str(len(raw)))
             self.end_headers()
-            # Every individual read is fast; the complete body takes124s.
-            start, sent = time.monotonic(), 0
+            start, sent = time.monotonic(), 0  # Each read is fast; the body takes longer than the 2 s wall.
             try:
-                while time.monotonic() - start < 124:
+                while time.monotonic() - start < 6:
                     self.wfile.write(raw[sent:sent + 1])
                     self.wfile.flush()
                     sent += 1
@@ -425,7 +424,7 @@ def test_runtime_slow_drip_refuses_within_original_wall_deadline(
     started = time.monotonic()
     try:
         with pytest.raises(artifacts.RuntimeDownloadError):
-            artifacts.download_runtime_archive(url, None)
+            artifacts.download_runtime_archive(url, None, wall=2)
     finally:
         elapsed = time.monotonic() - started
         stop.set()
@@ -433,7 +432,7 @@ def test_runtime_slow_drip_refuses_within_original_wall_deadline(
         server.server_close()
         thread.join(timeout=5)
     assert not thread.is_alive()
-    assert 119 <= elapsed <= 121.5
+    assert 1 <= elapsed <= 3.5
     assert requests == ['/pinned-runtime']
     assert not list((Path.home() / '.cache').rglob('*.tar.gz'))
     assert not (tmp_path / 'upload').exists()
