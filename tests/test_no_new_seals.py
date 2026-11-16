@@ -191,7 +191,7 @@ ALLOWLIST = {
         "digest (integrity); the Stage A slice binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_cost_quantum.py", "require_chain_readset"): (
         1, INTEGRITY, "the staged data manifest is the readset the record names"),
-    ("prismaquant/joint_cost_quantum.py", "bind_joint_served_quantizer"): (
+    ("prismaquant/joint_served_activation.py", "bind_joint_served_quantizer"): (
         1, AMBIGUOUS, "a format override against the served quantizer binding"),
     ("prismaquant/joint_cost_quantum.py", "run_layer_quantum_core"): (
         2, AMBIGUOUS, "the Stage A slice handed in against the one the record binds "

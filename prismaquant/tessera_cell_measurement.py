@@ -127,7 +127,7 @@ def _bind_served_quantizer(qname, format_name):
     it unbound (RobTand/prismaquant#567). Until #1481 nothing on the campaign
     path bound it, so every A4 rung raised ``ServedQuantizerUnboundError``.
 
-    The rule has one owner, ``joint_cost_quantum.bind_joint_served_quantizer``,
+    The rule has one owner, ``joint_served_activation.bind_joint_served_quantizer``,
     which Stage B already calls; this seam calls it too. It requires the
     registered operator for a served contract, never falls back to the Torch
     model, and binds nothing for A8/A16 rungs, so those rosters never import the
@@ -141,7 +141,7 @@ def _bind_served_quantizer(qname, format_name):
     """
     global _SERVED_QUANTIZER_RECORD
     from .nvfp4_activation_contract import active_served_quantizer_identity
-    from .joint_cost_quantum import bind_joint_served_quantizer
+    from .joint_served_activation import bind_joint_served_quantizer
 
     if active_served_quantizer_identity() is not None:
         return
