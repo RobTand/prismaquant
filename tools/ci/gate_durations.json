@@ -20534,5 +20534,37 @@
     "tests/test_workspace_receipt_digest_routing_1826.py::test_receipt_bytes_and_full_digest_match_independent_literals[value3-{\\n  \"a\": {\\n    \"a\": 1,\\n    \"b\": 2\\n  },\\n  \"z\": [\\n    true,\\n    null,\\n    1.25,\\n    -0.0\\n  ]\\n}\\n]": 0.007,
     "tests/test_workspace_receipt_digest_routing_1826.py::test_receipt_bytes_and_full_digest_match_independent_literals[value4-{\\n  \"value\": \"report \\u00e9\"\\n}\\n]": 0.0075,
     "tests/test_workspace_receipt_digest_routing_1826.py::test_receipt_bytes_and_full_digest_match_independent_literals[value5-[\\n  1,\\n  true,\\n  null\\n]\\n]": 0.0075
-  }
+  },
+  "slowest_shard": {
+    "tests/test_bazel_artifacts.py": 129.2,
+    "tests/test_canonical_consumer_join.py": 146.0,
+    "tests/test_canonical_quality_quantity.py": 129.4,
+    "tests/test_dsv4_fixture_isolation.py": 160.7,
+    "tests/test_held_producer_sdk5_smoke_2152.py": 111.0,
+    "tests/test_joint_cost_quantum_runtime.py": 154.2,
+    "tests/test_joint_retained_streamed.py": 120.5,
+    "tests/test_layer_streaming_mxfp4_isolation.py": 111.4,
+    "tests/test_native_receipt_table_routed.py": 108.8,
+    "tests/test_pq1588_predispatch_packet.py": 122.4,
+    "tests/test_quantum_band_serial.py": 212.7,
+    "tests/test_run_pipeline_additivity_identity_audit.py": 112.0,
+    "tests/test_ship_gates.py": 300.1,
+    "tests/test_stage_a_chain_prefetch.py": 191.4,
+    "tests/test_stage_a_chain_resume.py": 300.2,
+    "tests/test_stage_a_chain_seed.py": 300.2,
+    "tests/test_stage_a_forward_split.py": 121.0,
+    "tests/test_stage_a_head_skip.py": 110.8,
+    "tests/test_stage_a_retirement_1073.py": 149.1,
+    "tests/test_stage_a_retirement_pb_1073.py": 106.3,
+    "tests/test_stage_a_seed_package.py": 101.8,
+    "tests/test_stage_a_split_package.py": 111.0,
+    "tests/test_streamed_gold_companion.py": 144.4,
+    "tests/test_tessera_campaign_publication_cli.py": 126.2,
+    "tests/test_tessera_campaign_resume.py": 137.5,
+    "tests/test_tessera_forest_bytes.py": 121.2,
+    "tests/test_tessera_formats.py": 138.4,
+    "tests/test_tessera_menu.py": 166.6,
+    "tests/test_tessera_routed_e2m1_admission.py": 111.5
+  },
+  "slowest_shard_source": "Slowest single run (shard) per test target in Bazel post-merge records 43826135768, 43836620003, 43853503115, 43861457379 (amd64 executor and BuildBuddy cloud arm64), only where it lengthens the timeout; a TIMEOUT counts as 300 s. Sets the timeout, never the shard count."
 }
