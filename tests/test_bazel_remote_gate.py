@@ -382,7 +382,7 @@ def controller_manifest(mode='pr', selection='fallback'):
     labels = [f'//tests:test_{index}' for index in range(6)]
     architectures = {}
     for architecture in ('amd64', 'arm64') if mode == 'main' else ('amd64',):
-        count = 6 if mode == 'pr' else 4 if architecture == 'arm64' else 2
+        count = 6 if mode == 'pr' else 4
         population = [] if selection == 'irrelevant' else labels
         architectures[architecture] = {'population': population, 'tests': population,
             'shards': [population[index::count] for index in range(count)] if population else []}
