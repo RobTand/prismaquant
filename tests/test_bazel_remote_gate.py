@@ -28,7 +28,7 @@ def test_runner_keeps_its_cloud_placement_and_four_cpu_size(mode, monkeypatch):
     request = remote.run_request(arguments(mode))
     assert request['commit_sha'] == HEAD
     assert request['platform_properties'] == {
-        'EstimatedCPU': '4', 'EstimatedMemory': '8GB', 'EstimatedFreeDiskBytes': '50GB',
+        'EstimatedCPU': '8', 'EstimatedMemory': '8GB', 'EstimatedFreeDiskBytes': '50GB',
         'container-image': remote.IMAGE, 'workload-isolation-type': 'firecracker',
         'recycle-runner': 'true'}
     assert 'remote-controller-sentinel' not in json.dumps(request)

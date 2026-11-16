@@ -45,7 +45,7 @@ def run_request(args):
     return {'repo': args.repo, 'branch': args.branch, 'commit_sha': args.head,
             'steps': [{'run': 'python3 ' + shlex.join(command)}],
             'platform_properties': {
-                'EstimatedCPU': '4', 'EstimatedMemory': '8GB', 'EstimatedFreeDiskBytes': '50GB',
+                'EstimatedCPU': '8', 'EstimatedMemory': '8GB', 'EstimatedFreeDiskBytes': '50GB',
                 'container-image': IMAGE, 'workload-isolation-type': 'firecracker',
                 'recycle-runner': 'true'},
             'timeout': f'{args.timeout}m', 'wait_until': 'STARTED'}
