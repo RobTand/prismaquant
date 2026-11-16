@@ -1,7 +1,13 @@
 """Real DSv4 CPU contracts survive the unsupported-config import predecessor."""
 
+from typing import TYPE_CHECKING
+
 import pytest
 from test_layer_streaming_mxfp4_isolation import native_dsv4_session
+
+if TYPE_CHECKING:  # The session runs these files by path; this declares them as inputs.
+    import test_deepseek_v4_profile, test_dsv4_layer_streaming_rename, test_dsv4_nested_rotary_init
+    import test_grouped_linear_fisher, test_model_walk_export_gate  # both import test_model_walk
 
 
 @pytest.mark.parametrize("targets", [
