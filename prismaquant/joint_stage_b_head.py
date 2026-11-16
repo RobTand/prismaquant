@@ -34,23 +34,12 @@ from types import SimpleNamespace
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 from .dev_mode import seal_check
 from .digests import bytes_sha256hex
-
-HEAD_SLICE_SCHEMA = "prismaquant.joint_stage_b_head_slice.v1"
-
-#: The head files a slice may declare, in the order a quantum reads them.
-#: ``prepared`` and ``production_cache`` are always present; optional roles
-#: exist exactly when the plan binds them.
-HEAD_FILE_ROLES = ("prepared", "production_cache", "served_activation_policy",
-                   "source_identity_cache", "source_digest_cache")
+from .joint_layer_quanta import HEAD_FILE_ROLES, HEAD_SLICE_SCHEMA, control_directory
 
 #: The calibration draw fields the quantum compares with the original full
 #: draw the campaign's Hessians were fitted on (``run_layer_quantum``).
 CALIBRATION_IDENTITY_FIELDS = ("fit_ids_sha256", "text_sha256", "nsamples",
                                "seqlen", "seed")
-
-#: Formats that carry no render (``aura_cost._ZERO_COST_FORMATS`` is the
-#: quantum's own list; the intake roster appends exactly this one).
-PASSTHROUGH_FORMAT = "BF16"
 
 
 class HeadSliceRefused(ValueError):
@@ -85,14 +74,8 @@ def head_slice_bytes(head_slice) -> bytes:
     return canonical_json_bytes(head_slice, where="Stage B head slice")
 
 
-def head_slice_sha256(head_slice) -> str:
-    return bytes_sha256hex(head_slice_bytes(head_slice))
-
-
 def head_slice_directory(output_root: str, *, metadata_root: str | None = None) -> str:
     """Where head slices land: the control-metadata namespace (PQ #884)."""
-    from .joint_layer_quanta import control_directory
-
     return control_directory(output_root, "head-slices", metadata_root=metadata_root)
 
 
