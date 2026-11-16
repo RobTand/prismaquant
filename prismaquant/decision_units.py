@@ -6,11 +6,9 @@ when cross-layer CLADO machinery is archived.
 """
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 from . import format_registry as fr
 from .allocator_candidates import check_format_applicability
@@ -413,31 +411,3 @@ def parse_payload(payload: Mapping) -> tuple[
         ))
     singletons.sort(key=lambda unit: unit.name)
     return blocks, singletons, pairs_by_block
-
-
-def load_payload(path: str | Path) -> dict:
-    with Path(path).open("r", encoding="utf-8") as fh:
-        return json.load(fh)
-
-
-def total_param_count(payload: Mapping) -> int:
-    """Sum n_params across all units in a decision-unit payload."""
-    total = 0
-    for block in (payload.get("blocks") or {}).values():
-        for unit in (block.get("units") or {}).values():
-            options = unit.get("options") or {}
-            ref = options.get("BF16")
-            if ref is None:
-                ref = next(iter(options.values()))
-            mem = int(ref["memory_bytes"])
-            bpp = float(ref["bits_per_param"])
-            if bpp > 0:
-                total += int(round(mem * 8.0 / bpp))
-    for unit in (payload.get("singletons") or {}).values():
-        options = unit.get("options") or {}
-        ref = options.get("BF16") or next(iter(options.values()))
-        mem = int(ref["memory_bytes"])
-        bpp = float(ref["bits_per_param"])
-        if bpp > 0:
-            total += int(round(mem * 8.0 / bpp))
-    return total
