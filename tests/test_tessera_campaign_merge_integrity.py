@@ -201,3 +201,7 @@ def test_merge_carries_the_union_of_identity_migration_records(tmp_path):
     del payloads[sorted(payloads)[0]]["provenance"]["identity_migration"]
     merged_payload = campaign_table.merge_payloads(payloads, census={"counts": {}}, capture_sha256="merged")
     assert merged_payload["provenance"]["identity_migration"] == carried
+
+
+def test_the_uncalled_table_names_stay_deleted():
+    assert not {"_bound_pickle", "REFERENCES_NAME", "SCALES_NAME"} & set(vars(campaign_table))
