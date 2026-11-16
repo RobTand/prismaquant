@@ -295,7 +295,8 @@ def test_fallback_parallel_failure_cancels_the_other_admitted_shard_and_stops():
                              ('cancel', 1)]
 
 
-def test_first_red_pr_shard_ends_the_gate_and_cancels_running_siblings():
+def test_first_red_pr_shard_ends_the_gate_and_cancels_running_siblings(tmp_path, monkeypatch):
+    monkeypatch.setenv('REMOTE_SHARDS', str(tmp_path / 'remote-shards.txt'))
     client = BoundedFallbackClient(maximum=6, running={0, 2}, red={1})
     records = remote.submit_shards(client, fallback_requests(count=7), HEAD, concurrency=6,
                                    clock=lambda: 1, sleep=lambda seconds: None)
@@ -304,6 +305,8 @@ def test_first_red_pr_shard_ends_the_gate_and_cancels_running_siblings():
     assert client.events[6:] == [('running', 0), ('terminal', 1), ('evidence', 1)] + [
         event for index in (0, 2, 3, 4, 5) for event in [('cancel-child', index), ('cancel', index)]]
     assert not client.active
+    # A cancelled workflow's cancelled() step reads the admitted shards from this record.
+    assert (tmp_path / 'remote-shards.txt').read_text().split() == [f'parent-{index}' for index in range(6)]
 
 
 def test_shards_are_read_as_they_end_and_an_interrupt_cancels_the_rest():
@@ -332,14 +335,6 @@ def test_cancel_uses_the_buildbuddy_rpc_service_and_a_failure_never_hides_the_ve
     assert urls[0] == 'https://app.buildbuddy.io/rpc/BuildBuddyService/CancelExecutions'
     assert urls[1] == bazel_artifacts.API + 'GetInvocation'
     assert capsys.readouterr().out == 'Remote Bazel shard not cancelled: parent-0\n'
-
-
-def test_admitted_shards_are_recorded_for_the_cancelled_workflow_step(tmp_path, monkeypatch):
-    recorded = tmp_path / 'remote-shards.txt'
-    monkeypatch.setenv('REMOTE_SHARDS', str(recorded))
-    remote.submit_shards(BoundedFallbackClient(), fallback_requests(count=2), HEAD, concurrency=2,
-                         clock=lambda: 1)
-    assert recorded.read_text().split() == ['parent-0', 'parent-1']
 
 
 def test_a_red_record_shard_keeps_the_record_going():
