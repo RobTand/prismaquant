@@ -48,8 +48,10 @@ class BuildBuddy:
         self.key, self.api = key, api
 
     def call(self, method, body, *, raw=False, timeout=120):
+        # BuildBuddy serves CancelExecutions on its RPC service, not on the public API.
+        base = 'https://app.buildbuddy.io/rpc/BuildBuddyService/' if method == 'CancelExecutions' else self.api
         request = urllib.request.Request(
-            self.api + method, data=json.dumps(body).encode(),
+            base + method, data=json.dumps(body).encode(),
             headers={'x-buildbuddy-api-key': self.key, 'Content-Type': 'application/json'})
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:

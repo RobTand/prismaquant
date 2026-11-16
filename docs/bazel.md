@@ -154,8 +154,10 @@ not permit concurrent agent or development runs.
 
 Both modes use deterministic target-pattern partitions, verify their union
 against the queried population exactly once, and fail closed on any missing
-or DISCONNECTED shard. An admitted sibling still needs its own terminal
-evidence when another shard fails. No shard is retried to obtain a pass.
+or DISCONNECTED shard. A PR or queue shard stops at its first failed test
+(`--notest_keep_going`); the first shard that does not pass ends the gate red, and the
+controller cancels its admitted siblings. A record keeps going and lists every failure.
+No shard is retried to obtain a pass.
 
 TL3 keeps BuildBuddy priority if a fallback batch arrives while its queue is backed up; this cutover adds no scheduler.
 
