@@ -6,10 +6,9 @@ with full git history and the event's base commit. Ordinary PRs use the merge
 base; authenticated Mergify drafts use the actual draft base. Same-basename
 Git renames align base paths before edge comparison. The graph baseline stores
 numeric limits and policy, with no edge lists. The job needs only Python. A failed,
-skipped, cancelled, or missing graph verdict fails the aggregate. Its JUnit must
-contain exactly one passing graph test. The live test is excluded from shard
-execution and duration placement; its synthetic unit tests remain in the normal
-population. This job has no test-budget waiver.
+skipped, cancelled, or missing graph verdict fails the aggregate. The verdict is
+`pass` only when the command exits 0. The synthetic unit tests of
+`tests/test_graph_impact.py` stay in the normal population.
 
 PQ's baseline uses `"test_to_test": "reach"`, a minimum edge count, and
 `"test_to_test_strict_by": "2026-11-16"`. It has no count-based switch trigger.
