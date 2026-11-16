@@ -158,14 +158,11 @@ jobs:
         python-version: '3.12'
     - name: Run required graph impact check
       id: check
+      # The gate's checks that execute no test fail in the first minutes of every PR; leads run the same script first.
       run: |
         unset BUILDBUDDY_API_KEY
-        # The generated BUILD check needs no execution, so it fails in the first minutes of every PR.
-        python tools/bazel/build_files.py --check & files=$!
-        python tools/ci/graph_impact_pq.py --write base --snapshots "$RUNNER_TEMP" & base=$!
-        python tools/ci/graph_impact_pq.py --write head --snapshots "$RUNNER_TEMP" & head=$!
-        wait $files; wait $base; wait $head
-        python tools/ci/graph_impact_pq.py --snapshots "$RUNNER_TEMP"
+        python -m pip install -q packaging uv==0.10.10
+        tools/ci/static_checks.sh
         echo verdict=pass >> "$GITHUB_OUTPUT"
   stop-after-remote:
     name: Stop the gate after a red remote job
