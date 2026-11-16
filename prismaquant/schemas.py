@@ -16,28 +16,8 @@ from collections.abc import Mapping, Sequence
 import math
 from numbers import Integral, Real
 import re
-from typing import Any, NotRequired, TypedDict
 
 from .contract_checks import Contract, strict_json_loads, unique_json_object  # noqa: F401
-
-
-class CostEntry(TypedDict, total=False):
-    """Structural type for one per-format cost row.
-
-    Older artifacts are allowed to omit ``cost_source``; live producers should
-    set it when a cost was rewritten or comes from a non-default surrogate so
-    allocator logs can explain which objective priced the decision.
-    """
-
-    weight_mse: float
-    output_mse: float
-    rel_output_mse: float
-    predicted_dloss: float
-    output_mse_measured: bool
-    cost_source: NotRequired[str]
-    weight_mse_per_expert: NotRequired[list[float]]
-    cost_source_per_expert: NotRequired[list[str]]
-    error: str
 
 
 class SchemaValidationError(ValueError):

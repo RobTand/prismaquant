@@ -99,3 +99,8 @@ def test_layer_config_rejects_malformed_dict_entry():
     payload["model.layers.0.self_attn.q_proj"] = {"bits": 4}
     with pytest.raises(SchemaValidationError, match="data_type"):
         validate_layer_config_payload(payload, "layer.json")
+
+
+def test_the_unused_cost_entry_type_stays_deleted():
+    from prismaquant import schemas
+    assert not hasattr(schemas, "CostEntry")
