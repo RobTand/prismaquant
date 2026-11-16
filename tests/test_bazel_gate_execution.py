@@ -284,16 +284,37 @@ def test_full_shards_verify_only_test_statuses_but_build_failures_still_fail():
 def test_full_build_population_cannot_hide_a_missing_test_status():
     population = [LABEL, '//prismaquant:library']
     records = [shard_record(0, [])]
-    with pytest.raises(gate.GateError, match='population'):
-        gate.aggregate_shards(population, [population], records, test_population={LABEL})
+    found = gate.aggregate_shards(population, [population], records, test_population={LABEL})
+    assert found['verdict'] == 'fail'
+    assert found['shards'][0]['failed'] == [LABEL]
 
 
+def test_a_stopped_shard_names_only_tests_that_ran_and_failed():
+    ran, unrun = '//tests:test_ran', '//tests:test_unrun'
+    run = {'statuses': {ran: 'TIMEOUT', unrun: 'NO_STATUS'}, 'invocation': 'child',
+           'returncode': 3, 'executed_by_label': {ran: 1}}
+    found = gate.architecture_result({ran, unrun, LABEL}, run)
+    assert (found['verdict'], found['failed']) == ('fail', [ran])
+
+
+def test_a_red_shard_ends_the_aggregate_but_a_pass_needs_every_shard():
+    labels = [LABEL, '//tests:test_second']
+    shards = gate.partition_population(labels, shard_count=2)
+    red = shard_record(1, shards[1])
+    red['run']['statuses'] = {shards[1][0]: 'FAILED'}
+    found = gate.aggregate_shards(labels, shards, [red])
+    assert (found['verdict'], found['shards'][0]['failed']) == ('fail', shards[1])
+    with pytest.raises(gate.GateError, match='missing'):
+        gate.aggregate_shards(labels, shards, [shard_record(1, shards[1])])
+
+
+@pytest.mark.parametrize('mode', ['main', 'pr'])
 @pytest.mark.parametrize('status,code,verdict', [('PASSED', 0, 'pass'), ('TIMEOUT', 3, 'fail')])
 def test_remote_shard_executes_once_with_private_bep_and_preserves_timeout(
-        tmp_path, monkeypatch, status, code, verdict):
+        tmp_path, monkeypatch, status, code, verdict, mode):
     monkeypatch.setenv('MERGIFY_TOKEN', 'must-not-reach-bazel')
     monkeypatch.setenv('UNRELATED_SECRET', 'must-not-reach-bazel')
-    manifest = {'mode': 'main', 'base': 'b' * 40, 'head': 'a' * 40,
+    manifest = {'mode': mode, 'base': 'b' * 40, 'head': 'a' * 40,
                 'branch': 'main', 'architecture': 'arm64', 'index': 0,
                 'targets': [LABEL, '//prismaquant:library'], 'tests': [LABEL],
                 'require_execution': True}
@@ -303,6 +324,9 @@ def test_remote_shard_executes_once_with_private_bep_and_preserves_timeout(
         assert '--config=remote-arm64' in command and '--jobs=16' in command
         assert '--nocache_test_results' in command and '--noremote_accept_cached' in command
         assert '--flaky_test_attempts=1' in command
+        # A record lists every failure; a PR or queue shard stops at its first failed test.
+        assert (['--keep_going'] if mode == 'main' else ['--nokeep_going', '--notest_keep_going']) == [
+            arg for arg in command if arg.endswith('keep_going')]
         assert 'MERGIFY_TOKEN' not in kwargs['env'] and 'UNRELATED_SECRET' not in kwargs['env']
         path = Path(next(arg.split('=', 1)[1] for arg in command
                          if arg.startswith('--build_event_json_file=')))
@@ -694,6 +718,8 @@ def test_build_only_partitions_survive_the_cli_and_controller_handoff(
                     'artifacts': [{'name': 'gate-result.json', 'uri': 'bytestream://' + identity}]}]}
             if method == 'GetFile':
                 return records[body['uri'].removeprefix('bytestream://')]['result']
+            if method == 'CancelExecutions':
+                return {}
             raise AssertionError(method)
     args = Namespace(mode=mode, base='b' * 40, head='a' * 40, branch='probe',
                      repo='https://github.com/RobTand/prismaquant', timeout=20)

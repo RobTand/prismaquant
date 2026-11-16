@@ -167,16 +167,17 @@ def aggregate_shards(population, shards, records, *, require_execution=False,
     tests = set(population if test_population is None else test_population)
     if not tests <= set(population):
         raise GateError('test population is outside the queried build population')
-    if Counter(record['index'] for record in records) != Counter(range(len(shards))):
+    indexes = Counter(record['index'] for record in records)
+    if max(indexes.values(), default=0) > 1 or not set(indexes) <= set(range(len(shards))):
         raise GateError('missing or duplicate shard records')
-    ordered = sorted(records, key=lambda record: record['index'])
     results = []
-    for labels, record in zip(shards, ordered):
+    for record in sorted(records, key=lambda record: record['index']):
         if record['invocation_status'] != 'COMPLETE_INVOCATION_STATUS':
             raise GateError('shard invocation is incomplete or disconnected')
         run = record['run']
-        selected_tests = set(labels) & tests
-        if set(run['statuses']) != selected_tests:
+        selected_tests = set(shards[record['index']]) & tests
+        # A stopped shard has no status for tests it did not run; those count as not passed.
+        if not set(run['statuses']) <= selected_tests:
             raise GateError('shard evidence has a different test population')
         result = architecture_result(selected_tests, run,
                                      budget_warnings=record['budget_warnings'])
@@ -190,8 +191,10 @@ def aggregate_shards(population, shards, records, *, require_execution=False,
         results.append({**result, 'excerpts': excerpts})
     executed = sum(result['executed_test_actions'] for result in results)
     missing_execution = require_execution and executed == 0
-    return {'verdict': 'fail' if missing_execution or any(
-                result['verdict'] == 'fail' for result in results) else 'pass',
+    failed = any(result['verdict'] == 'fail' for result in results)
+    if len(indexes) != len(shards) and not failed:
+        raise GateError('missing or duplicate shard records')
+    return {'verdict': 'fail' if missing_execution or failed else 'pass',
             'shards': results,
             'executed_test_actions': executed,
             'error': 'architecture ran no test actions' if missing_execution else None,
@@ -217,6 +220,10 @@ def bep_run(text, *, returncode):
             result = identity.get('testResult')
             if result:
                 evidence = event.get('testResult', {})
+                # A test that ran and failed is named even when a stopped run left it no summary.
+                if (evidence.get('status', 'PASSED') not in ('PASSED', 'NO_STATUS')
+                        and statuses.get(result['label'], 'PASSED') == 'PASSED'):
+                    statuses[result['label']] = evidence['status']
                 if (evidence.get('status') and not evidence.get('cachedLocally', False)
                         and not evidence.get('executionInfo', {}).get('cachedRemotely', False)):
                     executed.add((result['label'], result.get('run', 1),
@@ -230,13 +237,14 @@ def bep_run(text, *, returncode):
 
 def architecture_result(population, run, *, budget_warnings=(), require_execution=False):
     failed = sorted(label for label in population if run['statuses'].get(label) != 'PASSED')
+    ran = [label for label in failed if run['statuses'].get(label, 'NO_STATUS') != 'NO_STATUS']
     executed = sum(run['executed_by_label'].get(label, 0) for label in population)
     missing_execution = require_execution and executed == 0
     if failed or run['returncode'] or missing_execution:
         verdict = 'fail'
     else:
         verdict = 'pass' if population else 'skipped'
-    return {'verdict': verdict, 'failed': failed, 'invocation': run['invocation'],
+    return {'verdict': verdict, 'failed': ran or failed, 'invocation': run['invocation'],
             'bazel_exit_code': run['returncode'], 'executed_test_actions': executed,
             'budget_warnings': list(budget_warnings),
             'error': 'architecture ran no test actions' if missing_execution else None}
@@ -341,13 +349,15 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
     config = 'remote' if manifest['architecture'] == 'amd64' else 'remote-arm64'
     command = ['bazel', 'test' if tests else 'build', '--config=' + config, '--config=ci', '--jobs=16',
                '--spawn_strategy=remote,local', '--remote_local_fallback=false',
-               '--keep_going',
+               # A PR or queue shard stops at its first failed test; a record lists every failure.
+               '--keep_going' if manifest['mode'] == 'main' else '--nokeep_going',
                '--build_event_json_file=' + str(bep),
                '--target_pattern_file=' + str(patterns),
                '--build_metadata=COMMIT_SHA=' + manifest['head'],
                '--build_metadata=BRANCH_NAME=' + manifest['branch']]
     if tests:
-        command += ['--flaky_test_attempts=1', '--zip_undeclared_test_outputs']
+        command += ['--flaky_test_attempts=1', '--zip_undeclared_test_outputs',
+                    *(['--notest_keep_going'] if manifest['mode'] != 'main' else [])]
     if manifest['require_execution']:
         command += ['--noremote_accept_cached', '--nocache_test_results']
     with evidence_phase('native-execution'):

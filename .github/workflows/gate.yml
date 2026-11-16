@@ -58,6 +58,7 @@ jobs:
         BASE: ${{ steps.refs.outputs.base }}
         HEAD: ${{ steps.refs.outputs.head }}
         BRANCH: ${{ github.head_ref }}
+        REMOTE_SHARDS: ${{ runner.temp }}/remote-shards.txt
       run: |
         set -Eeuo pipefail
         python tools/ci/remote_gate.py pr --base "$BASE" --head "$HEAD" --branch "$BRANCH" --timeout 20 --output bazel-upload
@@ -70,6 +71,22 @@ jobs:
         with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
             output.write('verdict=' + result['verdict'] + '\n')
         REMOTE_VERDICT
+    - name: Cancel own Remote Bazel shards
+      # A cancelled run kills the controller before it can cancel its shards.
+      if: ${{ cancelled() }}
+      env:
+        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        REMOTE_SHARDS: ${{ runner.temp }}/remote-shards.txt
+      run: |
+        python - <<'CANCEL_SHARDS'
+        import os
+        from pathlib import Path
+        from tools.ci import remote_gate
+        recorded = Path(os.environ['REMOTE_SHARDS'])
+        if recorded.exists():
+            remote_gate.cancel_runs(remote_gate.BuildBuddy(os.environ['BUILDBUDDY_API_KEY']),
+                                    recorded.read_text().split())
+        CANCEL_SHARDS
     - name: Require configured scope token
       id: token
       if: ${{ !cancelled() && steps.controller.outputs.scopes_ready == 'true' }}
