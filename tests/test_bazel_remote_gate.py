@@ -207,6 +207,10 @@ class BoundedFallbackClient:
             self.events.append(('submit', index))
             assert len(self.active) <= self.maximum, 'too many admitted fallback shards'
             return {'invocation_id': f'parent-{index}'}
+        if method == 'GetInvocation' and body.get('include_child_invocations'):
+            identity = body['selector']['invocation_id']
+            return {'invocation': [{'invocationId': identity, 'childInvocations': [
+                {'invocationId': identity.replace('parent-', 'child-')}]}]}
         if method == 'GetInvocation':
             index = int(body['selector']['invocation_id'].removeprefix('parent-'))
             if index in self.running:
@@ -229,6 +233,9 @@ class BoundedFallbackClient:
                 row['verdict'] = 'fail'
                 row['run']['statuses'][f'//tests:test_{index}'] = 'FAILED'
             return json.dumps(row).encode()
+        if method == 'CancelExecutions' and body['invocation_id'].startswith('child-'):
+            self.events.append(('cancel-child', int(body['invocation_id'].removeprefix('child-'))))
+            return {}
         if method == 'CancelExecutions':
             index = int(body['invocation_id'].removeprefix('parent-'))
             self.active.remove(index)
@@ -284,7 +291,8 @@ def test_fallback_parallel_failure_cancels_the_other_admitted_shard_and_stops():
     with pytest.raises(remote.RemoteError):
         remote.submit_shards(client, fallback_requests(), HEAD,
                              concurrency=2, clock=lambda: 1)
-    assert client.events == [('submit', 0), ('submit', 1), ('terminal', 0), ('cancel', 1)]
+    assert client.events == [('submit', 0), ('submit', 1), ('terminal', 0), ('cancel-child', 1),
+                             ('cancel', 1)]
 
 
 def test_first_red_pr_shard_ends_the_gate_and_cancels_running_siblings():
@@ -292,9 +300,9 @@ def test_first_red_pr_shard_ends_the_gate_and_cancels_running_siblings():
     records = remote.submit_shards(client, fallback_requests(count=7), HEAD, concurrency=6,
                                    clock=lambda: 1, sleep=lambda seconds: None)
     assert [record['index'] for record in records] == [1]
-    assert client.events[6:] == [('running', 0), ('terminal', 1), ('evidence', 1),
-                                 ('cancel', 0), ('cancel', 2), ('cancel', 3), ('cancel', 4),
-                                 ('cancel', 5)]
+    # The Bazel child goes first: its remote actions outlive a killed runner.
+    assert client.events[6:] == [('running', 0), ('terminal', 1), ('evidence', 1)] + [
+        event for index in (0, 2, 3, 4, 5) for event in [('cancel-child', index), ('cancel', index)]]
     assert not client.active
 
 
@@ -306,7 +314,24 @@ def test_shards_are_read_as_they_end_and_an_interrupt_cancels_the_rest():
         remote.submit_shards(client, fallback_requests(count=2), HEAD, concurrency=2,
                              clock=lambda: 1, sleep=interrupt)
     assert client.events == [('submit', 0), ('submit', 1), ('running', 0), ('terminal', 1),
-                             ('evidence', 1), ('cancel', 0)]
+                             ('evidence', 1), ('cancel-child', 0), ('cancel', 0)]
+
+
+def test_cancel_uses_the_buildbuddy_rpc_service_and_a_failure_never_hides_the_verdict(
+        monkeypatch, capsys):
+    from tools.ci import bazel_artifacts
+    urls = []
+    def urlopen(request, timeout):
+        urls.append(request.full_url)
+        raise bazel_artifacts.urllib.error.URLError('offline')
+    monkeypatch.setattr(bazel_artifacts.urllib.request, 'urlopen', urlopen)
+    client = bazel_artifacts.BuildBuddy('cancel-sentinel')
+    with pytest.raises(remote.RemoteError):
+        client.call('CancelExecutions', {'invocation_id': 'parent-0'})
+    remote.cancel_runs(client, ['parent-0'])
+    assert urls[0] == 'https://app.buildbuddy.io/rpc/BuildBuddyService/CancelExecutions'
+    assert urls[1] == bazel_artifacts.API + 'GetInvocation'
+    assert capsys.readouterr().out == 'Remote Bazel shard not cancelled: parent-0\n'
 
 
 def test_a_red_record_shard_keeps_the_record_going():
