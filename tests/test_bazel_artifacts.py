@@ -433,11 +433,11 @@ def test_runtime_slow_drip_refuses_within_original_wall_deadline(
         thread.join(timeout=5)
     assert not thread.is_alive()
     assert 1 <= elapsed <= 3.5
+    assert artifacts.download_runtime_archive.__defaults__ == (120,)  # production keeps the 120 s wall
     assert requests == ['/pinned-runtime']
     assert not list((Path.home() / '.cache').rglob('*.tar.gz'))
     assert not (tmp_path / 'upload').exists()
-    captured = capsys.readouterr()
-    assert not captured.out and not captured.err
+    assert capsys.readouterr() == ('', '')
 
 
 def test_runtime_proxy_connect_refreshes_budget_before_tls_handshake(
