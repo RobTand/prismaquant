@@ -534,34 +534,6 @@ def transactional_export_file(
                 )
 
 
-def transactional_directory_output(
-    *,
-    source_parameter: str,
-    output_parameter: str,
-    where: str,
-):
-    """Decorate an exporter so its output parameter receives a staging root."""
-    def decorate(function):
-        signature = inspect.signature(function)
-
-        @wraps(function)
-        def wrapped(*args, **kwargs):
-            bound = signature.bind(*args, **kwargs)
-            bound.apply_defaults()
-            source = bound.arguments[source_parameter]
-            output = bound.arguments[output_parameter]
-            with transactional_export_directory(
-                source,
-                output,
-                where=where,
-            ) as staged:
-                bound.arguments[output_parameter] = staged
-                return function(*bound.args, **bound.kwargs)
-
-        return wrapped
-    return decorate
-
-
 def transactional_file_output(
     *,
     source_parameter: str,
