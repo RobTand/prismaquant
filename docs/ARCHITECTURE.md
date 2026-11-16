@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-11-16 for PQ #3677. Source: the v68 pin, reviewed answer, and PQ2471 scope tests.
+Re-stamped 2026-11-16 for PQ #3720. Source: the v69 pin, reviewed answer, and routed E2M1 admission tests.
 
 Re-stamped 2026-11-15 for P4a. Source: `streaming_production_cache.py`,
 `build_production_cache.py`, and `run-pipeline.sh`.
@@ -2431,25 +2431,25 @@ normalization and its existing leaf mapping. Scoped route receipts replay
 carried launcher declarations through `tessera.image_metadata` with explicit
 receipt inputs. Shape guards, refusal payloads and exact replay equality remain
 active. Package-root resource traversal reads the exact packaged JSON.
-The producer and serving pin is `8bf496abdb7d598a3132f6b4b7cb7d7e96199d13` under schema v2.
-Contract v68, lane schema v12, has 18 cells and raw SHA-256
-`145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4`.
+The producer and serving pin is `e89757b9e39866dd253ca76215c112226724921f` under schema v2.
+Contract v69, lane schema v12, has 18 cells and raw SHA-256
+`e819d2e90c0b5fe27f11283890d1fec53054d88fbe29d7f9cc473a08682e7b5a`.
 E2M1 R896 cells name dense and routed units on IMG-G `f8dbe1a0` at TP1 only.
-PrismaQuant admits dense units.
-Tessera's published v68 routed predicate refuses this scope because it requires `start_state: True` with decision mode `carries`.
-A whole TP1 unit has no start state, although the v68 receipt served these bytes.
-[tessera#1716](https://github.com/RobTand/tessera/issues/1716) and [tessera#1719](https://github.com/RobTand/tessera/pull/1719) correct this predicate in v69. This pin stays at v68.
+PrismaQuant admits dense and routed units within those cells.
+Tessera #1719 removes the routed E2M1 start-state requirement. Whole TP1 units now pass the lane predicate.
+Receipt-bound launches retain their measured scope. No cell, wire, or arithmetic evidence changes.
 BF16 covers dense R769-R1279 and routed R1024 on IMG-N `5be13705` at TP1 only.
 The five measured BF16 dense rungs are 832, 880, 960, 1024, and 1088.
 E4M3 keeps its TP2 ceiling. IMG-G routed R768 uses the v66 class-launch receipt.
 PQ2471 grants narrow to BF16 TP1 and E4M3 TP2. They add no new rung or image.
-All 18 v68 cells have evidence grade `route_only`; none has an arithmetic receipt.
-Admission records show each parsed cell grade without changing a verdict. Tessera issue [#1717](https://github.com/RobTand/tessera/issues/1717) owns the arithmetic-receipt rule.
+All 18 v69 cells have evidence grade `route_only`; none has an arithmetic receipt.
+Admission records show each parsed cell grade. The evidence policy stays unchanged.
+Tessera #1718 makes refusal text name `evidence.grade`. It states that route-only evidence does not attest arithmetic.
 Graph-equality records remain route-only evidence. Export and serving gates stay independent.
 The plan writer uses the v68 projection API and the producer's native class geometry check.
 The default pipeline uses compressed-tensors and cannot reach a Tessera cell.
 The optional Qwen3 Tessera lane uses the vanilla image, which has no routed R768 cell.
-Provenance: 2026-11-16, PQ #3677 OPTION A; Tessera #1707 and the packaged v68 contract.
+Provenance: 2026-11-16, PQ #3720; Tessera #1719 and the packaged v69 contract.
 
 
 

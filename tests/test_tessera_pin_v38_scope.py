@@ -99,12 +99,8 @@ def test_glm_image_carries_only_its_qualified_families():
         for rung in cell["rungs_q256"]:
             facts = replace(_routed(rung, cell["family"]), structure=cell["structure"])
             route = _resolve(facts, NEW_IMAGE)
-            if cell["family"] == "TESSERA_E2M1_K2" and cell["structure"] == "routed_moe":
-                assert route.route_status == lane.ROUTE_STATUS_UNATTESTED
-                assert all("start_state" in regime.detail for regime in route.regimes)
-            else:
-                assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
-                assert cell["id"] in {r.cell_id for r in route.regimes}
+            assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
+            assert cell["id"] in {r.cell_id for r in route.regimes}
     for cell in cells:
         if cell["runtime"]["image"] == VANILLA_IMAGE:
             assert (cell["family"], cell["structure"], cell["rungs_q256"]) == (

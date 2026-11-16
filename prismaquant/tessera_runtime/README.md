@@ -39,17 +39,17 @@ git -C "$TS" cat-file -p "$SHA:src/tessera/serving/runtime_contract.json" | sha2
 The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
-## Current v68 pin
+## Current v69 pin
 
-The pin names `8bf496abdb7d598a3132f6b4b7cb7d7e96199d13`, contract v68, lane schema v12, with 18 cells.
-The packaged contract SHA-256 is `145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4`.
+The pin names `e89757b9e39866dd253ca76215c112226724921f`, contract v69, lane schema v12, with 18 cells.
+The packaged contract SHA-256 is `e819d2e90c0b5fe27f11283890d1fec53054d88fbe29d7f9cc473a08682e7b5a`.
 E2M1 R896 covers IMG-G at TP1.
-Tessera's published v68 routed predicate refuses this scope because it requires `start_state: True` with decision mode `carries`.
-A whole TP1 unit has no start state, although the v68 receipt served these bytes.
-[tessera#1716](https://github.com/RobTand/tessera/issues/1716) and [tessera#1719](https://github.com/RobTand/tessera/pull/1719) correct this predicate in v69. This pin stays at v68.
+Tessera #1719 removes the routed E2M1 start-state requirement. Whole TP1 units now pass the lane predicate.
+Receipt-bound launches retain their measured scope. No cell, wire, or arithmetic evidence changes.
 BF16 covers IMG-N at TP1. E4M3 keeps TP2.
 All 18 cell grades are `route_only`; none has an arithmetic receipt. Admission records show the parsed grade.
-Tessera issue [#1717](https://github.com/RobTand/tessera/issues/1717) owns the arithmetic-receipt rule. These annotations change no verdict.
+Tessera #1718 makes refusal text name `evidence.grade`. It states that route-only evidence does not attest arithmetic.
+The evidence policy stays unchanged.
 PQ #3677 narrows PrismaQuant-owned grants and records all upstream evidence changes.
 Historical results below retain their measured source identity.
 

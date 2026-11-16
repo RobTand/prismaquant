@@ -305,6 +305,7 @@ def test_native_qualification_is_exactly_the_reviewed_primary_cells():
     triples = domain.native_qualification_set()
     primary = {t for t in triples if t[0] in domain.PRIMARY_FAMILIES}
     assert primary == expected
+    assert (E2, 896, "routed_moe") in triples
     assert (BF, 3585, "dense") not in primary
 
 

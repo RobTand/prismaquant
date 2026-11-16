@@ -10872,7 +10872,6 @@
        "rotation": [
         "none"
        ],
-       "start_state": true,
        "window_bits": [
         14
        ]
@@ -11923,14 +11922,20 @@
    {
     "cell": "tessera_e2m1_k2_routed_moe_sm121_decode_resident",
     "execution_mode": "eager",
-    "native_cells": [],
+    "native_cells": [
+     "tessera_e2m1_k2_routed_moe_sm121_decode_resident",
+     "tessera_e2m1_k2_routed_moe_sm121_batch_resident"
+    ],
     "rate_q256": 896,
     "residency": "resident"
    },
    {
     "cell": "tessera_e2m1_k2_routed_moe_sm121_batch_resident",
     "execution_mode": "eager",
-    "native_cells": [],
+    "native_cells": [
+     "tessera_e2m1_k2_routed_moe_sm121_decode_resident",
+     "tessera_e2m1_k2_routed_moe_sm121_batch_resident"
+    ],
     "rate_q256": 896,
     "residency": "resident"
    },
@@ -12057,8 +12062,8 @@
   ]
  },
  "pin": {
-  "commit": "8bf496abdb7d598a3132f6b4b7cb7d7e96199d13",
-  "contract_sha256": "145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4",
+  "commit": "e89757b9e39866dd253ca76215c112226724921f",
+  "contract_sha256": "e819d2e90c0b5fe27f11283890d1fec53054d88fbe29d7f9cc473a08682e7b5a",
   "live_gate": "admits",
   "native_extension_rows": [
    {
@@ -21557,6 +21562,10 @@
    "execution_mode": "eager",
    "residency": "resident",
    "route": {
+    "activation_contracts": [
+     "e2m1_group16_ue4m3_static"
+    ],
+    "announced_fallback_regimes": [],
     "format": "TESSERA_E2M1_K2@896",
     "in_features": 4096,
     "in_scope": true,
@@ -21565,36 +21574,75 @@
     "out_features": 4096,
     "payload_family": "TESSERA_E2M1_K2",
     "qname": "tessera_e2m1_k2_routed_moe_sm121_decode_resident@896",
+    "qualifications": [
+     "device_qualified"
+    ],
     "rate_q256": 896,
     "regime_routes": [
      {
-      "activation_contract": null,
+      "activation_contract": "e2m1_group16_ue4m3_static",
       "cell_id": "tessera_e2m1_k2_routed_moe_sm121_decode_resident",
-      "detail": "cell 'tessera_e2m1_k2_routed_moe_sm121_decode_resident' launches ['tessera.routed_fused_e2m1.FusedRoutedE2M1MoE.__call__'] through the 'tessera_routed_fused_e2m1' lane (decoder 'native_routed_fused_window_e2m1'), whose published predicate this producer's planned wire for TESSERA_E2M1_K2 R896 fails: start_state: the lane reads only units that carry this, and the unit does not. No launch the cell names is left at this rung, so the kernel would refuse these bytes at load and the route is not admitted; the predicate is Tessera's, read from the contract, and the plan is this producer's -- change the plan or re-pin, never this gate.",
-      "qualification": null,
+      "detail": "",
+      "evidence_artifact": null,
+      "evidence_attribution": "unattributed",
+      "evidence_grade": "route_only",
+      "evidence_smoke": "not_recorded",
+      "executes": [
+       {
+        "decoder": "native_routed_fused_window_e2m1",
+        "symbol": "tessera.routed_fused_e2m1.FusedRoutedE2M1MoE.__call__"
+       }
+      ],
+      "execution_mode": "eager",
+      "qualification": "device_qualified",
       "regime": "decode",
-      "requires_serve_flags": [],
-      "route_status": "unattested"
+      "requires_plugins": [
+       "tessera"
+      ],
+      "requires_serve_flags": [
+       "TESSERA_SERVE_MODE=resident"
+      ],
+      "residency": "resident",
+      "route_status": "backed_with_serve_flag",
+      "runtime_image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
      },
      {
-      "activation_contract": null,
+      "activation_contract": "e2m1_group16_ue4m3_static",
       "cell_id": "tessera_e2m1_k2_routed_moe_sm121_batch_resident",
-      "detail": "cell 'tessera_e2m1_k2_routed_moe_sm121_batch_resident' launches ['tessera.routed_fused_e2m1.FusedRoutedE2M1MoE.__call__'] through the 'tessera_routed_fused_e2m1' lane (decoder 'native_routed_fused_window_e2m1'), whose published predicate this producer's planned wire for TESSERA_E2M1_K2 R896 fails: start_state: the lane reads only units that carry this, and the unit does not. No launch the cell names is left at this rung, so the kernel would refuse these bytes at load and the route is not admitted; the predicate is Tessera's, read from the contract, and the plan is this producer's -- change the plan or re-pin, never this gate.",
-      "qualification": null,
+      "detail": "",
+      "evidence_artifact": null,
+      "evidence_attribution": "unattributed",
+      "evidence_grade": "route_only",
+      "evidence_smoke": "not_recorded",
+      "executes": [
+       {
+        "decoder": "native_routed_fused_window_e2m1",
+        "symbol": "tessera.routed_fused_e2m1.FusedRoutedE2M1MoE.__call__"
+       }
+      ],
+      "execution_mode": "eager",
+      "qualification": "device_qualified",
       "regime": "batch",
-      "requires_serve_flags": [],
-      "route_status": "unattested"
+      "requires_plugins": [
+       "tessera"
+      ],
+      "requires_serve_flags": [
+       "TESSERA_SERVE_MODE=resident"
+      ],
+      "residency": "resident",
+      "route_status": "backed_with_serve_flag",
+      "runtime_image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
      }
     ],
-    "requires_serve_flags": [],
+    "requires_plugins": [
+     "tessera"
+    ],
+    "requires_serve_flags": [
+     "TESSERA_SERVE_MODE=resident"
+    ],
     "role_split": false,
-    "route_status": "unattested",
-    "structure": "routed_moe",
-    "unattested_reason": "no lane cell covers regime(s) ['decode', 'batch'] for TESSERA_E2M1_K2 rung 896 on sm_121 at residency 'resident', runtime_image 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5', execution_mode 'eager'",
-    "unattested_regimes": [
-     "decode",
-     "batch"
-    ]
+    "route_status": "backed_with_serve_flag",
+    "structure": "routed_moe"
    },
    "rung": 896
   },
@@ -21603,6 +21651,10 @@
    "execution_mode": "eager",
    "residency": "resident",
    "route": {
+    "activation_contracts": [
+     "e2m1_group16_ue4m3_static"
+    ],
+    "announced_fallback_regimes": [],
     "format": "TESSERA_E2M1_K2@896",
     "in_features": 4096,
     "in_scope": true,
@@ -21611,36 +21663,75 @@
     "out_features": 4096,
     "payload_family": "TESSERA_E2M1_K2",
     "qname": "tessera_e2m1_k2_routed_moe_sm121_batch_resident@896",
+    "qualifications": [
+     "device_qualified"
+    ],
     "rate_q256": 896,
     "regime_routes": [
      {
-      "activation_contract": null,
+      "activation_contract": "e2m1_group16_ue4m3_static",
       "cell_id": "tessera_e2m1_k2_routed_moe_sm121_decode_resident",
-      "detail": "cell 'tessera_e2m1_k2_routed_moe_sm121_decode_resident' launches ['tessera.routed_fused_e2m1.FusedRoutedE2M1MoE.__call__'] through the 'tessera_routed_fused_e2m1' lane (decoder 'native_routed_fused_window_e2m1'), whose published predicate this producer's planned wire for TESSERA_E2M1_K2 R896 fails: start_state: the lane reads only units that carry this, and the unit does not. No launch the cell names is left at this rung, so the kernel would refuse these bytes at load and the route is not admitted; the predicate is Tessera's, read from the contract, and the plan is this producer's -- change the plan or re-pin, never this gate.",
-      "qualification": null,
+      "detail": "",
+      "evidence_artifact": null,
+      "evidence_attribution": "unattributed",
+      "evidence_grade": "route_only",
+      "evidence_smoke": "not_recorded",
+      "executes": [
+       {
+        "decoder": "native_routed_fused_window_e2m1",
+        "symbol": "tessera.routed_fused_e2m1.FusedRoutedE2M1MoE.__call__"
+       }
+      ],
+      "execution_mode": "eager",
+      "qualification": "device_qualified",
       "regime": "decode",
-      "requires_serve_flags": [],
-      "route_status": "unattested"
+      "requires_plugins": [
+       "tessera"
+      ],
+      "requires_serve_flags": [
+       "TESSERA_SERVE_MODE=resident"
+      ],
+      "residency": "resident",
+      "route_status": "backed_with_serve_flag",
+      "runtime_image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
      },
      {
-      "activation_contract": null,
+      "activation_contract": "e2m1_group16_ue4m3_static",
       "cell_id": "tessera_e2m1_k2_routed_moe_sm121_batch_resident",
-      "detail": "cell 'tessera_e2m1_k2_routed_moe_sm121_batch_resident' launches ['tessera.routed_fused_e2m1.FusedRoutedE2M1MoE.__call__'] through the 'tessera_routed_fused_e2m1' lane (decoder 'native_routed_fused_window_e2m1'), whose published predicate this producer's planned wire for TESSERA_E2M1_K2 R896 fails: start_state: the lane reads only units that carry this, and the unit does not. No launch the cell names is left at this rung, so the kernel would refuse these bytes at load and the route is not admitted; the predicate is Tessera's, read from the contract, and the plan is this producer's -- change the plan or re-pin, never this gate.",
-      "qualification": null,
+      "detail": "",
+      "evidence_artifact": null,
+      "evidence_attribution": "unattributed",
+      "evidence_grade": "route_only",
+      "evidence_smoke": "not_recorded",
+      "executes": [
+       {
+        "decoder": "native_routed_fused_window_e2m1",
+        "symbol": "tessera.routed_fused_e2m1.FusedRoutedE2M1MoE.__call__"
+       }
+      ],
+      "execution_mode": "eager",
+      "qualification": "device_qualified",
       "regime": "batch",
-      "requires_serve_flags": [],
-      "route_status": "unattested"
+      "requires_plugins": [
+       "tessera"
+      ],
+      "requires_serve_flags": [
+       "TESSERA_SERVE_MODE=resident"
+      ],
+      "residency": "resident",
+      "route_status": "backed_with_serve_flag",
+      "runtime_image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
      }
     ],
-    "requires_serve_flags": [],
+    "requires_plugins": [
+     "tessera"
+    ],
+    "requires_serve_flags": [
+     "TESSERA_SERVE_MODE=resident"
+    ],
     "role_split": false,
-    "route_status": "unattested",
-    "structure": "routed_moe",
-    "unattested_reason": "no lane cell covers regime(s) ['decode', 'batch'] for TESSERA_E2M1_K2 rung 896 on sm_121 at residency 'resident', runtime_image 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5', execution_mode 'eager'",
-    "unattested_regimes": [
-     "decode",
-     "batch"
-    ]
+    "route_status": "backed_with_serve_flag",
+    "structure": "routed_moe"
    },
    "rung": 896
   },
