@@ -16350,7 +16350,6 @@ pq_py_library(
         ":test_grouped_linear_fisher_lib",
         ":test_layer_streaming_mxfp4_isolation_lib",
         ":test_model_walk_export_gate_lib",
-        ":test_model_walk_lib",
         "@pq_pip//pytest",
     ],
 )
