@@ -250,3 +250,8 @@ def test_fp8_round_preserves_fp32_bf16_recipe_bytes():
         dtype=torch.bfloat16,
     )
     assert torch.equal(out_tiny_bf, expected_tiny_bf)
+
+
+def test_the_uncalled_chunked_weight_io_stays_deleted():
+    from prismaquant import build_rtn_cache
+    assert not {"save_weights_chunked", "load_weights_chunked"} & set(vars(build_rtn_cache))
