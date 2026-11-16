@@ -13,14 +13,17 @@ as admitted Flux jobs; cite their job IDs and results in the PR body.
 2. Reference the same issue in the PR body. A partial change uses
    `Refs #<issue>.` with an open parent issue in this repository. A completed
    issue uses a supported closing reference such as `Closes #<issue>`.
-   The `linked issue` check verifies both the reference and branch number.
-3. Wait for `linked issue` and `pr-gate` to pass.
+   Put the reference at the start of its own line.
+3. Wait for `pr-gate` to pass.
 
 Classic branch protection requires a pull request but no status checks.
-The `queue` label path requires `linked issue` on your PR.
-The draft requires `gate` alone. Mergify would also
-apply any classic required check to the batch draft, which can't pass the
-issue rule, so keep required status checks out of classic protection.
+The `queue` label path requires two queue conditions on your PR's text: a body
+line `Closes #<N>`, `Fixes #<N>`, `Resolves #<N>`, `Refs #<N>` or `Part of #<N>`,
+and a branch `prismaquant-<N>[-suffix]` (`ig/`, `pg/`, `pg-train/` and `release`
+branches are exempt). Mergify does not check that the issue exists or is open, or
+that the branch number equals the issue number; you keep those rules yourself.
+The draft requires `gate` alone. Mergify would also apply any classic required
+check to the batch draft, so keep required status checks out of classic protection.
 
 ## Queue and dequeue
 

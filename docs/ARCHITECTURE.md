@@ -951,7 +951,8 @@ records run one at a time. The import surface runs only on pull requests and dra
 
 As of: 2026-11-16, FIFO merge queue in batches of 3, PQ #3773 (after #3642).
 Source: `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.mergify.yml`.
-One serial queue requires `linked issue` on original PRs and `gate` on each draft.
+One serial queue requires an issue line and a `prismaquant-<N>` branch on original PRs (PQ #3786;
+text only, no issue lookup) and `gate` on each draft.
 Each draft checks up to 3 PRs on the newest main, in `queue` label order; a failed batch is split.
 Bazel and hosted gate jobs run only on authenticated Mergify drafts or `gate-canary` PRs.
 Graph impact runs on every PR. The post-merge CPU suite remains on Python 3.12.
@@ -4437,6 +4438,12 @@ Re-stamped 2026-11-13: the multimodal probe and the allocator's
 takes `--visual-format` (default BF16) outside the DP. `CALIBRATION_MODALITY`
 and its `probe` settings key are removed, so a `probe.pkl` whose manifest
 records that key refuses with exit 2 until it is deleted.
+
+Superseded 2026-11-16 (PQ #3786): the `linked issue` workflow, its validator and
+`linked_issue.test.cjs` are deleted, because GitHub blocks `pull_request_target`
+by default from 2026-12-02. The merge queue now reads only the PR text (an issue
+line and a `prismaquant-<N>` branch) and checks no issue state. The text below
+is history.
 
 Re-stamped 2026-10-09 (PQ #2518): the trusted-base `linked issue` metadata
 check keeps native same-repository closing references and explicit
