@@ -262,11 +262,6 @@ PWC_WINDOW_LEASE_COUNTERS = {"windows_batched": 0, "entries_batched": 0,
                              "batch_fallbacks": 0}
 
 
-class _WindowLeaseRef(NamedTuple):
-    """The declared file one retained-window group-lease member stands for."""
-    path: str
-
-
 class _WindowTrackedWeights(dict):
     """Index resident owners while retaining the public cache's dict API.
 
@@ -2330,19 +2325,6 @@ def _qualify_stored_candidate_render_score(
     }
 
 
-def require_stored_candidate_render_score(
-    record: Mapping[str, object], *, where: str,
-) -> None:
-    """Refuse retained scalars that do not identify the candidate they priced."""
-    if _stored_candidate_render_score_dtype(record) is None:
-        raise ValueError(
-            f"{where}: render score lacks the supported stored-candidate scoring "
-            "contract and scored dtype; resume the production-cache producer "
-            "with the original source and calibration to rescore stored shards, "
-            "or rebuild the cache before synthesizing costs"
-        )
-
-
 def _render_score_normalizer(
     reference_weight: torch.Tensor,
     activations: torch.Tensor | None,
@@ -4358,49 +4340,6 @@ def activation_hook_scope_of(source: object) -> dict[str, object] | None:
     if raw is None:
         return None
     return validate_activation_hook_scope(raw)
-
-
-def assert_same_activation_hook_scope(
-    reference: Mapping[str, object] | None,
-    candidate: Mapping[str, object] | None,
-    *,
-    where: str,
-) -> dict[str, object] | None:
-    """Refuse two activation renderings that cannot be the same one (#147).
-
-    The correct rule for striped campaigns: shards of one campaign hook the
-    whole enumeration and render a slice each, so EQUAL hook digests (plus an
-    equal hooked count) is the pass condition. Binding per-shard digests into
-    the render identity would refuse every striped union; comparing nothing
-    lets two renderings ship under one name. Returns the validated reference
-    scope (``None`` when both sides predate the stamp).
-    """
-    if reference is None and candidate is None:
-        return None
-    if reference is None or candidate is None:
-        raise ValueError(
-            f"{where}: activation hook scope is present on one side and "
-            "missing on the other; cannot prove the same rendering"
-        )
-    validated_reference = validate_activation_hook_scope(
-        reference, where=f"{where} reference"
-    )
-    validated_candidate = validate_activation_hook_scope(
-        candidate, where=f"{where} candidate"
-    )
-    if (
-        validated_candidate["hooked_qnames_sha256"]
-        != validated_reference["hooked_qnames_sha256"]
-        or validated_candidate["hooked_qnames"]
-        != validated_reference["hooked_qnames"]
-    ):
-        raise ValueError(
-            f"{where}: activation hook digests differ: reference="
-            f"{validated_reference['hooked_qnames_sha256']} "
-            f"candidate={validated_candidate['hooked_qnames_sha256']}; "
-            "the two caches were rendered against different enumerations"
-        )
-    return validated_reference
 
 
 def _pre_guard_trusted_shards(cache_dir_path: str | Path) -> list[str]:

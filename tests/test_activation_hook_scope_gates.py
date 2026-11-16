@@ -258,3 +258,9 @@ def test_export_fingerprint_records_which_enumeration_it_ships():
     scope = fingerprint.get("activation_hook_scope")
     assert scope is not None, "export fingerprint dropped the hook scope"
     assert scope["hooked_qnames_sha256"] == HOOK_A
+
+
+def test_the_uncalled_cache_gates_stay_deleted():
+    from prismaquant import production_weight_cache as pwc
+    retired = {"assert_same_activation_hook_scope", "require_stored_candidate_render_score", "_WindowLeaseRef"}
+    assert not retired & set(vars(pwc))
