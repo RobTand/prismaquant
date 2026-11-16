@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
-import re
 from collections import defaultdict
 from collections.abc import Mapping
 from typing import Any
@@ -175,19 +173,6 @@ def _load_tensors(
                     )
                 out[k] = tensor if dtype is None else tensor.to(dtype)
     return out
-
-
-# The probe's activation-cache filename transform, mirrored EXACTLY (see
-# `measure_quant_cost.ActivationIndex`): one definition would be better, but
-# that one lives behind a class that also wants probe-stat metadata.
-_ACT_FNAME_SUB = re.compile(r"[^A-Za-z0-9_-]")
-
-# Packed parameter roles whose stage is `w13` (the fused gate/up half). Mirrors
-# `nvfp4_activation_contract._PACKED_LEAF_ROLES` without importing it at module
-# scope; anything else pools to the `w2` (down) stage.
-_PACKED_GATE_UP_LEAVES = frozenset(
-    {"gate_up_proj", "gate_proj", "up_proj", "w1", "w3"}
-)
 
 
 def _load_act_entry(
@@ -698,127 +683,6 @@ def synthesize_unrouted_expert_col_weights(
         "rule": "unrouted_expert_neutral_prior:layer_routed_mean",
         "basis": "probe n_tokens_seen == 0",
     }
-
-
-@torch.no_grad()
-def per_expert_stage_activation_calibration(
-    act_dir: str | Path,
-    members_by_target: Mapping[str, Mapping[tuple[str, int], str]],
-    *,
-    policy: str | None = None,
-) -> tuple[dict[str, torch.Tensor], dict[str, float]]:
-    """Calibrate packed routed-MoE stages from a PER-EXPERT activation cache.
-
-    ``synthesize_packed_expert_activation_samples`` replays routing from the
-    checkpoint because the packed topology caches only the experts MODULE's
-    input, so a ``down_proj`` stage has no measured routed intermediate. A
-    checkpoint that exposes routed experts as per-expert ``nn.Linear``s
-    (DeepSeek-V4-Flash) is the opposite case: the probe cached EVERY expert's
-    own inputs, so both stages are already measured and the replay's entry
-    condition (``moe_imatrix``'s ``f"{src}.0.gate_proj.weight" in weight_map``)
-    never fires. Nothing needs replaying here — only pooling.
-
-    Returns ``(samples, max_abs)`` keyed by the PACKED stage qname:
-
-    * ``samples`` covers the fused gate/up stage (``w13``). Each row is one
-      expert's column-wise max |x| over that expert's cached rows, so the
-      tensor's ``abs().max()`` is the EXACT pooled module-input max-abs while
-      residency stays at one row per expert rather than one row per routed
-      token (43 layers x 256 experts x 64 rows x 4096 cols would be ~11 GB
-      resident, and the contract builds every stage's sample up front).
-    * ``max_abs`` covers the down stage (``w2``). Its inputs are the routed
-      INTERMEDIATE, measured directly — not a module input and not a replay —
-      which is exactly the separation the stage attestation exists to publish.
-
-    Because the pooling is a max reduction it is exact for every amax-derived
-    policy and meaningless for a distribution-fitting one, so
-    ``mse_grid_calibrated.v1`` is refused rather than silently mis-fitted.
-    """
-    from prismaquant.nvfp4_activation_contract import (
-        MSE_GRID_INPUT_GLOBAL_SCALE_POLICY,
-        resolve_input_global_scale_policy,
-    )
-
-    if policy is not None and (
-        resolve_input_global_scale_policy(policy)
-        == MSE_GRID_INPUT_GLOBAL_SCALE_POLICY
-    ):
-        raise ValueError(
-            "per-expert routed-MoE stage calibration pools each expert's "
-            "cached rows to a column-wise max, which is exact for an "
-            "amax-derived policy and carries no distribution for "
-            f"{MSE_GRID_INPUT_GLOBAL_SCALE_POLICY!r}; re-probe with a packed "
-            "experts-module cache entry or choose an amax policy"
-        )
-
-    act_dir = Path(act_dir)
-    samples: dict[str, torch.Tensor] = {}
-    max_abs: dict[str, float] = {}
-    unrouted: dict[str, int] = {}
-    for packed_qname in sorted(members_by_target):
-        member_qnames = members_by_target[packed_qname]
-        experts = sorted({e for _proj, e in member_qnames})
-        rows: list[torch.Tensor] = []
-        absent = 0
-        for e in experts:
-            per_expert: list[torch.Tensor] = []
-            for (proj, expert_id), member in sorted(member_qnames.items()):
-                if expert_id != e:
-                    continue
-                path = act_dir / (
-                    _ACT_FNAME_SUB.sub("__", member) + ".pt")
-                if not path.exists():
-                    # A NEVER-ROUTED expert. The probe writes a cache entry per
-                    # Linear it actually saw, so an expert off the calibration
-                    # distribution has no file at all (DSv4-Flash 16x512:
-                    # 5,505 of 33,153 across 40 layers). It contributes no
-                    # observed activation, so it contributes nothing to a max
-                    # — the same reading `synthesize_unrouted_expert_col_weights`
-                    # takes of the same zero. Counted, never silent.
-                    absent += 1
-                    continue
-                _name, inputs, _row_ids = _load_act_entry(path)
-                if inputs is None or inputs.numel() == 0:
-                    raise ValueError(
-                        f"{packed_qname}: activation cache entry for "
-                        f"{member!r} has no value-bearing rows")
-                per_expert.append(inputs.abs().amax(dim=0))
-            if not per_expert:
-                continue
-            widths = {int(v.numel()) for v in per_expert}
-            if len(widths) != 1:
-                raise ValueError(
-                    f"{packed_qname}: expert {e} cached inputs disagree on "
-                    f"in_features across the fused projections: {widths}")
-            rows.append(torch.stack(per_expert).amax(dim=0)
-                        if len(per_expert) > 1 else per_expert[0])
-        if not rows:
-            raise ValueError(
-                f"{packed_qname}: NO expert in this stack has an activation "
-                f"cache entry ({len(member_qnames)} members, all absent), so "
-                "the stage has no calibrated input at all; re-probe rather "
-                "than ship an uncalibrated static W4A4 scalar")
-        if absent:
-            unrouted[packed_qname] = absent
-        pooled = torch.stack(rows).contiguous()
-        value = float(pooled.max().item())
-        if not math.isfinite(value) or value <= 0.0:
-            raise ValueError(
-                f"{packed_qname}: pooled routed-MoE stage max-abs is {value!r}")
-        if len(_PACKED_GATE_UP_LEAVES & {packed_qname.rsplit('.', 1)[1]}):
-            samples[packed_qname] = pooled
-        else:
-            max_abs[packed_qname] = value
-    if unrouted:
-        total = sum(unrouted.values())
-        worst = max(unrouted, key=unrouted.get)
-        print(
-            f"[export-cb-stream] routed-MoE stage calibration skipped {total} "
-            f"never-routed expert projection(s) across {len(unrouted)} "
-            f"stack(s) (worst: {worst} with {unrouted[worst]})",
-            flush=True,
-        )
-    return samples, max_abs
 
 
 # ---------------------------------------------------------------------------

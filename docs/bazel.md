@@ -159,6 +159,24 @@ evidence when another shard fails. No shard is retried to obtain a pass.
 
 TL3 keeps BuildBuddy priority if a fallback batch arrives while its queue is backed up; this cutover adds no scheduler.
 
+### Find the merge that broke a record
+
+The full record runs every 6 hours, so one red record can cover several merges. GitHub can start a
+scheduled slot late or not at all; 20 minutes after a slot with no run, the record is started once by hand. Bisect only the
+targets that failed, not the whole suite:
+
+1. Read the failed targets and their architecture from the red record's `failed test <label> on <arch>`
+   annotations.
+2. List the merges that the record covers:
+   `git log --first-parent --merges --format='%H %s' <last green record head>..<red record head>`.
+3. Bisect over that list. At each merge head, run only the failed targets with `bbrun.py`, the
+   BuildBuddy client that holds the API key, in an admitted Flux job:
+   `bazel test --config=remote --config=ci --noremote_accept_cached --nocache_test_results <targets>`.
+   For arm64, use `--config=remote-arm64`. N merges take about log2(N) runs.
+4. The first merge where a target fails is the cause. Tell the owner of that merge.
+   If the target passes when you run it at the red record head, the failure is flaky, not a merge.
+   Report it to the owner of the test. Do not rerun the record to get a green result.
+
 
 Upload scanning runs in-process under Python 3.14 with stdlib `compression.zstd`.
 The vendored scanner remains unchanged. The upload boundary refuses every

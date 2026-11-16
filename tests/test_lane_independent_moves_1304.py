@@ -119,3 +119,7 @@ def test_the_helpers_have_one_owner():
     # The retired codebook lane's modules were archived in step 2 of #1304.
     for name in ("cb_imatrix", "nvfp4_cb_footprint"):
         assert importlib.util.find_spec(f"prismaquant.{name}") is None, name
+
+
+def test_the_archive_only_per_expert_stage_calibration_stays_deleted():
+    assert not hasattr(moe_imatrix, "per_expert_stage_activation_calibration")

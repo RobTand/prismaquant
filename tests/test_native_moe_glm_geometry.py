@@ -525,3 +525,7 @@ def test_the_alias_is_never_treated_as_a_declared_geometry_field():
     view = panel._shape_for_roster(glm)
     assert view["experts"] == view["n_routed_experts"] == 288
     assert set(panel.geometry_only(view)) == set(panel.GLM_SHAPE_FIELDS)
+
+
+def test_the_uncalled_captured_moe_boundary_stays_deleted():
+    assert not hasattr(panel, "captured_moe_boundary")
