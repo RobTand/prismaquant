@@ -230,3 +230,6 @@ def test_help_runs_without_the_fleet(module):
     assert completed.returncode == 0, completed.stderr
     assert 'usage:' in completed.stdout
 
+
+def test_the_unused_show_status_stays_deleted():
+    assert not {"show_status", "EXIT_NOTHING"} & set(vars(common))
