@@ -487,7 +487,6 @@ def test_unreadable_test_log_keeps_the_fail_verdict_and_its_publication(tmp_path
     monkeypatch.setenv('BUILDBUDDY_API_KEY', 'excerpt-cli-sentinel')
     monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
     monkeypatch.setattr(gate.artifacts, 'scan_runtime_available', lambda: True)
-    monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: None)
     monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
     failed = log_event(LABEL, 'bytestream://own-log')
     if fault == 'no-uri':
@@ -616,7 +615,6 @@ def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_f
                 'verdict': 'pass', 'targets': [LABEL], 'budget_warnings': [],
                 'error': 'pq-scan-controller-sentinel' if scan_fault == 'leak' else None}
     monkeypatch.setattr(gate, 'execute_shard', execute)
-    monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: calls.append(('history', head)))
     original_write_bytes = Path.write_bytes
     def stage_receipt(path, content):
         if path.name == 'gate-result.json':
@@ -625,8 +623,7 @@ def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_f
         return original_write_bytes(path, content)
     monkeypatch.setattr(Path, 'write_bytes', stage_receipt)
     code = gate.main(['shard'])
-    assert calls[0] == ('history', 'a' * 40)
-    assert len(calls) == 2
+    assert len(calls) == 1
     if scan_fault:
         assert code == 75
         assert list((tmp_path / 'upload').iterdir()) == []
@@ -663,7 +660,6 @@ def test_build_only_partitions_survive_the_cli_and_controller_handoff(
             ('amd64', 'arm64') if mode == 'main' else ('amd64',))}}
     raw = json.dumps(document).encode()
     monkeypatch.setenv('BUILDBUDDY_API_KEY', 'build-only-upload-sentinel')
-    monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: None)
     calls, records = [], {}
     execute = gate.execute_shard
     def run_partition(manifest):
@@ -739,7 +735,6 @@ def test_shard_refusal_names_fixed_phase_and_category_without_private_values(
     monkeypatch.setenv('PQ_BAZEL_SHARD', '{}')
     monkeypatch.setenv('BUILDBUDDY_API_KEY', sentinel)
     monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
-    monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: None)
     monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
     native_calls = []
     local_output = tmp_path / sentinel
@@ -997,7 +992,6 @@ def test_inventory_late_dns_recovery_and_refusal_at_real_transport_boundary(
         'manifest_sha256': 'd' * 64, 'partition_sha256': 'e' * 64}))
     monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
     monkeypatch.setattr(gate.artifacts, 'scan_runtime_available', lambda: True)
-    monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: None)
     monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
     calls = []
 

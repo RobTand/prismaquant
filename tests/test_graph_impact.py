@@ -159,20 +159,6 @@ def test_vendored_core_hash():
     assert actual == recorded, 'Update the recorded hash only when the core changes in all four repos'
 
 
-def test_pra_baseline_keeps_main_minima_under_the_current_analyzer():
-    from tools.ci import graph_impact_pq as pq
-
-    main = pq.snapshot_at(ROOT, '9fb507d69a13dc058e731f039bf445e84e4b5d3a')
-    recorded = json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text())
-    expected = {**main['recorded_baseline'],
-                'figures': {**main['recorded_baseline']['figures'], 'scc_max': main['scc_max']},
-                'test_to_test_count': len(impact.test_to_test_edges(main)),
-                'analyzer_sha256': pq.file_sha256hex(ROOT / 'tools/bazel/build_files.py')}
-    assert impact.baseline_errors(recorded, expected) == []
-    fixed = expected.keys() - {'figures', 'reach_budget', 'test_to_test_count', 'edge_groups', 'test_to_test'}
-    assert {key: recorded[key] for key in fixed} == {key: expected[key] for key in fixed}
-
-
 def test_bazel_diff_reader_keeps_source_labels_and_excludes_manual(tmp_path):
     path = tmp_path / 'deps.json'
     path.write_text(json.dumps({'//t:fast': ['//lib:core'], '//t:manual': ['//other:x'],
@@ -223,22 +209,55 @@ def test_pq_adapter_respects_generator_launch_and_conftest_rules(tmp_path):
                                   'tests/test_a.py': ['prismaquant/hub.py', 'tools/run.py']}
 
 
-def test_pq_no_git_reports_no_base_and_enforces_absolute_budget(tmp_path, capsys):
+@pytest.mark.parametrize('changed', [None, 'tests/fixtures/graph_impact_baseline.json', 'tools/bazel/build_files.py',
+                                     'tools/ci/graph_impact.py', 'tools/ci/graph_impact_pq.py'])
+@pytest.mark.parametrize('field,value,message', [('analyzer_sha256', '0' * 64, 'analyzer_sha256 is stale'),
+                                                 ('scc_max', 3, 'baseline figure scc_max may only shrink'),
+                                                 ('test_to_test_count', 1, 'test_to_test_count may only shrink')])
+def test_pq_check_refuses_a_baseline_the_measured_base_does_not_meet(tmp_path, capsys, field, value, message, changed):
     from tools.ci import graph_impact_pq as pq
-    files = {'tests/test_a.py': 'import tools.hub\n', 'tools/hub.py': 'x = 1\n',
-             'tools/ci/gate_durations.json': '{"files": {}}',
-             'tests/fixtures/graph_impact_allowlist.json': '{}'}
-    for name, text in files.items():
-        path = tmp_path / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
-    snapshot = pq.load_snapshot(tmp_path)
-    (tmp_path / 'tests/fixtures/graph_impact_baseline.json').write_text(json.dumps(pq.record(snapshot)))
-    recorded = tmp_path / 'tests/fixtures/graph_impact_baseline.json'
-    data = json.loads(recorded.read_text()); data['reach_budget'] = 0; recorded.write_text(json.dumps(data))
-    assert pq.main(['--root', str(tmp_path)]) == 1
-    output = capsys.readouterr()
-    assert 'no base available' in output.out and 'reach 1 exceeds budget 0' in output.err
+    base = {**measure(edges={('a', 'b'), ('b', 'a')}), 'duplication': pq.duplication_inventory.scan(tmp_path)}
+    recorded = baseline(base, analyzer_sha256=pq.file_sha256hex(pq.ROOT / 'tools/bazel/build_files.py'))
+    (recorded['figures'] if field == 'scc_max' else recorded)[field] = value
+    base['recorded_baseline'] = {**recorded, 'reach_budget': recorded['reach_budget'] + (changed == str(pq.BASELINE))}
+    base['recorded_inputs'] = {path: '0' * 64 if path == changed else digest
+                               for path, digest in pq.ratchet_digests(pq.ROOT).items()}
+    refused = field == 'analyzer_sha256' or changed is not None
+    assert pq_check(tmp_path, base, base, recorded) == refused
+    assert (message in capsys.readouterr().err) is refused
+
+
+def test_pq_check_refuses_a_base_with_no_baseline_at_the_fixture_path(tmp_path, capsys):
+    from tools.ci import graph_impact_pq as pq
+    base = {**measure(), 'duplication': pq.duplication_inventory.scan(tmp_path), 'recorded_baseline': None,
+            'recorded_inputs': pq.ratchet_digests(pq.ROOT)}
+    loosened = baseline(base, reach_budget=1, analyzer_sha256=pq.file_sha256hex(pq.ROOT / pq.ANALYZER))
+    assert pq_check(tmp_path, base, base, loosened) == 1
+    assert 'no base graph' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('edges', [1, 6])
+def test_pq_write_baseline_records_a_base_gain_only_if_the_head_meets_it(tmp_path, capsys, edges):
+    from tools.ci import graph_impact_pq as pq
+    tests = {f't{index}': set() for index in range(7)}
+    legacy = {**dict.fromkeys(pq.LEGACY_TOLERANCES, 0), 'duplication': pq.duplication_inventory.scan(tmp_path)}
+    base = {**measure(tests), **legacy, 'recorded_inputs': pq.ratchet_digests(pq.ROOT)}
+    head = {**measure(tests, {('t0', f't{index}') for index in range(1, edges + 1)}), **legacy}
+    base['recorded_baseline'] = {**pq.record(base), 'test_to_test': 'reach', 'test_to_test_count': 5}
+    assert pq_check(tmp_path, base, head, base['recorded_baseline']) == 0
+    written = pq_check(tmp_path, base, head, base['recorded_baseline'], write_baseline=True)
+    assert ('count rose from 0 to 6' in capsys.readouterr().err) is (edges == 6)
+    recorded = json.loads((tmp_path / 'baseline.json').read_text())
+    # Base 0, recorded 5: one new edge records 0; six would fail the next check, so the write is refused.
+    assert (written, recorded['test_to_test_count'], pq_check(tmp_path, base, head, recorded)) == (
+        (0, 0, 0) if edges == 1 else (1, 5, 0))
+
+
+def pq_check(tmp_path, before, after, recorded, **options):
+    from tools.ci import graph_impact_pq as pq
+    (tmp_path / 'baseline.json').write_text(json.dumps(recorded))
+    (tmp_path / 'allowlist.json').write_text('{}')
+    return pq.check(before, after, tmp_path / 'baseline.json', tmp_path / 'allowlist.json', **options)
 
 
 from tools.ci import graph_impact_imports as fanout

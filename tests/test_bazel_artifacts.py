@@ -145,7 +145,7 @@ def test_scanner_bootstrap_uses_verified_python_without_pip(tmp_path, monkeypatc
         return payload
     def forbidden_child(*args, **kwargs):
         pytest.fail('runtime bootstrap must not launch a pip or installer child')
-    monkeypatch.setattr(artifacts.subprocess, 'run', forbidden_child)
+    monkeypatch.setattr('subprocess.run', forbidden_child)
     def replace_interpreter(executable, argv):
         assert 'Scanner runtime verified: pinned Python 3.14.0' in capsys.readouterr().out
         assert Path(executable).read_bytes() == content
@@ -218,55 +218,6 @@ def test_cli_refusal_names_a_fixed_phase_without_exception_values(tmp_path, monk
     category = ' category=runtime;' if role == 'shard' else ''
     assert 'refused at scanner-runtime;' + category + ' upload refused' in output.err
     assert 'private-path-token-and-query' not in output.err + output.out
-
-
-@pytest.mark.parametrize('wrong_head', [False, True])
-def test_runner_history_hydrates_a_shallow_checkout_for_archived_main(tmp_path, monkeypatch, wrong_head):
-    import subprocess
-    source, checkout = tmp_path / 'origin', tmp_path / 'checkout'
-    source.mkdir()
-    def git(directory, *arguments):
-        return subprocess.run(['git', *arguments], cwd=directory, check=True,
-            text=True, capture_output=True, env=artifacts.child_environment()).stdout.strip()
-    git(source, 'init', '-b', 'main')
-    git(source, 'config', 'user.name', 'History fixture')
-    git(source, 'config', 'user.email', 'fixture@example.invalid')
-    (source / 'tracked').write_text('archived main')
-    git(source, 'add', 'tracked')
-    git(source, 'commit', '-m', 'base')
-    base = git(source, 'rev-parse', 'HEAD')
-    (source / 'tracked').write_text('head')
-    git(source, 'commit', '-am', 'head')
-    head = git(source, 'rev-parse', 'HEAD')
-    git(tmp_path, 'clone', '--depth=1', source.as_uri(), str(checkout))
-    assert git(checkout, 'rev-parse', '--is-shallow-repository') == 'true'
-    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'history-private-sentinel')
-    calls = []
-    def run(command, **kwargs):
-        assert 'BUILDBUDDY_API_KEY' not in kwargs['env']
-        assert 'history-private-sentinel' not in repr(command)
-        assert command[:5] == ['git', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false']
-        assert kwargs['capture_output'] is True
-        calls.append(command)
-        return subprocess.run(command, **kwargs)
-    if wrong_head:
-        with pytest.raises(RuntimeError, match='history'):
-            artifacts.prepare_history(base, root=checkout, runner=run)
-    else:
-        artifacts.prepare_history(head, root=checkout, runner=run)
-        assert git(checkout, 'rev-parse', '--is-shallow-repository') == 'false'
-        assert git(checkout, 'show', base + ':tracked') == 'archived main'
-        assert any('--unshallow' in command and '--no-filter' in command for command in calls)
-
-
-def test_runner_history_failure_redacts_git_diagnostics(tmp_path, capsys):
-    import subprocess
-    def broken_git(command, **kwargs):
-        raise subprocess.CalledProcessError(1, command, output='private-history-credential')
-    with pytest.raises(RuntimeError, match='history') as error:
-        artifacts.prepare_history('a' * 40, root=tmp_path, runner=broken_git)
-    assert 'private-history-credential' not in str(error.value)
-    assert 'private-history-credential' not in capsys.readouterr().out
 
 
 @pytest.fixture
