@@ -61,9 +61,6 @@ pq_py_library(
     srcs = [
         "bench_stage_a_forward_split.py",
     ],
-    data = [
-        "bench_stage_a_forward_split.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -105,8 +102,6 @@ pq_py_library(
     data = [
         ":files/boundary_allowlists",
         "boundary_gate.py",
-        "test_package_tools_boundary.py",
-        "test_tessera_core_boundary.py",
     ],
 )
 
@@ -140,12 +135,6 @@ pq_py_library(
     name = "conftest",
     srcs = [
         "conftest.py",
-    ],
-    data = [
-        "test_conftest_reach.py",
-        "test_nvfp4_served_dequant_kernel.py",
-        "test_render_score_served_quantizer_identity.py",
-        "test_tessera_export_scope.py",
     ],
     deps = [
         ":_own_process_profile",
@@ -403,7 +392,6 @@ pq_py_library(
         ":files/fixtures/tessera_route_trace_1490/measured",
         ":files/fixtures/tessera_route_trace_1490/named",
         "fixtures/tessera_route_trace_1490/config.json",
-        "fixtures/tessera_route_trace_1490/generate.py",
         "fixtures/tessera_route_trace_1490/sources.json",
     ],
     deps = [
@@ -419,7 +407,6 @@ pq_py_library(
     ],
     data = [
         "fixtures/tessera_route_trace_1620/config.json",
-        "fixtures/tessera_route_trace_1620/generate.py",
         "fixtures/tessera_route_trace_1620/sources.json",
     ],
     deps = [
@@ -431,9 +418,6 @@ pq_py_library(
 pq_py_library(
     name = "fixtures/tessera_route_trace_509/generate",
     srcs = [
-        "fixtures/tessera_route_trace_509/generate.py",
-    ],
-    data = [
         "fixtures/tessera_route_trace_509/generate.py",
     ],
     deps = [
@@ -456,11 +440,7 @@ pq_py_library(
     srcs = [
         "fixtures/token_kl_old_2778.py",
     ],
-    data = [
-        "//:experiments/glm_tr3_full_vocab.py",
-    ],
     deps = [
-        "//:experiments/glm_tr3_full_vocab",
         "@pq_pip//torch",
     ],
 )
@@ -469,9 +449,6 @@ pq_py_library(
     name = "fleet_data_samples/sample_fleet_data",
     srcs = [
         "fleet_data_samples/sample_fleet_data.py",
-    ],
-    data = [
-        "test_fleet_data_selection.py",
     ],
     deps = [
         "@pq_pip//pytest",
@@ -881,7 +858,6 @@ pq_py_library(
     ],
     data = [
         ":files/fixtures",
-        "conftest.py",
         "golden_table.py",
     ],
 )
@@ -890,9 +866,6 @@ pq_py_library(
     name = "graph_lane_fixtures",
     srcs = [
         "graph_lane_fixtures.py",
-    ],
-    data = [
-        "conftest.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -925,9 +898,6 @@ pq_py_library(
     srcs = [
         "lane_table_fixtures.py",
     ],
-    data = [
-        "conftest.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -939,9 +909,6 @@ pq_py_library(
     name = "legacy_capture_fixtures",
     srcs = [
         "legacy_capture_fixtures.py",
-    ],
-    data = [
-        "conftest.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -1029,11 +996,6 @@ pq_py_library(
     srcs = [
         "nvfp4_served_qdq_fixtures.py",
     ],
-    data = [
-        "test_nvfp4_empty_activation_batch.py",
-        "test_nvfp4_served_dequant_kernel.py",
-        "test_nvfp4_served_qdq_no_sync.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -1090,9 +1052,6 @@ pq_py_library(
     srcs = [
         "own_process_samples/sample_isolated.py",
     ],
-    data = [
-        "test_own_process_isolation.py",
-    ],
     deps = [
         "@pq_pip//pytest",
     ],
@@ -1122,9 +1081,6 @@ pq_py_library(
     name = "own_process_samples/sample_shared",
     srcs = [
         "own_process_samples/sample_shared.py",
-    ],
-    data = [
-        "test_own_process_isolation.py",
     ],
 )
 
@@ -1494,7 +1450,6 @@ pq_py_library(
     ],
     data = [
         "test_activation_reservoir_row_identity.py",
-        "test_striped_render_row_identity.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -1825,9 +1780,6 @@ pq_py_library(
     srcs = [
         "test_allocator_byte_budget_selection.py",
     ],
-    data = [
-        "test_footprint.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -1957,9 +1909,6 @@ pq_py_library(
     srcs = [
         "test_allocator_family_licence.py",
     ],
-    data = [
-        "test_tessera_menu.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -2082,10 +2031,6 @@ pq_py_library(
     name = "test_allocator_measured_runtime_cli_lib",
     srcs = [
         "test_allocator_measured_runtime_cli.py",
-    ],
-    data = [
-        "test_prefill_frontier.py",
-        "test_runtime_admission_split.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -3562,12 +3507,6 @@ pq_py_library(
     srcs = [
         "test_atomic_write_recipe_1573.py",
     ],
-    data = [
-        "//:prismaquant/aura_checkpoint_journal.py",
-        "//:prismaquant/aura_cost.py",
-        "//:prismaquant/cost_stage_checkpoint.py",
-        "test_digest_calibration_cache_1512.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -4082,11 +4021,6 @@ pq_py_library(
     name = "test_band_serial_batched_regime_lib",
     srcs = [
         "test_band_serial_batched_regime.py",
-    ],
-    data = [
-        "//:prismaquant/joint_adjoint_checkpoints.py",
-        "//:prismaquant/joint_cost_quantum.py",
-        "test_kda_kernel_mode.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -6568,9 +6502,6 @@ pq_py_library(
     name = "test_bitrate_select_lib",
     srcs = [
         "test_bitrate_select.py",
-    ],
-    data = [
-        "test_allocator_kneedle.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -11575,7 +11506,6 @@ pq_py_library(
     data = [
         "//:files/experiments/measurements/glm-derivative-contract-20260908",
         "//:prismaquant/__init__.py",
-        "//:tools/tessera_campaign_container.py",
         "test_campaign_launcher_pinned_import.py",
     ],
     deps = [
@@ -13985,7 +13915,6 @@ pq_py_library(
     ],
     data = [
         "test_container_cache_roots_1072.py",
-        "test_overlay_cache_refusal_1129.py",
     ],
     deps = [
         "//:tools/__init__",
@@ -15025,9 +14954,6 @@ pq_py_library(
     srcs = [
         "test_derive_per_expert_routing_1931.py",
     ],
-    data = [
-        "//:prismaquant/measure_quant_cost.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -15263,7 +15189,6 @@ pq_py_library(
         ":files",
     ],
     deps = [
-        "//:prismaquant/digests",
         "//:tools/dsv4_wikitext_inputs",
         "//:tools/full_kl_teacher_payload",
         "@pq_pip//pytest",
@@ -15316,25 +15241,6 @@ pq_py_test(
     path = "tests/test_digest_export_lane_1599.py",
     library = ":test_digest_export_lane_1599_lib",
     deps = [
-        "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
-        "//:pqtel/__init__",
-        "//:prismaquant/lane_shipcard",
-        "//:prismaquant/shipcard_cli",
-        "//:tools/build_streamed_full_kl_teacher",
-        "//:tools/dsv4_wikitext_inputs",
-        "//:tools/full_kl_teacher_payload",
-        "//:tools/g3job/g3_pq_policy/__init__",
-        "//:tools/gold_engine_options",
-        "//:tools/gold_measurement_fidelity",
-        "//:tools/measure_served_gold",
-        "//:tools/measure_vllm_full_kl",
-        "//:tools/measure_vllm_wikitext_ppl",
-        "//:tools/pq_profile_child",
-        "//:tools/prepare_dsv4_wikitext_inputs",
-        "//:tools/prismaquant_source_bootstrap",
-        "//:tools/spec_decode_guard",
-        "//:tools/tessera_campaign_container",
-        "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
     timeout = "moderate",
@@ -15346,14 +15252,11 @@ pq_py_library(
         "test_digest_export_lane_1599.py",
     ],
     data = [
-        "//:prismaquant/digests.py",
-        "//:prismaquant/tessera_export_lane.py",
         ":files/fixtures",
         "test_digest_export_lane_1599.py",
     ],
     deps = [
         "//:prismaquant/__init__",
-        "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/digests",
         "@pq_pip//pytest",
     ],
@@ -15550,9 +15453,6 @@ pq_py_library(
     name = "test_digest_profiles_1301_files_lib",
     srcs = [
         "test_digest_profiles_1301_files.py",
-    ],
-    data = [
-        "golden_table.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -15778,7 +15678,6 @@ pq_py_library(
         "test_dispatch_joint_quanta.py",
     ],
     data = [
-        "//:tools/dispatch_joint_quanta.py",
         "test_dispatch_joint_quanta.py",
     ],
     deps = [
@@ -21188,7 +21087,6 @@ pq_py_library(
     ],
     data = [
         "//:pytest.ini",
-        "conftest.py",
         "fleet_data_samples/sample_fleet_data.py",
         "test_fleet_data_selection.py",
     ],
@@ -21749,7 +21647,6 @@ pq_py_library(
     data = [
         ":files/fixtures",
         "test_full_engine_resource_report.py",
-        "test_runtime_fixed_resource_admission.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -21892,9 +21789,6 @@ pq_py_library(
     name = "test_function_pairs_1302_lib",
     srcs = [
         "test_function_pairs_1302.py",
-    ],
-    data = [
-        "golden_table.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -24235,10 +24129,6 @@ pq_py_library(
     name = "test_glm5_next_streamed_forward_parity_lib",
     srcs = [
         "test_glm5_next_streamed_forward_parity.py",
-    ],
-    data = [
-        "//:prismaquant/model_profiles/glm5_next.py",
-        "//:prismaquant/model_runtime.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -27615,6 +27505,7 @@ pq_py_test(
         "//:tools/__init__",
         "//:tools/build_streamed_full_kl_teacher",
         "//:tools/g3job/g3_pq_policy/__init__",
+        "//:tools/measure_served_gold",
         "//:tools/measure_vllm_full_kl",
         "//:tools/measure_vllm_wikitext_ppl",
         "//:tools/pq_profile_child",
@@ -27805,9 +27696,11 @@ pq_py_test(
         "//:tools/inspect_prepared_cache.py",
         "//:tools/inspect_t4_binding.py",
         "//:tools/joint_prepare_startup_probe.py",
+        "//:tools/kl_ab.py",
         "//:tools/make_uniform_assignment.py",
         "//:tools/materialize_wikitext_corpus.py",
         "//:tools/measure_boundary_control.py",
+        "//:tools/measure_served_gold.py",
         "//:tools/measure_wire_rehash_readers.py",
         "//:tools/nvfp4_served_qdq_bench.py",
         "//:tools/operating_point.py",
@@ -29181,13 +29074,11 @@ pq_py_library(
     ],
     data = [
         "//:tools/gold_engine_options.py",
-        "//:tools/kl_ab.py",
     ],
     deps = [
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:tools/__init__",
         "//:tools/gold_engine_options",
-        "//:tools/kl_ab",
         "@pq_pip//pytest",
     ],
 )
@@ -29901,7 +29792,6 @@ pq_py_library(
         "test_grouped_linear_fisher.py",
     ],
     data = [
-        "test_body_fisher_sweep.py",
         "test_grouped_linear_fisher.py",
     ],
     deps = [
@@ -33476,9 +33366,6 @@ pq_py_library(
     srcs = [
         "test_interned_json_loader.py",
     ],
-    data = [
-        "test_interned_json.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -33562,9 +33449,6 @@ pq_py_library(
     name = "test_io_engine_lib",
     srcs = [
         "test_io_engine.py",
-    ],
-    data = [
-        "test_reclaim_readings_gb10.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -34706,7 +34590,6 @@ pq_py_library(
         "test_joint_catalog_extension.py",
     ],
     data = [
-        "//:tools/assemble_t4_overlay.py",
         ":files/fixtures",
         "test_joint_catalog_extension.py",
     ],
@@ -35748,9 +35631,6 @@ pq_py_library(
     srcs = [
         "test_joint_projection_backend.py",
     ],
-    data = [
-        "test_tessera_joint_aura.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -36621,9 +36501,6 @@ pq_py_library(
     data = [
         "//:files/experiments/measurements/glm-derivative-contract-20260908",
         "test_kda_capture_kernel.py",
-        "test_kda_chunk_kernel.py",
-        "test_kda_kernel_default_1252.py",
-        "test_kda_kernel_mode.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -36678,9 +36555,6 @@ pq_py_library(
     srcs = [
         "test_kda_chunk_kernel.py",
     ],
-    data = [
-        "//:experiments/kda_kernel_numerics.py",
-    ],
     deps = [
         "//:experiments/kda_kernel_numerics",
         "//:prismaquant/__init__",
@@ -36725,9 +36599,6 @@ pq_py_library(
     name = "test_kda_kernel_default_1252_lib",
     srcs = [
         "test_kda_kernel_default_1252.py",
-    ],
-    data = [
-        "test_kda_kernel_mode.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -36785,7 +36656,6 @@ pq_py_library(
         ":files/own_process_samples",
         "fleet_data_samples/sample_fleet_data.py",
         "test_kda_kernel_mode.py",
-        "test_quantum_band_serial.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -38932,6 +38802,7 @@ pq_py_test(
         "//:tools/measure_vllm_wikitext_ppl",
         "//:tools/pq_profile_child",
         "//:tools/prepare_dsv4_wikitext_inputs",
+        "//:tools/publish_artifact",
         "//:tools/tessera_campaign_container",
         "//:tools/tessera_fleet/__init__",
         ":conftest",
@@ -38951,16 +38822,13 @@ pq_py_library(
     data = [
         "//:prismaquant/run-pipeline.sh",
         "//:tools/measure_vllm_full_kl.py",
-        "//:tools/publish_artifact.py",
         "test_lane_gate_recording.py",
-        "test_tessera_route_receipt.py",
     ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/lane_shipcard",
         "//:tools/measure_vllm_full_kl",
-        "//:tools/publish_artifact",
         "@pq_pip//pytest",
         "@pq_pip//tessera_quant",
     ],
@@ -39999,9 +39867,6 @@ pq_py_library(
     name = "test_make_uniform_assignment_lib",
     srcs = [
         "test_make_uniform_assignment.py",
-    ],
-    data = [
-        "//:tools/make_uniform_assignment.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -43608,9 +43473,6 @@ pq_py_library(
     srcs = [
         "test_model_profile_conformance.py",
     ],
-    data = [
-        "//:prismaquant/model_profiles/validate.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -43935,9 +43797,6 @@ pq_py_library(
     name = "test_module_pairs_1302_lib",
     srcs = [
         "test_module_pairs_1302.py",
-    ],
-    data = [
-        "golden_table.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -44792,9 +44651,6 @@ pq_py_library(
     name = "test_name_projection_lib",
     srcs = [
         "test_name_projection.py",
-    ],
-    data = [
-        "//:prismaquant/name_projection.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -48452,9 +48308,6 @@ pq_py_library(
     srcs = [
         "test_numerics_pairs_1394.py",
     ],
-    data = [
-        "golden_table.py",
-    ],
     deps = [
         ":golden_table",
         "@pq_pip//pytest",
@@ -48577,9 +48430,6 @@ pq_py_library(
     name = "test_nvfp4_empty_activation_batch_lib",
     srcs = [
         "test_nvfp4_empty_activation_batch.py",
-    ],
-    data = [
-        "test_nvfp4_served_dequant_kernel.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -48752,9 +48602,6 @@ pq_py_library(
     name = "test_nvfp4_served_dequant_kernel_lib",
     srcs = [
         "test_nvfp4_served_dequant_kernel.py",
-    ],
-    data = [
-        "test_nvfp4_served_qdq_no_sync.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -54756,7 +54603,6 @@ pq_py_library(
     data = [
         "//:pytest.ini",
         ":files/own_process_samples",
-        "conftest.py",
         "test_own_process_isolation.py",
     ],
     deps = [
@@ -58110,7 +57956,6 @@ pq_py_library(
         "//:prismaquant/shipcard_slots.py",
         "g3job/test_g3_submit.py",
         "graph_receipt_fixtures.py",
-        "prismabuild_scan.py",
         "test_bazel_inputs.py",
         "test_container_cache_charge_1091.py",
         "test_dispatch_joint_quanta.py",
@@ -61175,9 +61020,6 @@ pq_py_library(
     srcs = [
         "test_projected_unit_check_1935.py",
     ],
-    data = [
-        "//:prismaquant/tessera_campaign.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -61475,7 +61317,6 @@ pq_py_library(
         "//:licenses/PRISMAQUANT-WEIGHTS-LICENSE-1.0.md",
         "//:tools/publish_artifact.py",
         "test_publish_artifact.py",
-        "test_shipcard.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -63563,9 +63404,6 @@ pq_py_library(
     srcs = [
         "test_reseal_identity_proof_cost_table.py",
     ],
-    data = [
-        "//:experiments/reseal_identity_proof.py",
-    ],
     deps = [
         "//:experiments/reseal_identity_proof",
         "@pq_pip//pytest",
@@ -64109,8 +63947,6 @@ pq_py_library(
         "test_retained_budget_provenance_1022.py",
     ],
     data = [
-        "//:tools/prepare_extended_joint_quanta.py",
-        "//:tools/regenerate_joint_quanta.py",
         "test_retained_budget_provenance_1022.py",
     ],
     deps = [
@@ -65207,7 +65043,6 @@ pq_py_library(
         "//:files/archive/production_render_staged_2026-07-30",
         "//:files/archive/union_cache_2026-07-30",
         "//:prismaquant/run-pipeline.sh",
-        "test_retired_codebook_refusals_1304.py",
         "test_run_pipeline_defaults.py",
     ],
     deps = [
@@ -65721,9 +65556,6 @@ pq_py_library(
     srcs = [
         "test_runtime_provenance.py",
     ],
-    data = [
-        "test_runtime_fixed_resource_admission.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -65766,9 +65598,6 @@ pq_py_library(
     name = "test_runtime_rank_resources_lib",
     srcs = [
         "test_runtime_rank_resources.py",
-    ],
-    data = [
-        "test_native_receipt_table_routed.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -66156,7 +65985,6 @@ pq_py_library(
     ],
     data = [
         "//:prismaquant/joint_adjoint_checkpoints.py",
-        "conftest.py",
         "test_sealing_off_1147.py",
     ],
     deps = [
@@ -66491,9 +66319,6 @@ pq_py_library(
     srcs = [
         "test_selected_source_validation_charge.py",
     ],
-    data = [
-        "test_streaming_buffer_precision.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -66614,10 +66439,13 @@ pq_py_test(
         "//:tools/g3job/g3_pq_policy/__init__",
         "//:tools/gold_engine_options",
         "//:tools/gold_measurement_fidelity",
+        "//:tools/measure_served_gold",
         "//:tools/measure_vllm_full_kl",
         "//:tools/measure_vllm_wikitext_ppl",
         "//:tools/pq_profile_child",
         "//:tools/prepare_dsv4_wikitext_inputs",
+        "//:tools/prismaquant_source_bootstrap",
+        "//:tools/spec_decode_guard",
         "//:tools/tessera_campaign_container",
         "//:tools/tessera_fleet/__init__",
         ":conftest",
@@ -66809,9 +66637,11 @@ pq_py_test(
         "//:tools/inspect_prepared_cache.py",
         "//:tools/inspect_t4_binding.py",
         "//:tools/joint_prepare_startup_probe.py",
+        "//:tools/kl_ab.py",
         "//:tools/make_uniform_assignment.py",
         "//:tools/materialize_wikitext_corpus.py",
         "//:tools/measure_boundary_control.py",
+        "//:tools/measure_served_gold.py",
         "//:tools/measure_vllm_full_kl.py",
         "//:tools/measure_vllm_wikitext_ppl.py",
         "//:tools/measure_wire_rehash_readers.py",
@@ -66836,6 +66666,7 @@ pq_py_test(
         "//:tools/prepare_extended_joint_quanta.py",
         "//:tools/prepare_stageb_after_capture.py",
         "//:tools/prismaquant_runtime_snapshot.py",
+        "//:tools/prismaquant_source_bootstrap.py",
         "//:tools/profile_produced_group_lookup.py",
         "//:tools/profile_stage_b_head.py",
         "//:tools/provision_tessera_pin.py",
@@ -66855,6 +66686,7 @@ pq_py_test(
         "//:tools/run_namespace_1986_cpu.sh",
         "//:tools/run_with_scratch_dirs.py",
         "//:tools/smoke_graph_memory.py",
+        "//:tools/spec_decode_guard.py",
         "//:tools/stage_b_preparation_submission.py",
         "//:tools/stagea_forward_recovery.py",
         "//:tools/stagea_produced_byte_cycle.py",
@@ -68187,13 +68019,11 @@ pq_py_library(
     ],
     data = [
         "//:files/prismaquant/tessera_runtime",
-        "//:tools/kl_ab.py",
         "test_serve_fingerprint_descendants.py",
     ],
     deps = [
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:tools/__init__",
-        "//:tools/kl_ab",
         "@pq_pip//pytest",
     ],
 )
@@ -69188,7 +69018,6 @@ pq_py_library(
     ],
     data = [
         "//:README.md",
-        "//:tools/publish_artifact.py",
         "test_shipcard.py",
     ],
     deps = [
@@ -69196,7 +69025,6 @@ pq_py_library(
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/shipcard_cli",
         "//:prismaquant/validate_quantized_model",
-        "//:tools/publish_artifact",
         ":graph_lane_fixtures",
         ":graph_receipt_fixtures",
         "@pq_pip//pytest",
@@ -69322,9 +69150,7 @@ pq_py_library(
         "test_shipcard_uniform_control.py",
     ],
     data = [
-        "test_shipcard.py",
         "test_shipcard_uniform_control.py",
-        "test_tessera_route_receipt.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -70323,7 +70149,6 @@ pq_py_library(
     ],
     data = [
         "test_spill_phase_plan_1011.py",
-        "test_stageb_one_pass_spill.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -72579,9 +72404,6 @@ pq_py_library(
     srcs = [
         "test_stage_b_band_binding.py",
     ],
-    data = [
-        "test_stage_a_bands.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -72889,16 +72711,12 @@ pq_py_library(
         "test_stage_b_prep_io_1070.py",
     ],
     data = [
-        "//:tools/prepare_extended_joint_quanta.py",
-        "//:tools/regenerate_joint_quanta.py",
-        "//:tools/stage_b_preparation_submission.py",
         "test_stage_b_prep_io_1070.py",
     ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/staged_launch",
-        "//:tools/prepare_extended_joint_quanta",
         "//:tools/regenerate_joint_quanta",
         "//:tools/stage_b_preparation_submission",
         ":test_quantum_executable_readset_lib",
@@ -73241,8 +73059,6 @@ pq_py_library(
         "test_stage_b_streamed_incoming_1143.py",
     ],
     data = [
-        "test_band_serial_batched_regime.py",
-        "test_band_serial_spill.py",
         "test_stage_b_streamed_incoming_1143.py",
     ],
     deps = [
@@ -74228,9 +74044,6 @@ pq_py_library(
     srcs = [
         "test_stageb_host_staging_1246.py",
     ],
-    data = [
-        "test_stageb_one_pass_spill.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -74279,9 +74092,6 @@ pq_py_library(
     name = "test_stageb_one_pass_spill_lib",
     srcs = [
         "test_stageb_one_pass_spill.py",
-    ],
-    data = [
-        "test_band_serial_batched_regime.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -74345,7 +74155,6 @@ pq_py_library(
         "test_stageb_prepared_inputs_bridge.py",
     ],
     data = [
-        "//:tools/regenerate_joint_quanta.py",
         "test_stageb_prepared_inputs_bridge.py",
     ],
     deps = [
@@ -79175,9 +78984,6 @@ pq_py_library(
     srcs = [
         "test_streaming_visual_materialization_scope.py",
     ],
-    data = [
-        "//:prismaquant/streaming_model.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -82386,14 +82192,12 @@ pq_py_library(
         "test_strict_json_tools_1605.py",
     ],
     data = [
-        "//:prismaquant/schemas.py",
         "test_strict_json_tools_1605.py",
     ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/container_runtime_identity",
-        "//:prismaquant/schemas",
         "//:tools/dsv4_wikitext_inputs",
         "//:tools/prismaquant_runtime_snapshot",
         "@pq_pip//pytest",
@@ -82483,7 +82287,6 @@ pq_py_library(
     ],
     data = [
         ":files/fixtures",
-        "test_math_reunderwrite_pins.py",
         "test_super_item_menu_byte_identity.py",
     ],
     deps = [
@@ -82891,9 +82694,6 @@ pq_py_library(
     srcs = [
         "test_tensor_digests_1384.py",
     ],
-    data = [
-        "golden_table.py",
-    ],
     deps = [
         ":golden_table",
         "@pq_pip//pytest",
@@ -82977,9 +82777,6 @@ pq_py_library(
     name = "test_tessera_amd_serving_profiles_lib",
     srcs = [
         "test_tessera_amd_serving_profiles.py",
-    ],
-    data = [
-        "test_route_status_reads_the_pinned_contract.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -84086,9 +83883,6 @@ pq_py_library(
     srcs = [
         "test_tessera_campaign_publication_cli.py",
     ],
-    data = [
-        "test_tessera_campaign_batch.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -84808,6 +84602,7 @@ pq_py_test(
     deps = [
         "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
         "//:pqtel/__init__",
+        "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/lane_shipcard",
         "//:prismaquant/shipcard_cli",
         "//:tools/build_streamed_full_kl_teacher",
@@ -85105,9 +84900,6 @@ pq_py_library(
     name = "test_tessera_export_lane_lib",
     srcs = [
         "test_tessera_export_lane.py",
-    ],
-    data = [
-        "test_profile_export_lanes.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -85498,9 +85290,6 @@ pq_py_library(
     srcs = [
         "test_tessera_formats.py",
     ],
-    data = [
-        "test_tessera_lane_admission.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -85802,10 +85591,6 @@ pq_py_library(
     name = "test_tessera_joint_aura_lib",
     srcs = [
         "test_tessera_joint_aura.py",
-    ],
-    data = [
-        "test_capture_memory_guard.py",
-        "test_served_activation_contract.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -87653,9 +87438,6 @@ pq_py_library(
     srcs = [
         "test_tessera_lane_v9.py",
     ],
-    data = [
-        "tessera_withdrawn_v38.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -87945,7 +87727,6 @@ pq_py_library(
         "test_tessera_menu.py",
     ],
     data = [
-        "test_allocator_sibling_aggregation.py",
         "test_tessera_menu.py",
     ],
     deps = [
@@ -88036,9 +87817,6 @@ pq_py_library(
     name = "test_tessera_menu_real_table_lib",
     srcs = [
         "test_tessera_menu_real_table.py",
-    ],
-    data = [
-        "test_allocator_body_candidate_coverage_audit.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -88478,7 +88256,6 @@ pq_py_library(
         "test_tessera_pin_provisioner.py",
     ],
     data = [
-        "//:prismaquant/tessera_runtime_contract.py",
         "//:pyproject.toml",
         "//:tools/provision_tessera_pin.py",
         "//:tools/resolve_tessera_dev_pin.py",
@@ -88486,7 +88263,6 @@ pq_py_library(
     ],
     deps = [
         "//:prismaquant/__init__",
-        "//:prismaquant/activation_fair_pricing_cycle",
         "//:tools/provision_tessera_pin",
         "//:tools/resolve_tessera_dev_pin",
         "@pq_pip//pytest",
@@ -94086,9 +93862,6 @@ pq_py_library(
     srcs = [
         "test_tessera_substitute_decoder.py",
     ],
-    data = [
-        "//:tools/serve_fingerprint.py",
-    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -94341,9 +94114,6 @@ pq_py_library(
     name = "test_tied_lm_head_lib",
     srcs = [
         "test_tied_lm_head.py",
-    ],
-    data = [
-        "//:prismaquant/measure_quant_cost.py",
     ],
     deps = [
         "//:prismaquant/__init__",
@@ -94823,7 +94593,6 @@ pq_py_library(
         "test_tp2_budget_plan.py",
     ],
     data = [
-        "//:tools/tp2_budget_plan.py",
         "test_tp2_budget_plan.py",
     ],
     deps = [
@@ -94869,9 +94638,6 @@ pq_py_library(
     name = "test_tp_decode_feasibility_lib",
     srcs = [
         "test_tp_decode_feasibility.py",
-    ],
-    data = [
-        "//:tools/tp_decode_feasibility.py",
     ],
     deps = [
         "//:tools/__init__",
@@ -96495,9 +96261,6 @@ pq_py_library(
     name = "test_whole_artifact_budget_lib",
     srcs = [
         "test_whole_artifact_budget.py",
-    ],
-    data = [
-        "//:prismaquant/footprint.py",
     ],
     deps = [
         "//:prismaquant/__init__",
