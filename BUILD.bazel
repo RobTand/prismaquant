@@ -12136,6 +12136,13 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "tools/ci/record_due",
+    srcs = [
+        "tools/ci/record_due.py",
+    ],
+)
+
+pq_py_library(
     name = "tools/ci/remote_gate",
     srcs = [
         "tools/ci/remote_gate.py",
