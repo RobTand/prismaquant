@@ -179,7 +179,10 @@ def aggregate_shards(population, shards, records, *, require_execution=False,
             raise GateError('shard evidence has a different test population')
         result = architecture_result(selected_tests, run,
                                      budget_warnings=record['budget_warnings'])
-        results.append(result)
+        excerpts = record.get('excerpts', {})
+        if not isinstance(excerpts, dict) or any(type(text) is not str for text in excerpts.values()):
+            raise GateError('shard failure excerpts are malformed')
+        results.append({**result, 'excerpts': excerpts})
     executed = sum(result['executed_test_actions'] for result in results)
     missing_execution = require_execution and executed == 0
     return {'verdict': 'fail' if missing_execution or any(
@@ -350,20 +353,39 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
         text = bep.read_text()
     with evidence_phase('bep-parse'):
         run = bep_run(text, returncode=outcome.returncode)
-    if fetch is None:
-        with InventoryFetcher() as inventory_fetch:
-            inventory = inventory_evidence(text, inventory_fetch)
-    else:
+    with InventoryFetcher() as own_fetch:
+        fetch = fetch or own_fetch
         inventory = inventory_evidence(text, fetch)
-    with evidence_phase('result-validation'):
-        result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
-                                     require_execution=manifest['require_execution'] and bool(tests))
+        with evidence_phase('result-validation'):
+            result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
+                                         require_execution=manifest['require_execution'] and bool(tests))
+        excerpts = failure_excerpts(text, result['failed'], fetch)
     if not tests and result['verdict'] == 'skipped':
         result['verdict'] = 'pass'
     return {'schema': SCHEMA, 'mode': manifest['mode'], 'head': manifest['head'],
             'base': manifest['base'], 'architecture': manifest['architecture'],
             'index': manifest['index'], 'targets': targets, 'run': run,
-            'nodes': inventory['nodes'], **result}
+            'nodes': inventory['nodes'], 'excerpts': excerpts, **result}
+
+
+def failure_excerpts(text, failed, fetch):
+    """First error lines and last lines of up to five failed tests' own test.log."""
+    logs = {}
+    for event in map(json.loads, text.splitlines()):
+        label, evidence = event.get('id', {}).get('testResult', {}).get('label'), event.get('testResult', {})
+        if label in failed and evidence.get('status') != 'PASSED':
+            logs.update({label: row.get('uri') for row in evidence.get('testActionOutput', [])
+                         if row.get('name') == 'test.log'})
+    excerpts = {}
+    for label, uri in sorted(logs.items())[:5]:
+        try:  # The test already failed; an unreadable log cannot change that verdict.
+            lines = fetch(uri).decode('utf-8', 'replace').splitlines()
+        except (OSError, RuntimeError, ValueError, TypeError, AttributeError):
+            excerpts[label] = 'excerpt unavailable'
+            continue
+        errors = [line for line in lines[:-20] if re.search('Error|FAILED|Traceback|assert', line)]
+        excerpts[label] = '\n'.join(errors[:20] + lines[-20:])[-4096:]
+    return excerpts
 
 
 def fetch_artifact(uri):

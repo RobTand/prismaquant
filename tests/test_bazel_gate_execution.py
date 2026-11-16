@@ -384,6 +384,62 @@ def test_remote_shard_includes_warnings_and_node_receipts_without_retry(tmp_path
     assert len(calls) == 1
 
 
+def log_event(label, uri, status='FAILED'):
+    return {'id': {'testResult': {'label': label, 'run': 1, 'shard': 0, 'attempt': 1}},
+            'testResult': {'status': status, 'testActionOutput': [{'name': 'test.log', 'uri': uri}]}}
+
+
+@pytest.mark.parametrize('error', [OSError(errno.EIO, 'private'),
+                                   gate.ShardEvidenceError('inventory-remote-fetch', 'network-dns')])
+def test_failed_test_log_excerpt_keeps_error_lines_and_tail_and_survives_fetch_failure(tmp_path, error):
+    from types import SimpleNamespace
+    other = '//tests:test_other'
+    tail = [f'line {number}' for number in range(30)]
+    manifest = {'mode': 'main', 'base': 'b' * 40, 'head': 'a' * 40, 'branch': 'main',
+                'architecture': 'arm64', 'index': 0, 'targets': [LABEL, other],
+                'tests': [LABEL, other], 'require_execution': False}
+
+    def run(command, **kwargs):
+        path = Path(next(arg.split('=', 1)[1] for arg in command
+                         if arg.startswith('--build_event_json_file=')))
+        path.write_text(events(log_event(LABEL, 'bytestream://own-log'), summary('FAILED'),
+                               log_event(other, 'bytestream://lost-log', status='TIMEOUT')))
+        return SimpleNamespace(returncode=3)
+
+    def fetch(uri):
+        if uri == 'bytestream://lost-log':
+            raise error
+        return '\n'.join(['header', 'E   AssertionError: seeded', *tail]).encode()
+
+    found = gate.execute_shard(manifest, root=tmp_path, runner=run, fetch=fetch)
+    assert found['verdict'] == 'fail' and found['failed'] == [LABEL, other]
+    assert found['excerpts'] == {LABEL: '\n'.join(['E   AssertionError: seeded', *tail[10:]]),
+                                 other: 'excerpt unavailable'}
+
+
+def test_failure_excerpts_are_capped_and_skip_passed_or_logless_results():
+    labels = [f'//tests:test_{index}' for index in range(7)]
+    text = events(*(log_event(label, 'bytestream://' + label) for label in labels),
+                  log_event(LABEL, 'bytestream://passed', status='PASSED'))
+    raw = '\n'.join(f'FAILED {number} ' + 'x' * 200 for number in range(100)).encode()
+    found = gate.failure_excerpts(text, ['//tests:a_build_failure', LABEL, *labels], lambda uri: raw)
+    assert sorted(found) == labels[:5]
+    assert all(len(text) == 4096 and len(text.splitlines()) <= 40 for text in found.values())
+
+
+@pytest.mark.parametrize('excerpts', [None, {LABEL: 'E   AssertionError: seeded'}, {LABEL: 3}, ['x']])
+def test_shard_excerpts_reach_the_aggregate_or_refuse_when_malformed(excerpts):
+    records = [shard_record(0, [LABEL])]
+    if excerpts is not None:
+        records[0]['excerpts'] = excerpts
+    if excerpts in ({LABEL: 3}, ['x']):
+        with pytest.raises(gate.GateError, match='excerpts'):
+            gate.aggregate_shards([LABEL], [[LABEL]], records)
+    else:
+        found = gate.aggregate_shards([LABEL], [[LABEL]], records)
+        assert found['shards'][0]['excerpts'] == (excerpts or {})
+
+
 @pytest.mark.parametrize('fault', [None, 'digest', 'head', 'union', 'partition'])
 def test_immutable_manifest_loading_checks_digest_source_union_and_partition(fault):
     document = {'schema': 'prismaquant.bazel-shards.v1', 'mode': 'main',
