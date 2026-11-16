@@ -62,7 +62,7 @@ def test_routed_e2m1_admits_without_start_state_on_the_pinned_contract(monkeypat
 
     on_routed = menu.route_admission(RUNG, serving_context=routed_context)
     assert on_routed.attested
-    assert on_routed.route_status == routed[0].route_status
+    assert on_routed.route_status == menu.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG == routed[0].route_status
     admitted, reason = cell_lane_admits(routed[0], 896, _table.lanes)
     assert admitted and reason == ""
     assert on_routed.readable is True
