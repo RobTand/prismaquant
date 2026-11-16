@@ -69,8 +69,7 @@ WINDOW_LAUNCH = {"symbol": "tessera_window_gemv::gemv", "decoder": "window_gemv"
 #: The current three routed extension lanes, including the E4M3 MMA variant.
 FUSED_LANES = ("tessera_routed_fused_e4m3", "tessera_routed_fused_value",
                "tessera_routed_fused_mma_e4m3", "tessera_routed_fused_e2m1")
-#: Exact routed roster from the independently reviewed answer, including
-#: the separately image-scoped v56 cells.
+#: IMG-G routed cells retain extension predicates. IMG-N class launches are lane-free.
 FUSED_ROUTED_CELLS = {
     row[0] for row in contract.TESSERA_DEV_PIN_ANSWER["cells"]
     if row[3] == "routed_moe" and row[2] in {E4M3, CLAIMING_FAMILY}
