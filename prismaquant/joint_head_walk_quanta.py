@@ -39,9 +39,19 @@ from .schemas import Contract
 
 
 #: The schema one quantum descriptor carries. Bumped only by a change to the
-#: descriptor's key set; the journal schemas it banks under stay owned by
-#: ``tessera_joint_aura`` and ``cost_stage_checkpoint``.
+#: descriptor's key set; the journal schemas it banks under are the head-walk
+#: ones below and ``cost_stage_checkpoint``'s.
 QUANTUM_SCHEMA = "prismaquant.joint_head_walk_quanta.v1"
+
+# The head walk's own durable journal (#754). Every restart re-paid the whole
+# roster walk -- the withdrawn campaign night paid it three times -- so the
+# walk banks each verified unit under the checkpoint machinery every other
+# stage of this campaign already uses (``prepare_journal``/``write_unit``),
+# and a resume re-verifies the banked prefix against the bytes it was banked
+# from before trusting one row of it.
+HEAD_WALK_STAGE = "joint head walk"
+HEAD_WALK_STATE_SCHEMA = "prismaquant.tessera_joint_aura.head_walk_unit.v1"
+HEAD_WALK_JOURNAL_SCHEMA = "prismaquant.tessera_joint_aura.head_walk.v1"
 
 
 # The head-walk journal uses this same sorted, newline-delimited recipe.
@@ -196,9 +206,7 @@ def join_head_walk_journals(receipts, *, dest, names) -> dict:
     """
     from .cost_stage_checkpoint import prepare_journal, write_unit
 
-    from . import tessera_joint_aura as bridge
-
-    stage = bridge.HEAD_WALK_STAGE
+    stage = HEAD_WALK_STAGE
     _require(isinstance(receipts, (list, tuple)) and bool(receipts),
              "head-walk join needs a non-empty list of quantum receipts")
     dest = Path(dest)
@@ -226,7 +234,7 @@ def join_head_walk_journals(receipts, *, dest, names) -> dict:
                  "head-walk quantum journal is missing banked units")
         for name, state in completed.items():
             _require(isinstance(state, dict)
-                     and state.get("schema") == bridge.HEAD_WALK_STATE_SCHEMA,
+                     and state.get("schema") == HEAD_WALK_STATE_SCHEMA,
                      f"head-walk quantum unit {name} carries no verified walk state")
         opened.append({"quantum": dict(quantum), "identity": identity,
                        "completed": completed})
@@ -245,7 +253,7 @@ def join_head_walk_journals(receipts, *, dest, names) -> dict:
              "head-walk quantum journals name another roster")
     full_identity = {key: value for key, value in first.items() if key != "quantum"}
     _require("quantum" in first, "head-walk quantum journal carries no quantum marker")
-    _require(full_identity.get("schema") == bridge.HEAD_WALK_JOURNAL_SCHEMA,
+    _require(full_identity.get("schema") == HEAD_WALK_JOURNAL_SCHEMA,
              "head-walk quantum journal carries a foreign journal schema")
 
     root, seal, _ = prepare_journal(dest, stage=stage, resume=False,
