@@ -50,6 +50,21 @@ def test_subcap_wire_planning_grants_no_dense_route(rung):
     assert not any(c.family == "TESSERA_E2M1_K2" and c.covers_rate(rung) for c in table.cells)
 
 
+def test_served_wire_mismatch_refuses_with_the_planning_reason(monkeypatch):
+    from dataclasses import replace
+    from prismaquant import tessera_formats as formats
+
+    recipe = _served("TESSERA_E2M1_K2_R896", "routed_moe")
+    mismatch = replace(recipe, window_bits=recipe.window_bits + 1)
+    monkeypatch.setattr(formats, "_served_recipe_for", lambda *_args: mismatch)
+    reason = formats.tessera_served_route_refusal(
+        "TESSERA_E2M1_K2", 896, structure="routed_moe")
+    assert reason is not None and "is not the wire the pinned contract attests" in reason
+    with pytest.raises(formats.TesseraRouteRefused) as refused:
+        _served("TESSERA_E2M1_K2_R896", "routed_moe")
+    assert str(refused.value) == reason
+
+
 def _weight():
     import torch
     return torch.randn(64, 64, generator=torch.Generator().manual_seed(1502)).bfloat16()

@@ -381,10 +381,11 @@ CELL_QUALIFICATIONS = frozenset({
 #: gets read as a measured one.
 EVIDENCE_KL_KIND_TOPK_LOWER_BOUND = "topk_intersection_lower_bound"
 EVIDENCE_KL_KIND_FULL_VOCAB = "full_vocab"
+EVIDENCE_KL_KIND_GRAPH_EQUALITY = "graph_equality"
 EVIDENCE_KL_KINDS = frozenset({
     EVIDENCE_KL_KIND_TOPK_LOWER_BOUND,
     EVIDENCE_KL_KIND_FULL_VOCAB,
-    "graph_equality",
+    EVIDENCE_KL_KIND_GRAPH_EQUALITY,
 })
 
 #: A greedy smoke's outcome, in the receipt's own words. ``repetitive`` is not
@@ -1244,7 +1245,7 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
             raise LaneEligibilityError(
                 f"{spot}.top_k must be null for {kind}, got {top_k!r}")
         regime = entry["regime"]
-        if kind == "graph_equality" and regime != "decode":
+        if kind == EVIDENCE_KL_KIND_GRAPH_EQUALITY and regime != "decode":
             raise LaneEligibilityError(f"{spot}: graph_equality requires decode regime")
         if cell_regime and regime != cell_regime:
             raise LaneEligibilityError(

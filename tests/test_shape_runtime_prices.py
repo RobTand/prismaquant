@@ -794,9 +794,8 @@ def test_observation_itself_refuses_a_tp2_scope(tmp_path):
         _consume_observations([tmp_path / "obs" / "observation.json"], table_id="tp2")
 
 
-def test_observation_is_admitted_against_pq_pinned_scope(tmp_path, eligibility):
-    from dataclasses import replace
-    eligibility = replace(eligibility, contract_sha256=OBS_CONTRACT, runtime_commit=OBS_COMMIT)
+def test_observation_is_admitted_against_pq_pinned_scope(tmp_path):
+    eligibility = contract.installed_runtime_snapshot().eligibility
     observation_fixture(tmp_path)
     table = _consume_observations(
         [tmp_path / "obs" / "observation.json"], table_id="pilot",

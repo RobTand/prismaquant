@@ -43,7 +43,10 @@ contain, which nobody else can re-derive.
 
 The pin names `8bf496abdb7d598a3132f6b4b7cb7d7e96199d13`, contract v68, lane schema v12, with 18 cells.
 The packaged contract SHA-256 is `145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4`.
-E2M1 R896 covers IMG-G at TP1. PrismaQuant refuses its routed plan because it has no start state.
+E2M1 R896 covers IMG-G at TP1.
+Tessera's published routed predicate refuses this scope because it requires `start_state: True` with decision mode `carries`.
+A whole TP1 unit has no start state, although the v68 receipt served these bytes.
+[tessera#1716](https://github.com/RobTand/tessera/issues/1716) owns the decision: correct the predicate for whole TP1 units or withdraw the routed cell.
 BF16 covers IMG-N at TP1. E4M3 keeps TP2.
 PQ #3677 narrows PrismaQuant-owned grants and records all upstream evidence changes.
 Historical results below retain their measured source identity.

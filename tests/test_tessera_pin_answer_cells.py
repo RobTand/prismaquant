@@ -161,8 +161,8 @@ def test_the_projection_keeps_positional_columns_and_optional_launch_scopes(monk
     for row in rows:
         offset = int("launch_scopes" in row[13])
         assert len(row) == 18 + offset
-        assert isinstance(row[13 + offset], dict) and set(row[13 + offset]) >= {
-            "image", "execution_modes"}
+        assert isinstance(row[13 + offset], dict) and set(row[13 + offset]) == {
+            "image", "execution_modes", "kernel_build"}
         assert len(row[16 + offset]) == 7, row[0]
         cell = parsed[row[0]]
         assert row[17 + offset] == {

@@ -2076,7 +2076,7 @@ and the data-manifest producer import on a coordinator interpreter with no
 `tessera` package; `tessera_menu` keeps `menu_mode()` and menu construction.
 Mode spellings, refusals, defaults and every gate are unchanged.
 
-Re-stamped 2026-10-16: with the development answer pin unset, the TP
+Historical at v60, 2026-10-16: with the development answer pin unset, the TP
 loader-axis leg reads `tensor_parallel.units[].loader_axes` from the exact
 installed serving contract, through the same captured bytes and pin check as
 the world-size ceiling. `expand_tessera_menu` captures both facts once beside
@@ -2446,7 +2446,10 @@ The producer and serving pin is `8bf496abdb7d598a3132f6b4b7cb7d7e96199d13` under
 Contract v68, lane schema v12, has 18 cells and raw SHA-256
 `145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4`.
 E2M1 R896 cells name dense and routed units on IMG-G `f8dbe1a0` at TP1 only.
-PrismaQuant admits dense units. Its routed plan has no start state and fails the existing lane predicate.
+PrismaQuant admits dense units.
+Tessera's published routed predicate refuses this scope because it requires `start_state: True` with decision mode `carries`.
+A whole TP1 unit has no start state, although the v68 receipt served these bytes.
+[tessera#1716](https://github.com/RobTand/tessera/issues/1716) owns the decision: correct the predicate for whole TP1 units or withdraw the routed cell.
 BF16 covers dense R769-R1279 and routed R1024 on IMG-N `5be13705` at TP1 only.
 The five measured BF16 dense rungs are 832, 880, 960, 1024, and 1088.
 E4M3 keeps its TP2 ceiling. IMG-G routed R768 uses the v66 class-launch receipt.
@@ -6564,7 +6567,8 @@ admission changes as follows:
 The "one image carries E2M1, the other carries every v38 cell" split described
 below is what v39 resolves: `f8dbe1a0…` carries every GLM-image cell.
 The vanilla image separately retains the dense E4M3 q1024 pair.
-`TESSERA_E2M1_K2` keeps `max_world_size: 2`. A TP2 route census of the all-E2M1
+Historical at v39, 2026-09-27: `TESSERA_E2M1_K2` kept `max_world_size: 2`.
+A TP2 route census of the all-E2M1
 stub on `f8dbe1a0…` served every module on both ranks through the native
 span-2 route (Tessera
 `experiments/results/glm53_u1_stub_d_tp2_eager_census.json`). That census is

@@ -16,6 +16,7 @@ from prismaquant import tessera_menu as menu, tessera_render as render
 from prismaquant import tessera_runtime_contract as contract
 from prismaquant.lane_eligibility import ServingContext, cell_lane_admits
 from prismaquant.tessera_formats import get_tessera_family
+from prismaquant.tessera_footprint import tessera_exact_bits_for_shape
 from prismaquant.tessera_serving_runtime_pin import require_pinned_tessera_runtime
 
 RUNG = "TESSERA_E2M1_K2_R896"
@@ -132,8 +133,9 @@ def test_readable_menu_spans_a4_a8_a16_on_a_routed_unit_and_stamps_the_gap(monke
     assert (a4.admission.act_bits, a8.admission.act_bits, a16.admission.act_bits) == (4, 8, 16)
     assert len({a4.admission.activation_contract, a8.admission.activation_contract,
                 a16.admission.activation_contract}) == 3
-    # The readable census prices the research wire, without a served grant.
-    assert float(a4.bits_per_param) == pytest.approx(3.766407012939453)
+    # Byte accounting grants no serving admission.
+    assert a4.bits_per_param == tessera_exact_bits_for_shape(
+        FAMILY, 896, shape, structure=ROUTED) / (shape[0] * shape[1])
     assert not a4.admission.attested
     assert "start_state" in a4.admission.detail
     assert a16.route_status == menu.ROUTE_STATUS_UNATTESTED
