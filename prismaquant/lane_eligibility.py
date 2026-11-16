@@ -384,6 +384,7 @@ EVIDENCE_KL_KIND_FULL_VOCAB = "full_vocab"
 EVIDENCE_KL_KINDS = frozenset({
     EVIDENCE_KL_KIND_TOPK_LOWER_BOUND,
     EVIDENCE_KL_KIND_FULL_VOCAB,
+    "graph_equality",
 })
 
 #: A greedy smoke's outcome, in the receipt's own words. ``repetitive`` is not
@@ -1241,8 +1242,10 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
                     f"intersection bound, got {top_k!r}")
         elif top_k is not None:
             raise LaneEligibilityError(
-                f"{spot}.top_k must be null for a full-vocabulary KL, got {top_k!r}")
+                f"{spot}.top_k must be null for {kind}, got {top_k!r}")
         regime = entry["regime"]
+        if kind == "graph_equality" and regime != "decode":
+            raise LaneEligibilityError(f"{spot}: graph_equality requires decode regime")
         if cell_regime and regime != cell_regime:
             raise LaneEligibilityError(
                 f"{spot}.regime {regime!r} is not the cell's regime "

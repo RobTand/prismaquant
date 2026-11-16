@@ -159,10 +159,13 @@ def test_the_real_pinned_contract_cites_a_receipt_for_every_raised_ceiling():
     """The installed v31 table passes the same refusal it is read through."""
     path, sha, payload = _installed_contract()
     limits = trc.published_tensor_parallel_limits(path, sha)
-    assert limits == {E2M1: 2, FP8: 2, BF16: 2}
+    assert limits == {E2M1: 1, FP8: 2, BF16: 1}
     receipts = {row["id"]: row for row in
                 payload["tensor_parallel"]["world_size_receipts"]}
     for unit in payload["tensor_parallel"]["units"]:
+        if unit["max_world_size"] == 1:
+            assert "world_size_receipt" not in unit
+            continue
         receipt = receipts[unit["world_size_receipt"]]
         assert receipt["world_size"] >= unit["max_world_size"]
         assert unit["unit"] in receipt["executed_units"]

@@ -205,7 +205,7 @@ _PARALLEL_KINDS = frozenset({PARALLEL_COLUMN, PARALLEL_ROW, PARALLEL_NONE})
 #: The cut direction, in Tessera's axis vocabulary.  A column-parallel Linear
 #: splits vLLM's output features, and those are this unit's ROWS, so
 #: ``PARALLEL_COLUMN`` asks about ``"row"``.  The mapping is written once and
-#: read by both TP legs (``tessera.layout.can_shard`` and the contract's
+#: read by both TP legs (``tessera.slicing.can_shard`` and the contract's
 #: ``loader_axes``): inverting it answers plausibly in both directions and
 #: gates exactly the wrong half of a model.
 _CUT_AXIS = {PARALLEL_COLUMN: "row", PARALLEL_ROW: "column"}
@@ -444,13 +444,13 @@ def tessera_tp_axis_legal(
     """Will the pinned runtime's LOADER cut this family on this axis?
 
     The third leg of TP legality, and the cheapest: it needs no shape and no
-    ``tessera.layout`` call, because it reads a status the contract publishes
+    ``tessera.slicing`` call, because it reads a status the contract publishes
     per unit and per axis (``tensor_parallel.units[].loader_axes``, which
     Tessera validates equal to the ``ROUTE_TP_AXES`` its routes gate on).
 
     It is a different question from both of the others.
     :func:`tessera_tp_world_attested` asks whether a served receipt covers
-    this world size -- the ATTESTATION -- and ``tessera.layout.can_shard``
+    this world size -- the ATTESTATION -- and ``tessera.slicing.can_shard``
     asks whether the rung's own period divides the shard.  This one asks
     whether the loader accepts the cut at all, and a ``refused`` axis is
     refused on EVERY rank, so no world size and no shape makes it legal.
@@ -530,7 +530,8 @@ def _tp_world(spec: TesseraFamily, tp: int,
     if tp > int(declared):
         return False, (
             f"tp{tp}_unattested: the pinned contract attests {spec.name} up to "
-            f"world size {int(declared)}"
+            f"world size {int(declared)}; no world_size_receipt covers "
+            f"{spec.name} at world size {tp}"
         )
     return True, ""
 
@@ -992,7 +993,7 @@ class _BodyShape(NamedTuple):
 
 @dataclass(frozen=True, slots=True)
 class _ShardGeometry:
-    """The fields ``tessera.layout.shard_granularity`` reads off an encoded unit.
+    """The fields ``tessera.slicing.shard_granularity`` reads off an encoded unit.
 
     A granularity is a property of the *encoded* unit -- Tessera derives it
     from the very checks ``slice_unit`` applies, so a granularity it reports is
@@ -1089,7 +1090,7 @@ def tessera_shard_granularity(
     its quota on a whole superblock.  A slice that cuts any of those periods
     produces bytes no reader can decode alone.
 
-    **The number is Tessera's, not ours.**  ``tessera.layout.shard_granularity``
+    **The number is Tessera's, not ours.**  ``tessera.slicing.shard_granularity``
     derives both periods from the checks ``slice_unit`` itself applies; this
     function builds the unit-shaped geometry that rung implies at that shape
     (:class:`_ShardGeometry`) and asks.  Until 2026-09-02 Tessera published no
@@ -1110,7 +1111,7 @@ def tessera_shard_granularity(
     geometry = _shard_geometry(
         spec.name, int(body_rate_q256), int(shape[-2]), int(shape[-1]), structure,
     )
-    from tessera.layout import shard_granularity as _tessera_granularity
+    from tessera.slicing import shard_granularity as _tessera_granularity
 
     rows, cols = _tessera_granularity(
         geometry, SUPERBLOCK_WEIGHTS, int(spec.arity),
@@ -1206,7 +1207,7 @@ def _tp_legal(
       does NOT depend on ``require_attested_world`` -- "has this been
       measured" and "will this even load" are separate questions.
     * **Can the whole unit be cut this way at all?**
-      ``tessera.layout.can_shard(unit, tp, axis)`` -- and the axis mapping is
+      ``tessera.slicing.can_shard(unit, tp, axis)`` -- and the axis mapping is
       Tessera's, not a local convention: a *column-parallel* Linear (q/k/v,
       gate/up) splits vLLM's output features, which are this unit's **rows**,
       so ``PARALLEL_COLUMN`` asks ``axis="row"``.  Inverting that pair would
@@ -1247,7 +1248,7 @@ def _tp_legal(
     except TesseraMenuError as exc:
         return False, f"tp_shape:{exc}"
     if tp > 1 and parallel_kind != PARALLEL_NONE:
-        from tessera.layout import can_shard as _tessera_can_shard
+        from tessera.slicing import can_shard as _tessera_can_shard
 
         axis = tp_cut_axis(parallel_kind)
         try:
@@ -1266,7 +1267,7 @@ def _tp_legal(
             extent = int(shape[-2]) if axis == "row" else int(shape[-1])
             return False, (
                 f"tp{tp}_{axis}_granularity: {extent} {axis}s cut {tp} ways is "
-                f"not a multiple of {gran} (tessera.layout.shard_granularity)"
+                f"not a multiple of {gran} (tessera.slicing.shard_granularity)"
             )
     return tessera_shape_legal(spec, body_rate_q256, sharded, structure=structure)
 
@@ -1285,8 +1286,8 @@ def tessera_shape_legal(
     tracing has already paid for it.  The rules, each with the raise site it
     mirrors:
 
-    * ``rows % arity`` -- ``tessera.export`` / ``tessera.layout._counts_for``
-    * ``steps % span`` -- ``tessera.encode`` / ``tessera.layout._counts_for``
+    * ``rows % arity`` -- ``tessera.export`` / ``tessera.slicing._counts_for``
+    * ``steps % span`` -- ``tessera.encode`` / ``tessera.slicing._counts_for``
     * the Bresenham root realisable over the column count -- asked by *calling*
       ``family.column_schedule``, which is ``tessera.grammar``'s own scheduler,
       so this cannot drift from what the encoder will do

@@ -1,5 +1,7 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-11-16 for PQ #3677. Source: the v68 pin, reviewed answer, and PQ2471 scope tests.
+
 Re-stamped 2026-11-15 for P4a. Source: `streaming_production_cache.py`,
 `build_production_cache.py`, and `run-pipeline.sh`.
 The default pipeline keeps resident rendering and the expert gate, then runs separate activation re-fit.
@@ -2440,15 +2442,19 @@ normalization and its existing leaf mapping. Scoped route receipts replay
 carried launcher declarations through `tessera.image_metadata` with explicit
 receipt inputs. Shape guards, refusal payloads and exact replay equality remain
 active. Package-root resource traversal reads the exact packaged JSON.
-The API-only producer and serving pin is
-`aaa417003f0ee690e8ace138acd18df7f9531369` under schema v2. Version 0.1.0,
-v60 contract SHA `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`,
-22 cells, evidence, qualifications, scope, extensions, TP ceilings and the
-packaged reviewed answer remain unchanged. Serving, export and development-answer
-policies remain independent. Exact installed Git provenance and package bytes
-are qualified separately from the schema-v2 contract gate.
-Provenance: API-only producer delivery `aaa417003f0ee690e8ace138acd18df7f9531369`;
-PrismaQuant refactor parent `3867674f74529d1091dd31681557a76eae9aa9aa`.
+The producer and serving pin is `8bf496abdb7d598a3132f6b4b7cb7d7e96199d13` under schema v2.
+Contract v68, lane schema v12, has 18 cells and raw SHA-256
+`145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4`.
+E2M1 R896 covers dense and routed units on IMG-G `f8dbe1a0` at TP1 only.
+BF16 covers dense R769-R1279 and routed R1024 on IMG-N `5be13705` at TP1 only.
+The five measured BF16 dense rungs are 832, 880, 960, 1024, and 1088.
+E4M3 keeps its TP2 ceiling. IMG-G routed R768 uses the v66 class-launch receipt.
+PQ2471 grants narrow to BF16 TP1 and E4M3 TP2. They add no new rung or image.
+Graph-equality records remain route-only evidence. Export and serving gates stay independent.
+The default pipeline uses compressed-tensors and cannot reach a Tessera cell.
+The optional Qwen3 Tessera lane uses the vanilla image, which has no routed R768 cell.
+Provenance: 2026-11-16, PQ #3677 OPTION A; Tessera #1707 and the packaged v68 contract.
+
 
 
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): genuine

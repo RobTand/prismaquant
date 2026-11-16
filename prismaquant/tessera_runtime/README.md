@@ -39,6 +39,14 @@ git -C "$TS" cat-file -p "$SHA:src/tessera/serving/runtime_contract.json" | sha2
 The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
+## Current v68 pin
+
+The pin names `8bf496abdb7d598a3132f6b4b7cb7d7e96199d13`, contract v68, lane schema v12, with 18 cells.
+The packaged contract SHA-256 is `145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4`.
+E2M1 R896 covers IMG-G at TP1. BF16 covers IMG-N at TP1. E4M3 keeps TP2.
+PQ #3677 narrows PrismaQuant-owned grants and records all upstream evidence changes.
+Historical results below retain their measured source identity.
+
 ## Contract v60 pin history
 
 The v60 pin move used Tessera `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb` (Tessera #1033, PQ #2426).

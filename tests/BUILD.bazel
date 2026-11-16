@@ -68722,6 +68722,10 @@ pq_py_library(
     srcs = [
         "test_shape_runtime_prices.py",
     ],
+    data = [
+        ":files/fixtures",
+        "test_shape_runtime_prices.py",
+    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",

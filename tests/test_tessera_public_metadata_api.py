@@ -57,13 +57,13 @@ class ForbiddenRuntime:
 sys.meta_path.insert(0, ForbiddenRuntime())
 from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
 snapshot = installed_runtime_snapshot()
-assert len(snapshot.eligibility.cells) == 22
-assert snapshot.sha256 == 'ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e'
+assert len(snapshot.eligibility.cells) == 18
+assert snapshot.sha256 == '145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4'
 snapshot.require_exact_pin()
 from prismaquant.tessera_runtime_contract import TESSERA_DEV_PIN_COMMIT
 from prismaquant.tessera_serving_runtime_pin import load_tessera_serving_runtime_pin
 pin = load_tessera_serving_runtime_pin()
-assert pin.commit == pin.producer_commit == TESSERA_DEV_PIN_COMMIT == 'aaa417003f0ee690e8ace138acd18df7f9531369'
+assert pin.commit == pin.producer_commit == TESSERA_DEV_PIN_COMMIT == '8bf496abdb7d598a3132f6b4b7cb7d7e96199d13'
 assert not any(name == 'tessera.serving' or name.startswith('tessera.serving.') for name in sys.modules)
 print('PUBLIC-METADATA-OK')
 '''
@@ -237,3 +237,18 @@ def test_package_keeps_the_serving_runtime_outside_the_dependency_boundary():
                    for name in imported):
                 violations.append(f'{path.relative_to(root)}:{node.lineno}')
     assert not violations, violations
+
+
+@pytest.mark.parametrize('change', [{}, {'top_k': 1024}, {'regime': 'batch'}, {'grade': 'kl_full_vocab'}])
+def test_graph_equality_records_never_claim_served_kl(change):
+    entry = dict(kind='graph_equality', top_k=None, regime='decode',
+                 execution_modes=['eager'], receipt='docs/graph-equality.md')
+    payload = dict(grade=change.get('grade', 'route_only'), kl=[entry],
+                   smoke=dict(status='not_recorded', receipt=None))
+    entry.update({k: v for k, v in change.items() if k != 'grade'})
+    if change:
+        with pytest.raises(lane.LaneEligibilityError):
+            lane.parse_cell_evidence(payload, 'graph', cell_regime=entry['regime'], execution_modes=['eager'])
+    else:
+        evidence = lane.parse_cell_evidence(payload, 'graph', cell_regime='decode', execution_modes=['eager'])
+        assert evidence.grade == 'route_only'

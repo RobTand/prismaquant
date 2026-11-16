@@ -191,7 +191,7 @@ def test_shard_granularity_matches_a_real_encoded_unit(
     """The menu's granularity is Tessera's own, on a unit Tessera encoded.
 
     ``tessera_menu`` cannot encode 3000 rungs to ask where they cut, so it
-    hands ``tessera.layout.shard_granularity`` a ``_ShardGeometry`` carrying
+    hands ``tessera.slicing.shard_granularity`` a ``_ShardGeometry`` carrying
     the geometry an encode *would* produce. Three of the fields that object
     supplies are read there through ``getattr(unit, name, default)``, so an
     omitted or mis-set one answers confidently for a different wire. This
@@ -207,7 +207,7 @@ def test_shard_granularity_matches_a_real_encoded_unit(
     lower E2M1x2 rung and E4M3 cases use the window body.
     """
     from tessera.export import encode_linear_planes
-    from tessera.layout import shard_granularity as tessera_granularity
+    from tessera.slicing import shard_granularity as tessera_granularity
 
     import torch
 
@@ -253,12 +253,12 @@ def test_the_tp_gate_asks_tessera_about_the_axis_vllm_actually_shards():
     """``PARALLEL_COLUMN`` is vLLM's word for a cut Tessera calls ``row``.
 
     vLLM's ColumnParallelLinear splits the OUTPUT features; those are the
-    unit's rows, and ``tessera.layout.can_shard`` takes ``axis="row"`` for
+    unit's rows, and ``tessera.slicing.can_shard`` takes ``axis="row"`` for
     them. Inverting the pair answers plausibly in both directions and gates
     exactly the wrong half of a model, so it is pinned against a rung whose
     two granularities differ by a factor of 256.
     """
-    from tessera.layout import can_shard
+    from tessera.slicing import can_shard
 
     from prismaquant.tessera_formats import get_tessera_family
     from prismaquant.tessera_menu import _shard_geometry
@@ -461,7 +461,7 @@ def test_the_dev_pin_attests_exactly_the_rungs_the_contract_publishes(dev_pin):
             flag for cell in cells for flag in cell.requires_serve_flags
         }))
         assert rung.admission.source.startswith("tessera_dev_pin:runtime_contract:")
-        assert rung.admission.max_world_size == 2
+        assert rung.admission.max_world_size == contract.max_world_size[rung.admission.payload_family]
 
     # ...and the derivation is not vacuous: the contract must actually attest
     # something, or an empty menu would pass every assertion above.
@@ -977,20 +977,7 @@ def test_tp_above_the_attested_world_size_is_refused_in_the_attested_menu(dev_pi
 @pytest.mark.parametrize("context", ["dense", "routed"], ids=["dense", "routed"])
 def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(
         dev_pin, parallel_kind, context):
-    """The regression #632 names: a TP2 allocation dropped every Tessera rung.
-
-    Under the v24 pin every family sat at ``max_world_size: 1``, so the
-    attested menu at TP=2 was EMPTY -- ``tessera_tp_world_attested`` refused
-    each rung before the shape was looked at. v29 attests all three units at
-    world size 2 on a served receipt, so the TP=2 menu must be exactly the
-    TP=1 menu on a shape both axes shard, and each surviving rung must still
-    say the ceiling it was admitted under. Derived from the contract rather
-    than typed, so a family the pin stops attesting at 2 fails here by name.
-
-    Both v39 GLM-image structures carry A4, A8 and A16 cells. The selected
-    context is explicit; the vanilla dense E4M3 scope is a separate witness
-    in test_tessera_pin_v38_scope.py.
-    """
+    """TP2 retains only families with a current world-size receipt."""
     contract = trc.load_tessera_contract()
     scope = (_dense_context() if context == "dense"
              else _routed_context("TESSERA_E4M3_K1"))
@@ -1000,9 +987,10 @@ def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(
         SHAPE, mode=tm.MENU_ATTESTED, tp_degree=2,
         parallel_kind=parallel_kind, serving_context=scope)
     assert at_one, "the pinned contract must attest something at TP=1"
-    assert [r.format_name for r in at_two] == at_one
+    assert [r.format_name for r in at_two] == [
+        name for name in at_one if contract.max_world_size[name.rsplit("_R", 1)[0]] >= 2]
     families = {r.admission.payload_family for r in at_two}
-    assert families == {"TESSERA_E2M1_K2", "TESSERA_E4M3_K1", "TESSERA_BF16_K1"}, sorted(families)
+    assert families == {"TESSERA_E4M3_K1"}, sorted(families)
     for rung in at_two:
         assert contract.max_world_size[rung.admission.payload_family] >= 2
         legal, reason = tm.tessera_tp_legal(

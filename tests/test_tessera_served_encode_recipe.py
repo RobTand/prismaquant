@@ -1,12 +1,4 @@
-"""The recipe a campaign encodes is the served wire the pinned contract attests (#1502).
-
-``tessera.export.wire_recipe`` is the research default: below the E2M1x2 cap it
-is the WINDOW body, span 1, ``window_bits`` 12. The pinned contract's
-``formats[].attested_wire`` stamps the served routed wire, TCQ span 2, at every
-E2M1_K2 rung from 128 to 896, and the routed cells attest those rungs. A
-routed unit priced on the research wire is priced on bytes the routed decoder
-cannot read; G2 spent w02r row-0045 on exactly that.
-"""
+"""The v68 served E2M1x2 wire is WINDOW L14 on dense and routed units."""
 from prismaquant import tessera_cell_measurement as cell_measurement
 import pytest
 
@@ -14,7 +6,7 @@ pytest.importorskip("tessera")
 
 from prismaquant.joint_catalog_extension import added_format_recipe
 from prismaquant.tessera_formats import (
-    TesseraRouteRefused, parse_tessera_format_name, tessera_served_wire_recipe,
+    parse_tessera_format_name, tessera_served_wire_recipe,
     tessera_wire_recipe,
 )
 
@@ -31,13 +23,14 @@ def _attested(fmt):
     return recipe
 
 
-@pytest.mark.parametrize("fmt", ["TESSERA_E2M1_K2_R640", "TESSERA_E2M1_K2_R768"])
-def test_a_routed_subcap_e2m1_unit_encodes_the_attested_wire(fmt):
-    assert _served(fmt, "routed_moe").to_config() == _attested(fmt)
+@pytest.mark.parametrize("structure", ["dense", "routed_moe"])
+def test_e2m1_r896_encodes_the_v68_attested_window_wire(structure):
+    recipe = _served("TESSERA_E2M1_K2_R896", structure)
+    assert recipe.to_config() == _attested("TESSERA_E2M1_K2_R896")
+    assert recipe.span == 1 and recipe.window_bits == 14
 
 
 @pytest.mark.parametrize("fmt", [
-    "TESSERA_E2M1_K2_R896",
     *(f"TESSERA_E4M3_K1_R{q}" for q in (768, 896, 1152, 1408, 1536, 2048)),
     *(f"TESSERA_BF16_K1_R{q}" for q in (960, 1088, 1152, 1408, 1536, 2048)),
 ])
@@ -48,42 +41,9 @@ def test_where_the_research_wire_is_attested_the_encode_is_unchanged(fmt, struct
     assert _served(fmt, structure).to_config() == _attested(fmt)
 
 
-@pytest.mark.parametrize("fmt", ["TESSERA_E2M1_K2_R640", "TESSERA_E2M1_K2_R768"])
-def test_a_dense_subcap_e2m1_unit_is_refused_as_a_route_fact(fmt):
-    # The attested wire differs from the research wire at this rung, and no
-    # dense cell attests the rung (the E2M1 dense cells publish [896]): the
-    # dense route has no attested reading of either spelling.
-    with pytest.raises(TesseraRouteRefused, match="dense"):
-        _served(fmt, "dense")
-
-
-# ---------------------------------------------------------------------------
-# GREEN: the resolved wire is the encoded wire, and the campaign plans it
-# ---------------------------------------------------------------------------
-
 def _weight():
     import torch
     return torch.randn(64, 64, generator=torch.Generator().manual_seed(1502)).bfloat16()
-
-
-def test_the_planning_reader_returns_the_refusal_it_would_raise():
-    from prismaquant.tessera_formats import tessera_served_route_refusal
-    family, rung = parse_tessera_format_name("TESSERA_E2M1_K2_R640")
-    assert tessera_served_route_refusal(family, rung, structure=None) is None
-    assert tessera_served_route_refusal(family, rung, structure="routed_moe") is None
-    reason = tessera_served_route_refusal(family, rung, structure="dense")
-    assert "dense" in reason and "stays in the menu" in reason
-    # Not refused where the reader range ends: the export route gate owns it.
-    k1, k1_rung = parse_tessera_format_name("TESSERA_E4M3_K1_R1024")
-    assert tessera_served_route_refusal(k1, k1_rung, structure="dense") is None
-    with pytest.raises(Exception, match="structure 'stacked'"):
-        tessera_served_route_refusal(family, rung, structure="stacked")
-
-
-def test_a_receipt_reader_resolves_the_dense_wire_without_the_refusal():
-    family, rung = parse_tessera_format_name("TESSERA_E2M1_K2_R640")
-    assert tessera_served_wire_recipe(
-        family, rung, structure="dense", refuse_unattested=False) == tessera_wire_recipe(family, rung)
 
 
 # BF16_K1 is the family whose recipe sets a source spread (``window_sigma``).
@@ -99,11 +59,12 @@ def test_forwarding_the_research_recipe_writes_the_bytes_the_default_wrote(fmt):
     assert blob == default
 
 
-@pytest.mark.parametrize("fmt", ["TESSERA_E2M1_K2_R640", "TESSERA_E2M1_K2_R768"])
-def test_a_routed_subcap_encode_writes_the_served_wire(fmt):
+@pytest.mark.parametrize("structure", ["dense", "routed_moe"])
+def test_e2m1_r896_writes_the_served_wire(structure):
+    fmt = "TESSERA_E2M1_K2_R896"
     from tessera.container import parse
     from prismaquant import tessera_render
-    served = _served(fmt, "routed_moe")
+    served = _served(fmt, structure)
     _render, blob = tessera_render.encode_tessera_unit(
         _weight(), fmt, hessian_required=False, recipe=served)
     manifest = parse(blob).manifest
@@ -129,37 +90,19 @@ def test_batches_never_join_units_served_on_different_structures():
     assert len(cell_measurement.compatible_batches(pending, weights=weights, batch_size=4)) == 1
 
 
-def test_the_campaign_plans_route_refusals_as_contract_facts():
+def test_the_campaign_uses_the_shared_dense_and_routed_window_wire():
     from prismaquant import tessera_campaign as campaign
-    rungs = {640, 768, 896}
-    plan = campaign._served_route_refusals(
-        "TESSERA_E2M1_K2", rungs, ["up", "gate"],
-        encode_structure={"up": "dense", "gate": "dense"}, projected_units={})
-    assert sorted(plan) == ["640", "768"]
-    assert plan["640"]["members"] == ["gate", "up"] and "dense" in plan["640"]["reason"]
-    # A projected routed unit is served on TCQ: nothing refused.
-    assert campaign._served_route_refusals(
-        "TESSERA_E2M1_K2", rungs, ["e0"], encode_structure={"e0": "routed_moe"},
-        projected_units={"e0": {}}) == {}
-    # A routed unit with no projection cannot be adopted on the routed wire.
-    unprojected = campaign._served_route_refusals(
-        "TESSERA_E2M1_K2", rungs, ["e0"], encode_structure={"e0": "routed_moe"},
-        projected_units={})
-    assert sorted(unprojected) == ["640", "768"]
-    assert "no producer projection" in unprojected["640"]["reason"]
-    # No declared structure and K1 families: never refused.
-    assert campaign._served_route_refusals(
-        "TESSERA_E2M1_K2", rungs, ["x"], encode_structure=None, projected_units={}) == {}
-    assert campaign._served_route_refusals(
-        "TESSERA_E4M3_K1", {1024, 1408}, ["x"], encode_structure={"x": "dense"},
-        projected_units={}) == {}
+    for structure in ("dense", "routed_moe"):
+        assert campaign._served_route_refusals(
+            "TESSERA_E2M1_K2", {896}, ["u"],
+            encode_structure={"u": structure}, projected_units={}) == {}
 
 
 def test_a_routed_checkpoint_identity_stamps_the_served_wire(monkeypatch):
     from types import SimpleNamespace
     from tessera import cached_unit
     from prismaquant import tessera_campaign as campaign
-    fmt = "TESSERA_E2M1_K2_R640"
+    fmt = "TESSERA_E2M1_K2_R896"
     family, rung = parse_tessera_format_name(fmt)
     weight = _weight()
     anchor = SimpleNamespace(qname="u", format_name=fmt, family=family.name,
@@ -172,7 +115,7 @@ def test_a_routed_checkpoint_identity_stamps_the_served_wire(monkeypatch):
     research = campaign._checkpoint_anchor_identity(anchor, **kwargs)
     assert research == cached_unit.encoding_input_identity(
         weight, "u", family.payload_grid(), int(rung))
-    assert campaign._checkpoint_anchor_identity(anchor, structure="dense", **kwargs) == research
+    assert campaign._checkpoint_anchor_identity(anchor, structure="dense", **kwargs)["recipe"] != research["recipe"]
     tensor = "model.layers.3.mlp.experts.0.gate_proj.weight"
     projection = {"tensor": tensor, "source_tensor": tensor, "source_layout": "unpacked_per_expert",
                   "expert": 0, "source_slice": {"expert": 0, "selector": "whole",
@@ -193,7 +136,7 @@ def test_a_routed_checkpoint_identity_stamps_the_served_wire(monkeypatch):
 def test_a_resumed_row_stamped_on_the_research_wire_is_diverted_not_adopted():
     from types import SimpleNamespace
     from prismaquant import tessera_campaign as campaign
-    fmt = "TESSERA_E2M1_K2_R640"
+    fmt = "TESSERA_E2M1_K2_R896"
     family, rung = parse_tessera_format_name(fmt)
     anchor = SimpleNamespace(format_name=fmt)
 
@@ -206,8 +149,8 @@ def test_a_resumed_row_stamped_on_the_research_wire_is_diverted_not_adopted():
     reason = cell_measurement.stale_wire_reason(anchor, research, structure="routed_moe")
     assert reason is not None and "#1502" in reason
     assert cell_measurement.stale_wire_reason(anchor, served, structure="routed_moe") is None
-    # No declared structure, or a dense unit on its own wire: adopted as before.
+    # A declared dense unit also requires the new served wire.
     assert cell_measurement.stale_wire_reason(anchor, research, structure=None) is None
-    assert cell_measurement.stale_wire_reason(anchor, research, structure="dense") is None
+    assert cell_measurement.stale_wire_reason(anchor, research, structure="dense") is not None
     # An unreadable receipt is left to the full identity check, which refuses it.
     assert cell_measurement.stale_wire_reason(anchor, {}, structure="routed_moe") is None
