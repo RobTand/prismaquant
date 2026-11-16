@@ -8840,7 +8840,6 @@ pq_py_library(
         "prismaquant/lane_spec.py",
         "prismaquant/model_profiles/structure.py",
         "prismaquant/model_walk.py",
-        "prismaquant/native_moe_panel.py",
         "prismaquant/production_weight_cache.py",
         "prismaquant/serving_profiles.py",
         "prismaquant/shape_runtime_prices.py",
