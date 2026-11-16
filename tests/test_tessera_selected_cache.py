@@ -281,13 +281,9 @@ def _rooted_case(tmp_path, monkeypatch, change=None):
 def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, monkeypatch, capsys, change):
     import hashlib
     from operator import attrgetter
-    from prismaquant import joint_catalog_extension as bridge
     from tessera.cached_unit import CachedUnitBundle
-    names_ = ('build packages names source groups seen header old_plan plan old_prepared new_prepared '
-              'old_pwc new_pwc resource capture rows records proof policy_bound policy').split()
-    (build, packages, names, source, groups, seen, header, old_plan, plan, old_prepared, new_prepared,
-     old_pwc, new_pwc, resource, capture, rows, records, proof, policy_bound, policy) = attrgetter(*names_)(
-        _rooted_case(tmp_path, monkeypatch, change))
+    build, packages, names, source, groups, seen, header = attrgetter(
+        *'build packages names source groups seen header'.split())(_rooted_case(tmp_path, monkeypatch, change))
     if change == 'no_proof':
         with pytest.raises(ValueError, match='no encoder source proof'): build()
         return
@@ -315,14 +311,6 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
             read_cached_unit_bundle(manifest, tmp_path, set(names), source)
         return
     assert len(seen) == 1 and seen[0][1]['run_header'] == header
-    reads = set(bridge.selected_cache_read_paths(manifest))
-    assert {item['path'] for item in (old_plan, plan, old_prepared, new_prepared, old_pwc, new_pwc, resource)} <= reads
-    assert (capture['path'] in reads) == (change != 'v2_extension')
-    assert {row['wire'] for row in rows} <= reads
-    assert str(tmp_path/records[DENSE]['file']) in reads
-    assert {proof['path'], str(tmp_path/'source-proof-arm.json'), str(tmp_path/'source-fixture.json')} <= reads
-    assert {str(Path(package['path'])/'__init__.py') for package in packages.values()} <= reads
-    assert {policy_bound['path'], *(policy[key]['path'] for key in ('original_prepared', 'original_cache', 'census'))} <= reads
     # The v2 extension case used to stop here: the pinned Tessera read only a
     # v1 extension as rooted cached-unit authority. Tessera f46be81f7 (in the
     # af7a86d43 pin) reads v2 as well, so a band-created extension now binds
@@ -460,3 +448,8 @@ def test_a_catalog_adopted_wire_of_the_wrong_size_refuses_at_manifest_time(tmp_p
     bad = Path(case.rows[0]['wire']).resolve()
     with pytest.raises(TesseraExportLaneError, match=re.escape(f'{bad} does not match its receipt')):
         case.build()
+
+
+def test_the_unused_selected_cache_read_paths_stays_deleted():
+    from prismaquant import joint_catalog_extension
+    assert not hasattr(joint_catalog_extension, "selected_cache_read_paths")
