@@ -10,7 +10,6 @@ from pathlib import Path
 import re
 import shlex
 import shutil
-import signal
 import sys
 import time
 
@@ -93,6 +92,10 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
                 if not invocation_id:
                     raise RemoteError('shard submission returned no acknowledgement ID')
                 print('Remote Bazel shard: ' + invocation_id, flush=True)
+                # A cancelled workflow kills this process; its cancelled() step reads the record.
+                if recorded := os.environ.get('REMOTE_SHARDS'):
+                    with open(recorded, 'a') as stream:
+                        stream.write(invocation_id + '\n')
                 pending.append((invocation_id, expected, clock() + 58 * 60))
             except RemoteError as failure:
                 error = failure
@@ -397,6 +400,4 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
-    # A cancelled workflow sends SIGTERM; exiting through Python runs the cancel of own shards.
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     raise SystemExit(main())

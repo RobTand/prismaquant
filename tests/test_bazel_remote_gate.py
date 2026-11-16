@@ -334,6 +334,14 @@ def test_cancel_uses_the_buildbuddy_rpc_service_and_a_failure_never_hides_the_ve
     assert capsys.readouterr().out == 'Remote Bazel shard not cancelled: parent-0\n'
 
 
+def test_admitted_shards_are_recorded_for_the_cancelled_workflow_step(tmp_path, monkeypatch):
+    recorded = tmp_path / 'remote-shards.txt'
+    monkeypatch.setenv('REMOTE_SHARDS', str(recorded))
+    remote.submit_shards(BoundedFallbackClient(), fallback_requests(count=2), HEAD, concurrency=2,
+                         clock=lambda: 1)
+    assert recorded.read_text().split() == ['parent-0', 'parent-1']
+
+
 def test_a_red_record_shard_keeps_the_record_going():
     client = BoundedFallbackClient(red={0})
     records = remote.submit_shards(client, fallback_requests(count=2, mode='main'), HEAD,
