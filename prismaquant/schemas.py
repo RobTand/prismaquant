@@ -44,12 +44,16 @@ class SchemaValidationError(ValueError):
     """Raised when a PrismaQuant handoff artifact is structurally invalid."""
 
 
+class RetiredFormatError(ValueError):
+    """A format name that belongs to a retired lane and is no longer served.
+
+    It is deliberately NOT a ``KeyError``. A reader that tolerates unknown
+    names with ``except KeyError`` still refuses a retired one.
+    """
+
+
 #: Shape of a retired codebook rung name (the Gridbook lane, archived
-#: 2026-09-02; remnant cleanup 2026-09-25, #1304). A shape test only,
-#: kept here so the torch-free readers (this module, ``layer_config``)
-#: can spot one; the authority is
-#: ``format_registry.RETIRED_CODEBOOK_FORMAT_RE``, reached through
-#: ``get_format`` by :func:`refuse_retired_codebook_format`.
+#: 2026-09-02; remnant cleanup 2026-09-25, #1304). This is the one authority.
 RETIRED_CODEBOOK_NAME_RE = re.compile(r"^(?:NVFP4_CB_K|FP8_CB_K)\d+$")
 RETIRED_CODEBOOK_ARCHIVE = "archive/gridbook_lane_2026-09-02"
 #: Cost-row fields only the retired codebook lane's min-chain encoder wrote.
@@ -87,8 +91,6 @@ def refuse_retired_format_plan_identity(record, where: str) -> None:
     for key in RETIRED_FORMAT_PLAN_IDENTITY_KEYS:
         if record.get(key) is None:
             continue
-        from prismaquant.format_registry import RetiredFormatError
-
         raise RetiredFormatError(
             f"{where}: {key}={record[key]!r} binds it to a source-class format "
             f"plan; that feature was archived with the Gridbook codebook lane "
@@ -107,8 +109,6 @@ def refuse_retired_ladder_cost_source(entry, where: str = "cost row") -> None:
     source = entry.get("cost_source") if _is_mapping(entry) else None
     if source not in RETIRED_LADDER_COST_SOURCES:
         return
-    from prismaquant.format_registry import RetiredFormatError
-
     raise RetiredFormatError(
         f"{where}: cost_source {source!r} was stamped by the retired Gridbook "
         f"codebook lane's RD-ladder interpolation (archived 2026-09-25, "
@@ -120,15 +120,18 @@ def refuse_retired_ladder_cost_source(entry, where: str = "cost row") -> None:
 def refuse_retired_codebook_format(name: str) -> None:
     """Raise ``RetiredFormatError`` when ``name`` is a retired codebook rung.
 
-    Returns for every other name. ``format_registry`` imports torch, so it is
-    imported only on this refusal path and the caller stays torch-free.
+    Returns for every other name.
     """
-    if not RETIRED_CODEBOOK_NAME_RE.fullmatch(str(name).upper()):
-        return
-    from prismaquant.format_registry import get_format
-
-    get_format(str(name))
-    raise AssertionError(f"{name!r} is a retired codebook rung but resolved")
+    if RETIRED_CODEBOOK_NAME_RE.fullmatch(str(name).upper()):
+        raise RetiredFormatError(
+            f"format {name!r} belongs to the retired Gridbook codebook "
+            f"lane (NVFP4-CB / FP8-CB), removed on 2026-09-02; its "
+            f"format, cost and render code was archived on 2026-09-25 "
+            f"(#1304). A cost table, layer config or selection that "
+            f"names it can no longer be priced, rendered or exported "
+            f"from this repository. See {RETIRED_CODEBOOK_ARCHIVE}/"
+            f"README.md."
+        )
 
 
 def _label(path: str | None) -> str:

@@ -113,7 +113,7 @@ from .layer_config import (
     is_layer_config_meta_key as _is_layer_config_meta_key,
     layer_config_metadata as _layer_config_metadata,
 )
-from .schemas import validate_layer_config_payload
+from .schemas import refuse_retired_codebook_format, validate_layer_config_payload
 from .export_output_safety import (
     prepare_fresh_export_directory,
     transactional_export_directory,
@@ -580,13 +580,10 @@ def _coerce_runtime_legal_assignment(
             continue
         if fmt_canonical not in EXPORTABLE_FORMATS:
             from prismaquant.gguf_formats import GGUF_BLOCK_BYTES
-            from prismaquant import format_registry as _fr
 
-            if _fr.RETIRED_CODEBOOK_FORMAT_RE.fullmatch(fmt_canonical):
-                # A retired codebook rung (the Gridbook lane, archived
-                # 2026-09-25, #1304) refuses with the registry's pointer to
-                # the archive rather than as an unknown research format.
-                _fr.get_format(fmt_canonical)
+            # A retired codebook rung refuses with the pointer to the archive
+            # rather than as an unknown research format.
+            refuse_retired_codebook_format(fmt_canonical)
             if fmt_canonical in GGUF_BLOCK_BYTES:
                 # Wrong container, not a research format: a GGUF assignment
                 # reaching the compressed-tensors exporter means the pipeline

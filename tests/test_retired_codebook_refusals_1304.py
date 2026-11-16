@@ -241,7 +241,7 @@ def test_retired_refusal_is_not_a_key_error():
     "name", ("TESSERA_NVFP4_K1_R4", "NVFP4", "FP8_DYNAMIC", "NVFP4_CB", "CB_K16")
 )
 def test_non_codebook_names_do_not_hit_the_retired_refusal(name):
-    assert not fr.RETIRED_CODEBOOK_FORMAT_RE.fullmatch(name)
+    assert not schemas.RETIRED_CODEBOOK_NAME_RE.fullmatch(name)
 
 
 TESSERA = (
@@ -257,7 +257,6 @@ CODEBOOK_ACTIVATION_GLOBS = ("NVFP4_CB_*", "FP8_CB_*", "*_CB_K*")
 @pytest.mark.parametrize("name", TESSERA)
 def test_a_tessera_rung_never_reaches_a_codebook_path(name):
     # The name gate every reader above goes through lets it pass.
-    assert not fr.RETIRED_CODEBOOK_FORMAT_RE.fullmatch(name)
     assert not schemas.RETIRED_CODEBOOK_NAME_RE.fullmatch(name)
     assert schemas.refuse_retired_codebook_format(name) is None
     # It resolves to a live family, and the footprint prices it without a
