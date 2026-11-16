@@ -944,6 +944,11 @@ and 58-minute await deadline are unchanged. See `docs/bazel.md` for the timing
 source and scope. Known excluded manual rules are removed from impacts before
 manifest validation; hosted routing and unknown-target refusal remain enforced.
 
+As of: 2026-11-16, post-merge record schedule, PQ #3763. Source: `.github/workflows/ci.yml`.
+The full no-cache Bazel record (amd64 and arm64) runs every 6 hours, and on manual dispatch, only when
+main moved since the last finished record. A push to main runs the hosted amd64 and arm64 lanes and the
+import surface, each push in its own concurrency group; records run one at a time.
+
 As of: 2026-11-15, FIFO merge queue, PQ #3642.
 Source: `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.mergify.yml`.
 One serial queue requires `linked issue` on original PRs and `gate` on each draft.

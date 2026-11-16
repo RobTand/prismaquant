@@ -66,7 +66,9 @@ def test_remote_planner_uses_queue_aware_refs_and_requires_scope_upload():
 def test_postmerge_has_one_serial_controller_for_both_architectures():
     ci = workflows()['ci.yml']
     controller = ci['jobs']['tests']
-    assert controller['if'] == "github.event_name != 'pull_request'"
+    assert controller['if'] == "needs.due.outputs.run == 'true'" and controller['needs'] == 'due'
+    assert ci['on']['schedule'] == [{'cron': '17 */6 * * *'}]  # Not at every push (#3763).
+    assert {ci['jobs'][job]['if'] for job in ('hosted-amd64', 'hosted-arm64')} == {"github.event_name == 'push'"}
     checkout = next(step for step in controller['steps']
                     if step.get('uses', '').startswith('actions/checkout@'))
     assert checkout.get('with', {}).get('fetch-depth') == 0, 'historical-main graph contract needs full history'

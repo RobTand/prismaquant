@@ -9,15 +9,32 @@ name: CI
     - synchronize
     - reopened
     - ready_for_review
+  schedule:
+  - cron: 17 */6 * * *
   workflow_dispatch: null
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'record' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
+  actions: read
 jobs:
+  due:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.due.outputs.run }}
+    steps:
+    - id: due
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        last="$(gh run list -R "$GITHUB_REPOSITORY" -w ci.yml -b main -L 200 --json headSha,event,status,conclusion --jq '[.[] | select((.event == "schedule" or .event == "workflow_dispatch") and .status == "completed" and .conclusion != "cancelled")][0].headSha')"
+        [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ "$last" != "$GITHUB_SHA" ] && run=true || run=false
+        echo "run=$run" >> "$GITHUB_OUTPUT"
   tests:
-    if: github.event_name != 'pull_request'
+    needs: due
+    if: needs.due.outputs.run == 'true'
     name: Post-merge Bazel record (amd64 and arm64)
     runs-on: ubuntu-24.04
     timeout-minutes: 360
@@ -147,7 +164,7 @@ jobs:
         python -c "import prismaquant; print('prismaquant ok')"
         python -m prismaquant.allocator --help > /dev/null && echo "allocator CLI ok"
   hosted-amd64:
-    if: ${{ github.event_name != 'pull_request' }}
+    if: github.event_name == 'push'
     uses: ./.github/workflows/bazel-hosted.yml
     with:
       architecture: amd64
@@ -159,7 +176,7 @@ jobs:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
       MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
   hosted-arm64:
-    if: ${{ github.event_name != 'pull_request' }}
+    if: github.event_name == 'push'
     uses: ./.github/workflows/bazel-hosted.yml
     with:
       architecture: arm64
