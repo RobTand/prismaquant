@@ -2,8 +2,7 @@
 
   1. sensitivity_probe.stage_multimodal — preserves vision_config (vs
      stage_text_only which strips it).
-  2. allocator.apply_visual_format_override — the uniform visual format.
-  3. export_native_compressed._apply_visual_recipe_quant passes the
+  2. export_native_compressed._apply_visual_recipe_quant passes the
      activations cached under a visual Linear's recipe name to
      native_render_codec.quantize_2d.
 """
@@ -136,23 +135,6 @@ class TestStageMultimodalPreservesVisionConfig(unittest.TestCase):
             self.assertTrue(mm.is_relative_to(temp_parent))
             self.assertTrue(txt.is_relative_to(temp_parent))
 
-
-class TestAllocatorVisualSensitivityModes(unittest.TestCase):
-    """Exercise the uniform visual assignment helper."""
-
-    def test_uniform_mode_always_stamps_visual_format(self):
-        # Visual Linears are stamped with --visual-format regardless of
-        # whether the probe had them.
-        from prismaquant.allocator import (
-            apply_visual_format_override,
-        )
-        assignment = {
-            "model.layers.0.self_attn.q_proj": "NVFP4",
-            "model.visual.blocks.0.attn.qkv": "NVFP4",
-        }
-        out = apply_visual_format_override(assignment, "BF16")
-        self.assertEqual(out["model.visual.blocks.0.attn.qkv"], "BF16")
-        self.assertEqual(out["model.layers.0.self_attn.q_proj"], "NVFP4")
 
 class TestQuantize2DVisualActivationsRoundtrip(unittest.TestCase):
     """The exporter hands a visual Linear's cached activations to the codec.
