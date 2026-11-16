@@ -316,11 +316,11 @@ def test_selected_prefetch_guards_and_advises_verified_files(capture, monkeypatc
     root, path, census, identity, acts, hessians, record = capture
     observed, advised = [], []
     monkeypatch.setattr(perturbed_x_cache, 'release_activation_cache_file_pages',
-        lambda path, *, expected_stat: advised.append((path.name, expected_stat.st_size)))
+        lambda path, *, expected_stat, durable: advised.append((path.name, expected_stat.st_size, durable)))
     values, _ = cc.prefetch_capture(record['path'], expected_identity=identity,
         census=census, names=['a'], device='cpu', expected_sha256=record['sha256'],
         release_file_pages=True, resource_check=lambda label, **kwargs: observed.append((label, kwargs)))
-    assert advised == [('a.pt', (root/'inputs/a.pt').stat().st_size)]
+    assert advised == [('a.pt', (root/'inputs/a.pt').stat().st_size, False)]
     # ONE allocation on a CPU device: the payload the loader returns IS the
     # tensor handed on (`.to` on the same device and dtype returns the same
     # tensor), so this is the storage size once rather than the 2x the single

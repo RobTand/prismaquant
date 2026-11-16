@@ -52,8 +52,8 @@ MANIFEST_SOURCE_BLOBS = {
 # hashlib calls are identical; no retained site was deleted or archived.
 # Reproducer and per-site evidence: flux-migration/pq-tessera/evidence/p4-gfix/.
 # Future changed pins require a per-file --reason and print the source diff.
-CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('cf7f382046d38975ed4a0b22fa6b63b1182f4dba',
-                                      'cc2793ea2cb73def65ea2ed2e5e2ab40a9f09e5fb3ce4e596dbec9cb51381d55'),
+CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('27653aa3feb5f4d14b6cca1651bd232f23f601f0',
+                                      '15993e22c339d1cbb7c157d69d904dff031a535bee09bb35797cbbe654f693ce'),
  'prismaquant/digests.py': ('1511a8142cca4b1fb9067bb5cbbcf92098f95f69',
                             'e8ab9ab2d8afd9fcbc3bc6fd57401247405bd17ec850fefb71e4694edb2dbb99'),
  'prismaquant/tensor_digests.py': ('0777758650869edc365cbf545280250e6fa175f2',
