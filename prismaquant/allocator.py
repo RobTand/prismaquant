@@ -628,44 +628,6 @@ def _mark_weight_only_nvfp4_stats(
     return marked
 
 
-def apply_visual_format_override(
-    assignment: dict[str, str],
-    visual_format: str,
-    *, profile=None,
-) -> dict[str, str]:
-    """Force every visual-encoder Linear in `assignment` to `visual_format`.
-
-    `visual_format="BF16"` is a no-op when a visual Linear already has no
-    allocator entry (the export's existing passthrough keeps it at BF16);
-    we still write `BF16` into the returned assignment so the layer_config
-    round-trip is explicit and downstream tooling (export, validate) has a
-    uniform record of the decision.
-    """
-    out = dict(assignment)
-    for name in list(out.keys()):
-        if _is_visual_linear(name, profile):
-            out[name] = visual_format
-    return out
-
-
-def apply_mtp_format_override(
-    assignment: dict[str, str],
-    mtp_format: str,
-) -> dict[str, str]:
-    """Force MTP Linears to a recipe-level format.
-
-    The production vLLM path currently validates main-target logits and keeps
-    MTP in BF16 until speculative-decode acceptance is measured.  This override
-    is applied after DP/fused-sibling promotion so a sensitive MTP projection
-    cannot be accidentally quantized by the allocator.
-    """
-    out = dict(assignment)
-    for name in list(out.keys()):
-        if name.startswith("mtp."):
-            out[name] = mtp_format
-    return out
-
-
 class _StockAllocationLane:
     """The allocation protocol's answers when no lane plugin provides it.
 
