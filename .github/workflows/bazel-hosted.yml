@@ -65,6 +65,7 @@ jobs:
       run: |
         set -Eeuo pipefail
         mkdir -p hosted-private
+        case "$BASE" in *[!0]*) ;; *) BASE="$(git rev-parse "$HEAD^1")" ;; esac  # empty (dispatch) or all zeros (new branch)
         python tools/ci/gate_select.py --base "$BASE" --head "$HEAD" --mode full --output hosted-private/full-plan.json
         if [ "$TRUSTED" = true ]; then
           python tools/ci/bazel_gate.py hosted --architecture "$ARCHITECTURE" --plan hosted-private/full-plan.json --output hosted-private/plan.json

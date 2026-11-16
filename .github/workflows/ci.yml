@@ -21,9 +21,6 @@ jobs:
     name: Post-merge Bazel record (amd64 and arm64)
     runs-on: ubuntu-24.04
     timeout-minutes: 360
-    outputs:
-      base: ${{ steps.source.outputs.base }}
-      head: ${{ github.sha }}
     env:
       TRUSTED: 'true'
     steps:
@@ -150,28 +147,24 @@ jobs:
         python -c "import prismaquant; print('prismaquant ok')"
         python -m prismaquant.allocator --help > /dev/null && echo "allocator CLI ok"
   hosted-amd64:
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.tests.result == 'success' }}
-    needs:
-    - tests
+    if: ${{ github.event_name != 'pull_request' }}
     uses: ./.github/workflows/bazel-hosted.yml
     with:
       architecture: amd64
       mode: main
-      base: ${{ needs.tests.outputs.base }}
+      base: ${{ github.event.before }}
       head: ${{ github.sha }}
       trusted: true
     secrets:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
       MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
   hosted-arm64:
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.tests.result == 'success' }}
-    needs:
-    - tests
+    if: ${{ github.event_name != 'pull_request' }}
     uses: ./.github/workflows/bazel-hosted.yml
     with:
       architecture: arm64
       mode: main
-      base: ${{ needs.tests.outputs.base }}
+      base: ${{ github.event.before }}
       head: ${{ github.sha }}
       trusted: true
     secrets:
