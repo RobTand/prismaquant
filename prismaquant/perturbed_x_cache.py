@@ -528,6 +528,7 @@ def release_activation_cache_file_pages(path, *, expected_stat, durable=True):
 
     Completed-entry readers may pass ``durable=False`` after writer file
     and directory fsyncs. Provisional output spools may also skip this fence.
+    With ``durable=False``, pages still dirty or under writeback stay cached.
     """
     flags = os.O_RDONLY | os.O_NOFOLLOW
     descriptor = os.open(path, flags)
@@ -1986,11 +1987,11 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                                             expected_session, residency_check=None,
                                             release_file_pages=True, scratch=None,
                                             resolver=None, session_for_reference=None,
-                                            local_paths=None):
+                                            local_paths=None, durable=True):
     """Read/verify the entire bounded window before exposing any tensor.
 
-    This is the existing activation artifact owner's exact-input read seam.
-    The consumer owns no additional cache and receives no lazy-loading path.
+    Pass ``durable=False`` only after writer file and directory fsyncs.
+    Local reads keep their fsync, including direct-produced entries.
     ``residency_check`` reserves/releases these tensors in its aggregate owner.
 
     ``resolver`` names which staged reader context this window resolves
@@ -2098,7 +2099,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             window._tensors[ref] = _read_exact_entry(
                 ref, path=path, signature=signature, source=source,
                 source_before=source_before, lease_fd=lease_fd, owned=buffer,
-                release_file_pages=release_file_pages, durable=False,
+                release_file_pages=release_file_pages, durable=durable,
                 source_offset=0 if lease_window is None else _staged.get('object_offset', 0))
         _record_served_bytes(lease_resolver, path, tier, ref.file_bytes)
         if lease_window is not None:
@@ -2127,7 +2128,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                     ref, path=path, signature=signature,
                     source=Path(lease_window.stage_path(key) or path),
                     source_before=os.fstat(lease_fd), lease_fd=lease_fd,
-                    owned=buffer, release_file_pages=release_file_pages, durable=False,
+                    owned=buffer, release_file_pages=release_file_pages, durable=durable,
                     source_offset=lease_window.entries[key].get('object_offset', 0))
                 lease_window.check_fd(lease_fd)
         finally:

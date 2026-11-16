@@ -67,7 +67,7 @@ def _warm(directory: Path) -> None:
 
 
 @pytest.mark.parametrize('local', [False, True])
-def test_completed_reader_keeps_writer_durability(tmp_path, monkeypatch, local):
+def test_unproved_exact_reader_keeps_default_fsync(tmp_path, monkeypatch, local):
     calls = []
     fsync = os.fsync
 
@@ -77,15 +77,39 @@ def test_completed_reader_keeps_writer_durability(tmp_path, monkeypatch, local):
 
     monkeypatch.setattr(os, 'fsync', counted)
     expected = torch.arange(8, dtype=torch.float32).reshape(2, 4)
-    ref = _write(tmp_path, 'durable', expected, durable=not local)
-    assert calls == ([] if local else ['file', 'directory'])
+    ref = _write(tmp_path, 'unproved', expected, durable=False)
+    assert calls == []
     assert hashlib.sha256(Path(ref.path).read_bytes()).hexdigest() == ref.sha256
     calls.clear()
     with prefetch_exact_activation_cache_entries(
             [ref], max_tensor_bytes=ref.tensor_bytes, expected_session=SESSION,
             local_paths={ref: Path(ref.path)} if local else None) as window:
         assert torch.equal(window.get(ref), expected)
-    assert calls == (['file'] if local else [])
+    assert calls == ['file']
+
+
+def test_exact_reference_follows_writer_fsyncs(tmp_path, monkeypatch):
+    events = []
+    fsync = os.fsync
+
+    def synced(descriptor):
+        result = fsync(descriptor)
+        events.append('directory' if stat.S_ISDIR(os.fstat(descriptor).st_mode) else 'file')
+        return result
+
+    def reference(*args):
+        assert events == ['file', 'directory']
+        value = ExactActivationReference(*args)
+        events.append(value)
+        return value
+
+    monkeypatch.setattr(os, 'fsync', synced)
+    with monkeypatch.context() as patch:
+        patch.setattr('prismaquant.perturbed_x_cache.ExactActivationReference', reference)
+        ref = _write(tmp_path, 'published', torch.arange(8, dtype=torch.float32))
+    assert events == ['file', 'directory', ref]
+    assert isinstance(ref, ExactActivationReference)
+    assert hashlib.sha256(Path(ref.path).read_bytes()).hexdigest() == ref.sha256
 
 
 def test_write_hashes_the_serialized_bytes_without_rereading_the_entry(tmp_path):

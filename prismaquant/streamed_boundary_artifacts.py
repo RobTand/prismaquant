@@ -2385,7 +2385,7 @@ class StreamedBoundaryArtifacts:
                 if self._scratch is None:
                     from .perturbed_x_cache import EntryReadScratch
                     self._scratch = EntryReadScratch()
-                context = prefetch_exact_activation_cache_entries(references,
+                context = prefetch_exact_activation_cache_entries(references, durable=False,
                     expected_session=self.session, max_tensor_bytes=self.config["max_resident_bytes"],
                     residency_check=self._reserve, scratch=self._scratch, local_paths=local,
                     session_for_reference=(lambda ref: self._entry_identity(ref)["session"])
