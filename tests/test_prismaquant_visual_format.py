@@ -1,12 +1,10 @@
 """Tests for the Phase 1 visual-encoder --visual-format override.
 
-The override lives in three places the body never touches:
-  1. allocator.apply_visual_format_override — stamps visual Linears
-     in an assignment dict with a uniform target format.
-  2. allocator.discover_visual_linears_from_source — scans a source
+The override lives in two places the body never touches:
+  1. allocator.discover_visual_linears_from_source — scans a source
      checkpoint's safetensors for rank-2 `model.visual.*.weight`
      entries (the enumerable visual Linears).
-  3. export_native_compressed._apply_visual_recipe_quant — rewrites
+  2. export_native_compressed._apply_visual_recipe_quant — rewrites
      passthrough-loaded visual `.weight` tensors through
      `quantize_2d` when the recipe assigns non-BF16.
 
@@ -25,7 +23,6 @@ import torch
 from safetensors.torch import save_file
 
 from prismaquant.allocator import (
-    apply_visual_format_override,
     discover_visual_linear_stats_from_source,
     discover_visual_linears_from_source,
     validate_source_visual_passthrough_contract,
@@ -50,42 +47,6 @@ class TestIsVisualLinear(unittest.TestCase):
         self.assertFalse(_is_visual_linear("model.layers.0.self_attn.q_proj"))
         self.assertFalse(_is_visual_linear("mtp.layers.0.mlp.gate_proj"))
         self.assertFalse(_is_visual_linear("lm_head"))
-
-
-class TestApplyVisualFormatOverride(unittest.TestCase):
-    def test_override_forces_uniform_nvfp4_for_visual(self):
-        # Mixed assignment: body stays untouched; visual Linears are
-        # forced uniformly to the override format even when their prior
-        # assignment varied.
-        assignment = {
-            "model.layers.0.self_attn.q_proj": "NVFP4",
-            "model.layers.0.mlp.gate_proj": "MXFP8",
-            "model.visual.blocks.0.attn.qkv": "BF16",
-            "model.visual.blocks.1.mlp.fc1": "MXFP8",
-            "visual.merger.mlp.0": "BF16",
-        }
-        out = apply_visual_format_override(assignment, "NVFP4")
-        # Body untouched.
-        self.assertEqual(out["model.layers.0.self_attn.q_proj"], "NVFP4")
-        self.assertEqual(out["model.layers.0.mlp.gate_proj"], "MXFP8")
-        # All visual Linears are uniformly NVFP4 regardless of prior.
-        self.assertEqual(out["model.visual.blocks.0.attn.qkv"], "NVFP4")
-        self.assertEqual(out["model.visual.blocks.1.mlp.fc1"], "NVFP4")
-        self.assertEqual(out["visual.merger.mlp.0"], "NVFP4")
-
-    def test_bf16_override_keeps_visual_entries_but_stamps_bf16(self):
-        assignment = {
-            "model.layers.0.self_attn.q_proj": "NVFP4",
-            "model.visual.blocks.0.attn.qkv": "MXFP8",
-        }
-        out = apply_visual_format_override(assignment, "BF16")
-        self.assertEqual(out["model.layers.0.self_attn.q_proj"], "NVFP4")
-        self.assertEqual(out["model.visual.blocks.0.attn.qkv"], "BF16")
-
-    def test_override_does_not_mutate_input(self):
-        assignment = {"model.visual.blocks.0.attn.qkv": "BF16"}
-        _ = apply_visual_format_override(assignment, "NVFP4")
-        self.assertEqual(assignment["model.visual.blocks.0.attn.qkv"], "BF16")
 
 
 class TestDiscoverVisualLinearsFromSource(unittest.TestCase):
@@ -321,9 +282,7 @@ class TestApplyVisualRecipeQuant(unittest.TestCase):
 
 
 class TestAllocatorVisualEndToEnd(unittest.TestCase):
-    """End-to-end: discover visual Linears from a synthetic source +
-    run apply_visual_format_override → the resulting layer_config
-    assigns NVFP4 to every visual Linear."""
+    """End-to-end: discover the three rank-2 visual Linears of a synthetic source."""
 
     def test_discover_then_override_yields_uniform_nvfp4(self):
         import tempfile
@@ -338,19 +297,7 @@ class TestAllocatorVisualEndToEnd(unittest.TestCase):
             }
             save_file(tensors, str(tmp / "model.safetensors"))
             names = discover_visual_linears_from_source(str(tmp))
-            # Start with an empty assignment then inject visual entries
-            # (this mirrors what main() does after the knapsack DP).
-            assignment = {"model.layers.0.self_attn.q_proj": "NVFP4"}
-            for n in names:
-                assignment[n] = "BF16"  # seed with pre-override value
-            out = apply_visual_format_override(assignment, "NVFP4")
-            # All three rank-2 visual Linears flipped to NVFP4.
-            self.assertEqual(
-                {n: out[n] for n in names},
-                {n: "NVFP4" for n in names},
-            )
             self.assertEqual(len(names), 3)
-            self.assertEqual(out["model.layers.0.self_attn.q_proj"], "NVFP4")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from prismaquant import allocator
 from prismaquant import format_registry as fr
 from prismaquant.allocator import (
-    apply_mtp_format_override,
     filter_candidates_for_profile,
     resolve_target_profile,
 )
@@ -185,15 +185,6 @@ def test_e5m2_is_parsed_then_gated_by_serving_profile():
     assert "not enabled for dense Linears" in verdict.detail
 
 
-def test_mtp_format_override_keeps_body_assignment_intact():
-    assignment = {
-        "model.layers.0.mlp.down_proj": "NVFP4",
-        "mtp.fc": "NVFP4",
-        "mtp.layers.0.mlp.down_proj": "NVFP4",
-    }
-
-    out = apply_mtp_format_override(assignment, "BF16")
-
-    assert out["model.layers.0.mlp.down_proj"] == "NVFP4"
-    assert out["mtp.fc"] == "BF16"
-    assert out["mtp.layers.0.mlp.down_proj"] == "BF16"
+def test_assignment_override_helpers_stay_deleted():
+    assert not hasattr(allocator, "apply_visual_format_override")
+    assert not hasattr(allocator, "apply_mtp_format_override")
