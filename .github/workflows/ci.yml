@@ -9,15 +9,17 @@ name: CI
     - synchronize
     - reopened
     - ready_for_review
+  schedule:
+  - cron: 17 */6 * * *
   workflow_dispatch: null
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'record' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
   tests:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     name: Post-merge Bazel record (amd64 and arm64)
     runs-on: ubuntu-24.04
     timeout-minutes: 360
@@ -29,32 +31,27 @@ jobs:
         ref: ${{ github.sha }}
         fetch-depth: 0
         persist-credentials: false
+    - id: due  # A schedule records main only when it moved within the interval and a margin.
+      run: |
+        recent="$(git log -1 --since='7 hours ago' --format=%H)"
+        if [ "$GITHUB_EVENT_NAME" != schedule ] || [ -n "$recent" ]; then echo run=true >> "$GITHUB_OUTPUT"; fi
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      if: steps.due.outputs.run == 'true'
       id: scan-python
       with:
         python-version: '3.14'
-    - id: source
-      env:
-        BEFORE: ${{ github.event.before }}
-        HEAD: ${{ github.sha }}
-      run: |
-        set -Eeuo pipefail
-        base="$BEFORE"
-        if [ -z "$base" ] || [ "$base" = 0000000000000000000000000000000000000000 ]; then
-          base="$(git rev-parse "$HEAD^1")"
-        fi
-        printf 'base=%s\n' "$base" >> "$GITHUB_OUTPUT"
     - name: Run source-bound Remote Bazel controller
+      if: steps.due.outputs.run == 'true'
       id: controller
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-        BASE: ${{ steps.source.outputs.base }}
         HEAD: ${{ github.sha }}
         BRANCH: ${{ github.ref_name }}
       run: |
         set -Eeuo pipefail
-        python tools/ci/remote_gate.py main --base "$BASE" --head "$HEAD" --branch "$BRANCH" --timeout 20 --output bazel-main-upload
+        # Main mode records the whole population; the base only names the parent.
+        python tools/ci/remote_gate.py main --base "$(git rev-parse "$HEAD^1")" --head "$HEAD" --branch "$BRANCH" --timeout 20 --output bazel-main-upload
         python - <<'REMOTE_VERDICT'
         import json, os
         from pathlib import Path
@@ -147,7 +144,7 @@ jobs:
         python -c "import prismaquant; print('prismaquant ok')"
         python -m prismaquant.allocator --help > /dev/null && echo "allocator CLI ok"
   hosted-amd64:
-    if: ${{ github.event_name != 'pull_request' }}
+    if: github.event_name == 'push'
     uses: ./.github/workflows/bazel-hosted.yml
     with:
       architecture: amd64
@@ -159,7 +156,7 @@ jobs:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
       MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
   hosted-arm64:
-    if: ${{ github.event_name != 'pull_request' }}
+    if: github.event_name == 'push'
     uses: ./.github/workflows/bazel-hosted.yml
     with:
       architecture: arm64
