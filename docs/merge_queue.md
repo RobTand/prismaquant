@@ -14,7 +14,9 @@ as admitted Flux jobs; cite their job IDs and results in the PR body.
    `Refs #<issue>.` with an open parent issue in this repository. A completed
    issue uses a supported closing reference such as `Closes #<issue>`.
    Put the reference at the start of its own line.
-3. Wait for `pr-gate` to pass.
+3. Run `tools/ci/static_checks.sh --merge-main` (in a Flux job, with the repo's Python 3.12 environment and `uv` on
+   `PATH`). It runs the gate's checks that execute no test on your head merged with the current `main`.
+4. Wait for `pr-gate` to pass.
 
 Classic branch protection requires a pull request but no status checks.
 The `queue` label path requires two queue conditions on your PR's text: a body

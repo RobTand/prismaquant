@@ -10,7 +10,7 @@ FIX = 'tools/bazel/generate.sh'
 
 
 def commands():
-    """Every derived-input check. The hosted gate lane runs them on each head tree."""
+    """Every derived-input check. tools/ci/static_checks.sh runs them in the gate and before the queue label."""
     return [
         [sys.executable, 'tools/bazel/requirements.py', '--check'],
         [sys.executable, 'tools/bazel/build_files.py', '--check'],
