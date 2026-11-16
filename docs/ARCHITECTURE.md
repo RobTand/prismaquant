@@ -944,10 +944,10 @@ and 58-minute await deadline are unchanged. See `docs/bazel.md` for the timing
 source and scope. Known excluded manual rules are removed from impacts before
 manifest validation; hosted routing and unknown-target refusal remain enforced.
 
-As of: 2026-11-15, FIFO merge queue, PQ #3642.
+As of: 2026-11-16, FIFO merge queue in batches of 3, PQ #3773 (after #3642).
 Source: `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.mergify.yml`.
 One serial queue requires `linked issue` on original PRs and `gate` on each draft.
-Each draft checks one PR on the newest main, in `queue` label order.
+Each draft checks up to 3 PRs on the newest main, in `queue` label order; a failed batch is split.
 Bazel and hosted gate jobs run only on authenticated Mergify drafts or `gate-canary` PRs.
 Graph impact runs on every PR. The post-merge CPU suite remains on Python 3.12.
 
