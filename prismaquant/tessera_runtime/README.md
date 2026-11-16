@@ -39,14 +39,16 @@ git -C "$TS" cat-file -p "$SHA:src/tessera/serving/runtime_contract.json" | sha2
 The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
-## Current v69 pin
+## Current v70 pin
 
-The pin names `e89757b9e39866dd253ca76215c112226724921f`, contract v69, lane schema v12, with 18 cells.
-The packaged contract SHA-256 is `e819d2e90c0b5fe27f11283890d1fec53054d88fbe29d7f9cc473a08682e7b5a`.
+The pin names `c3a3ca52ad2620b460223e46d82cd19bdc1c9c2e`, contract v70, lane schema v12, with 18 cells.
+The packaged contract SHA-256 is `703871fa2c2e6f8c14f0b5fbaa1634ed589a70b737f16220391f3702e3c7fdd8`.
 E2M1 R896 covers IMG-G at TP1.
 Tessera #1719 removes the routed E2M1 start-state requirement. Whole TP1 units now pass the lane predicate.
 Receipt-bound launches retain their measured scope. No cell, wire, or arithmetic evidence changes.
 BF16 covers IMG-N at TP1. E4M3 keeps TP2.
+IMG-N routed E4M3 now names the dispatched class pair at R896, R928, R1024, and R1088.
+Tessera #1725 adds its scoped TP2 census receipt. IMG-G keeps the historical pairs.
 All 18 cell grades are `route_only`; none has an arithmetic receipt. Admission records show the parsed grade.
 Tessera #1718 makes refusal text name `evidence.grade`. It states that route-only evidence does not attest arithmetic.
 The evidence policy stays unchanged.

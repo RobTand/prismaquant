@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-11-16 for PQ #3720. Source: the v69 pin, reviewed answer, and routed E2M1 admission tests.
+Re-stamped 2026-11-16 for PQ #3822. Source: the v70 pin, reviewed answer, and serving identity tests.
 
 Re-stamped 2026-11-15 for P4a. Source: `streaming_production_cache.py`,
 `build_production_cache.py`, and `run-pipeline.sh`.
@@ -2452,9 +2452,9 @@ normalization and its existing leaf mapping. Scoped route receipts replay
 carried launcher declarations through `tessera.image_metadata` with explicit
 receipt inputs. Shape guards, refusal payloads and exact replay equality remain
 active. Package-root resource traversal reads the exact packaged JSON.
-The producer and serving pin is `e89757b9e39866dd253ca76215c112226724921f` under schema v2.
-Contract v69, lane schema v12, has 18 cells and raw SHA-256
-`e819d2e90c0b5fe27f11283890d1fec53054d88fbe29d7f9cc473a08682e7b5a`.
+The producer and serving pin is `c3a3ca52ad2620b460223e46d82cd19bdc1c9c2e` under schema v2.
+Contract v70, lane schema v12, has 18 cells and raw SHA-256
+`703871fa2c2e6f8c14f0b5fbaa1634ed589a70b737f16220391f3702e3c7fdd8`.
 E2M1 R896 cells name dense and routed units on IMG-G `f8dbe1a0` at TP1 only.
 PrismaQuant admits dense and routed units within those cells.
 Tessera #1719 removes the routed E2M1 start-state requirement. Whole TP1 units now pass the lane predicate.
@@ -2462,15 +2462,16 @@ Receipt-bound launches retain their measured scope. No cell, wire, or arithmetic
 BF16 covers dense R769-R1279 and routed R1024 on IMG-N `5be13705` at TP1 only.
 The five measured BF16 dense rungs are 832, 880, 960, 1024, and 1088.
 E4M3 keeps its TP2 ceiling. IMG-G routed R768 uses the v66 class-launch receipt.
+IMG-N routed R896, R928, R1024, and R1088 name the dispatched class pair and scoped TP2 receipt.
 PQ2471 grants narrow to BF16 TP1 and E4M3 TP2. They add no new rung or image.
-All 18 v69 cells have evidence grade `route_only`; none has an arithmetic receipt.
+All 18 v70 cells have evidence grade `route_only`; none has an arithmetic receipt.
 Admission records show each parsed cell grade. The evidence policy stays unchanged.
 Tessera #1718 makes refusal text name `evidence.grade`. It states that route-only evidence does not attest arithmetic.
 Graph-equality records remain route-only evidence. Export and serving gates stay independent.
 The plan writer uses the v68 projection API and the producer's native class geometry check.
 The default pipeline uses compressed-tensors and cannot reach a Tessera cell.
 The optional Qwen3 Tessera lane uses the vanilla image, which has no routed R768 cell.
-Provenance: 2026-11-16, PQ #3720; Tessera #1719 and the packaged v69 contract.
+Provenance: 2026-11-16, PQ #3822; Tessera #1725 and the packaged v70 contract.
 
 
 
