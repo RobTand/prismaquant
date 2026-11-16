@@ -25,13 +25,14 @@ jobs:
     outputs:
       run: ${{ steps.due.outputs.run }}
     steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
     - id: due
       env:
         GH_TOKEN: ${{ github.token }}
-      run: |
-        last="$(gh run list -R "$GITHUB_REPOSITORY" -w ci.yml -b main -L 200 --json headSha,event,status,conclusion --jq '[.[] | select((.event == "schedule" or .event == "workflow_dispatch") and .status == "completed" and .conclusion != "cancelled")][0].headSha')"
-        [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ "$last" != "$GITHUB_SHA" ] && run=true || run=false
-        echo "run=$run" >> "$GITHUB_OUTPUT"
+        GH_REPO: ${{ github.repository }}
+      run: python3 tools/ci/record_due.py
   tests:
     needs: due
     if: needs.due.outputs.run == 'true'
@@ -50,28 +51,17 @@ jobs:
       id: scan-python
       with:
         python-version: '3.14'
-    - id: source
-      env:
-        BEFORE: ${{ github.event.before }}
-        HEAD: ${{ github.sha }}
-      run: |
-        set -Eeuo pipefail
-        base="$BEFORE"
-        if [ -z "$base" ] || [ "$base" = 0000000000000000000000000000000000000000 ]; then
-          base="$(git rev-parse "$HEAD^1")"
-        fi
-        printf 'base=%s\n' "$base" >> "$GITHUB_OUTPUT"
     - name: Run source-bound Remote Bazel controller
       id: controller
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-        BASE: ${{ steps.source.outputs.base }}
         HEAD: ${{ github.sha }}
         BRANCH: ${{ github.ref_name }}
       run: |
         set -Eeuo pipefail
-        python tools/ci/remote_gate.py main --base "$BASE" --head "$HEAD" --branch "$BRANCH" --timeout 20 --output bazel-main-upload
+        # Main mode records the whole population; the base only names the parent.
+        python tools/ci/remote_gate.py main --base "$(git rev-parse "$HEAD^1")" --head "$HEAD" --branch "$BRANCH" --timeout 20 --output bazel-main-upload
         python - <<'REMOTE_VERDICT'
         import json, os
         from pathlib import Path
