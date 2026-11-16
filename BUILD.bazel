@@ -12038,20 +12038,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/ci/import_fanout",
-    srcs = [
-        "tools/ci/import_fanout.py",
-    ],
-    data = [
-        "tools/ci/import_fanout.py",
-    ],
-    deps = [
-        ":tools/__init__",
-        ":tools/ci/graph_impact_pq",
-    ],
-)
-
-pq_py_library(
     name = "tools/ci/remote_gate",
     srcs = [
         "tools/ci/remote_gate.py",
