@@ -1339,17 +1339,6 @@ tokenizer and provenance adapters while retaining the real CLI, population
 contracts and calculations. They establish measurement admission, with no
 live endpoint, served-quality or performance qualification.
 
-As of: 2026-10-17, architecture audit continuation, bootstrap uncertainty.
-The public `saturation_select.bootstrap_mean_ci` helper uses a local seeded
-random generator to sample with replacement. The previous generator's low
-bits made power-of-two sample counts repeat the same mean and report zero
-uncertainty for nonconstant inputs. Constants still report zero uncertainty;
-repeated seeds are deterministic and leave process-global random state alone.
-`bootstrap-uncertainty-green-v1` passes 21 CPU cases and compiles both touched
-files. Source, logs, terminal outcome and CAS receipt are verified against
-parent `f836fb21096` plus the recorded overlays. This qualifies the public
-helper; no active production caller or performance claim is established.
-
 As of: 2026-10-17, architecture audit continuation, validator bpp population.
 Assignment validation excludes the profile's fixed and auxiliary populations,
 then requires stats for every mutable assigned unit before reporting bpp.

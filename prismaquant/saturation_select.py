@@ -66,33 +66,6 @@ def log_error_values(values: Sequence[float]) -> list[float]:
     return [math.log10(max(float(value), floor)) for value in values]
 
 
-def bootstrap_mean_ci(
-    samples: Sequence[float], *, n_boot: int = 1000, seed: int = 0,
-) -> tuple[float, float]:
-    """Return (mean, stderr_of_mean) via bootstrap over per-position values.
-
-    Deterministic given seed. stderr is the std of bootstrap-resampled means,
-    which is the noise floor on the mean distortion at one bpp."""
-    n = len(samples)
-    if n == 0:
-        return 0.0, 0.0
-    mean = sum(samples) / n
-    if n == 1:
-        return mean, float("inf")
-    from random import Random
-
-    rng = Random(seed)
-    boot_means = []
-    for _ in range(n_boot):
-        s = 0.0
-        for _ in range(n):
-            s += rng.choice(samples)
-        boot_means.append(s / n)
-    bm = sum(boot_means) / n_boot
-    var = sum((m - bm) ** 2 for m in boot_means) / max(1, n_boot - 1)
-    return mean, math.sqrt(var)
-
-
 def find_saturation_bpp(
     grid: Sequence[float],
     measure_fn: Callable[[float], tuple[float, float]],
