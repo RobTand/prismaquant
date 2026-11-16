@@ -17,7 +17,6 @@ from functools import partial
 from pathlib import Path
 from types import MappingProxyType
 import re
-from typing import TypedDict
 
 from .schemas import Contract, strict_json_loads
 from .digests import (
@@ -85,39 +84,6 @@ ORIGINAL_PREPARATION_KEYS = frozenset({
     'source_model_identity', 'source_execution', 'calibration', 'resources', 'head_source',
 })
 from .native_results import SELECTION_KEYS as ORIGINAL_RESULT_SELECTION_KEYS
-
-
-class BoundOriginalInput(TypedDict):
-    path: str
-    sha256: str
-
-
-class OriginalPublisher(TypedDict):
-    id: str
-    revision: str
-    input: BoundOriginalInput
-
-
-class OriginalSession(TypedDict):
-    generation: str
-    run_identity_sha256: str
-
-
-class OriginalSourceAuthority(TypedDict):
-    schema: str
-    scope: str
-    publisher: OriginalPublisher
-    producer: BoundOriginalInput
-    source_paths: BoundOriginalInput
-    readset: BoundOriginalInput
-    runtime: BoundOriginalInput
-    qualification: BoundOriginalInput | None
-    root_admission: BoundOriginalInput | None
-    calibration: dict
-    source_model_identity: dict
-    source_execution: dict
-    session: OriginalSession
-    resources: BoundOriginalInput
 
 
 def _snapshot(value):

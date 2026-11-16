@@ -79,3 +79,8 @@ def test_selected_original_reader_does_not_accept_legacy_or_cpu_dicts():
     for value in ({}, {'payload': b'old CAS bytes'}, {'producer_context': {}}):
         with pytest.raises(RuntimeError, match='verified native bytes'):
             sg._original_artifact_publication(value, node_id='actual-node', roles={'control'})
+
+
+def test_the_unused_authority_typed_dicts_stay_deleted():
+    unused = {"BoundOriginalInput", "OriginalPublisher", "OriginalSession", "OriginalSourceAuthority"}
+    assert not unused & set(vars(sg))
