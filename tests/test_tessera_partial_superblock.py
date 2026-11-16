@@ -9,7 +9,7 @@ import pytest
 import torch
 from tessera.control import grid_for_name, unit_wire_bits
 from tessera.errors import GrammarError
-from tessera.export import encode_linear
+from tessera.export import encode_linear, served_recipe
 
 from prismaquant.tessera_footprint import tessera_tensor_payload_breakdown
 from prismaquant.tessera_formats import (
@@ -74,18 +74,16 @@ def test_the_breakdown_prices_what_the_exporter_writes_at_128_columns(
     assert (breakdown["total_bytes"] - int(breakdown["container_side_bytes"])
             == exported), (family, rung)
     serving = tessera_tensor_payload_breakdown(
-        SMALL_128, family=family, body_rate_q256=rung, structure="dense")
+        SMALL_128, family=family, body_rate_q256=rung,
+        recipe=served_recipe(grid_for_name(grid), rung))
     assert unit_wire_bits(grid, rung, rows, columns) == 8 * serving["payload_bytes"]
 
 
 def test_every_rung_at_the_kda_gate_shape_is_tesseras_price_or_tesseras_refusal():
-    """The sweep at the real shape: price, existence and legality are one fact.
+    """The real shape has the same legal quotas on research and served wires.
 
-    For every rung of every menu family: either all three of the breakdown,
-    ``unit_wire_bits`` and ``tessera_shape_legal`` refuse it (its quota does
-    not close over 128 columns), or all three admit it and the two byte
-    figures are equal.  Nothing is refused by only one of them, which is the
-    disagreement that crashed the census.
+    Compare explicit served prices with the control accountant. Geometry
+    grants no cell. The independent serving gate can refuse a legal wire.
     """
     rows, columns = KDA_GATE
     priced = refused = 0
@@ -93,10 +91,11 @@ def test_every_rung_at_the_kda_gate_shape_is_tesseras_price_or_tesseras_refusal(
         grid = _grid_name(spec)
         lo, hi = spec.mathematical_q256_bounds
         for rung in range(lo, hi + 1):
-            legal, why = tessera_shape_legal(spec, rung, KDA_GATE, structure="dense")
+            legal, why = tessera_shape_legal(spec, rung, KDA_GATE)
             try:
                 breakdown = tessera_tensor_payload_breakdown(
-                    KDA_GATE, family=spec.name, body_rate_q256=rung, structure="dense"
+                    KDA_GATE, family=spec.name, body_rate_q256=rung,
+                    recipe=served_recipe(grid_for_name(grid), rung)
                 )
             except TesseraFormatError:
                 assert not legal, (spec.name, rung, "menu admits, accountant refuses")
