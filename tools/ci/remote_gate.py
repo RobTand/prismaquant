@@ -133,17 +133,23 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
 
 def cancel_runs(client, invocation_ids):
     """Stop own admitted runs and their Bazel children, whose remote actions outlive a killed
-    runner; a failed cancel names the run and never hides the verdict."""
+    runner. Each cancel stands alone; a failed one names the run and never hides the verdict."""
     for invocation_id in invocation_ids:
+        targets = [invocation_id]
         try:
             record = client.call('GetInvocation', {'selector': {'invocation_id': invocation_id},
-                'include_child_invocations': True}, timeout=15)['invocation'][0]
-            for child in [row['invocationId'] for row in record.get('childInvocations', [])] + [
-                    invocation_id]:
-                client.call('CancelExecutions', {'invocation_id': child}, timeout=15)
-            print('Remote Bazel shard cancelled: ' + invocation_id, flush=True)
+                'include_child_invocations': True}, timeout=30)['invocation'][0]
+            targets[:0] = [row['invocationId'] for row in record.get('childInvocations', [])]
         except (RemoteError, LookupError, TypeError):
-            print('Remote Bazel shard not cancelled: ' + invocation_id, flush=True)
+            pass
+        failed = []
+        for target in targets:
+            try:
+                client.call('CancelExecutions', {'invocation_id': target}, timeout=60)
+            except RemoteError:
+                failed.append(target)
+        print(('Remote Bazel shard not cancelled: ' if failed else 'Remote Bazel shard cancelled: ')
+              + invocation_id, flush=True)
 
 
 def run_manifest(client, args, manifest_uri, raw_manifest, *, clock=time.monotonic):
