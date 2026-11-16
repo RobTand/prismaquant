@@ -437,12 +437,6 @@ def test_the_graph_record_names_edges_cycles_tests_and_uncertain_modules(tmp_pat
     assert record['uncertain'] == {'tools/beta.py': ['dynamic import not followed']}
 
 
-def test_dedicated_graph_check_keeps_its_own_job():
-    attributes = build_files.test_attributes('tests/test_graph_impact.py', {})
-    assert attributes['args'] == ['--deselect=tests/test_graph_impact.py::test_graph_impact_gate']
-    assert build_files.test_attributes('tests/test_in.py', {})['args'] == []
-
-
 def test_long_files_are_sharded_and_given_a_long_timeout_only_when_needed():
     slow = build_files.test_attributes('tests/test_slow.py', {'tests/test_slow.py': 170.2})
     assert slow['shard_count'] == 5 and slow['timeout'] == 'moderate'

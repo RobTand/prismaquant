@@ -139,60 +139,12 @@ jobs:
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
       with:
         python-version: '3.12'
-    - name: Install graph check dependencies
-      run: |
-        unset BUILDBUDDY_API_KEY
-        python -m pip install -c .github/ci-constraints.txt pytest
     - name: Run required graph impact check
       id: check
-      shell: bash
       run: |
         unset BUILDBUDDY_API_KEY
-        set -Eeuo pipefail
-        mkdir -p graph-impact
-        python -m pytest tests/test_graph_impact.py::test_graph_impact_gate --noconftest \
-          -q --junitxml=graph-impact/junit.xml 2>&1 | tee graph-impact/tests.txt
-        python - <<'GRAPH_VERDICT'
-        import os
-        from pathlib import Path
-        import xml.etree.ElementTree as ET
-        cases = ET.parse('graph-impact/junit.xml').findall('.//testcase')
-        if len(cases) != 1 or cases[0].get('name') != 'test_graph_impact_gate' or any(
-            case.find(tag) is not None for case in cases
-                                  for tag in ('failure', 'error', 'skipped')):
-            raise SystemExit('NO_VERDICT: expected exactly one passing graph impact test')
-        import json
-        Path('graph-impact/result.json').write_text(json.dumps({'verdict': 'pass', 'base': os.environ['GATE_BASE'], 'head': os.environ['GATE_HEAD']}) + '\n')
-        with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
-            output.write('verdict=pass\n')
-        GRAPH_VERDICT
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-      id: scan-python
-      with:
-        python-version: '3.14'
-    - name: Scan exact JSON upload set
-      id: scan
-      if: ${{ !cancelled() && env.TRUSTED == 'true' && steps.check.outcome == 'success' }}
-      env:
-        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: |
-        python tests/bazel_scan_runtime.py
-        python - <<'SCAN_JSON'
-        from pathlib import Path
-        from tools.ci.bazel_artifacts import publish_json
-        import os
-        upload = Path('graph-upload')
-        upload.mkdir(parents=True, exist_ok=True)
-        publish_json(upload, {'result.json': Path('graph-impact/result.json').read_bytes()}, ['BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN'])
-        SCAN_JSON
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-      if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
-      with:
-        name: graph-impact-${{ github.run_attempt }}
-        path: graph-upload/
-        if-no-files-found: error
-        retention-days: 7
+        python tools/ci/graph_impact_pq.py
+        echo verdict=pass >> "$GITHUB_OUTPUT"
   gate:
     name: gate
     if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) }}

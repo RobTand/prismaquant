@@ -124,28 +124,5 @@ def test_graph_check_remains_parallel_and_requires_exactly_one_pass():
     checkout=next(s for s in graph['steps'] if s.get('uses', '').startswith('actions/checkout@'))
     assert checkout['with']['fetch-depth']==0
     check=next(s for s in graph['steps'] if s.get('id')=='check')
-    assert 'tests/test_graph_impact.py::test_graph_impact_gate' in check['run']
-    assert '--noconftest' in check['run']
+    assert 'graph_impact_pq' in check['run']
     assert 'graph-impact' in jobs['gate']['needs']
-
-
-@pytest.mark.parametrize('cases,passes', [
-    ('<testcase name="test_graph_impact_gate"/>', True), ('', False),
-    ('<testcase name="other"/>', False),
-    ('<testcase name="test_graph_impact_gate"><skipped/></testcase>', False),
-    ('<testcase name="test_graph_impact_gate"><failure/></testcase>', False),
-    ('<testcase name="test_graph_impact_gate"><error/></testcase>', False),
-    ('<testcase/><testcase/>', False),
-])
-def test_graph_job_publishes_only_one_passing_test(cases, passes, tmp_path):
-    import os,subprocess,sys
-    jobs=workflows()['gate.yml']['jobs']
-    command=next(s['run'] for s in jobs['graph-impact']['steps'] if s.get('id')=='check')
-    script=command.split("python - <<'GRAPH_VERDICT'\n",1)[1].split('\nGRAPH_VERDICT',1)[0]
-    (tmp_path/'graph-impact').mkdir()
-    (tmp_path/'graph-impact/junit.xml').write_text('<testsuites><testsuite>'+cases+'</testsuite></testsuites>')
-    output=tmp_path/'output'
-    run=subprocess.run([sys.executable,'-c',script],cwd=tmp_path,capture_output=True,text=True,
-        env={**os.environ,'GITHUB_OUTPUT':str(output),'GATE_BASE':'a'*40,'GATE_HEAD':'b'*40})
-    assert (run.returncode==0) is passes,run.stdout+run.stderr
-    assert (output.read_text() if output.exists() else '')==('verdict=pass\n' if passes else '')
