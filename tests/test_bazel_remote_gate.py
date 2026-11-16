@@ -361,6 +361,7 @@ def test_shard_enters_the_gate_before_its_python314_bootstrap():
     request = remote.shard_request(arguments(), 'amd64', 0,
         'bytestream://remote.buildbuddy.io/manifest', 'c' * 64, 'd' * 64)
     assert request['steps'] == [{'run': 'python3 tools/ci/bazel_gate.py shard'}]
+    assert request['wait_until'] == 'QUEUED'  # a Run does not wait for its runner to start
 
 
 def test_verified_shard_records_feed_the_exact_union_aggregator():
@@ -543,10 +544,17 @@ class PlannedGateClient(ManifestClient):
 
 
 @pytest.mark.parametrize('mode', ['pr', 'main'])
-def test_complete_gate_uses_only_its_own_verified_plan_before_any_shard(mode):
+def test_complete_gate_uses_only_its_own_verified_plan_before_any_shard(mode, monkeypatch):
     document = controller_manifest(mode)
     client = PlannedGateClient(document)
+    intervals, await_invocation = [], remote.await_invocation
+    def awaited(client, invocation, deadline, *, interval=15, **kwargs):
+        intervals.append(interval)
+        return await_invocation(client, invocation, deadline, interval=interval, **kwargs)
+    monkeypatch.setattr(remote, 'await_invocation', awaited)
     found = remote.run_gate(client, arguments(mode), clock=lambda: 1)
+    # Shards start when the plan ends, so only the plan is polled every 2 s.
+    assert intervals[0] == 2 and set(intervals[1:]) == {15}
     assert found['verdict'] == 'pass'
     assert found['plan_invocation'] == 'plan-parent'
     assert found['manifest_sha256'] == hashlib.sha256(client.manifest_bytes).hexdigest()

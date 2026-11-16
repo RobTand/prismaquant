@@ -561,19 +561,30 @@ def test_impacted_quarantined_rule_is_excluded_but_hosted_and_unknown_routes_are
 
 
 @pytest.fixture
-def planning_history(tmp_path):
+def planning_history(tmp_path, request):
+    """Head modifies prismaquant/core.py; a parameter adds one change of graph structure."""
+    extra = getattr(request, 'param', None)
     root = tmp_path / 'repo'
-    root.mkdir()
     def git(*args):
         return subprocess.run(['git', *args], cwd=root, check=True,
             text=True, capture_output=True).stdout.strip()
-    git('init', '--quiet')
     source = root / 'prismaquant/core.py'
-    source.parent.mkdir()
+    source.parent.mkdir(parents=True)
+    git('init', '--quiet')
+    (root / 'BUILD.bazel').write_text('base\n')
+    (root / 'old.txt').write_text('old\n')
+    if extra == 'symlink':
+        (root / 'link.py').symlink_to('prismaquant/core.py')
     revisions = []
     for content in ('base\n', 'head\n'):
         source.write_text(content)
-        git('add', '.')
+        if content == 'head\n' and extra == 'build':
+            (root / 'BUILD.bazel').write_text('head\n')
+        elif content == 'head\n' and extra == 'add':
+            (root / 'new.txt').write_text('new\n')
+        elif content == 'head\n' and extra == 'delete':
+            (root / 'old.txt').unlink()
+        git('add', '--all')
         git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
             'commit', '--quiet', '-m', content.strip())
         revisions.append(git('rev-parse', 'HEAD'))
@@ -609,8 +620,9 @@ def test_fallback_planner_maps_measured_file_times_into_six_balanced_shards(
         assert [len(shard) for shard in row['shards']] == [2] * 6
 
 
+@pytest.mark.parametrize('planning_history', ['build'], indirect=True)
 @pytest.mark.parametrize('mode,fault', [
-    ('pr', None), ('pr', 'missing_base'), ('pr', 'hash_failure'),
+    ('pr', None), ('pr', 'missing_base'), ('pr', 'hash_failure'), ('pr', 'base_hash_failure'),
     ('pr', 'comparison_failure'), ('main', None),
 ])
 def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
@@ -633,7 +645,8 @@ def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
             hashed_sources.append((Path(kwargs['cwd']) / 'prismaquant/core.py').read_text())
             Path(command[-1]).write_text('{"hashes": {"//tests:test_consumer": "Rule#hash"}}')
             Path(command[command.index('--depEdgesFile') + 1]).write_text('{}')
-            return SimpleNamespace(returncode=1 if fault == 'hash_failure' else 0)
+            failed = fault == 'hash_failure' or (fault, hashed_sources[-1]) == ('base_hash_failure', 'base\n')
+            return SimpleNamespace(returncode=int(failed))
         assert command[3] == 'get-impacted-targets'
         assert command[command.index('--workspacePath') + 1] == str(root)
         assert command[command.index('--bazelPath') + 1] == 'bazel'
@@ -650,14 +663,63 @@ def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
     for row in found['architectures'].values():
         assert row['tests'] == expected
         assert sorted(label for shard in row['shards'] for label in shard) == row['population']
+    if mode == 'pr' and fault in (None, 'comparison_failure', 'base_hash_failure'):
+        # The base half runs in the head workspace, which then returns to head.
+        assert hashed_sources == ['head\n', 'base\n']
     if mode == 'pr' and not fault:
-        assert hashed_sources == ['base\n', 'head\n']
         assert found['selection'] == 'impacted' and found['all_scopes'] is False
     else:
         assert found['selection'] == 'fallback' and found['all_scopes'] is True
+    assert (root / 'prismaquant/core.py').read_text() == 'head\n'
+    assert subprocess.run(['git', 'status', '--porcelain'], cwd=root, check=True,
+                          text=True, capture_output=True).stdout == ''
     if mode == 'main':
         assert not hashed_sources
         assert not any(command[0] == 'java' for command in calls)
+
+
+@pytest.mark.parametrize('planning_history', [None, 'build', 'add', 'delete', 'symlink'],
+                         indirect=True)
+def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
+        tmp_path, planning_history, request):
+    root, (base, head) = planning_history
+    rows = [
+        {'sourceFile': {'name': '//prismaquant:core.py'}},
+        {'rule': {'name': '//prismaquant:gen', 'ruleClass': 'genrule',
+                  'ruleInput': ['@//prismaquant:core.py']}},
+        {'generatedFile': {'name': '//prismaquant:core.json', 'generatingRule': '@//prismaquant:gen'}},
+        {'rule': {'name': '//tests:test_consumer', 'ruleClass': 'py_test',
+                  'ruleInput': ['//prismaquant:core.json']}},
+        {'rule': {'name': '//tests:test_manual', 'ruleClass': 'py_test',
+                  'ruleInput': ['//prismaquant:core.py'],
+                  'attribute': [{'name': 'tags', 'stringListValue': ['manual']}]}},
+        {'rule': {'name': '//tests:test_unrelated', 'ruleClass': 'py_test'}},
+        {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg', 'ruleClass': 'py_library'}},
+    ]
+    tools = []
+
+    def planning_command(command, **kwargs):
+        if command[0] == 'git':
+            return subprocess.run(command, **kwargs)
+        if command[1] == 'query':
+            return SimpleNamespace(returncode=0, stdout='\n'.join(map(json.dumps, rows)))
+        tools.append(command[3])
+        if command[3] == 'generate-hashes':
+            Path(command[-1]).write_text('{"hashes": {"//tests:test_consumer": "Rule#hash"}}')
+            Path(command[command.index('--depEdgesFile') + 1]).write_text('{}')
+        else:
+            Path(command[command.index('--output') + 1]).write_text('//tests:test_consumer\n')
+        return SimpleNamespace(returncode=0)
+
+    found = selection.plan_revisions(root, tmp_path / 'private', base=base, head=head,
+        mode='pr', java='java', jar=tmp_path / 'v42.jar', runner=planning_command)
+    if request.node.callspec.params['planning_history'] is None:
+        assert not tools
+        assert found['selection'] == 'impacted'
+        assert found['architectures']['amd64']['population'] == [
+            '//prismaquant:gen', '//tests:test_consumer']
+    else:
+        assert tools == ['generate-hashes', 'generate-hashes', 'get-impacted-targets']
 
 
 @pytest.mark.parametrize('fault', [None, 'leak', 'unscannable'])
