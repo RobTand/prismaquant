@@ -161,7 +161,8 @@ TL3 keeps BuildBuddy priority if a fallback batch arrives while its queue is bac
 
 ### Find the merge that broke a record
 
-The full record runs every 6 hours, so one red record can cover several merges. Bisect only the
+The full record runs every 6 hours, so one red record can cover several merges. GitHub can start a
+scheduled slot late or not at all; 20 minutes after a slot with no run, the record is started once by hand. Bisect only the
 targets that failed, not the whole suite:
 
 1. Read the failed targets and their architecture from the red record's `failed test <label> on <arch>`
