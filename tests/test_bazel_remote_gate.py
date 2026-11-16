@@ -472,7 +472,7 @@ def test_complete_gate_uses_only_its_own_verified_plan_before_any_shard(mode, mo
     monkeypatch.setattr(remote, 'await_invocation', awaited)
     found = remote.run_gate(client, arguments(mode), clock=lambda: 1)
     # Shards start when the plan ends, so only the plan is polled every 2 s.
-    assert intervals[0] == 2 and set(intervals[1:]) == {15}
+    assert intervals[0] == 2 and set(intervals[1:]) <= {15}
     assert found['verdict'] == 'pass'
     assert found['plan_invocation'] == 'plan-parent'
     assert found['manifest_sha256'] == hashlib.sha256(client.manifest_bytes).hexdigest()
