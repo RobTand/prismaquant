@@ -117,3 +117,8 @@ def test_request_drift_during_cost_hash_cannot_seed_a_reusable_metadata_pair(
     with pytest.raises(ValueError, match="changed during declaration"):
         metadata.joint_campaign_acquisition_control_inputs(binding)
     assert metadata._VERIFIED_CONTROL_INPUTS is None
+
+
+def test_the_unused_acquisition_controls_function_stays_deleted():
+    from prismaquant import tessera_acquisition_inputs as metadata
+    assert not hasattr(metadata, "joint_campaign_acquisition_controls")
