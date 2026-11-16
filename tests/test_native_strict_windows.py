@@ -240,7 +240,7 @@ def test_completed_exact_reader_does_not_fsync(tmp_path, monkeypatch, staged):
         assert torch.equal(tensors[ref.name].view(torch.uint8), expected[coordinates].view(torch.uint8))
     assert len(windows) == (len(refs) if staged else 0)
     assert len(set(windows)) == int(staged)
-    assert all(not calls for calls in opened)
+    assert all(not opens for opens in opened)
     assert calls == []
 
 
