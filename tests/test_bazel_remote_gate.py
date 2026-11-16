@@ -138,6 +138,8 @@ class ShardClient:
             if self.wrong_head:
                 row['head'] = BASE
             return json.dumps(row).encode()
+        if method == 'CancelExecutions':
+            return {}
         raise AssertionError(method)
 
 
@@ -189,22 +191,33 @@ def test_shard_result_must_match_the_exact_requested_partition(field, value):
 
 
 class BoundedFallbackClient:
-    """Own admitted IDs remain active until their own terminal evidence is read."""
-    def __init__(self, fail_first=False, maximum=2):
+    """Own admitted IDs remain active until their own terminal evidence is read or they are cancelled."""
+    def __init__(self, fail_first=False, maximum=2, running=(), red=()):
         self.active = set()
         self.events = []
         self.fail_first = fail_first
         self.maximum = maximum
+        self.running, self.red = set(running), set(red)
 
     def call(self, method, body, **kwargs):
         if method == 'Run':
-            index = json.loads(body['env']['PQ_BAZEL_SHARD'])['index']
+            shard = json.loads(body['env']['PQ_BAZEL_SHARD'])
+            index, self.mode = shard['index'], shard['mode']
             self.active.add(index)
             self.events.append(('submit', index))
             assert len(self.active) <= self.maximum, 'too many admitted fallback shards'
             return {'invocation_id': f'parent-{index}'}
+        if method == 'GetInvocation' and body.get('include_child_invocations'):
+            identity = body['selector']['invocation_id']
+            return {'invocation': [{'invocationId': identity, 'childInvocations': [
+                {'invocationId': identity.replace('parent-', 'child-')}]}]}
         if method == 'GetInvocation':
             index = int(body['selector']['invocation_id'].removeprefix('parent-'))
+            if index in self.running:
+                self.running.discard(index)
+                self.events.append(('running', index))
+                return {'invocation': [{'invocationId': f'parent-{index}',
+                                        'invocationStatus': 'PARTIAL_INVOCATION_STATUS'}]}
             self.events.append(('terminal', index))
             return {'invocation': [{'invocationId': f'parent-{index}',
                 'invocationStatus': ('DISCONNECTED_INVOCATION_STATUS'
@@ -215,7 +228,19 @@ class BoundedFallbackClient:
             index = int(body['uri'].removeprefix('bytestream://result-'))
             self.active.remove(index)
             self.events.append(('evidence', index))
-            return json.dumps(shard_result(index)).encode()
+            row = {**shard_result(index), 'mode': self.mode}
+            if index in self.red:
+                row['verdict'] = 'fail'
+                row['run']['statuses'][f'//tests:test_{index}'] = 'FAILED'
+            return json.dumps(row).encode()
+        if method == 'CancelExecutions' and body['invocation_id'].startswith('child-'):
+            self.events.append(('cancel-child', int(body['invocation_id'].removeprefix('child-'))))
+            return {}
+        if method == 'CancelExecutions':
+            index = int(body['invocation_id'].removeprefix('parent-'))
+            self.active.remove(index)
+            self.events.append(('cancel', index))
+            return {}
         raise AssertionError(method)
 
 
@@ -261,13 +286,68 @@ def test_concurrency_above_one_is_bounded_and_exclusive_to_pr_gates(
     assert client.events == []
 
 
-def test_fallback_parallel_failure_still_reads_the_other_admitted_shard_and_stops():
+def test_fallback_parallel_failure_cancels_the_other_admitted_shard_and_stops():
     client = BoundedFallbackClient(fail_first=True)
     with pytest.raises(remote.RemoteError):
         remote.submit_shards(client, fallback_requests(), HEAD,
                              concurrency=2, clock=lambda: 1)
-    assert client.events == [('submit', 0), ('submit', 1), ('terminal', 0),
-                             ('terminal', 1), ('evidence', 1)]
+    assert client.events == [('submit', 0), ('submit', 1), ('terminal', 0), ('cancel-child', 1),
+                             ('cancel', 1)]
+
+
+def test_first_red_pr_shard_ends_the_gate_and_cancels_running_siblings():
+    client = BoundedFallbackClient(maximum=6, running={0, 2}, red={1})
+    records = remote.submit_shards(client, fallback_requests(count=7), HEAD, concurrency=6,
+                                   clock=lambda: 1, sleep=lambda seconds: None)
+    assert [record['index'] for record in records] == [1]
+    # The Bazel child goes first: its remote actions outlive a killed runner.
+    assert client.events[6:] == [('running', 0), ('terminal', 1), ('evidence', 1)] + [
+        event for index in (0, 2, 3, 4, 5) for event in [('cancel-child', index), ('cancel', index)]]
+    assert not client.active
+
+
+def test_shards_are_read_as_they_end_and_an_interrupt_cancels_the_rest():
+    client = BoundedFallbackClient(running={0})
+    def interrupt(seconds):
+        raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        remote.submit_shards(client, fallback_requests(count=2), HEAD, concurrency=2,
+                             clock=lambda: 1, sleep=interrupt)
+    assert client.events == [('submit', 0), ('submit', 1), ('running', 0), ('terminal', 1),
+                             ('evidence', 1), ('cancel-child', 0), ('cancel', 0)]
+
+
+def test_cancel_uses_the_buildbuddy_rpc_service_and_a_failure_never_hides_the_verdict(
+        monkeypatch, capsys):
+    from tools.ci import bazel_artifacts
+    urls = []
+    def urlopen(request, timeout):
+        urls.append(request.full_url)
+        raise bazel_artifacts.urllib.error.URLError('offline')
+    monkeypatch.setattr(bazel_artifacts.urllib.request, 'urlopen', urlopen)
+    client = bazel_artifacts.BuildBuddy('cancel-sentinel')
+    with pytest.raises(remote.RemoteError):
+        client.call('CancelExecutions', {'invocation_id': 'parent-0'})
+    remote.cancel_runs(client, ['parent-0'])
+    assert urls[0] == 'https://app.buildbuddy.io/rpc/BuildBuddyService/CancelExecutions'
+    assert urls[1] == bazel_artifacts.API + 'GetInvocation'
+    assert capsys.readouterr().out == 'Remote Bazel shard not cancelled: parent-0\n'
+
+
+def test_admitted_shards_are_recorded_for_the_cancelled_workflow_step(tmp_path, monkeypatch):
+    recorded = tmp_path / 'remote-shards.txt'
+    monkeypatch.setenv('REMOTE_SHARDS', str(recorded))
+    remote.submit_shards(BoundedFallbackClient(), fallback_requests(count=2), HEAD, concurrency=2,
+                         clock=lambda: 1)
+    assert recorded.read_text().split() == ['parent-0', 'parent-1']
+
+
+def test_a_red_record_shard_keeps_the_record_going():
+    client = BoundedFallbackClient(red={0})
+    records = remote.submit_shards(client, fallback_requests(count=2, mode='main'), HEAD,
+                                   clock=lambda: 1)
+    assert [record['verdict'] for record in records] == ['fail', 'pass']
+    assert ('cancel', 1) not in client.events
 
 
 def test_fallback_remains_serial_unless_the_controller_explicitly_selects_two():
@@ -301,7 +381,7 @@ def controller_manifest(mode='pr', selection='fallback'):
     labels = [f'//tests:test_{index}' for index in range(6)]
     architectures = {}
     for architecture in ('amd64', 'arm64') if mode == 'main' else ('amd64',):
-        count = 6 if mode == 'pr' else 4 if architecture == 'arm64' else 2
+        count = 6 if mode == 'pr' else 4
         population = [] if selection == 'irrelevant' else labels
         architectures[architecture] = {'population': population, 'tests': population,
             'shards': [population[index::count] for index in range(count)] if population else []}
@@ -352,6 +432,8 @@ class ManifestClient:
                 'run': {'statuses': {label: 'PASSED' for label in tests},
                     'invocation': 'child-' + identity, 'returncode': 0,
                     'executed_by_label': {label: executed for label in tests}}}).encode()
+        if method == 'CancelExecutions':
+            return {}
         raise AssertionError(method)
 
 
@@ -539,13 +621,13 @@ def test_controller_cli_publishes_scanned_results_and_scopes_only_after_own_proo
         assert {path.name for path in upload.iterdir()} == {'result.json'}
         result = json.loads((upload / 'result.json').read_text())
         assert result['verdict'] == ('fail' if fault == 'fail' else 'pass')
+        # The first red shard ends a PR gate; its five siblings are cancelled, not read.
         assert result['budget_warnings'] == [
-            {'nodeid': 'test_one', 'seconds': 2, 'budget_seconds': 1}] * 6
+            {'nodeid': 'test_one', 'seconds': 2, 'budget_seconds': 1}] * (1 if fault == 'fail' else 6)
         assert output.read_text().splitlines() == [
             'scopes=["//tests"]', 'all_scopes=true', 'scopes_ready=true']
         assert 'Bazel verdict: ' + result['verdict'] in summary.read_text()
-    assert annotations == ([f'::error::failed test //tests:test_{index} on amd64' for index in range(6)]
-                           if fault == 'fail' else [])
+    assert annotations == (['::error::failed test //tests:test_0 on amd64'] if fault == 'fail' else [])
 
 
 @pytest.mark.parametrize('stage', ['await', 'fetch', 'validate'])
