@@ -86,3 +86,7 @@ def test_runtime_aggregation_has_one_option_per_expanded_operator(monkeypatch):
     # A uniform per-name choice and its composite twin execute the same
     # operator. Retaining both makes final runtime re-binding ambiguous.
     assert len(recipes) == len(set(recipes)) == 4
+
+
+def test_the_uncalled_flashinfer_wrapper_stays_deleted():
+    assert not hasattr(ac, "_flashinfer_kernel_accepts")
