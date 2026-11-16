@@ -836,3 +836,5 @@ def _golden_rows_all_used(request):
                 "rows of a retired test with its archive wall.", pytrace=False)
 
 # Canary 4a for #3777 (cancel mid-run, cancelled() step): this comment changes every test input.
+
+# Canary 4b for #3777 (red path): this comment changes every test input.

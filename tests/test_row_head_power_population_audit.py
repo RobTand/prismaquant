@@ -95,3 +95,7 @@ def test_one_observed_encode_sample_is_not_missing(tmp_path, monkeypatch):
     assert result["nfs_read_bytes_total"] == 1100
     assert result["encode_seconds"] == 1.0
     assert result["batches"] == 2
+
+
+def test_canary_3777_seeded_failure():
+    assert False, "seeded failure for the fail-fast canary of #3777"
