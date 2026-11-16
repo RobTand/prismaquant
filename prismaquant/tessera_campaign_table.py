@@ -26,8 +26,6 @@ STAGE = "Tessera campaign"
 COST_NAME = "cost.pkl"
 MANIFEST_NAME = "cost.anchors.json"
 PARTS_NAME = MANIFEST_NAME + ".parts"
-REFERENCES_NAME = "hessian_capture.references.json"
-SCALES_NAME = "input_scales.safetensors"
 
 SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 
@@ -1674,34 +1672,6 @@ def _bound_digest(container: dict, key: str, *, label: str, where: str) -> str:
             f"{label}: {where} is {path}, which hashes to {actual}, not the "
             f"bound {declared['sha256']}")
     return actual
-
-
-def _bound_pickle(container: dict, key: str, *, label: str, where: str) -> dict:
-    """The pickled artifact a plan binds by path and sha256, re-read and checked.
-
-    ``_bound_json``'s check and then the object itself, for the campaign cost
-    table: the plan's own record of which ``(unit, format)`` cells the campaign
-    priced.  The digest is what makes that record the plan's rather than the
-    caller's -- an edited table no longer hashes to what the plan declares --
-    and reading it is one sequential pass over a few hundred MiB, not the
-    multi-GiB candidate roster a per-cell re-derivation from the checkpoint
-    would need. Serialized bytes are owned only until parsing completes;
-    no process-scoped byte cache retains the table alongside its objects.
-    """
-    import pickle
-
-    declared = (container or {}).get(key)
-    if (not isinstance(declared, dict) or not isinstance(declared.get("path"), str)
-            or not isinstance(declared.get("sha256"), str) or not declared["sha256"]):
-        raise ScopeRefused(f"{label}: {where} is not a bound artifact")
-    path = Path(declared["path"])
-    blob = pickle.loads(_bound_bytes(
-        path, declared["sha256"], label=label, where=where,
-        mismatch_detail="; the campaign cost table the plan names is not the one "
-                        "on disk, so the cells it priced are not the plan's"))
-    if not isinstance(blob, dict):
-        raise ScopeRefused(f"{label}: {where} ({path}) is not a cost payload")
-    return blob
 
 
 def _census_draw(census: dict, *, label: str) -> dict:
