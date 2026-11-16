@@ -28,6 +28,7 @@ PACKAGE = ROOT / "prismaquant"
 # (lower module, higher module it must not reach through any chain of imports)
 SEPARATED = [
     ("prismaquant.schemas", "prismaquant.format_registry"),
+    ("prismaquant.joint_layer_quanta", "prismaquant.joint_stage_b_head"),
     ("prismaquant.joint_adjoint_band", "prismaquant.joint_cost_stage_a"),
     ("prismaquant.tessera_shipcard", "prismaquant.shipcard_cli"),
     ("prismaquant.tessera_joint_allocation", "prismaquant.joint_quanta_join"),

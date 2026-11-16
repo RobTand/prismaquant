@@ -8714,7 +8714,6 @@ pq_py_library(
         "prismaquant/joint_price_step.py",
         "prismaquant/joint_replay_spill.py",
         "prismaquant/joint_served_activation.py",
-        "prismaquant/joint_stage_b_head.py",
         "prismaquant/joint_stageb_resources.py",
         "prismaquant/joint_statistics_plan.py",
         "prismaquant/joint_statistics_replay.py",
@@ -9844,6 +9843,7 @@ pq_py_library(
         ":prismaquant/joint_replay_regime",
         ":prismaquant/joint_retained_window_plan",
         ":prismaquant/joint_run_progress",
+        ":prismaquant/joint_stage_b_head",
         ":prismaquant/kl_fisher",
         ":prismaquant/matmul_arithmetic",
         ":prismaquant/residency_map",
@@ -10063,6 +10063,24 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/residency_map",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/joint_stage_b_head",
+    srcs = [
+        "prismaquant/joint_stage_b_head.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/calibration_data",
+        ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/dev_mode",
+        ":prismaquant/digests",
+        ":prismaquant/joint_run_progress",
+        ":prismaquant/staged_tier_policy",
+        ":prismaquant/staged_whole_file",
     ],
 )
 
@@ -13168,6 +13186,7 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/calibration_data",
         ":prismaquant/io_spans",
+        ":prismaquant/joint_stage_b_head",
         ":prismaquant/stage_inputs",
         ":prismaquant/staged_tier_policy",
         ":prismaquant/tessera_reader",
@@ -13284,6 +13303,7 @@ pq_py_library(
         ":prismaquant/joint_adjoint_slices",
         ":prismaquant/joint_campaign_ledger",
         ":prismaquant/joint_cost_quantum",
+        ":prismaquant/joint_stage_b_head",
         ":prismaquant/source_read_plan",
         ":prismaquant/stage_a_produced_output",
         ":prismaquant/staged_tier_policy",

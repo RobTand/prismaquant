@@ -2031,6 +2031,15 @@ def _source_extent_entries(parent_manifest: Mapping, *,
     return runs
 
 
+HEAD_SLICE_SCHEMA = "prismaquant.joint_stage_b_head_slice.v1"
+
+#: The head files a slice may declare, in the order a quantum reads them.
+#: ``prepared`` and ``production_cache`` are always present; optional roles
+#: exist exactly when the plan binds them.
+HEAD_FILE_ROLES = ("prepared", "production_cache", "served_activation_policy",
+                   "source_identity_cache", "source_digest_cache")
+
+
 def check_head_slice_binding(head_slice: Mapping, *, layer: int,
                              prepared_sha256: str,
                              production_pkl_sha256: str) -> dict:
@@ -2041,8 +2050,6 @@ def check_head_slice_binding(head_slice: Mapping, *, layer: int,
     and its prepared completion and production pickle must be the sealed
     campaign's. The slice bytes are the producer's; this checks the binding.
     """
-    from .joint_stage_b_head import HEAD_FILE_ROLES, HEAD_SLICE_SCHEMA
-
     def _file(row, where):
         if not isinstance(row, Mapping):
             raise ValueError(f"{where} is not an object: refusing")
