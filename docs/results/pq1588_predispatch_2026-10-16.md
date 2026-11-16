@@ -89,3 +89,13 @@ Three requested rows have changed cell state:
 - `TESSERA_BF16_K1 R1408 dense`: qualified structures changed from `["dense"]` to `[]`; `cell_for_requested_class` changed from `true` to `false`.
 - `TESSERA_BF16_K1 R1792 dense`: qualified structures changed from `["dense"]` to `[]`; `cell_for_requested_class` changed from `true` to `false`.
 - `TESSERA_E4M3_K1 R768 routed`: qualified structures changed from `["dense"]` to `["dense", "routed_moe"]`; `cell_for_requested_class` changed from `false` to `true`.
+
+## Contract v69 refresh, 2026-11-16
+
+The packet records the v69 API values from Flux prepare mode.
+The source is `/mnt/shared/flux-jobs/pq-3720-v69-20261116T104500Z/prepare-2/packet-values.json`.
+The pin is `e89757b9e39866dd253ca76215c112226724921f`.
+The contract SHA-256 is `e819d2e90c0b5fe27f11283890d1fec53054d88fbe29d7f9cc473a08682e7b5a`.
+The exporter and grammar retain the `reader-pin-8bf496ab` byte state.
+All 14 requested rows retain their cell state, unpriced flags, and hour estimates.
+The new routed E2M1 admission covers R896, outside these requested rows.
