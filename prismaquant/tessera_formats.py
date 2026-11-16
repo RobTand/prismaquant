@@ -444,34 +444,12 @@ def tessera_served_wire_recipe(
     family: "str | TesseraFamily", rung: int, *, structure: "str | None",
     refuse_unattested: bool = True,
 ) -> "WireRecipe":
-    """The wire a served unit of ``structure`` carries for ``family`` at ``rung``.
+    """Read the served wire from Tessera's producer recipe and contract.
 
-    ``tessera.export.served_recipe`` is Tessera's one statement of the served
-    wire per ``(grid, q256, structure)``: its exporter encodes it, its
-    cached-unit receipt stamps it and its export intake adopts it
-    (tessera#662). Below the E2M1x2 cap a ``routed_moe`` stack is served on
-    span-2 TCQ, the only body its decoder reads, where ``tessera_wire_recipe``
-    (the research table) says WINDOW. A campaign that prices a routed unit on
-    the research wire prices bytes the serve cannot read (#1502).
-
-    ``structure=None`` is a campaign that declares no serving structure; it
-    gets the research recipe it always got.
-
-    A dense unit at a rung whose served wire is not the one the pinned
-    contract attests is refused (:class:`TesseraRouteRefused`), as a fact read
-    off the contract rather than a ban (principle 9): the E2M1 dense spelling
-    below the cap is WINDOW, the contract's ``attested_wire`` for the family
-    is TCQ span 2, and no dense cell attests those rungs, so the pinned route
-    has no attested reading of the bytes. The rung stays in the menu; the
-    campaign records the refusal instead of pricing it
-    (:func:`tessera_served_route_refusal`).
-
-    ``refuse_unattested=False`` resolves the same wire without the refusal,
-    for a reader that recomputes an existing receipt's identity or a spec
-    query that reports producer eligibility rather than planning a new
-    encode. The receipt is checked against the wire it was stamped on, and
-    the spec's independent eligibility gate reports whether the route is
-    admitted. Planning a served encode retains the default refusal.
+    E2M1x2 uses WINDOW L14 for dense and routed serving at v68.
+    ``structure=None`` keeps the research recipe. ``refuse_unattested=False``
+    resolves receipt identity without granting export or serving admission.
+    The independent route gate checks the image, rung, structure, and TP scope.
     """
     spec = get_tessera_family(family)
     if structure is None:

@@ -1,38 +1,8 @@
-"""A TCQ body's forest is on the wire, so it is in the price (issue #126).
+"""Price every plane on the explicit wire recipe, including each TCQ forest.
 
-``artifact_bpp`` priced the E2M1x2 rung at the coset cap as exactly 4.0 bpp on
-every shape, and the exporter wrote 512 bytes more than that on every shape.
-The missing term is the TCQ body's **forest**: the ALPHABET plane (the anchor
-codes, ``2^(R+1)`` per distinct rate in the schedule) and the DESCENDANT plane
-(``2^(cap+1)`` per distinct rate).  Both are written per *unit*, so the error
-is a fixed 512 B at the E2M1x2 cap -- 0.1333 bpp on a 96x320 expert unit and
-0.0013 bpp on a 1024x3072 dense one -- and it is largest exactly where an MoE
-plan spends most of its units.  On arity-1 E2M1 the same hole is 20-44 B, and
-it has a second mechanism the issue does not report: a schedule that spans two
-distinct rates carries **two** forests, so R511 outweighs the uniform R512
-above it.
-
-Three numbers have to be one number, and this is where that is asserted:
-
-* ``prismaquant.tessera_formats.artifact_bpp(...) * n_params / 8`` -- what the
-  DP spends its byte budget in;
-* ``tessera.control.unit_wire_bits(...) / 8`` -- Tessera's own exact per-unit
-  figure, which since tessera ``889fc3a`` charges the forest through
-  ``tessera.grammar.forest_plane_bytes``;
-* ``tessera.export.encode_linear(...).exact_bytes`` -- the bytes that ship.
-
-The first two are arithmetic and are checked at every shape in the issue's
-table.  The third is an encode, so it is checked at the four shapes whose
-encodes are seconds; the two large ones are :func:`test_the_exporter_agrees_at_
-the_large_shapes_too`, behind ``PRISMAQUANT_TESSERA_SLOW_ENCODE`` because a
-3072-column encode is minutes on CPU and the identity it adds is the same one.
-Measured green on all six on 2026-09-03; the run is in the issue thread.
-
-CPU only, and the seed is irrelevant: ``exact_bytes`` is a property of the
-layout, not of the weights.  The routine exporter legs use ``scale_refit=0``:
-one real trellis search and the real serializer/round-trip check, without
-quality refits that change plane values but not their extents.  The opt-in
-large-shape encodes retain the default refits.
+Tessera's control accountant uses the served recipe at v68. The research
+encoder retains its research default. Compare each price against the same
+recipe. Large encoder checks require PRISMAQUANT_TESSERA_SLOW_ENCODE=1.
 """
 
 import os
@@ -52,7 +22,7 @@ from prismaquant.tessera_formats import (
 )
 
 from tessera.control import grid_for_name, unit_wire_bits
-from tessera.export import encode_linear
+from tessera.export import encode_linear, served_recipe
 from tessera.grammar import forest_plane_bytes
 from tessera.manifest import BodyKind
 
@@ -97,9 +67,9 @@ def _cases(shapes):
     return out
 
 
-def _priced_bytes(family, rung, shape):
+def _priced_bytes(family, rung, shape, *, recipe=None):
     rows, columns = shape
-    bpp = artifact_bpp(family, rung, shape=shape)
+    bpp = artifact_bpp(family, rung, shape=shape, recipe=recipe)
     priced = bpp * rows * columns
     assert priced.denominator == 1, (family, rung, shape, bpp)
     assert priced % 8 == 0, "a plane region is a whole number of bytes"
@@ -115,7 +85,8 @@ def test_the_accountant_and_the_wire_are_one_number(family, grid, rung, shape):
     that covers all six shapes, because it costs nothing to evaluate.
     """
     rows, columns = shape
-    assert _priced_bytes(family, rung, shape) == unit_wire_bits(
+    recipe = served_recipe(grid_for_name(grid), rung)
+    assert _priced_bytes(family, rung, shape, recipe=recipe) == unit_wire_bits(
         grid, rung, rows, columns
     ) / 8
 
@@ -274,36 +245,10 @@ def _grid_name(spec) -> str:
 
 
 def test_every_realisable_rung_of_every_family_prices_what_tessera_prices():
-    """The property, swept: no rung of no family, at no shape, disagrees.
+    """Both accountants price the served recipe at every realizable rung.
 
-    This is the test that would catch a *thirteenth* plane without anyone
-    editing it.  Both sides are exact ``Fraction`` arithmetic over integer
-    plane extents, so the sweep is seconds rather than encodes, and neither
-    side is a table restated beside the other: the left is
-    ``artifact_bpp``, which derives its per-unit terms from
-    ``tessera.grammar.forest_plane_bytes`` and the recipe
-    ``tessera.export.wire_recipe`` resolves, and the right is
-    ``tessera.control.unit_wire_bits``, which is
-    ``tessera.calculator.terminal_rate`` -- the accountant the serializer and
-    the parser both defer to.  Add a plane to the wire and Tessera's
-    accountant moves; PrismaQuant's does not unless the term it derives from
-    covers it, and this goes red.
-
-    **What it catches:** every plane Tessera charges and PrismaQuant does not,
-    at every realisable rung of every family in the menu, at three shapes --
-    which is the failure #126 was.  Before the fix it was red on 514 of the
-    2436 (family, rung) pairs at each shape: all 513 rungs of the arity-1 TCQ
-    family at 20-56 B, and the one E2M1x2 coset-cap rung at 512 B.
-
-    **What it does not catch:** a plane *both* accountants forget.  That leg is
-    ``encode_linear``, and it is asserted above (E2M1, both arities, both sides
-    of the cap) and in
-    :func:`test_the_window_families_agree_with_the_exporter_too` (E4M3, BF16),
-    at the shapes whose encodes are seconds.  It also says nothing about
-    header and manifest side bytes, which both figures exclude by the same
-    definition, nor about a **shard**: ``artifact_bpp`` prices a whole unit,
-    and a tensor-parallel shard writes an INITIAL_STATE plane that neither
-    side of this identity carries (RobTand/prismaquant#129).
+    The encoder tests separately check the research recipe. No comparison
+    grants a serving cell or a tensor-parallel receipt.
     """
     from prismaquant.tessera_menu import menu_families
 
@@ -319,7 +264,8 @@ def test_every_realisable_rung_of_every_family_prices_what_tessera_prices():
         for rows, columns in SWEEP_SHAPES:
             for rung in range(lo, hi + 1):
                 try:
-                    priced = _priced_bytes(spec.name, rung, (rows, columns))
+                    recipe = served_recipe(grid_for_name(grid), rung)
+                    priced = _priced_bytes(spec.name, rung, (rows, columns), recipe=recipe)
                 except TesseraFormatError:
                     # The quota does not close over these columns.  Then
                     # Tessera must refuse the same pair: the two accountants

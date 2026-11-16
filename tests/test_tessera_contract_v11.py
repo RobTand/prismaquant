@@ -1,6 +1,7 @@
 """V11 rule coverage uses the reviewed pin and retains independent refusals."""
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -20,7 +21,7 @@ def test_active_answer_matches_the_installed_contract():
 
 
 def _payload():
-    payload = json.loads(runtime.contract_path().read_bytes())
+    payload = json.loads((Path(__file__).parent / "fixtures/shape_runtime_contract_v60.json").read_bytes())
     for family in payload["formats"]:
         family.pop("allowable_rungs", None)
     payload["lane_eligibility"]["schema"] = "tessera.lane-eligibility.v11"

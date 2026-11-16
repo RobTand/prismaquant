@@ -89,7 +89,7 @@ campaign samples from and the dense menu it fills in.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from fractions import Fraction
 from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
@@ -101,6 +101,7 @@ from .lane_eligibility import (
     SCOPED_LANE_SCHEMAS,
     NATIVE_ROUTE_STATUSES,
     legacy_runtime_scope_refusal,
+    cell_evidence_grades,
     ROUTE_STATUS_BACKED,
     ROUTE_STATUS_BACKED_WITH_SERVE_FLAG,
     ROUTE_STATUS_UNATTESTED,
@@ -205,7 +206,7 @@ _PARALLEL_KINDS = frozenset({PARALLEL_COLUMN, PARALLEL_ROW, PARALLEL_NONE})
 #: The cut direction, in Tessera's axis vocabulary.  A column-parallel Linear
 #: splits vLLM's output features, and those are this unit's ROWS, so
 #: ``PARALLEL_COLUMN`` asks about ``"row"``.  The mapping is written once and
-#: read by both TP legs (``tessera.layout.can_shard`` and the contract's
+#: read by both TP legs (``tessera.slicing.can_shard`` and the contract's
 #: ``loader_axes``): inverting it answers plausibly in both directions and
 #: gates exactly the wrong half of a model.
 _CUT_AXIS = {PARALLEL_COLUMN: "row", PARALLEL_ROW: "column"}
@@ -293,6 +294,7 @@ class RouteAdmission:
     readable: bool = False
     # None means no measurement input on an emulation-only allocation.
     measured_allowable: bool | None = None
+    evidence_grades: tuple[tuple[str, str], ...] = ()
 
 
     @property
@@ -444,13 +446,13 @@ def tessera_tp_axis_legal(
     """Will the pinned runtime's LOADER cut this family on this axis?
 
     The third leg of TP legality, and the cheapest: it needs no shape and no
-    ``tessera.layout`` call, because it reads a status the contract publishes
+    ``tessera.slicing`` call, because it reads a status the contract publishes
     per unit and per axis (``tensor_parallel.units[].loader_axes``, which
     Tessera validates equal to the ``ROUTE_TP_AXES`` its routes gate on).
 
     It is a different question from both of the others.
     :func:`tessera_tp_world_attested` asks whether a served receipt covers
-    this world size -- the ATTESTATION -- and ``tessera.layout.can_shard``
+    this world size -- the ATTESTATION -- and ``tessera.slicing.can_shard``
     asks whether the rung's own period divides the shard.  This one asks
     whether the loader accepts the cut at all, and a ``refused`` axis is
     refused on EVERY rank, so no world size and no shape makes it legal.
@@ -530,7 +532,8 @@ def _tp_world(spec: TesseraFamily, tp: int,
     if tp > int(declared):
         return False, (
             f"tp{tp}_unattested: the pinned contract attests {spec.name} up to "
-            f"world size {int(declared)}"
+            f"world size {int(declared)}; no world_size_receipt covers "
+            f"{spec.name} at world size {tp}"
         )
     return True, ""
 
@@ -733,23 +736,27 @@ def _route_admission(
         readable = _rate_is_readable(rung, runtime.reader_rate_range(family.name))
         requires_context = runtime.requires_serving_context
         verdict = snapshot_rung_admission(name, runtime, serving_context=serving_context)
-        attesting = verdict.cells
+        cells = verdict.cells
         if verdict.admitted:
-            status, flags = _attested_cell_conditions(name, attesting)
+            status, flags = _attested_cell_conditions(name, cells)
             world = runtime.tensor_parallel[0].get(family.name)
             detail = (
-                "the packaged Tessera contract attests a device-qualified "
-                "native cell naming this rate, under the exact serving pin")
+                "the packaged Tessera contract attests a native cell "
+                "naming this rate, under the exact serving pin")
         else:
             status = ROUTE_STATUS_UNATTESTED
             detail = verdict.reason
-        if attesting:
+        if cells:
             check_tessera_activation_agreement(
                 name, route,
-                [cell.activation_contract for cell in attesting],
+                [cell.activation_contract for cell in cells],
             )
+    grades = cell_evidence_grades(cells)
+    if grades:
+        detail += f"; qualification=device_qualified, evidence grades {grades}"
     return RouteAdmission(
         format_name=name,
+        evidence_grades=tuple(sorted(grades.items())),
         payload_family=family.name,
         activation_contract=route.contract,
         terminal_format=route.terminal_format,
@@ -992,7 +999,7 @@ class _BodyShape(NamedTuple):
 
 @dataclass(frozen=True, slots=True)
 class _ShardGeometry:
-    """The fields ``tessera.layout.shard_granularity`` reads off an encoded unit.
+    """The fields ``tessera.slicing.shard_granularity`` reads off an encoded unit.
 
     A granularity is a property of the *encoded* unit -- Tessera derives it
     from the very checks ``slice_unit`` applies, so a granularity it reports is
@@ -1089,7 +1096,7 @@ def tessera_shard_granularity(
     its quota on a whole superblock.  A slice that cuts any of those periods
     produces bytes no reader can decode alone.
 
-    **The number is Tessera's, not ours.**  ``tessera.layout.shard_granularity``
+    **The number is Tessera's, not ours.**  ``tessera.slicing.shard_granularity``
     derives both periods from the checks ``slice_unit`` itself applies; this
     function builds the unit-shaped geometry that rung implies at that shape
     (:class:`_ShardGeometry`) and asks.  Until 2026-09-02 Tessera published no
@@ -1110,7 +1117,7 @@ def tessera_shard_granularity(
     geometry = _shard_geometry(
         spec.name, int(body_rate_q256), int(shape[-2]), int(shape[-1]), structure,
     )
-    from tessera.layout import shard_granularity as _tessera_granularity
+    from tessera.slicing import shard_granularity as _tessera_granularity
 
     rows, cols = _tessera_granularity(
         geometry, SUPERBLOCK_WEIGHTS, int(spec.arity),
@@ -1206,7 +1213,7 @@ def _tp_legal(
       does NOT depend on ``require_attested_world`` -- "has this been
       measured" and "will this even load" are separate questions.
     * **Can the whole unit be cut this way at all?**
-      ``tessera.layout.can_shard(unit, tp, axis)`` -- and the axis mapping is
+      ``tessera.slicing.can_shard(unit, tp, axis)`` -- and the axis mapping is
       Tessera's, not a local convention: a *column-parallel* Linear (q/k/v,
       gate/up) splits vLLM's output features, which are this unit's **rows**,
       so ``PARALLEL_COLUMN`` asks ``axis="row"``.  Inverting that pair would
@@ -1247,7 +1254,7 @@ def _tp_legal(
     except TesseraMenuError as exc:
         return False, f"tp_shape:{exc}"
     if tp > 1 and parallel_kind != PARALLEL_NONE:
-        from tessera.layout import can_shard as _tessera_can_shard
+        from tessera.slicing import can_shard as _tessera_can_shard
 
         axis = tp_cut_axis(parallel_kind)
         try:
@@ -1266,7 +1273,7 @@ def _tp_legal(
             extent = int(shape[-2]) if axis == "row" else int(shape[-1])
             return False, (
                 f"tp{tp}_{axis}_granularity: {extent} {axis}s cut {tp} ways is "
-                f"not a multiple of {gran} (tessera.layout.shard_granularity)"
+                f"not a multiple of {gran} (tessera.slicing.shard_granularity)"
             )
     return tessera_shape_legal(spec, body_rate_q256, sharded, structure=structure)
 
@@ -1386,6 +1393,7 @@ class MenuRung:
             "activation_contract": self.admission.activation_contract,
             "route_status": self.admission.route_status,
             "route_status_source": self.admission.source,
+            "evidence_grades": dict(self.admission.evidence_grades),
             "terminal_format": self.admission.terminal_format,
             "act_bits": self.admission.act_bits,
             "min_capability_sm": self.admission.min_capability_sm,

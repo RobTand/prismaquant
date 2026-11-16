@@ -29,6 +29,11 @@ def set_cell_census(payload: dict, cell: dict, rungs: list[int]) -> None:
     from prismaquant.lane_eligibility import _allowable_rung_tables
 
     cell["rungs_q256"] = list(rungs)
+    for launch in cell.get("executes", []):
+        if "rungs_q256" in launch:
+            launch["rungs_q256"] = sorted(set(launch["rungs_q256"]) & set(rungs))
+    cell["executes"] = [launch for launch in cell.get("executes", [])
+                        if launch.get("rungs_q256", [None])]
     if "run_tables" in cell:
         row = next(r for r in payload["formats"] if r["family"] == cell["family"])
         tables = _allowable_rung_tables(row, "fixture.formats")
@@ -89,6 +94,9 @@ def down_convert_lane_table(payload: dict, schema: str) -> dict:
             if key in attested
         }
     for cell in lane["cells"]:
+        if version < 12:
+            for launch in cell.get("executes", []):
+                launch.pop("rungs_q256", None)
         if version <= 5:
             cell.pop("evidence", None)
         else:

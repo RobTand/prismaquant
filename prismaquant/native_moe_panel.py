@@ -333,7 +333,7 @@ def decoded_rank_member(blob, shape, role, *, device, where):
 
     The artifact holds the WHOLE module, so what this rank must hold is the cut
     the loader itself makes. Above a world of one that cut goes through the
-    wire format's own cutter -- ``tessera.layout.can_shard``/``slice_unit``,
+    wire format's own cutter -- ``tessera.slicing.can_shard``/``slice_unit``,
     the producer-neutral primitive the loader calls -- never through an import
     of the serving route (AGENTS.md principle 5) and never by slicing encoded
     planes here. A row cut of a trellis unit carries the state its first
@@ -351,7 +351,7 @@ def decoded_rank_member(blob, shape, role, *, device, where):
     if world == 1:
         decoded = unit_artifact.read_unit_artifact(blob, device=str(device))
         return decoded.to(torch.bfloat16)
-    from tessera.layout import can_shard, slice_unit
+    from tessera.slicing import can_shard, slice_unit
     parsed = unit_artifact.parse_unit_artifact(blob, str(device))
     if can_shard(parsed, world, axis) is not True:
         raise ValueError(

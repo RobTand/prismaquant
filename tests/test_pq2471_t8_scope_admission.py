@@ -22,14 +22,14 @@ IMAGE_5BE13705 = (
 )
 
 AUTHORIZED = (
-    ("TESSERA_BF16_K1", "dense", "batch", (832, 880, 960, 1024, 1088)),
-    ("TESSERA_BF16_K1", "dense", "decode", (832, 880, 960, 1024, 1088)),
-    ("TESSERA_BF16_K1", "routed_moe", "batch", (1024,)),
-    ("TESSERA_BF16_K1", "routed_moe", "decode", (1024,)),
-    ("TESSERA_E4M3_K1", "dense", "batch", (832, 960, 1024, 1088)),
-    ("TESSERA_E4M3_K1", "dense", "decode", (832, 960, 1024, 1088)),
-    ("TESSERA_E4M3_K1", "routed_moe", "batch", (896, 928, 1024, 1088)),
-    ("TESSERA_E4M3_K1", "routed_moe", "decode", (896, 928, 1024, 1088)),
+    ("TESSERA_BF16_K1", "dense", "batch", (832, 880, 960, 1024, 1088), 1),
+    ("TESSERA_BF16_K1", "dense", "decode", (832, 880, 960, 1024, 1088), 1),
+    ("TESSERA_BF16_K1", "routed_moe", "batch", (1024,), 1),
+    ("TESSERA_BF16_K1", "routed_moe", "decode", (1024,), 1),
+    ("TESSERA_E4M3_K1", "dense", "batch", (832, 960, 1024, 1088), 2),
+    ("TESSERA_E4M3_K1", "dense", "decode", (832, 960, 1024, 1088), 2),
+    ("TESSERA_E4M3_K1", "routed_moe", "batch", (896, 928, 1024, 1088), 2),
+    ("TESSERA_E4M3_K1", "routed_moe", "decode", (896, 928, 1024, 1088), 2),
 )
 
 
@@ -43,15 +43,17 @@ def _context(family, structure, regime):
         runtime_image=IMAGE_5BE13705, execution_mode="eager")
 
 
-@pytest.mark.parametrize("family,structure,regime,rungs", AUTHORIZED)
+@pytest.mark.parametrize("family,structure,regime,rungs,tp", AUTHORIZED)
 def test_the_authorized_scope_admits_at_each_stated_rung(
-        family, structure, regime, rungs):
+        family, structure, regime, rungs, tp, record_property):
     table = _table()
     cells = [c for c in table.cells
              if c.family == family and c.structure == structure
              and c.regime == regime and c.runtime_image == IMAGE_5BE13705]
     assert len(cells) == 1, (family, structure, regime)
     cell = cells[0]
+    record_property("cell_id", cell.id)
+    record_property("evidence_grade", cell.evidence.grade)
     assert tuple(cell.rungs_q256) == rungs
     assert cell.qualification == "device_qualified"
     assert cell.requires_plugin == "tessera"
@@ -63,17 +65,20 @@ def test_the_authorized_scope_admits_at_each_stated_rung(
     assert not cell.covers_rate(1), cell.id
 
 
-def test_the_authorized_image_serves_tp2_within_the_closed_world_ceiling():
-    import json
+def test_authorization_stays_within_the_current_tp_ceiling():
+    from prismaquant.tessera_menu import tessera_tp_world_attested
 
     contract = json.loads(tr.tessera_serving_contract_path().read_text())
-    tp = contract["tensor_parallel"]
-    assert tp["semantics"] == "closed_world"
-    worlds = {u["unit"]: u["max_world_size"] for u in tp["units"]}
-    for family, _, _, _ in AUTHORIZED:
-        assert worlds[family] == 2, family
-    receipts = {r["id"]: r for r in tp["world_size_receipts"]}
-    assert receipts["glm53_a4_stub_tp2_sm121"]["world_size"] == 2
+    assert contract["tensor_parallel"]["semantics"] == "closed_world"
+    worlds = {u["unit"]: u["max_world_size"] for u in contract["tensor_parallel"]["units"]}
+    for family, _, _, _, tp in AUTHORIZED:
+        assert worlds[family] == tp
+        assert tessera_tp_world_attested(family, tp) == (True, "")
+    for family in ("TESSERA_BF16_K1", "TESSERA_E2M1_K2"):
+        assert worlds[family] == 1
+        admitted, reason = tessera_tp_world_attested(family, 2)
+        assert not admitted
+        assert family in reason and "no world_size_receipt" in reason
 
 
 def test_excluded_scopes_refuse():

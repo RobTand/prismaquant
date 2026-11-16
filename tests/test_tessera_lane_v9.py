@@ -120,8 +120,9 @@ def _up_convert(payload: dict, *, record_cells=(MOE_DECODE, MOE_BATCH)) -> dict:
     (a cell nobody re-ran records ``null``).  Written here rather than taken
     from a fixture file so it tracks whatever the pin installs.
     """
-    moved = copy.deepcopy(payload)
-    moved["lane_eligibility"]["schema"] = lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V9
+    from lane_table_fixtures import down_convert_lane_table
+
+    moved = down_convert_lane_table(payload, lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V9)
     for cell in moved["lane_eligibility"]["cells"]:
         cell["evidence"]["smoke"]["record"] = (
             copy.deepcopy(RECORD) if cell["id"] in record_cells else None)

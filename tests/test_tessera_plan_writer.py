@@ -135,9 +135,8 @@ def _unit(tensor):
     return tensor[: -len(".weight")]
 
 
-def _context(surface, config, tmp_path, *, research_selected=False):
-    return writer.model_plan_context(
-        tmp_path, config, surface, research_selected=research_selected)
+def _context(surface, config, tmp_path):
+    return writer.model_plan_context(tmp_path, config, surface)
 
 
 # -- planning: coverage, BF16 completion, per-role rungs ----------------------

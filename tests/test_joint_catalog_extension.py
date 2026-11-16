@@ -1083,8 +1083,8 @@ def test_an_added_recipe_is_the_attested_template_with_its_q256():
         **_K1_WIRE, 'grid': 'E4M3', 'q256': 1152}
     # The pinned contract derives the recipe the R13 catalog carried as a literal.
     assert added_format_recipe(ADDED_FORMAT) == {
-        'body': 'tcq', 'channel_sigma': None, 'grid': 'E2M1x2', 'plane': 'lut16', 'q256': 896,
-        'seed': 0, 'sigma': None, 'span': 2, 'window_bits': 0}
+        'body': 'window', 'channel_sigma': None, 'grid': 'E2M1x2', 'plane': 'lut16', 'q256': 896,
+        'seed': 0, 'sigma': None, 'span': 1, 'window_bits': 14}
 
 
 @pytest.mark.parametrize('fmt,changes,match', [
