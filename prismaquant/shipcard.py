@@ -261,11 +261,6 @@ GOLD_PRODUCER_RECORD_SCHEMAS = frozenset({
 })
 TOPK_COVERAGE_POLICY_SCHEMA = "prismaquant.topk_tail_coverage_policy/1"
 WIKITEXT_REVISION = "b08601e04326c79dfdd32d625aee71d232d685c3"
-_CB_FORMAT_RE = re.compile(r"^(?:NVFP4_CB|FP8_CB)_[KS][0-9]+$")
-_FP8_SOURCE_W8A16_WIRE_IDS = frozenset({
-    "fp8_e4m3_ue8m0_block128",
-})
-_MXFP8_DENSE_WIRE_IDS = frozenset({"mxfp8_e4m3_e8m0_g32"})
 
 
 # ---------------------------------------------------------------------------
@@ -1969,105 +1964,6 @@ def verify(
         else:
             problems.extend(adapter.replay(record, card=card, model_dir=model_dir))
     return problems
-
-
-def _gold_extension_requirements(
-    quant_config: Mapping[str, Any],
-) -> frozenset[str]:
-    """Extension families implied by the finalized live assignment."""
-    cb_formats: set[str] = set()
-    dense_mxfp8 = False
-    source_fp8_w8a16 = False
-
-    config_groups = quant_config.get("config_groups")
-    if config_groups is not None:
-        if not isinstance(config_groups, Mapping):
-            raise ValueError("quant_config config_groups is not an object")
-        for key, group in config_groups.items():
-            if not isinstance(key, str) or not isinstance(group, Mapping):
-                raise ValueError("quant_config config_groups is malformed")
-            fmt = group.get("format")
-            if isinstance(fmt, str) and _CB_FORMAT_RE.fullmatch(fmt):
-                cb_formats.add(fmt)
-
-    provenance = quant_config.get("provenance")
-    tensor_formats = provenance.get("tensor_formats") if isinstance(
-        provenance, Mapping
-    ) else None
-    if tensor_formats is not None:
-        if not isinstance(tensor_formats, Mapping):
-            raise ValueError("quant_config tensor_formats is not an object")
-        for qname, fmt in tensor_formats.items():
-            if not isinstance(qname, str) or not isinstance(fmt, str):
-                raise ValueError("quant_config tensor_formats is malformed")
-            if _CB_FORMAT_RE.fullmatch(fmt):
-                cb_formats.add(fmt)
-            if fmt in {"MXFP8_UE8M0_G32", *_MXFP8_DENSE_WIRE_IDS}:
-                dense_mxfp8 = True
-            if fmt in {
-                "FP8_BLOCK_UE8M0_SOURCE", *_FP8_SOURCE_W8A16_WIRE_IDS,
-            }:
-                source_fp8_w8a16 = True
-
-    delegated = quant_config.get("source_passthrough")
-    if delegated is not None:
-        if (
-            not isinstance(delegated, Mapping)
-            or set(delegated) != {"version", "units"}
-            or delegated.get("version") != 1
-            or not isinstance(delegated.get("units"), Mapping)
-        ):
-            raise ValueError("source_passthrough is not the closed v1 declaration")
-        for qname, wire in delegated["units"].items():
-            if not isinstance(qname, str) or not isinstance(wire, str):
-                raise ValueError("source_passthrough route is malformed")
-            if wire in _MXFP8_DENSE_WIRE_IDS:
-                dense_mxfp8 = True
-            if wire in _FP8_SOURCE_W8A16_WIRE_IDS:
-                source_fp8_w8a16 = True
-
-    per_expert = quant_config.get("per_expert_format_groups")
-    if per_expert is not None:
-        if (
-            not isinstance(per_expert, Mapping)
-            or per_expert.get("version") != 1
-            or not isinstance(per_expert.get("layers"), Mapping)
-        ):
-            raise ValueError("per_expert_format_groups is malformed")
-        for families in per_expert["layers"].values():
-            if not isinstance(families, Mapping):
-                raise ValueError("per-expert family declaration is malformed")
-            for entries in families.values():
-                if not isinstance(entries, list):
-                    raise ValueError("per-expert format groups are malformed")
-                for entry in entries:
-                    wire = entry.get("format_wire_id") if isinstance(
-                        entry, Mapping
-                    ) else None
-                    if not isinstance(wire, str):
-                        raise ValueError("per-expert format route is malformed")
-                    if _CB_FORMAT_RE.fullmatch(wire):
-                        cb_formats.add(wire)
-                    if wire in _MXFP8_DENSE_WIRE_IDS:
-                        dense_mxfp8 = True
-                    if wire in _FP8_SOURCE_W8A16_WIRE_IDS:
-                        source_fp8_w8a16 = True
-
-    required: set[str] = set()
-    if cb_formats:
-        # Every CB execution family uses the main module for activation QDQ,
-        # expansion/GEMV, and/or routed combine. Layout-v2 FP4 additionally
-        # requires its v2 quality expander at load.
-        required.add("cb_main")
-        if quant_config.get("layout_version", 1) == 2 and any(
-            name.startswith("NVFP4_CB_") for name in cb_formats
-        ):
-            required.add("cb_v2")
-    if dense_mxfp8:
-        required.add("mxfp8_dense")
-    if source_fp8_w8a16:
-        required.update({"fp8_source_w8a16", "cb_bf16_grouped"})
-    return frozenset(required)
 
 
 def _verify_gold_producer_identity(

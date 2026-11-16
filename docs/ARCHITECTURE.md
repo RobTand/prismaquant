@@ -30798,15 +30798,6 @@ is the parent and EngineCore is a child. Two guards ride on that:
   `PYTHONPATH` is absent. A same-version CWD/`PYTHONPATH` shadow, dirty producer,
   bare local install, or post-install source mutation cannot close a slot
   (`serve_fingerprint.gold_producer_identity`, `gridbook_distribution_provenance`).
-* **Assignment-derived extension closure.** Gold verification parses the finalized
-  `quant_config.json` rather than accepting "some Gridbook `.so`". Any CB assignment requires
-  `prismaquant_cb_ext`; layout-v2 NVFP4-CB additionally requires
-  `prismaquant_cb_v2_ext`; a direct group-32 MXFP8 assignment requires
-  `pq_mxfp8_dense_*`; and the block-128 source W8A16 route requires both
-  `pq_fp8_source_w8a16_*` and the large-M `pq_cb_bf16_grouped_*` bridge. Only the families
-  actually implied by `config_groups`,
-  `provenance.tensor_formats`, `source_passthrough`, and per-expert groups are demanded
-  (`shipcard._gold_extension_requirements`).
 
 ### 7.4 Reproducibility contract
 
