@@ -584,37 +584,6 @@ def synthesize_packed_expert_col_weights(
     return added
 
 
-def synthesize_packed_expert_activation_samples(
-    model_path: str | Path,
-    act_dir: str | Path,
-    targets: set[str],
-    profile=None,
-    *,
-    max_rows: int = 4096,
-    device: str | None = None,
-) -> dict[str, torch.Tensor | RoutedActivationSamples]:
-    """Replay only packed-expert inputs absent from the probe cache.
-
-    This is the same checkpoint routing/gate/up replay used by the imatrix
-    harvester, so activation-scale calibration and weighted export cannot drift
-    onto duplicate MoE semantics.
-    """
-
-    samples: dict[str, torch.Tensor | RoutedActivationSamples] = {}
-    synthesize_packed_expert_col_weights(
-        model_path,
-        act_dir,
-        {},
-        profile,
-        max_rows=max_rows,
-        device=device,
-        activation_samples=samples,
-        target_names=set(targets),
-        write_col_weights=False,
-    )
-    return samples
-
-
 def synthesize_unrouted_expert_col_weights(
     probe_stats: Mapping[str, Mapping[str, Any]],
     col_weights: dict[str, torch.Tensor],
