@@ -65,7 +65,7 @@ jobs:
       run: |
         set -Eeuo pipefail
         mkdir -p hosted-private
-        python tools/ci/gate_select.py --base "$BASE" --head "$HEAD" --mode full --output hosted-private/full-plan.json
+        python tools/ci/gate_select.py --base "${BASE:-$(git rev-parse "$HEAD^1")}" --head "$HEAD" --mode full --output hosted-private/full-plan.json
         if [ "$TRUSTED" = true ]; then
           python tools/ci/bazel_gate.py hosted --architecture "$ARCHITECTURE" --plan hosted-private/full-plan.json --output hosted-private/plan.json
         else
