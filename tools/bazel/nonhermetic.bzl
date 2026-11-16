@@ -194,7 +194,7 @@ NONHERMETIC = {
     ),
     "//tests:test_native_strict_app_consumers": struct(
         tags = ["hosted-arm64"],
-        reason = "A disk-space guard (prismaquant/perturbed_x_cache.py:1099) refuses on arm64 executors whose tmpfs execroot reports 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
+        reason = "A local-disk guard (prismaquant/perturbed_x_cache.py:1099) refuses any tmpfs scratch, and arm64 executors use a tmpfs execroot with 0 free bytes, so hosted arm64 runs this file (forced-zero scan, 2026-11-16).",
     ),
     "//tests:test_no_secret_on_command_line": struct(
         tags = ["runner"],
