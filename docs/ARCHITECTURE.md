@@ -927,6 +927,17 @@ explicit traffic wire bytes. DEFAULT-OFF, UNQUALIFIED FEATURE HOLD.
 CPU verification covers declaration uptake only; no pipeline default,
 format, serving lane or ship gate changes.
 
+As of: 2026-11-16, gate plan phase, PQ #3768.
+Source: `tools/ci/bazel_selection.py` and `tools/ci/remote_gate.py`, based on
+main `087dd15b`. A PR diff that only modifies files (no add, delete,
+BUILD/REPO/WORKSPACE file or tracked symlink) selects the rules that reach a
+modified source file on the head query's `ruleInput`/`generatingRule` edges,
+with no base query and no bazel-diff. For that class it equals bazel-diff:
+13 recorded gate manifests were reproduced. Other impacted diffs run the
+bazel-diff base half in the head workspace (`git read-tree`) on its warm
+Bazel server. The controller polls the plan every 2 s and submits shard runs
+with `wait_until: QUEUED`; shard awaits keep 15 s and the 58-minute deadline.
+
 As of: 2026-11-06, Remote Bazel PR fallback uses six shards, PQ #3345.
 Source: `tools/ci/bazel_selection.py` and `tools/ci/remote_gate.py`, based on
 main `118c4b17`. PR fallback now plans six timing-balanced shards and the
