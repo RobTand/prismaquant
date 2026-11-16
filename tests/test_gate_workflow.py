@@ -1,6 +1,9 @@
 """The cutover preserves required verdicts, hosted exceptions and policy checks."""
+import os
 from pathlib import Path
 import re
+import subprocess
+import time
 
 import pytest
 import yaml
@@ -61,6 +64,22 @@ def test_remote_planner_uses_queue_aware_refs_and_requires_scope_upload():
     assert 'scopes_ready' in steps['token']['if']
     assert 'steps.scopes.outcome' in steps['scope-verdict']['env']['OUTCOME']
     assert 'github.event.pull_request.head.repo.full_name == github.repository' in remote['if']
+
+
+@pytest.mark.parametrize('event, hours, output', [('schedule', 8, ''), ('schedule', 1, 'run=true'),
+                                                    ('workflow_dispatch', 8, 'run=true'), ('schedule', None, None)])
+def test_a_scheduled_record_runs_for_a_head_under_seven_hours_old_and_fails_without_git(tmp_path, event, hours, output):
+    step = next(step for step in workflows()['ci.yml']['jobs']['tests']['steps'] if step.get('id') == 'due')
+    date = f'@{int(time.time()) - 3600 * (hours or 0)} +0000'
+    env = {**os.environ, 'GIT_AUTHOR_DATE': date, 'GIT_COMMITTER_DATE': date, 'GITHUB_EVENT_NAME': event,
+           'GITHUB_OUTPUT': str(tmp_path / 'output'), 'GIT_CEILING_DIRECTORIES': str(tmp_path)}
+    if hours is not None:
+        subprocess.run(['git', 'init', '-q'], cwd=tmp_path, check=True)
+        subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'head'],
+                       cwd=tmp_path, env=env, check=True)
+    (tmp_path / 'output').write_text('')
+    status = subprocess.run(['bash', '-e', '-c', step['run']], cwd=tmp_path, env=env).returncode
+    assert (status != 0) if output is None else (status, (tmp_path / 'output').read_text().strip()) == (0, output)
 
 
 def test_postmerge_has_one_serial_controller_for_both_architectures():

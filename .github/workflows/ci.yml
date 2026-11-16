@@ -32,7 +32,9 @@ jobs:
         fetch-depth: 0
         persist-credentials: false
     - id: due  # A schedule records main only when it moved within the interval and a margin.
-      run: echo "run=$([ "$GITHUB_EVENT_NAME" != schedule ] || [ -n "$(git log -1 --since='7 hours ago' --format=%H)" ] && echo true)" >> "$GITHUB_OUTPUT"
+      run: |
+        recent="$(git log -1 --since='7 hours ago' --format=%H)"
+        if [ "$GITHUB_EVENT_NAME" != schedule ] || [ -n "$recent" ]; then echo run=true >> "$GITHUB_OUTPUT"; fi
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
       if: steps.due.outputs.run == 'true'
       id: scan-python
