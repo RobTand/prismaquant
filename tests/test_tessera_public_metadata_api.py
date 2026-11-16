@@ -58,12 +58,12 @@ sys.meta_path.insert(0, ForbiddenRuntime())
 from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
 snapshot = installed_runtime_snapshot()
 assert len(snapshot.eligibility.cells) == 18
-assert snapshot.sha256 == '145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4'
+assert snapshot.sha256 == 'e819d2e90c0b5fe27f11283890d1fec53054d88fbe29d7f9cc473a08682e7b5a'
 snapshot.require_exact_pin()
 from prismaquant.tessera_runtime_contract import TESSERA_DEV_PIN_COMMIT
 from prismaquant.tessera_serving_runtime_pin import load_tessera_serving_runtime_pin
 pin = load_tessera_serving_runtime_pin()
-assert pin.commit == pin.producer_commit == TESSERA_DEV_PIN_COMMIT == '8bf496abdb7d598a3132f6b4b7cb7d7e96199d13'
+assert pin.commit == pin.producer_commit == TESSERA_DEV_PIN_COMMIT == 'e89757b9e39866dd253ca76215c112226724921f'
 assert not any(name == 'tessera.serving' or name.startswith('tessera.serving.') for name in sys.modules)
 print('PUBLIC-METADATA-OK')
 '''

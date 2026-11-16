@@ -1,8 +1,4 @@
-"""The v68 routed E2M1 lane requires start state; this producer plans none.
-
-Dense R896 remains attested. Routed R896 stays readable but cannot pass
-the lane predicate, with or without the optional development pin.
-"""
+"""Contract v69 admits whole TP1 E2M1 R896 units within each cell's scope."""
 import json
 from dataclasses import replace
 
@@ -46,7 +42,7 @@ def _context(cell, structure):
 
 
 @pytest.mark.parametrize("dev_pin", [False, True])
-def test_routed_e2m1_refuses_the_missing_start_state_on_the_pinned_contract(monkeypatch, dev_pin):
+def test_routed_e2m1_admits_without_start_state_on_the_pinned_contract(monkeypatch, dev_pin):
     monkeypatch.delenv(contract.TESSERA_DEV_PIN_ENV, raising=False)
     require_pinned_tessera_runtime()  # The real pin, no substitute.
     _table, _formats, dense, routed = _packaged_reference()
@@ -65,12 +61,10 @@ def test_routed_e2m1_refuses_the_missing_start_state_on_the_pinned_contract(monk
     assert on_dense.act_bits == 4
 
     on_routed = menu.route_admission(RUNG, serving_context=routed_context)
-    assert not on_routed.attested
-    assert on_routed.route_status == menu.ROUTE_STATUS_UNATTESTED
+    assert on_routed.attested
+    assert on_routed.route_status == routed[0].route_status
     admitted, reason = cell_lane_admits(routed[0], 896, _table.lanes)
-    assert not admitted and "start_state" in reason
-    if not dev_pin:
-        assert "start_state" in on_routed.detail
+    assert admitted and reason == ""
     assert on_routed.readable is True
     assert on_routed.act_bits == on_dense.act_bits == 4
 
@@ -136,8 +130,7 @@ def test_readable_menu_spans_a4_a8_a16_on_a_routed_unit_and_stamps_the_gap(monke
     # Byte accounting grants no serving admission.
     assert a4.bits_per_param == tessera_exact_bits_for_shape(
         FAMILY, 896, shape, structure=ROUTED) / (shape[0] * shape[1])
-    assert not a4.admission.attested
-    assert "start_state" in a4.admission.detail
+    assert a4.admission.attested
     assert a16.route_status == menu.ROUTE_STATUS_UNATTESTED
     assert a16.admission.readable
     routed_e4m3_here = any(
@@ -149,6 +142,6 @@ def test_readable_menu_spans_a4_a8_a16_on_a_routed_unit_and_stamps_the_gap(monke
     attested = menu.expand_tessera_menu(shape, mode=menu.MENU_ATTESTED, families=families,
                                         serving_context=routed_context)
     names = {rung.format_name for rung in attested}
-    assert RUNG not in names
+    assert RUNG in names
     assert "TESSERA_BF16_K1_R1024" not in names
     assert "TESSERA_BF16_K1_R1023" not in names

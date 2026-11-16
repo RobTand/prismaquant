@@ -434,19 +434,11 @@ def test_the_trace_gate_default_reads_the_tracked_pin(monkeypatch):
 # A v2 pin behaves exactly as before: a before/after comparison
 # ---------------------------------------------------------------------------
 def test_every_gate_answers_exactly_as_it_did_before_under_the_v2_pin():
-    """Byte equality with the answers taken on origin/main before this change.
+    """Compare every admission answer with the current reviewed pin snapshot.
 
-    ``GOLDEN`` was produced by ``tests.tessera_serving_identity_snapshot`` on
-    ``a796448b5e8`` plus only that helper, through PrismaBuild. It covers the
-    tracked pin and the live pin gate, all 14 packaged cells, the 56 unit routes
-    their scopes resolve to, the development contract's reviewed answer and
-    admitted cells, and eight route-trace verdicts, four of them on traces
-    whose header carries a digest a v2 pin must not read.
-
-    Regenerated once, through PrismaBuild, when #1490 merged onto this gate:
-    the route-trace verdicts gained the glm5_next served-namespace fields
-    (``served_namespace``, renamed priced targets, one sentence in
-    ``detail``), and no verdict changed.
+    The snapshot includes the exact pin, all packaged cells and scoped routes,
+    development native-cell answers, and route-trace verdicts.
+    Pin moves regenerate it in Flux through ``tests.tessera_serving_identity_snapshot``.
     """
     now = snapshot_module.canonical(snapshot_module.snapshot())
     before = GOLDEN.read_text(encoding="utf-8")

@@ -439,10 +439,7 @@ def test_the_planned_decoration_is_the_render_decoration():
 # ---------------------------------------------------------------------------
 def _assert_current_plan(cell, rung, table):
     admits, why = lane.cell_lane_admits(cell, rung, table.lanes)
-    if cell.family == CLAIMING_FAMILY and cell.structure == "routed_moe":
-        assert not admits and "start_state" in why, (cell.id, why)
-    else:
-        assert admits and why == "", (cell.id, why)
+    assert admits and why == "", (cell.id, why)
 
 
 def test_the_pinned_lane_gated_cells_check_the_producer_plan(table):

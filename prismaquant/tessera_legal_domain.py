@@ -633,18 +633,19 @@ def live_pins() -> DomainPins:
 #: The full rate walk retains E4M3 1793 and BF16 3841 legal rates, with no holes.
 #: BF16 table widths still change at R3585 and R3841. Grammar bytes are unchanged.
 #: The exporter changes E2M1 serving bytes; primary E4M3/BF16 recipes stay unchanged.
+#: Contract v69 keeps the v68 exporter and grammar byte state, PQ #3720.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="8bf496abdb7d598a3132f6b4b7cb7d7e96199d13",
+    reader_dev_pin_commit="e89757b9e39866dd253ca76215c112226724921f",
     reader_dev_pin_contract_sha256=(
-        "145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4"
+        "e819d2e90c0b5fe27f11283890d1fec53054d88fbe29d7f9cc473a08682e7b5a"
     ),
-    serving_runtime_pinned_commit="8bf496abdb7d598a3132f6b4b7cb7d7e96199d13",
+    serving_runtime_pinned_commit="e89757b9e39866dd253ca76215c112226724921f",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4"
+        "e819d2e90c0b5fe27f11283890d1fec53054d88fbe29d7f9cc473a08682e7b5a"
     ),
     producer_installed_contract_sha256=(
-        "145a6dac54a63f9bac5ed3eda5d59b5c0f09c4233b4e95ffa63f9b4009a73be4"
+        "e819d2e90c0b5fe27f11283890d1fec53054d88fbe29d7f9cc473a08682e7b5a"
     ),
 )
 
