@@ -101,3 +101,8 @@ def test_plugin_mechanism_can_declare_phase_and_dependency():
 
     assert plan.errors == ()
     assert plan.names() == ("gptq", "scale_sweep", "unit_test_post_scale_polish")
+
+
+def test_the_uncalled_render_helpers_stay_deleted():
+    from prismaquant import render_score
+    assert not {"output_error_distribution_stats", "render_mechanism"} & set(vars(render_score))
