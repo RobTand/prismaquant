@@ -946,8 +946,8 @@ manifest validation; hosted routing and unknown-target refusal remain enforced.
 
 As of: 2026-11-16, post-merge record schedule, PQ #3763. Source: `.github/workflows/ci.yml`.
 The full no-cache Bazel record (amd64 and arm64) runs every 6 hours when main's head commit is younger
-than 7 hours, and on every manual dispatch. A push to main runs the hosted amd64 and arm64 lanes and the
-import surface, each push in its own concurrency group; records run one at a time.
+than 7 hours, and on every manual dispatch. A push to main runs the hosted amd64 and arm64 lanes, each push in its own concurrency group;
+records run one at a time. The import surface runs only on pull requests and drafts (PQ #3791).
 
 As of: 2026-11-15, FIFO merge queue, PQ #3642.
 Source: `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.mergify.yml`.
