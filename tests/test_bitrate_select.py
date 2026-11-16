@@ -6,12 +6,9 @@ cu130 venv). Mirrors tests/test_allocator_kneedle.py.
 """
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from prismaquant.saturation_select import (
-    bootstrap_mean_ci,
     find_saturation_bpp,
     select_under_byte_budget,
 )
@@ -146,26 +143,6 @@ def test_byte_budget_empty():
     assert not sel["feasible"] and sel["below_floor"] and sel["chosen"] is None
 
 
-# --------------------------------------------------------------------------
-# bootstrap_mean_ci
-# --------------------------------------------------------------------------
-def test_bootstrap_deterministic():
-    xs = [0.01, 0.02, 0.015, 0.03, 0.025, 0.018]
-    a = bootstrap_mean_ci(xs, seed=7)
-    b = bootstrap_mean_ci(xs, seed=7)
-    assert a == b
-    mean, se = a
-    assert mean == pytest.approx(sum(xs) / len(xs))
-    assert se >= 0.0 and math.isfinite(se)
-
-
-def test_bootstrap_edges():
-    assert bootstrap_mean_ci([]) == (0.0, 0.0)
-    m, se = bootstrap_mean_ci([0.5])
-    assert m == pytest.approx(0.5)
-    assert math.isinf(se)
-
-
-def test_bootstrap_constant_samples_zero_se():
-    _, se = bootstrap_mean_ci([0.1] * 16, seed=3)
-    assert se == pytest.approx(0.0, abs=1e-12)
+def test_the_unused_bootstrap_helper_stays_deleted():
+    import prismaquant.saturation_select as saturation_select
+    assert not hasattr(saturation_select, "bootstrap_mean_ci")
