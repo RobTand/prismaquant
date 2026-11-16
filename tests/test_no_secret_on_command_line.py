@@ -131,7 +131,6 @@ def test_step_env_and_python_header_are_sanctioned():
 
 UPLOADS = {
     ('gate.yml', 'remote'): ('bazel-upload', None),
-    ('gate.yml', 'graph-impact'): ('graph-upload', 'graph-impact/result.json'),
     ('ci.yml', 'tests'): ('bazel-main-upload', None),
     ('bazel-hosted.yml', 'tests'): ('hosted-upload', 'hosted-private/result.json'),
 }
@@ -139,7 +138,6 @@ SCAN_KEYS = ['BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN']
 SCAN_CONDITIONS = {
     'bazel-upload': "${{ !cancelled() && env.TRUSTED == 'true' && steps.controller.outputs.scopes_ready == 'true' }}",
     'bazel-main-upload': "${{ !cancelled() && env.TRUSTED == 'true' && steps.controller.outputs.scopes_ready == 'true' }}",
-    'graph-upload': "${{ !cancelled() && env.TRUSTED == 'true' && steps.check.outcome == 'success' }}",
     'hosted-upload': "${{ !cancelled() && inputs.trusted && steps.tests.outcome == 'success' }}",
 }
 

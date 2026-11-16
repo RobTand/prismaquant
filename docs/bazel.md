@@ -1,6 +1,6 @@
 # Dependency graph impact
 
-`tests/test_graph_impact.py::test_graph_impact_gate` runs in its own required
+`tools/ci/graph_impact_pq.py` runs in its own required
 hosted job, in parallel with the gate shards. It checks the graph
 at the merge base against the PR head, without using run history. `GATE_BASE`
 is the event's base commit. Ordinary PRs compare from its merge base with the
