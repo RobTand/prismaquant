@@ -31,6 +31,7 @@ GATE_INPUTS = {
 BAZEL_DIFF_URL = 'https://github.com/Tinder/bazel-diff/releases/download/v42.0.0/bazel-diff_deploy.jar'
 BAZEL_DIFF_SHA256 = '0170b70fe2f24477ab056c11f5c3240d8b45a1dca5ab73ad252c096679c5500c'
 DURATIONS_PATH = 'tools/ci/gate_durations.json'
+BUILD_LANGUAGE = {'BUILD', 'REPO', 'WORKSPACE'}  # with or without the .bazel suffix
 
 
 class SelectionError(RuntimeError):
@@ -117,11 +118,16 @@ def wheel_repositories(labels):
     return sorted(repositories)
 
 
+def main_label(label):
+    return label.removeprefix('@') if label.startswith('@//') else label
+
+
 def query_population(rows, architecture):
-    """Read Bazel query records once, preserving build rules and lane routes."""
+    """Read Bazel query records once, preserving build rules, lane routes and the
+    consumers of each rule (by label) and source file (by repository path)."""
     if architecture not in ('amd64', 'arm64'):
         raise SelectionError('query has an unsupported architecture')
-    rules, sources, labels = {}, set(), []
+    rules, paths, labels, inputs, generating = {}, {}, [], {}, {}
     try:
         for row in rows:
             item = (row.get('rule') or row.get('sourceFile') or row.get('generatedFile')
@@ -129,7 +135,7 @@ def query_population(rows, architecture):
             label = item['name']
             if not isinstance(label, str):
                 raise ValueError('invalid label')
-            label = label.removeprefix('@') if label.startswith('@//') else label
+            label = main_label(label)
             labels.append(label)
             if not label.startswith('//'):
                 continue
@@ -139,7 +145,7 @@ def query_population(rows, architecture):
                 path = label[2:].replace(':', '/').lstrip('/')
                 if '\\' in path or any(part in ('.', '..') for part in path.split('/')):
                     raise ValueError('invalid source path')
-                sources.add(path)
+                paths[label] = path
             elif 'rule' in row:
                 kind = item['ruleClass']
                 tags = next((attr.get('stringListValue',
@@ -149,6 +155,13 @@ def query_population(rows, architecture):
                         or any(not isinstance(tag, str) for tag in tags) or label in rules):
                     raise ValueError('invalid rule record')
                 rules[label] = kind, set(tags)
+                inputs[label] = [main_label(name) for name in item.get('ruleInput', [])]
+            elif 'generatedFile' in row:
+                generating[label] = main_label(item['generatingRule'])
+        consumers = {}
+        for rule, names in inputs.items():
+            for name in names:
+                consumers.setdefault(paths.get(name, generating.get(name, name)), set()).add(rule)
         targets = {label for label, (_, tags) in rules.items()
                    if 'manual' not in tags and not (architecture == 'arm64'
                        and tags & {'runner', 'hosted-arm64'})}
@@ -162,7 +175,7 @@ def query_population(rows, architecture):
                                  if 'gate-lane-hosted' in tags),
                 'hosted_arm64': sorted(label for label, (_, tags) in rules.items()
                                        if 'hosted-arm64' in tags),
-                'used_sources': sorted(sources),
+                'used_sources': sorted(paths.values()), 'consumers': consumers,
                 'wheel_repositories': wheel_repositories(labels)}
     except (AttributeError, KeyError, TypeError, ValueError):
         raise SelectionError('query population is incomplete or malformed') from None
@@ -211,6 +224,16 @@ def compare_graphs(base_graph, head_graph, changed, deleted, directory, *,
         return gate_decision(changed, deleted, set(), used_sources, tests,
                              detection_error='graph comparison unavailable')
     return gate_decision(changed, deleted, impacted, used_sources, tests)
+
+
+def reverse_closure(consumers, modified):
+    """Rules that reach a modified source file. When a diff only modifies contents (no add,
+    delete, BUILD file or symlink), base and head share one graph, so bazel-diff impacts these."""
+    found, frontier = set(), set(modified)
+    while frontier:
+        frontier = set().union(*(consumers.get(node, ()) for node in frontier)) - found
+        found |= frontier
+    return found
 
 
 def query_revision(root, directory, architecture, *, bazel='bazel', runner=subprocess.run):
@@ -299,14 +322,20 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
                 git('cat-file', '-e', base + '^{commit}')
             except SelectionError:
                 git('fetch', '--no-tags', 'origin', base)
-            changed = set(filter(None, git('diff', '--no-renames', '--name-only', '-z',
-                '--diff-filter=ACMRT', base, head, '--').split('\0')))
-            deleted = set(filter(None, git('diff', '--no-renames', '--name-only', '-z',
-                '--diff-filter=D', base, head, '--').split('\0')))
-            if not changed and not deleted:
+            entries = git('diff', '--no-renames', '--name-status', '-z', base, head, '--').split('\0')
+            status = dict(zip(entries[1::2], entries[0::2]))
+            changed = {path for path, letter in status.items() if letter != 'D'}
+            deleted = set(status) - changed
+            if not status:
                 raise SelectionError('empty source diff')
             if fallback_files(changed | deleted):
                 decision = everything(fallback_files(changed | deleted), population['tests'])
+            elif (set(status.values()) == {'M'}
+                  and not any(Path(path).name.removesuffix('.bazel') in BUILD_LANGUAGE for path in changed)
+                  and not any(row.startswith('120000 ') for row in git('ls-files', '-s').splitlines())):
+                impacted = reverse_closure(population['consumers'], changed)
+                decision = gate_decision(changed, deleted, impacted - set(population['excluded']),
+                                         set(population['used_sources']), set(population['tests']))
             else:
                 base_root = directory / 'base-source'
                 base_root.mkdir()
