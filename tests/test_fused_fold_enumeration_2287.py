@@ -1,7 +1,7 @@
-"""Re-take fused-group enumeration at the v68 image scopes, PQ #3677.
+"""Re-take fused-group enumeration at the v69 image scopes, PQ #3720.
 
 IMG-N dense BF16 and E4M3 each cover 511 rates. IMG-G routed E4M3
-covers 512 rates, including upstream R768. Routed E2M1 lacks start state.
+covers 512 rates, including upstream R768. Routed E2M1 covers R896.
 Both groups fit below the unchanged complete-combination guard.
 """
 from __future__ import annotations
@@ -106,11 +106,11 @@ def test_dense_gate_up_fits_in_complete_combination_mode(dense_menu):
 
 
 def test_routed_gate_up_fits_in_complete_combination_mode(routed_menu):
-    """The upstream R768 receipt adds one E4M3 rate on IMG-G."""
+    """The v69 predicate admits E2M1 R896 beside 512 E4M3 rates on IMG-G."""
     by_family: dict[str, int] = {}
     for rung in routed_menu:
         by_family[rung.family] = by_family.get(rung.family, 0) + 1
-    assert by_family == {"TESSERA_E4M3_K1": 512}
+    assert by_family == {"TESSERA_E4M3_K1": 512, "TESSERA_E2M1_K2": 1}
     members = ["model.layers.3.mlp.experts.0.gate_proj",
                "model.layers.3.mlp.experts.0.up_proj"]
     cands = _candidates(members, routed_menu)
@@ -119,11 +119,15 @@ def test_routed_gate_up_fits_in_complete_combination_mode(routed_menu):
         members, cands, 2 * 2048 * 4096,
         licence=_installed_fused_licence(), report=report,
         preserve_runtime_frontier=True)
-    assert len(options) == 262144
+    assert len(options) == 262145
     e4m3 = report["TESSERA_E4M3_K1[grid=E4M3,body=WINDOW,plane=channel]"]
     assert e4m3["member_menu"] == [512, 512]
     assert e4m3["fold_frontier"] == [512, 262144]
     assert e4m3["options"] == 262144
+    e2m1 = report["TESSERA_E2M1_K2[grid=E2M1x2,body=TCQ,plane=lut16]"]
+    assert e2m1["member_menu"] == [1, 1]
+    assert e2m1["fold_frontier"] == [1, 1]
+    assert e2m1["options"] == 1
     assert max(step for cell in report.values()
                if isinstance(cell, dict) and "fold_frontier" in cell
                for step in cell["fold_frontier"]) == 262144 < GUARD_PAIRS

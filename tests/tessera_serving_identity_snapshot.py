@@ -28,6 +28,7 @@ At the 2026-10-15 public metadata API backport, only the pin commit moves to
 exact d2e98b3c, then aaa417003f on 2026-10-16 for the additional producer APIs.
 Packaged v60 bytes and every parsed admission answer stay equal.
 PQ #3677 re-takes the snapshot in Flux at 8bf496ab/v68, with 18 cells and TP1 for BF16 and E2M1.
+PQ #3720 re-takes the snapshot at e89757b9/v69. Whole TP1 routed E2M1 R896 now admits.
 This is an admission snapshot, never compiled/model/performance qualification.
 
 Run as ``python -m tests.tessera_serving_identity_snapshot`` to print it.

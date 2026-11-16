@@ -62,7 +62,6 @@
           "rotation": [
             "none"
           ],
-          "start_state": true,
           "grid_arities": [
             2
           ],
