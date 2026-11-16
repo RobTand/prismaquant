@@ -27,6 +27,9 @@ IMG-G routed E4M3 R768 gains only upstream v66 evidence, not a PrismaQuant grant
 Its receipt is `experiments/results/glm53_r768_stub_base_tp2_eager_census.json` at the target commit.
 An explicit IMG-G target can reach R768 through the production assignment-scope check and export path.
 No current default reaches it. Publication still requires independent shipcard gates.
+v68 retains activation-quantizer evidence only on IMG-G. Explicit calls for removed images refuse.
+The existing single-image selector can select IMG-G when no image is supplied.
+The independent panel check still requires the actual image to match the stamp.
 
 ## Evidence
 

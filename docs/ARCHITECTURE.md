@@ -2452,6 +2452,7 @@ The five measured BF16 dense rungs are 832, 880, 960, 1024, and 1088.
 E4M3 keeps its TP2 ceiling. IMG-G routed R768 uses the v66 class-launch receipt.
 PQ2471 grants narrow to BF16 TP1 and E4M3 TP2. They add no new rung or image.
 Graph-equality records remain route-only evidence. Export and serving gates stay independent.
+The plan writer uses the v68 projection API and the producer's native class geometry check.
 The default pipeline uses compressed-tensors and cannot reach a Tessera cell.
 The optional Qwen3 Tessera lane uses the vanilla image, which has no routed R768 cell.
 Provenance: 2026-11-16, PQ #3677 OPTION A; Tessera #1707 and the packaged v68 contract.
