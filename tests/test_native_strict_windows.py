@@ -212,6 +212,38 @@ def _native_entries(tmp_path, monkeypatch):
     return record, refs, expected, resolver, opened
 
 
+@pytest.mark.parametrize('staged', [False, True])
+def test_completed_exact_reader_does_not_fsync(tmp_path, monkeypatch, staged):
+    _, record, expected, _, _, files = _checkpoint(tmp_path)
+    refs = [checkpoints.reference_from_record(row) for row in record['activation_entries']]
+    opened = []
+    if staged:
+        bind(monkeypatch, publish_inputs(tmp_path, files))
+        opened = [_forbid_source(monkeypatch, path) for path in files]
+    assert (active_policy() is not None) is staged
+    calls, windows = [], []
+    fsync, lease_open = os.fsync, LeaseWindow.open
+
+    def counted(descriptor):
+        calls.append(descriptor)
+        return fsync(descriptor)
+
+    def observe(window, key):
+        windows.append(id(window))
+        return lease_open(window, key)
+
+    monkeypatch.setattr(os, 'fsync', counted)
+    monkeypatch.setattr(LeaseWindow, 'open', observe)
+    tensors = checkpoints.read_exact_entry_tensors(record['activation_entries'],
+        expected_session=checkpoints.checkpoint_entry_session(record))
+    for ref, coordinates in zip(refs, sorted(expected)):
+        assert torch.equal(tensors[ref.name].view(torch.uint8), expected[coordinates].view(torch.uint8))
+    assert len(windows) == (len(refs) if staged else 0)
+    assert len(set(windows)) == int(staged)
+    assert all(not opens for opens in opened)
+    assert calls == []
+
+
 def test_grouped_and_single_exact_reads_keep_independent_known_tensor_bytes(tmp_path, monkeypatch):
     record, refs, expected, resolver, opened = _native_entries(tmp_path, monkeypatch)
     fds, windows = [], []

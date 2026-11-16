@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -43,12 +44,12 @@ def _identity(slot: str, *, session: str = SESSION) -> dict:
 
 
 def _write(directory: Path, name: str, tensor: torch.Tensor, *,
-           session: str = SESSION, release_file_pages: bool = False):
+           session: str = SESSION, release_file_pages: bool = False, durable: bool = True):
     nbytes = tensor.numel() * tensor.element_size()
     return write_exact_activation_cache_entry(
         directory, name, tensor, identity=_identity(name, session=session),
         max_tensor_bytes=nbytes, max_file_bytes=nbytes + 65536,
-        release_file_pages=release_file_pages)
+        release_file_pages=release_file_pages, durable=durable)
 
 
 def _prefetch(references, *, session: str = SESSION, release_file_pages: bool = False):
@@ -63,6 +64,52 @@ def _warm(directory: Path) -> None:
     ref = _write(directory, "warm", torch.zeros(4, 8))
     with _prefetch([ref]) as window:
         window.get(ref)
+
+
+@pytest.mark.parametrize('local', [False, True])
+def test_unproved_exact_reader_keeps_default_fsync(tmp_path, monkeypatch, local):
+    calls = []
+    fsync = os.fsync
+
+    def counted(descriptor):
+        calls.append('directory' if stat.S_ISDIR(os.fstat(descriptor).st_mode) else 'file')
+        return fsync(descriptor)
+
+    monkeypatch.setattr(os, 'fsync', counted)
+    expected = torch.arange(8, dtype=torch.float32).reshape(2, 4)
+    ref = _write(tmp_path, 'unproved', expected, durable=False)
+    assert calls == []
+    assert hashlib.sha256(Path(ref.path).read_bytes()).hexdigest() == ref.sha256
+    calls.clear()
+    with prefetch_exact_activation_cache_entries(
+            [ref], max_tensor_bytes=ref.tensor_bytes, expected_session=SESSION,
+            local_paths={ref: Path(ref.path)} if local else None) as window:
+        assert torch.equal(window.get(ref), expected)
+    assert calls == ['file']
+
+
+def test_exact_reference_follows_writer_fsyncs(tmp_path, monkeypatch):
+    events = []
+    fsync = os.fsync
+
+    def synced(descriptor):
+        result = fsync(descriptor)
+        events.append('directory' if stat.S_ISDIR(os.fstat(descriptor).st_mode) else 'file')
+        return result
+
+    def reference(*args):
+        assert events == ['file', 'directory']
+        value = ExactActivationReference(*args)
+        events.append(value)
+        return value
+
+    monkeypatch.setattr(os, 'fsync', synced)
+    with monkeypatch.context() as patch:
+        patch.setattr('prismaquant.perturbed_x_cache.ExactActivationReference', reference)
+        ref = _write(tmp_path, 'published', torch.arange(8, dtype=torch.float32))
+    assert events == ['file', 'directory', ref]
+    assert isinstance(ref, ExactActivationReference)
+    assert hashlib.sha256(Path(ref.path).read_bytes()).hexdigest() == ref.sha256
 
 
 def test_write_hashes_the_serialized_bytes_without_rereading_the_entry(tmp_path):

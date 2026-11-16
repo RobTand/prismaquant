@@ -2474,7 +2474,7 @@ def prefetch_capture(path, *, expected_identity=None, census, names, device,
             del payload, x, h, _entry_receipt
             payload = x = h = _entry_receipt = None
             if release_file_pages and execution is None:
-                release_activation_cache_file_pages(artifact, expected_stat=file_stat)
+                release_activation_cache_file_pages(artifact, expected_stat=file_stat, durable=False)
             if resource_check is not None:
                 resource_check(f'after_capture_prefetch:{name}')
         if str(device).startswith('cuda'):

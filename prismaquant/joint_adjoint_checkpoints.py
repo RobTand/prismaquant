@@ -271,7 +271,7 @@ def read_exact_entry_tensors(records, *, expected_session) -> dict:
     total = sum(int(record["tensor_bytes"]) for record in records)
     references = [reference_from_record(record) for record in records]
     with prefetch_exact_activation_cache_entries(
-        references, max_tensor_bytes=total, expected_session=expected_session) as window:
+        references, max_tensor_bytes=total, expected_session=expected_session, durable=False) as window:
         for reference in references:
             tensors[reference.name] = window.get(reference)
     return tensors
