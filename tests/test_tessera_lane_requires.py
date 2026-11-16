@@ -479,7 +479,7 @@ def test_routed_e4m3_launches_keep_their_per_rung_scope(payload):
                         {COMPACT_E4M3, FUSED_E4M3, FUSED_MMA_E4M3})
             assert set(launches) == expected, (cell_id, rung, launches)
     assert {claim.decoder for claim in table.lanes if claim.requires is not None} == {
-        "window_gemv", "native_routed_fused_window", "native_routed_fused_window_folded",
+        "window_gemv", "native_routed_fused_window", "native_routed_fused_window_bf16",
         "native_routed_fused_window_e4m3mma", "native_routed_fused_window_e2m1"}
 
 

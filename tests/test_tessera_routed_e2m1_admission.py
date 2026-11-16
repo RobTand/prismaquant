@@ -14,7 +14,7 @@ import pytest
 
 from prismaquant import tessera_menu as menu, tessera_render as render
 from prismaquant import tessera_runtime_contract as contract
-from prismaquant.lane_eligibility import ServingContext
+from prismaquant.lane_eligibility import ServingContext, cell_lane_admits
 from prismaquant.tessera_formats import get_tessera_family
 from prismaquant.tessera_serving_runtime_pin import require_pinned_tessera_runtime
 
@@ -66,7 +66,10 @@ def test_routed_e2m1_refuses_the_missing_start_state_on_the_pinned_contract(monk
     on_routed = menu.route_admission(RUNG, serving_context=routed_context)
     assert not on_routed.attested
     assert on_routed.route_status == menu.ROUTE_STATUS_UNATTESTED
-    assert "start_state" in on_routed.detail
+    admitted, reason = cell_lane_admits(routed[0], 896, _table.lanes)
+    assert not admitted and "start_state" in reason
+    if not dev_pin:
+        assert "start_state" in on_routed.detail
     assert on_routed.readable is True
     assert on_routed.act_bits == on_dense.act_bits == 4
 

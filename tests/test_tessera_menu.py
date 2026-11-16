@@ -928,7 +928,7 @@ assert contract is not None
 assert contract.commit == pin.commit == trc.TESSERA_DEV_PIN_COMMIT
 assert contract.sha256 == snapshot.sha256 == pin.contract_sha256 == trc.TESSERA_DEV_PIN_CONTRACT_SHA256
 published = {cell['id'] for cell in json.loads(snapshot.raw)['lane_eligibility']['cells']}
-assert len(published) == 22
+assert len(published) == 18
 assert {cell.id for cell in contract.cells} == published
 assert {cell.id for cell in snapshot.eligibility.cells} == published
 assert 'tessera.metadata' in sys.modules

@@ -101,7 +101,7 @@ def test_glm_image_carries_only_its_qualified_families():
             route = _resolve(facts, NEW_IMAGE)
             if cell["family"] == "TESSERA_E2M1_K2" and cell["structure"] == "routed_moe":
                 assert route.route_status == lane.ROUTE_STATUS_UNATTESTED
-                assert "start_state" in route.detail
+                assert all("start_state" in regime.detail for regime in route.regimes)
             else:
                 assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
                 assert cell["id"] in {r.cell_id for r in route.regimes}
