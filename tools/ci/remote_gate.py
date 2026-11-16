@@ -69,7 +69,8 @@ def shard_request(args, architecture, index, manifest_uri, manifest_sha256,
                 'require_execution': require_execution, 'selection': selection}
     request['steps'] = [{'run': 'python3 tools/ci/bazel_gate.py shard'}]
     request['env'] = {'PQ_BAZEL_SHARD': json.dumps(manifest, separators=(',', ':'))}
-    request['timeout'] = '55m'
+    # Each Run returns once queued; the controller awaits every shard's own completion.
+    request['timeout'], request['wait_until'] = '55m', 'QUEUED'
     return request
 
 
@@ -230,7 +231,9 @@ def run_gate(client, args, *, clock=time.monotonic):
         raise RemoteError('plan submission returned no acknowledgement ID')
     print('Remote Bazel plan: ' + invocation, flush=True)
     with _evidence_phase('plan-await', invocation, REFUSAL_DETAIL):
-        record = await_invocation(client, invocation, clock() + args.timeout * 60, clock=clock)
+        # The shards wait for this plan, so poll it closely; shard runs keep the 15 s default.
+        record = await_invocation(client, invocation, clock() + args.timeout * 60,
+                                  interval=2, clock=clock)
     with _evidence_phase('plan-validate', invocation):
         if not succeeded(record):
             raise RemoteError(f'remote run {invocation} failed')

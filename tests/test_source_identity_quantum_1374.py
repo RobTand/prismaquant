@@ -201,3 +201,10 @@ def test_an_explicit_binding_outranks_the_prepare_proof(tmp_path):
          "source_identity_cache": {"path": str(bound), "sha256": bridge._sha(bound)}},
         run_root)
     assert slot.read_bytes() == b"bound proof"
+
+
+def test_the_archive_only_identity_projections_stay_deleted():
+    for name in ("portable_streamed_model_content_identity",
+                 "compact_streamed_model_identity",
+                 "STREAMED_MODEL_PORTABLE_CONTENT_SCHEMA"):
+        assert not hasattr(cs_identity, name), name
