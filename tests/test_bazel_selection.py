@@ -622,7 +622,7 @@ def test_fallback_planner_maps_measured_file_times_into_six_balanced_shards(
 
 @pytest.mark.parametrize('planning_history', ['build'], indirect=True)
 @pytest.mark.parametrize('mode,fault', [
-    ('pr', None), ('pr', 'missing_base'), ('pr', 'hash_failure'),
+    ('pr', None), ('pr', 'missing_base'), ('pr', 'hash_failure'), ('pr', 'base_hash_failure'),
     ('pr', 'comparison_failure'), ('main', None),
 ])
 def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
@@ -645,7 +645,8 @@ def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
             hashed_sources.append((Path(kwargs['cwd']) / 'prismaquant/core.py').read_text())
             Path(command[-1]).write_text('{"hashes": {"//tests:test_consumer": "Rule#hash"}}')
             Path(command[command.index('--depEdgesFile') + 1]).write_text('{}')
-            return SimpleNamespace(returncode=1 if fault == 'hash_failure' else 0)
+            failed = fault == 'hash_failure' or (fault, hashed_sources[-1]) == ('base_hash_failure', 'base\n')
+            return SimpleNamespace(returncode=int(failed))
         assert command[3] == 'get-impacted-targets'
         assert command[command.index('--workspacePath') + 1] == str(root)
         assert command[command.index('--bazelPath') + 1] == 'bazel'
@@ -662,11 +663,16 @@ def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
     for row in found['architectures'].values():
         assert row['tests'] == expected
         assert sorted(label for shard in row['shards'] for label in shard) == row['population']
+    if mode == 'pr' and fault in (None, 'comparison_failure', 'base_hash_failure'):
+        # The base half runs in the head workspace, which then returns to head.
+        assert hashed_sources == ['head\n', 'base\n']
     if mode == 'pr' and not fault:
-        assert hashed_sources == ['base\n', 'head\n']
         assert found['selection'] == 'impacted' and found['all_scopes'] is False
     else:
         assert found['selection'] == 'fallback' and found['all_scopes'] is True
+    assert (root / 'prismaquant/core.py').read_text() == 'head\n'
+    assert subprocess.run(['git', 'status', '--porcelain'], cwd=root, check=True,
+                          text=True, capture_output=True).stdout == ''
     if mode == 'main':
         assert not hashed_sources
         assert not any(command[0] == 'java' for command in calls)

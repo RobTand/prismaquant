@@ -4,14 +4,12 @@ from __future__ import annotations
 from pathlib import Path
 import argparse
 import contextlib
-import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import traceback
 import urllib.request
@@ -301,9 +299,9 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
         raise SelectionError('invalid planner mode or source revisions')
     root, directory = Path(root), Path(directory)
 
-    def git(*arguments, binary=False):
+    def git(*arguments):
         result = runner(['git', *arguments], cwd=root, env=child_environment(),
-            text=not binary, capture_output=True, check=False)
+            text=True, capture_output=True, check=False)
         if result.returncode:
             raise SelectionError('Git revision evidence is unavailable')
         return result.stdout
@@ -337,10 +335,6 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
                 decision = gate_decision(changed, deleted, impacted - set(population['excluded']),
                                          set(population['used_sources']), set(population['tests']))
             else:
-                base_root = directory / 'base-source'
-                base_root.mkdir()
-                with tarfile.open(fileobj=io.BytesIO(git('archive', base, binary=True))) as archive:
-                    archive.extractall(base_root, filter='data')
                 if jar is None:
                     jar = bazel_diff_jar(directory)
                 if java is None:
@@ -350,14 +344,18 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
                     if info.returncode or not Path(info.stdout.strip()).is_absolute():
                         raise SelectionError('Bazel Java runtime is unavailable')
                     java = Path(info.stdout.strip()) / 'bin/java'
-                before = collect_revision(base_root, directory / 'base', 'amd64',
-                    java=java, jar=jar, bazel=bazel, runner=runner)
                 after = collect_revision(root, directory / 'head', 'amd64',
                     java=java, jar=jar, bazel=bazel, runner=runner, queried=head_query)
+                # The base half reuses the head workspace and its warm Bazel server.
+                try:
+                    git('read-tree', '--reset', '-u', base)
+                    before = collect_revision(root, directory / 'base', 'amd64',
+                        java=java, jar=jar, bazel=bazel, runner=runner)
+                finally:
+                    git('read-tree', '--reset', '-u', head)
                 decision = compare_graphs(before, after, changed, deleted, directory,
                                           java=java, jar=jar, root=root, bazel=bazel, runner=runner)
-        except (SelectionError, OSError, ValueError, TypeError,
-                tarfile.TarError, subprocess.SubprocessError):
+        except (SelectionError, OSError, ValueError, TypeError, subprocess.SubprocessError):
             decision = everything(['source or graph evidence unavailable'], population['tests'])
     populations = {'amd64': population}
     if mode == 'main':
