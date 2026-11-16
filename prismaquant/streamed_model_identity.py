@@ -18,10 +18,6 @@ STREAMED_MODEL_IDENTITY_CACHE_SCHEMA = (
     "prismaquant.streamed_model.identity_cache.v1"
 )
 
-STREAMED_MODEL_PORTABLE_CONTENT_SCHEMA = (
-    "prismaquant.streamed_model.portable_content.v1"
-)
-
 _STREAMED_MODEL_CONFIG_PROVENANCE_FIELDS = frozenset({
     "_name_or_path",
     "transformers_version",
@@ -1328,123 +1324,6 @@ def canonical_streamed_model_semantic_config(
     stripped = _strip(canonical)
     assert isinstance(stripped, dict)
     return stripped
-
-
-def portable_streamed_model_content_identity(
-    identity: object,
-    *,
-    where: str = "streamed model portable content identity",
-) -> dict[str, object]:
-    """Derive one path-neutral digest from a complete v1 local identity.
-
-    The serialized v1 ``content_sha256`` intentionally remains unchanged: it
-    binds absolute shard paths and the exact runtime config stored in an
-    identity cache.  This additive projection is derivable from old caches and
-    is the value suitable for comparing independently built caches on separate
-    hosts.  Local cache validation must still happen before callers use it.
-    """
-    from collections.abc import Mapping
-    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-
-    canonical = validate_streamed_model_identity(identity, where=where)
-    config = canonical_streamed_model_semantic_config(
-        canonical.get("config"), where=f"{where} config",
-    )
-
-    def _string_map(value: object, *, field: str) -> dict[str, str]:
-        if not isinstance(value, Mapping) or not value:
-            raise RuntimeError(f"{where} requires nonempty {field}")
-        result: dict[str, str] = {}
-        for raw_key, raw_value in value.items():
-            if (
-                not isinstance(raw_key, str)
-                or not raw_key
-                or not isinstance(raw_value, str)
-                or not raw_value
-            ):
-                raise RuntimeError(f"{where} {field} is malformed")
-            result[raw_key] = raw_value
-        return dict(sorted(result.items()))
-
-    weight_map = _string_map(canonical.get("weight_map"), field="weight_map")
-    checkpoint_weight_map = _string_map(
-        canonical.get("checkpoint_weight_map"),
-        field="checkpoint_weight_map",
-    )
-    raw_shards = canonical.get("shards")
-    assert isinstance(raw_shards, list)  # validated above
-    shards: list[dict[str, object]] = []
-    seen_names: set[str] = set()
-    for index, raw in enumerate(raw_shards):
-        if not isinstance(raw, Mapping):
-            raise RuntimeError(f"{where} shard {index} is malformed")
-        path = raw.get("path")
-        size = raw.get("size")
-        sha256 = str(raw.get("sha256", "")).lower()
-        if not isinstance(path, str) or not path:
-            raise RuntimeError(f"{where} shard {index} has no path")
-        name = Path(path).name
-        if (
-            not name
-            or name in seen_names
-            or type(size) is not int
-            or int(size) < 1
-            or re.fullmatch(r"[0-9a-f]{64}", sha256) is None
-        ):
-            raise RuntimeError(
-                f"{where} shard {index} has no unique basename/size/content"
-            )
-        seen_names.add(name)
-        shards.append({"name": name, "size": int(size), "sha256": sha256})
-    shards.sort(key=lambda row: str(row["name"]))
-
-    body = {
-        "schema": STREAMED_MODEL_PORTABLE_CONTENT_SCHEMA,
-        "source_identity_schema": STREAMED_MODEL_IDENTITY_SCHEMA,
-        "config": config,
-        "weight_map": weight_map,
-        "checkpoint_weight_map": checkpoint_weight_map,
-        "shards": shards,
-    }
-    return {
-        "schema": STREAMED_MODEL_PORTABLE_CONTENT_SCHEMA,
-        "portable_content_sha256": canonical_json_sha256(
-            body, where=where,
-        ),
-        "checkpoint_shards": len(shards),
-        "checkpoint_tensors": len(checkpoint_weight_map),
-    }
-
-
-def compact_streamed_model_identity(
-    identity: object,
-    *,
-    where: str = "streamed model identity",
-) -> dict[str, object]:
-    """Return the compact, value-bearing identity stored in an artifact.
-
-    The full identity can be several MiB because it carries the complete
-    tensor-to-shard map and one SHA-256 per source shard.  ``content_sha256``
-    already binds those fields; the compact form retains coverage counts so a
-    partial checkpoint identity cannot be mistaken for the full source.
-    """
-
-    canonical = validate_streamed_model_identity(identity, where=where)
-    shards = canonical.get("shards")
-    checkpoint_weight_map = canonical.get("checkpoint_weight_map")
-    if not isinstance(shards, list) or not isinstance(
-        checkpoint_weight_map, dict
-    ):
-        raise RuntimeError(
-            f"{where} does not attest a complete indexed checkpoint"
-        )
-    return {
-        "schema": canonical.get("schema"),
-        "content_sha256": canonical.get("content_sha256"),
-        "resolved_commit": canonical.get("resolved_commit"),
-        "checkpoint_shards": len(shards),
-        "checkpoint_tensors": len(checkpoint_weight_map),
-    }
 
 
 def live_streaming_runner_config(source_model: str | Path) -> dict[str, object]:
