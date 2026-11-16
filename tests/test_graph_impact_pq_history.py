@@ -1,6 +1,7 @@
 """PQ edge attribution uses real git history, never persisted edge identities."""
 import json
 from pathlib import Path
+import pickle
 import subprocess
 
 import pytest
@@ -264,3 +265,11 @@ def test_duplication_shrink_and_return_without_fixture_edit(repo, capsys, remain
     for kind in ('near_duplicates', 'same_name_helpers', 'primitive_digest_sites'):
         assert f'new {kind} against the base commit' in output
     assert (repo / fixture).read_text() == ceiling
+
+
+def test_graph_snapshots_built_for_another_base_are_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(pq, 'base_revision', lambda *args, **kwargs: 'b' * 40)
+    for name in ('base', 'head'):
+        (tmp_path / f'{name}.pickle').write_bytes(pickle.dumps(('a' * 40, {})))
+    with pytest.raises(SystemExit, match='graph snapshots are for base'):
+        pq.main(['--root', str(tmp_path), '--snapshots', str(tmp_path)])
