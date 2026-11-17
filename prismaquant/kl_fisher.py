@@ -15,13 +15,10 @@ from __future__ import annotations
 
 import math
 import hashlib
-from typing import Literal
 
 import torch
 
 
-TokenScope = Literal["last", "all", "causal"]
-ProbeDistribution = Literal["gaussian", "rademacher"]
 ROW_PROBE_LAYOUT = "prismaquant.kl_fisher.global_row.v1"
 
 
