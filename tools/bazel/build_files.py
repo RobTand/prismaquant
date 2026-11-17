@@ -1140,8 +1140,50 @@ def strings(values, indent='        '):
     return '[\n' + ''.join(f'{indent}{json.dumps(value)},\n' for value in values) + indent[:-4] + ']'
 
 
-def generate(root=ROOT, files=None):
-    """{package directory: BUILD.bazel text} for every generated package."""
+CYCLE_FILE = 'tools/ci/cycle_members.json'
+# Step B of #3996 sets True: then --check fails on a stale table (tools/ci/bazel_selection.py MODULE_LEVEL).
+CYCLE_TABLE_ENFORCED = False
+
+
+def whole_target(evidence, path):
+    """Why a change to this import-cycle member selects its whole target, or None (docs/bazel.md, "Selection")."""
+    if path.endswith('__init__.py'):
+        return 'package __init__'
+    if evidence.uncertain.get(path):
+        return 'uncertain: ' + '; '.join(sorted(evidence.uncertain[path]))
+    named = lambda node: 'register' in getattr(getattr(node, 'func', node), 'attr', getattr(getattr(node, 'func', node), 'id', ''))
+    pending, reasons = list((evidence.trees[path] or ast.Module([])).body), set()
+    while pending:  # the code that runs at import: all but function bodies and the __main__ block
+        node = pending.pop()
+        reasons |= {'a register call at import'} if named(node) and isinstance(node, ast.Call) or any(
+            map(named, getattr(node, 'decorator_list', []))) else set()
+        reasons |= {'a call statement at import'} if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) else set()
+        pending += (node.decorator_list + node.args.defaults if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    else [] if isinstance(node, ast.Lambda) or isinstance(node, ast.If) and '__main__' in ast.unparse(node.test)
+                    else ast.iter_child_nodes(node))
+    return '; '.join(sorted(reasons)) or None
+
+
+def cycle_record(evidence, graph, owner, libraries, importers):
+    """Each product import-cycle member: its target, its direct importers and readers (a member of the same
+    target by path, any other module by its Bazel library, a test that names, launches or reads it by its
+    py_test) and, when a change to it selects the whole target, the reason. `importers` holds the tests."""
+    for path in evidence.modules:
+        for target in graph.edges[path] | graph.data[path]:
+            importers[target].add(path)
+    members = {}
+    for path in sorted(path for component in libraries if len(component) > 1 for path in component):
+        home = owner[path]
+        if home[0] != 'tests':
+            members[path] = {'importers': sorted(other if owner.get(other, home) == home else
+                                                 f'//{owner[other][0]}:{owner[other][1]}'
+                                                 for other in importers[path] - {path}),
+                             'target': f'//{home[0]}:{home[1]}', 'whole': whole_target(evidence, path)}
+    return json.dumps({'members': members, 'schema': 'prismaquant.cycle_members.v1'}, indent=1) + '\n'
+
+
+def generate(root=ROOT, files=None, extra=None):
+    """{package directory: BUILD.bazel text} for every generated package; with `extra`, also the cycle table."""
     root = Path(root)
     files = repository_files(root) if files is None else files
     graph = Graph(Evidence(root, files))
@@ -1187,6 +1229,7 @@ def generate(root=ROOT, files=None):
         data = trees.labels({file for path in component for file in graph.data[path]}, home)
         packages[home].append((name, 'pq_py_library', {
             'srcs': [relative(path, home) for path in component], 'data': data, 'deps': sorted(deps)}))
+    readers = defaultdict(set)  # module -> py_tests that name, launch or read it (for the cycle table)
     for path in evidence.modules:
         if not is_test(path):
             continue
@@ -1194,7 +1237,10 @@ def generate(root=ROOT, files=None):
         inputs = graph.test_inputs(path)
         # Launched programs are libraries too: a test target is a leaf, so their
         # imports, data and pip packages reach this test and nothing else.
-        listed = extra_modules.get(f'//{home}:{relative(path, home).removesuffix(".py")}', set())
+        test = f'//{home}:{relative(path, home).removesuffix(".py")}'
+        listed = extra_modules.get(test, set())
+        for module in inputs['deps'] | inputs['launched'] | inputs['own_data'] | listed:
+            readers[module].add(test)
         deps = {label(*owner[module], home)
                 for module in inputs['deps'] | set(inputs['conftests']) | inputs['launched'] | listed
                 if module in owner}
@@ -1203,6 +1249,8 @@ def generate(root=ROOT, files=None):
             'path': path, 'library': label(*owner[path], home), 'deps': sorted(deps),
             'data': trees.labels(inputs['own_data'] - inputs['modules'], home),
             **test_attributes(path, durations)}))
+    if extra is not None:
+        extra[CYCLE_FILE] = cycle_record(evidence, graph, owner, libraries, readers)
     for package, directories in trees.used.items():
         if package == HANDWRITTEN[0].rstrip('/'):
             continue  # Its BUILD file, written by hand, declares :files.
@@ -1256,13 +1304,14 @@ def main(argv=None):
             record = graph_record(graph, [row['path'] for row in plan['selected']])
             args.graph_json.write_text(json.dumps(record, indent=1) + '\n')
         return 0
+    extra = {}
     try:
-        generated = generate(args.root)
+        generated = generate(args.root, extra=extra)
     except GenerationError as error:
         sys.exit(f'Cannot generate BUILD files: {error}')
     stale = []
-    for package, text in sorted(generated.items()):
-        path = args.root / package / 'BUILD.bazel'
+    for package, text in sorted(generated.items()) + sorted(extra.items()) * (CYCLE_TABLE_ENFORCED or not args.check):
+        path = args.root / package / ('' if package in extra else 'BUILD.bazel')
         if path.exists() and path.read_text() == text:
             continue
         if args.check:
@@ -1270,7 +1319,7 @@ def main(argv=None):
         else:
             path.write_text(text)
     if stale:
-        sys.exit('Generated BUILD files are stale: ' + ', '.join(stale) + f'\nFix: {FIX}')
+        sys.exit('Generated files are stale: ' + ', '.join(stale) + f'\nFix: {FIX}')
     return 0
 
 

@@ -214,7 +214,8 @@ def run_manifest(client, args, manifest_uri, raw_manifest, *, clock=time.monoton
     verdicts = {result['verdict'] for result in results.values()}
     return {'schema': SCHEMA, 'mode': args.mode, 'base': args.base, 'head': args.head,
             'selection': document['selection'], 'scopes': document['scopes'],
-            'all_scopes': document['all_scopes'], 'reason': document['reason'],
+            'all_scopes': document['all_scopes'], 'reason': document['reason'], 'rules': document.get('rules', {}),
+            'tests': {architecture: len(row['tests']) for architecture, row in document['architectures'].items()},
             'manifest_sha256': manifest_sha256, 'architectures': results,
             'verdict': 'fail' if 'fail' in verdicts else 'pass' if 'pass' in verdicts else 'skipped',
             'budget_warnings': [warning for result in results.values()
@@ -380,6 +381,9 @@ def main(argv=None):
         if summary := os.environ.get('GITHUB_STEP_SUMMARY'):
             with Path(summary).open('a') as stream:
                 stream.write('Bazel verdict: ' + result['verdict'] + '\n\n')
+                stream.write(f"Selection: {result['selection']}, " + ', '.join(
+                    f'{count} tests on {architecture}' for architecture, count in result['tests'].items()) + '\n\n')
+                stream.writelines(f'- `{path}`: {rule}\n' for path, rule in result['rules'].items())
                 stream.write('Budget warnings: ' + str(len(result['budget_warnings'])) + '\n')
         if result['verdict'] == 'fail':
             for architecture, record in result['architectures'].items():
