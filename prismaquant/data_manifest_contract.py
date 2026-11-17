@@ -88,20 +88,6 @@ def check_manifest(manifest: dict, *, where: str = "data manifest") -> dict:
     return manifest
 
 
-def check_manifest_bytes(blob: bytes, *, where: str = "data manifest") -> bytes:
-    """Refuse an oversized scientific manifest before publication.
-
-    ``load_data_manifest`` stats the file before it parses it, so an oversized
-    manifest fails at submission with nothing validated.  Checking the bytes
-    the producer is about to write keeps that refusal here.
-    """
-    if len(blob) > MAX_MANIFEST_BYTES:
-        raise ReadsetRefused(
-            f"{where}: manifest file is {len(blob)} bytes, over the "
-            f"{MAX_MANIFEST_BYTES}-byte limit")
-    return blob
-
-
 def check_manifest_v2(manifest: dict, *, where: str = "data manifest V2") -> dict:
     """Validate V2 unique entries and ordered read coverage."""
     if set(manifest) != MANIFEST_KEYS | {"read_plan"} or manifest.get("schema") != SCHEMA_V2:
