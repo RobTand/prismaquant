@@ -32,7 +32,6 @@ from prismaquant.anchored_shape import (
     AnchoredShapeError,
     LogShapeObservation,
     fit_centered_log_shape,
-    rank_and_solve as _shape_rank_and_solve,
 )
 from prismaquant.cost_stage_checkpoint import (
     atomic_write_bytes,
@@ -949,17 +948,6 @@ def anchors_from_results(
             receipt,
         )
     return anchors
-
-
-def _rank_and_solve(
-    x_rows: Sequence[Sequence[float]],
-    y_rows: Sequence[float],
-) -> tuple[int, tuple[float, ...]]:
-    """Compatibility wrapper around the shared, format-neutral solver."""
-    try:
-        return _shape_rank_and_solve(x_rows, y_rows)
-    except AnchoredShapeError as exc:
-        raise AnchoredCostError(str(exc)) from exc
 
 
 def _fit_currency(

@@ -26,3 +26,24 @@ def test_fence_benchmark_hashes_tiny_synthetic_wires(tmp_path, monkeypatch, caps
     assert all(run["distinct_hash_threads"] >= 1 for run in report["runs"])
     assert all(run["peak_concurrent_hashes"] >= 1 for run in report["runs"])
     assert joint_catalog_extension.FENCE_REHASHED == {"bench wire fence": 2}
+
+
+def test_cache_drop_closes_descriptor_when_advice_fails(tmp_path, monkeypatch):
+    import errno
+    from unittest import TestCase
+    import os
+    from tools import bench_fence_rehash as bench
+
+    path = tmp_path / "wire"
+    path.write_bytes(b"wire")
+    descriptors = []
+    def fail(fd, offset, length, advice):
+        descriptors.append(fd)
+        raise OSError(errno.EIO, "advice failed")
+    monkeypatch.setattr(bench.os, "posix_fadvise", fail)
+    with TestCase().assertRaisesRegex(OSError, "advice failed"):
+        bench._fadvise_drop(path)
+    assert len(descriptors) == 1
+    with TestCase().assertRaises(OSError) as closed:
+        os.fstat(descriptors[0])
+    assert closed.exception.errno == errno.EBADF

@@ -479,3 +479,13 @@ def test_glm5_next_fp8_source_overlay_skips_packed_expert_leaves():
     leaf = "model.layers.10.mlp.experts.7.up_proj"
     assert _re.search(r"\.experts\.[0-9]+\.", leaf)
     assert leaf.startswith(packed_prefixes)
+
+
+def test_stock_classifier_refuses_drift_from_serving_profile(monkeypatch):
+    import re
+    from prismaquant import glm53_stock_reprice as reprice
+
+    assert reprice._assert_rule_matches_profile() is None
+    monkeypatch.setattr(reprice, "QUANTIZABLE_RE", re.compile("deliberately-different-rule"))
+    with pytest.raises(Glm53StockError, match="copy has drifted from the gate"):
+        reprice._assert_rule_matches_profile()

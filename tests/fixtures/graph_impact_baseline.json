@@ -2,8 +2,8 @@
   "schema": "graph-impact.v1",
   "figures": {
     "u_pct": 51.145946653361364,
-    "loc_u_pct": 63.54443613300139,
-    "scc_max": 141,
+    "loc_u_pct": 63.54429919844529,
+    "scc_max": 139,
     "median_selected_pct": 13.2,
     "p90_selected_pct": 86.0,
     "modules_over_half": 253,

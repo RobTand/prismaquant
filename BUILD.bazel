@@ -1018,6 +1018,7 @@ pq_py_library(
         "//tests:test_streamed_cost_checkpoints_lib",
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/aura_provenance",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/joint_adjoint_slices",
         ":prismaquant/joint_cost_quantum",
@@ -2452,6 +2453,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/aura_provenance",
         ":prismaquant/digests",
         ":prismaquant/export_output_safety",
         ":prismaquant/gguf_formats",
@@ -3891,7 +3893,6 @@ pq_py_library(
         "prismaquant/allocator_solver.py",
         "prismaquant/aura_checkpoint_journal.py",
         "prismaquant/aura_cost.py",
-        "prismaquant/aura_provenance.py",
         "prismaquant/autoscale.py",
         "prismaquant/build_rtn_cache.py",
         "prismaquant/capture_layer_chain.py",
@@ -3917,7 +3918,6 @@ pq_py_library(
         "prismaquant/joint_aura_rows.py",
         "prismaquant/joint_aura_run_transition.py",
         "prismaquant/joint_aura_source_transition.py",
-        "prismaquant/joint_aura_transition_base.py",
         "prismaquant/joint_aura_transitions.py",
         "prismaquant/joint_catalog_extension.py",
         "prismaquant/joint_forward_campaign.py",
@@ -4037,9 +4037,7 @@ pq_py_library(
         ":files/prismaquant/tessera_runtime",
         "README.md",
         "prismaquant/README.md",
-        "prismaquant/aura_checkpoint_journal.py",
         "prismaquant/aura_cost.py",
-        "prismaquant/aura_provenance.py",
         "prismaquant/container_runtime_identity.py",
         "prismaquant/joint_adjoint_checkpoints.py",
         "prismaquant/joint_aura_retained_budget_transition.py",
@@ -4047,7 +4045,6 @@ pq_py_library(
         "prismaquant/joint_aura_source_transition.py",
         "prismaquant/joint_aura_transitions.py",
         "prismaquant/joint_layer_quanta.py",
-        "prismaquant/joint_price_step.py",
         "prismaquant/lane_spec.py",
         "prismaquant/model_profiles/structure.py",
         "prismaquant/model_walk.py",
@@ -4077,6 +4074,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_index",
         ":prismaquant/activation_sampling",
+        ":prismaquant/aura_provenance",
         ":prismaquant/calibration_data",
         ":prismaquant/cluster_campaign",
         ":prismaquant/compressed_route_sweep_gate",
@@ -4101,6 +4099,7 @@ pq_py_library(
         ":prismaquant/io_engine",
         ":prismaquant/io_spans",
         ":prismaquant/joint_adjoint_slices",
+        ":prismaquant/joint_aura_transition_base",
         ":prismaquant/joint_campaign_ledger",
         ":prismaquant/joint_cost_read_schedule",
         ":prismaquant/joint_eval_observation",
@@ -5956,6 +5955,7 @@ pq_py_library(
         ":experiments/pq237_streamed_protocol",
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/aura_provenance",
         ":prismaquant/kl_fisher",
         ":prismaquant/model_runtime",
         ":prismaquant/tessera_hessian",
@@ -7126,6 +7126,7 @@ pq_py_library(
         ":experiments/alloc_lead_asd/run_pair",
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/aura_provenance",
         ":prismaquant/glm_source_derivative",
         ":prismaquant/joint_cost_stage_a",
         ":prismaquant/joint_run_progress",
@@ -8072,6 +8073,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/aura_provenance",
         ":prismaquant/calibration_data",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/dev_mode",
@@ -10067,6 +10069,18 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "prismaquant/joint_aura_transition_base",
+    srcs = [
+        "prismaquant/joint_aura_transition_base.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/aura_provenance",
+        ":prismaquant/digests",
+    ],
+)
+
+pq_py_library(
     name = "prismaquant/activation_sampling",
     srcs = [
         "prismaquant/activation_sampling.py",
@@ -10530,6 +10544,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/aura_provenance",
         ":prismaquant/calibration_data",
         ":prismaquant/digests",
         ":prismaquant/io_spans",
@@ -11444,6 +11459,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/assignment_space",
+        ":prismaquant/aura_provenance",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/digests",
         ":prismaquant/fixed_head",
@@ -12153,6 +12169,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/aura_provenance",
         ":prismaquant/dev_mode",
         ":prismaquant/digests",
         ":prismaquant/joint_adjoint_slices",
@@ -12236,6 +12253,25 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":tools/__init__",
         ":tools/measure_served_gold",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/aura_provenance",
+    srcs = [
+        "prismaquant/aura_provenance.py",
+    ],
+    data = [
+        "prismaquant/aura_checkpoint_journal.py",
+        "prismaquant/aura_cost.py",
+        "prismaquant/aura_provenance.py",
+        "prismaquant/joint_price_step.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/dev_mode",
+        ":prismaquant/digests",
+        ":prismaquant/file_identity",
     ],
 )
 
@@ -13197,6 +13233,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/aura_provenance",
         ":prismaquant/calibration_data",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/dev_mode",
