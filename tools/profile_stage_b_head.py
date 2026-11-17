@@ -97,10 +97,6 @@ def install_stop_signal(report):
     return handler
 
 
-class GuardStop(Exception):
-    """The READ round trip rose past the limit; the run is stopped."""
-
-
 def start_read_guard(limit_ms: float, *, interval_s: float = 5.0, min_ops: int = 20,
                      sample=read_rtt, on_stop=None):
     """Watch the NFS READ round trip on the shared sampler thread.
