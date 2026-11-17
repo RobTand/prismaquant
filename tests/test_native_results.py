@@ -121,3 +121,17 @@ def test_publish_result_refuses_an_existing_publication_without_replacing_it(tmp
     assert path.read_bytes() == before
     assert hashlib.sha256(before).hexdigest() == first['sha256']
     assert capsys.readouterr().out == ''
+
+
+def test_checkpoint_reader_requires_explicit_nonzero_payload_exit(monkeypatch):
+    calls = []
+    monkeypatch.setattr(nr, "_read_selected_result",
+                        lambda selection, **kwargs: calls.append((selection, kwargs)))
+    for value in (None, False, True, -1, 0, 125, 1.0, "1"):
+        with pytest.raises(nr.ResultUnavailable, match="checkpoint requires an explicit nonzero payload exit in 1..124"):
+            nr.read_selected_checkpoint({}, payload_exit=value)
+    assert calls == []
+    for value in (1, 124):
+        nr.read_selected_checkpoint({}, payload_exit=value, artifact_limits={"weights": 7})
+    assert calls == [({}, {"checkpoint_exit": value, "artifact_limits": {"weights": 7}})
+                     for value in (1, 124)]
