@@ -955,8 +955,9 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
         if state != "research_metadata_handoff":
             raise TesseraExportLaneError("selected cache requires the completed joint allocation handoff")
     else:
-        from .tessera_sampled_stack_proposal import require_research_proposal_assignment
-        require_research_proposal_assignment(research_proposal, assignment)
+        from .tessera_research_proposal import require_research_proposal_assignment
+        from .layer_config import canonicalize_assignment
+        require_research_proposal_assignment(research_proposal, assignment, canonicalize_assignment)
         if (state != 'research_sampled_joint_panel' or
                 research_proposal.get('pilot') != provenance.get('joint_eval') or
                 research_proposal.get('original_joint_plan_sha256') !=

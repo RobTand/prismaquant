@@ -26,14 +26,10 @@ from .cluster_campaign import _atomic_write_new_bytes
 from .joint_aura import assignment_probe_summary
 from .tessera_formats import (family_q256_bounds, get_tessera_family,
                               parse_tessera_format_name, realisable_rungs)
-from .schemas import Contract
-from .digests import DIRECT_ASCII_LAX
+from .tessera_research_proposal import (
+    SCHEMA, _require, require_research_proposal_assignment, selected_assignment_sha256)
 
-SCHEMA = 'prismaquant.tessera_sampled_stack_proposal.v1'
 PRIMARY_FAMILIES = frozenset({'TESSERA_E4M3_K1', 'TESSERA_BF16_K1'})
-
-
-_require = Contract(ValueError).require
 
 
 def _domain(families, costs, stats):
@@ -340,14 +336,6 @@ def _read_bound(bound, label):
     return raw
 
 
-def selected_assignment_sha256(assignment):
-    """Bind the expanded member assignment, not its optimizer super-item IDs."""
-    _require(isinstance(assignment, dict) and assignment and
-             all(isinstance(k, str) and isinstance(v, str) for k, v in assignment.items()),
-             'selected research assignment must be complete qname/format pairs')
-    return DIRECT_ASCII_LAX.sha256(assignment)
-
-
 def bind_pilot_from_inputs(*, joint_binding, plan_binding):
     """Authenticate real completed pilot, original 512 draw, preparation and wires."""
     from .production_weight_cache import ProductionWeightCache
@@ -426,7 +414,7 @@ def validation_layer_config(bound_payload, proposal, *, proposal_sha256,
     This does not make the research selection shippable: its marker demands an
     explicit proposal on the validation-export preflight and selected cache.
     """
-    from .layer_config import LAYER_CONFIG_META_KEY
+    from .layer_config import LAYER_CONFIG_META_KEY, canonicalize_assignment
     from .tessera_expert_projection import allocation_expert_projection_block
     from .joint_catalog_extension import hessian_references
     from .tessera_menu import (assert_uniform_hessian_identity, priced_static_scales,
@@ -436,7 +424,7 @@ def validation_layer_config(bound_payload, proposal, *, proposal_sha256,
     _require(len(proposal_sha256) == 64 and all(c in '0123456789abcdef' for c in proposal_sha256),
              'research proposal SHA-256 required')
     assignment = proposal['expanded_assignment']
-    require_research_proposal_assignment(proposal, assignment)
+    require_research_proposal_assignment(proposal, assignment, canonicalize_assignment)
     _require(isinstance(serving_target, ServingTarget),
              'validation layer config needs a separate explicit ServingTarget')
     contexts = context_by_unit_from_stats(serving_target, bound_payload['stats'], profile)
@@ -461,36 +449,6 @@ def validation_layer_config(bound_payload, proposal, *, proposal_sha256,
             'selected_assignment_sha256': proposal['selected_assignment_sha256']},
     }
     return config
-
-
-def require_research_proposal_assignment(proposal, assignment, *, pilot_joint_binding=None):
-    """Bind a candidate export/selected-cache request to the reviewed proposal.
-
-    Existing current-byte, Hessian, scale, encoder, route and runtime gates run
-    after this admission; this verifier never reports their eligibility.
-    """
-    from .layer_config import canonicalize_assignment
-    _require(isinstance(proposal, dict) and proposal.get('schema') == SCHEMA
-             and proposal.get('status') == 'research_proposal'
-             and proposal.get('production_export_authority') is False
-             and proposal.get('validation_export_eligible') is None
-             and proposal.get('research_validation_permitted') is True,
-             'research export needs a pending-integrity sampled proposal')
-    _require(proposal.get('pilot', {}).get('status') == 'diagnostic_pilot',
-             'research proposal lost diagnostic pilot identity')
-    expected = proposal.get('expanded_assignment')
-    actual = canonicalize_assignment(assignment)
-    _require(actual == expected and selected_assignment_sha256(actual) ==
-             proposal.get('selected_assignment_sha256'),
-             'research export assignment differs from expanded sampled proposal')
-    if pilot_joint_binding is not None:
-        _require(proposal.get('input_bindings', {}).get('pilot_joint_cost') == pilot_joint_binding,
-                 'research selected cache pilot cost binding differs')
-    return {'schema': 'prismaquant.tessera_sampled_validation_export_binding.v1',
-            'proposal_schema': SCHEMA,
-            'selected_assignment_sha256': proposal['selected_assignment_sha256'],
-            'validation_export_eligible': None,
-            'production_export_authority': False}
 
 
 def main(argv=None):

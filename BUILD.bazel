@@ -8795,7 +8795,6 @@ pq_py_library(
         "prismaquant/tessera_footprint.py",
         "prismaquant/tessera_formats.py",
         "prismaquant/tessera_full_domain_acquisition.py",
-        "prismaquant/tessera_joint_allocation.py",
         "prismaquant/tessera_joint_aura.py",
         "prismaquant/tessera_joint_eval_panel.py",
         "prismaquant/tessera_lane.py",
@@ -8808,7 +8807,6 @@ pq_py_library(
         "prismaquant/tessera_route_trace_gate.py",
         "prismaquant/tessera_row_stream.py",
         "prismaquant/tessera_runtime_contract.py",
-        "prismaquant/tessera_sampled_stack_proposal.py",
         "prismaquant/tessera_serving_runtime_pin.py",
         "prismaquant/tessera_serving_scope.py",
         "prismaquant/tessera_shipcard.py",
@@ -8824,7 +8822,6 @@ pq_py_library(
         ":files/prismaquant/serving_profile_specs",
         ":files/prismaquant/tessera_runtime",
         "README.md",
-        "archive/proposal_validation_2026-10-14/prismaquant/proposal_validation.py",
         "prismaquant/README.md",
         "prismaquant/aura_checkpoint_journal.py",
         "prismaquant/aura_cost.py",
@@ -8949,6 +8946,7 @@ pq_py_library(
         ":prismaquant/tessera_producer_interface",
         ":prismaquant/tessera_publication",
         ":prismaquant/tessera_reader",
+        ":prismaquant/tessera_research_proposal",
         ":prismaquant/tessera_reuse_authority",
         ":prismaquant/tied_embeddings",
         ":prismaquant/vendored/__init___cycle",
@@ -11131,6 +11129,24 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "prismaquant/tessera_joint_allocation",
+    srcs = [
+        "prismaquant/tessera_joint_allocation.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/cluster_campaign",
+        ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/dev_mode",
+        ":prismaquant/digests",
+        ":prismaquant/joint_campaign_ledger",
+        ":prismaquant/schemas",
+        ":prismaquant/stage_inputs",
+    ],
+)
+
+pq_py_library(
     name = "prismaquant/tessera_materialization",
     srcs = [
         "prismaquant/tessera_materialization.py",
@@ -11186,12 +11202,43 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "prismaquant/tessera_research_proposal",
+    srcs = [
+        "prismaquant/tessera_research_proposal.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
+        ":prismaquant/schemas",
+    ],
+)
+
+pq_py_library(
     name = "prismaquant/tessera_reuse_authority",
     srcs = [
         "prismaquant/tessera_reuse_authority.py",
     ],
     data = [
         "prismaquant/tessera_reuse_authority.py",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/tessera_sampled_stack_proposal",
+    srcs = [
+        "prismaquant/tessera_sampled_stack_proposal.py",
+    ],
+    data = [
+        "archive/proposal_validation_2026-10-14/prismaquant/proposal_validation.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/calibration_data",
+        ":prismaquant/cluster_campaign",
+        ":prismaquant/layer_config",
+        ":prismaquant/tessera_joint_allocation",
+        ":prismaquant/tessera_research_proposal",
     ],
 )
 
