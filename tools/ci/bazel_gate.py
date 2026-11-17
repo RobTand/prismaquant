@@ -238,6 +238,8 @@ def bep_run(text, *, returncode):
 def architecture_result(population, run, *, budget_warnings=(), require_execution=False):
     failed = sorted(label for label in population if run['statuses'].get(label) != 'PASSED')
     ran = [label for label in failed if run['statuses'].get(label, 'NO_STATUS') != 'NO_STATUS']
+    if failed and not ran and run['returncode'] not in (0, 1, 3):  # 1: build failed, 3: tests failed
+        raise GateError(f"Bazel exited {run['returncode']} before {len(failed)} selected tests had a result")
     executed = sum(run['executed_by_label'].get(label, 0) for label in population)
     missing_execution = require_execution and executed == 0
     if failed or run['returncode'] or missing_execution:
