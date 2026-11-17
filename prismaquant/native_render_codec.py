@@ -139,13 +139,6 @@ def resolve_nvfp4_scale_rule(raw: str) -> str:
         ) from exc
 
 
-def _decode_nvfp4_indices(
-    fp4_idx: torch.Tensor,
-    scale: torch.Tensor,
-) -> torch.Tensor:
-    return _decode_nvfp4_indices_with_eff_scale(fp4_idx, scale.unsqueeze(-1))
-
-
 def _decode_nvfp4_indices_with_eff_scale(
     fp4_idx: torch.Tensor,
     eff_scale: torch.Tensor,
@@ -1519,92 +1512,6 @@ def rtn_dequant_nvfp4(
         levers=levers,
     )
     return codec.dequant.reshape(rows, cols)
-
-
-def _explicit_nvfp4_recipe(
-    scale_rule: str,
-    snapped_scale_scoring: bool,
-    joint_scale_levels: tuple[float, ...],
-) -> NativeRenderLevers:
-    """The complete NVFP4 recipe named by explicit scale-plane arguments."""
-    return NativeRenderLevers(
-        nvfp4_scale_rule=resolve_nvfp4_scale_rule(scale_rule),
-        nvfp4_snapped_scale_scoring=bool(snapped_scale_scoring),
-        nvfp4_joint_scale_levels=tuple(joint_scale_levels),
-    )
-
-
-def render_nvfp4_dequant(
-    weight: torch.Tensor,
-    *,
-    group_size: int = 16,
-    global_real_override: torch.Tensor | None = None,
-    scale_rule: str = NVFP4_SCALE_RULE_STATIC_6,
-    snapped_scale_scoring: bool = False,
-    joint_scale_levels: tuple[float, ...] = (6.0, 4.0),
-) -> torch.Tensor:
-    """Render a 2-D weight through the exact production NVFP4 codec.
-
-    """
-    recipe = _explicit_nvfp4_recipe(
-        scale_rule, snapped_scale_scoring, joint_scale_levels)
-    if weight.ndim != 2:
-        raise ValueError(
-            "production NVFP4 dequant render requires a rank-2 weight; "
-            f"got shape={tuple(weight.shape)}"
-        )
-    rows, cols = weight.shape
-    if cols % int(group_size) != 0:
-        raise ValueError(f"NVFP4 group_size={group_size} ∤ {cols}")
-    grouped = weight.float().reshape(
-        rows, cols // int(group_size), int(group_size)
-    )
-    scale_real, global_real = select_nvfp4_pack_scales_and_global(
-        grouped,
-        global_real_override=global_real_override,
-        levers=recipe,
-    )
-    codec = nvfp4_quantize_grouped_codec(
-        grouped,
-        global_real=global_real,
-        scale_real=scale_real,
-        levers=recipe,
-    )
-    return codec.dequant.reshape(rows, cols)
-
-
-def nvfp4_global_real(
-    weight: torch.Tensor,
-    *,
-    group_size: int = 16,
-    scale_rule: str = NVFP4_SCALE_RULE_STATIC_6,
-    snapped_scale_scoring: bool = False,
-    joint_scale_levels: tuple[float, ...] = (6.0, 4.0),
-) -> torch.Tensor:
-    """Return the explicit production-codec global multiplier for a weight.
-
-    This is the companion to :func:`render_nvfp4_dequant` used when vLLM
-    fuses sibling projections into one runtime parameter and therefore makes
-    them share the maximum of their natural globals.
-    """
-    recipe = _explicit_nvfp4_recipe(
-        scale_rule, snapped_scale_scoring, joint_scale_levels)
-    if weight.ndim != 2:
-        raise ValueError(
-            "production NVFP4 global calculation requires a rank-2 weight; "
-            f"got shape={tuple(weight.shape)}"
-        )
-    rows, cols = weight.shape
-    if cols % int(group_size) != 0:
-        raise ValueError(f"NVFP4 group_size={group_size} ∤ {cols}")
-    grouped = weight.float().reshape(
-        rows, cols // int(group_size), int(group_size)
-    )
-    _scale_real, global_real = select_nvfp4_pack_scales_and_global(
-        grouped,
-        levers=recipe,
-    )
-    return global_real
 
 
 def quantize_dequantize_nvfp4_packed(
