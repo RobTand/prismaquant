@@ -264,7 +264,8 @@ def test_full_legal_inventory_contains_unmeasured_producer_rates():
 
 
 def test_research_selected_cache_requires_proposal_and_exact_assignment():
-    from prismaquant.tessera_sampled_stack_proposal import (
+    from prismaquant.layer_config import canonicalize_assignment
+    from prismaquant.tessera_research_proposal import (
         SCHEMA, require_research_proposal_assignment, selected_assignment_sha256)
     from prismaquant.tessera_export_lane import selected_cached_units_manifest, TesseraExportLaneError
     from tessera.cached_unit import CACHE_SCHEMA
@@ -277,11 +278,11 @@ def test_research_selected_cache_requires_proposal_and_exact_assignment():
         'selected_assignment_sha256': selected_assignment_sha256(assignment),
         'original_joint_plan_sha256': joint['provenance']['tessera_joint_allocation']['plan_sha256'],
         'original_prepared': joint['provenance']['tessera_joint_allocation']['prepared']}
-    assert require_research_proposal_assignment(proposal, assignment)['production_export_authority'] is False
+    assert require_research_proposal_assignment(proposal, assignment, canonicalize_assignment)['production_export_authority'] is False
     changed = dict(assignment)
     changed[names[0]] = 'TESSERA_E4M3_K1_R1024'
     with pytest.raises(ValueError, match='differs'):
-        require_research_proposal_assignment(proposal, changed)
+        require_research_proposal_assignment(proposal, changed, canonicalize_assignment)
     with pytest.raises(TesseraExportLaneError, match='completed joint allocation handoff'):
         selected_cached_units_manifest(assignment, {}, joint, None, schema=CACHE_SCHEMA)
 
