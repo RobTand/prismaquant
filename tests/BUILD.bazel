@@ -89617,9 +89617,8 @@ pq_py_library(
         "test_tessera_sampled_stack_proposal.py",
     ],
     data = [
-        "//:files",
-        "//tools/bazel:files",
-        ":files",
+        "//:files/archive",
+        "test_tessera_sampled_stack_proposal.py",
     ],
     deps = [
         "//:prismaquant/__init__",
