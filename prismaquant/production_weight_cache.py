@@ -100,12 +100,14 @@ from prismaquant.cost_stage_checkpoint import (  # noqa: F401 -- identity helper
 from prismaquant.digests import (
     DIRECT_ASCII_INDENT2_LAX,
     DIRECT_UTF8_STRICT,
-    LengthFramedSourceSha256,
     bytes_sha256hex,
     canonical_json,
     text_sha256hex,
 )
 from prismaquant.file_identity import file_stat_signature, _production_cache_identity_paths
+from prismaquant.aura_provenance import (  # noqa: F401 -- cache names re-exported
+    producer_package_sha256 as _production_cache_source_sha256, _production_cache_source_profile,
+)
 from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.render_score import (
     gate_render_candidate,
@@ -3313,65 +3315,6 @@ def _production_cache_git_commit() -> str:
             f"{commit!r}"
         )
     return commit
-
-
-def _production_cache_source_root(package_root: Path | None) -> Path:
-    root = (
-        Path(package_root)
-        if package_root is not None
-        else Path(__file__).resolve().parent
-    )
-    if not root.is_dir():
-        raise RuntimeError(
-            f"production source identity cannot read package root {root}"
-        )
-    return root
-
-
-def _production_cache_source_sha256(
-    package_root: Path | None = None,
-) -> str:
-    """Hash every durable PrismaQuant package input used by the producer.
-
-    A hand-maintained import list is not fail-closed: a newly introduced
-    transitive renderer dependency could otherwise change bytes without
-    changing a resumable pair's identity.  Hash the complete installed
-    package tree instead, excluding only interpreter bytecode caches.  This
-    also binds packaged lattice/codebook data and model-profile JSON.
-    """
-    return _production_cache_source_profile(package_root)[0]
-
-
-def _production_cache_source_profile(
-    package_root: Path | None = None,
-) -> tuple[str, dict[str, str]]:
-    """Aggregate digest and per-file digests from one read of the source tree.
-
-    The aggregate is byte-identical to ``_production_cache_source_sha256``'s
-    framing; the per-file map is what a checkpoint manifest stores beside it
-    so a later mismatch can name the first file whose bytes moved (#2218).
-    One walk, one read per file, so the map and its aggregate always describe
-    the same pass over the tree.
-    """
-    root = _production_cache_source_root(package_root)
-    identity_paths = _production_cache_identity_paths(root)
-    if not identity_paths:
-        raise RuntimeError(
-            f"production source identity found no files under {root}"
-        )
-    digest = LengthFramedSourceSha256()
-    digests: dict[str, str] = {}
-    for path in identity_paths:
-        relative = path.relative_to(root).as_posix()
-        try:
-            payload = path.read_bytes()
-        except OSError as exc:
-            raise RuntimeError(
-                f"production source identity cannot read {relative}"
-            ) from exc
-        digest.update(relative, payload)
-        digests[relative] = bytes_sha256hex(payload)
-    return digest.hexdigest(), digests
 
 
 def _production_cache_recent_writes(
