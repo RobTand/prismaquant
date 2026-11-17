@@ -58,7 +58,6 @@ TEST_INPUTS = {
         reason = "it reads each patch set's MANIFEST.json through SERVING_RUNTIME_PATCH_SETS_DIR, a path imported from the module.",
     ),
     "//tests:test_tool_imports_1304": struct(
-        data = ["//:files/scripts", "//:files/tools"],
         modules = ["scripts/", "tools/"],
         reason = "it parses every file under tools and scripts and imports each prismaquant and tools module they name.",
     ),

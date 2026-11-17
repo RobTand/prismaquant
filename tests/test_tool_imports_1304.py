@@ -20,12 +20,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = sorted(
-    path.relative_to(ROOT).as_posix()
-    for top in ("tools", "scripts")
-    for path in (ROOT / top).rglob("*.py")
-    if "archive" not in path.relative_to(ROOT).parts
-)
+FILES = {path.relative_to(ROOT).as_posix(): path
+         for path in [*(ROOT / "tools").rglob("*.py"), *(ROOT / "scripts").rglob("*.py")]
+         if "archive" not in path.relative_to(ROOT).parts}
 OWNED = ("prismaquant", "tools")
 
 
@@ -44,7 +41,7 @@ def _resolve(module: str, name: str) -> bool:
 
 
 def _missing(path: str) -> list[str]:
-    tree = ast.parse((ROOT / path).read_text(), path)
+    tree = ast.parse(FILES[path].read_text(), path)
     aliases: dict[str, str] = {}
     missing: list[str] = []
     for node in ast.walk(tree):
@@ -81,6 +78,6 @@ def _missing(path: str) -> list[str]:
     return missing
 
 
-@pytest.mark.parametrize("path", FILES)
+@pytest.mark.parametrize("path", sorted(FILES))
 def test_tool_resolves_its_prismaquant_imports(path):
     assert _missing(path) == []
