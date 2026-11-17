@@ -169,8 +169,8 @@ def open_runtime_url(url, deadline):
     return opener.open(url, timeout=runtime_remaining(deadline))
 
 
-def download_runtime_archive(url, fetch):
-    deadline = time.monotonic() + 120
+def download_runtime_archive(url, fetch, wall=120):
+    deadline = time.monotonic() + wall
     for attempt in range(1, 4):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
