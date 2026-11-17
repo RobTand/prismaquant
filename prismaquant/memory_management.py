@@ -1128,21 +1128,3 @@ def enforce_gpu_memory_budget(
                 "other allocations exceed PRISMAQUANT_MAX_GPU_MEM_GB."
             )
     return evicted
-
-
-def phase_boundary_memory_cleanup(label: str | None = None) -> None:
-    """Release allocator-held memory and collect Python garbage at phase edges."""
-    gc.collect()
-    try:
-        torch.cuda.empty_cache()
-    except Exception as exc:
-        if label:
-            print(
-                f"[memory] cleanup {label}: empty_cache failed: "
-                f"{type(exc).__name__}: {exc}",
-                file=sys.stderr,
-                flush=True,
-            )
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
