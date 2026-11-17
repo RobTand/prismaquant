@@ -348,7 +348,6 @@ LANE_ROUTE_STATUSES = frozenset({
     ROUTE_STATUS_BACKED_WITH_SERVE_FLAG,
     ROUTE_STATUS_UNBACKED,
 })
-REGIME_ROUTE_STATUSES = LANE_ROUTE_STATUSES | {ROUTE_STATUS_FALLBACK}
 
 #: The CLOSED set a packaged cell may declare, mirroring the publisher's
 #: ``_LANE_ROUTE_STATUSES`` exactly. ``unbacked`` is absent on purpose: the
@@ -3971,7 +3970,6 @@ __all__ = [
     "ROUTE_STATUS_UNATTESTED",
     "ROUTE_STATUS_FALLBACK",
     "LANE_ROUTE_STATUSES",
-    "REGIME_ROUTE_STATUSES",
     "CELL_ROUTE_STATUSES",
     "CELL_QUALIFICATIONS",
     "QUALIFICATION_COMPILE_ONLY",
