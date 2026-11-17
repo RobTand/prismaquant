@@ -1495,6 +1495,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/gpu_guard",
         "//:prismaquant/joint_cost_quantum",
         "//:prismaquant/joint_cost_stage_a",
@@ -3604,6 +3605,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "@pq_pip//pytest",
     ],
 )
@@ -4032,6 +4034,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/joint_adjoint_slices",
         "//:prismaquant/joint_cost_quantum",
@@ -15127,6 +15130,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/calibration_data",
         "//:prismaquant/dev_mode",
         "//:prismaquant/digests",
@@ -21875,7 +21879,7 @@ pq_py_library(
     ],
     deps = [
         "//:prismaquant/__init__",
-        "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         ":golden_table",
         "@pq_pip//pytest",
         "@pq_pip//torch",
@@ -34273,6 +34277,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/kl_fisher",
         ":test_joint_aura_packed_lib",
         ":test_joint_aura_streamed_lib",
@@ -34362,6 +34367,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/kl_fisher",
         ":test_streamed_cost_checkpoints_lib",
         "@pq_pip//pytest",
@@ -34449,6 +34455,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/digests",
         "//:prismaquant/joint_retained_window_plan",
@@ -34494,8 +34501,10 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/digests",
+        "//:prismaquant/joint_aura_transition_base",
         ":test_joint_aura_streamed_lib",
         "@pq_pip//pytest",
     ],
@@ -34538,6 +34547,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/digests",
         ":test_joint_aura_streamed_lib",
@@ -34583,6 +34593,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/joint_projection_backend",
         "//:prismaquant/kl_fisher",
         ":test_streamed_cost_checkpoints_lib",
@@ -34811,6 +34822,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/calibration_data",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/gpu_guard",
@@ -35079,6 +35091,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/joint_adjoint_slices",
         "//:prismaquant/joint_cost_stage_a",
@@ -35524,6 +35537,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/memory_management",
         ":test_joint_aura_packed_lib",
         ":test_joint_aura_streamed_lib",
@@ -35662,6 +35676,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/joint_stage_b_head",
         "//:tools/regenerate_joint_quanta",
         "@pq_pip//pytest",
@@ -35789,6 +35804,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/calibration_data",
         "//:prismaquant/gpu_guard",
         "//:prismaquant/joint_projection_backend",
@@ -36235,6 +36251,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/io_engine",
         "//:prismaquant/joint_retained_window_plan",
@@ -36351,6 +36368,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/joint_cost_quantum",
         ":test_joint_aura_assignment_diagnostics_lib",
         ":test_joint_aura_projection_lib",
@@ -48275,6 +48293,7 @@ pq_py_library(
     ],
     deps = [
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/dev_mode",
         "//:prismaquant/glm_kda_capture_kernel",
         "//:prismaquant/joint_campaign_ledger",
@@ -57039,6 +57058,7 @@ pq_py_library(
         "//:experiments/pq237_joint_aura_streamed",
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         ":test_joint_aura_streamed_lib",
         ":test_streamed_cost_checkpoints_lib",
         "@pq_pip//pytest",
@@ -58915,6 +58935,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "@pq_pip//pytest",
     ],
 )
@@ -61837,6 +61858,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/digests",
         ":source_framing_recording",
         "@pq_pip//pytest",
@@ -62394,6 +62416,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/io_spans",
         "//:prismaquant/joint_adjoint_slices",
@@ -62596,6 +62619,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/joint_adjoint_capture",
         "//:prismaquant/joint_adjoint_slices",
@@ -62887,6 +62911,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/joint_cost_stage_a",
         ":test_joint_cost_quantum_runtime_lib",
@@ -69654,7 +69679,7 @@ pq_py_library(
     ],
     deps = [
         "//:prismaquant/__init__",
-        "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/digests",
         ":test_pwc_source_framing_1764_lib",
         ":test_source_framing_1752_lib",
@@ -70902,6 +70927,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/joint_adjoint_capture",
         "//:prismaquant/joint_cost_quantum",
@@ -71291,6 +71317,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/calibration_data",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/gpu_guard",
@@ -72851,6 +72878,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/calibration_data",
         "//:prismaquant/gpu_guard",
         "//:prismaquant/joint_cost_quantum",
@@ -74302,6 +74330,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/joint_adjoint_slices",
         "//:prismaquant/joint_cost_stage_a",
@@ -74351,6 +74380,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/dev_mode",
         "//:prismaquant/io_spans",
@@ -76988,6 +77018,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         ":test_joint_aura_streamed_lib",
         ":test_kv_cotangent_path_lib",
         ":test_streamed_cost_checkpoints_lib",
@@ -77081,6 +77112,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/expert_empirical_cost",
         "//:prismaquant/gpu_guard",
@@ -85895,6 +85927,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/calibration_data",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/gpu_guard",
@@ -85949,6 +85982,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/calibration_data",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/gpu_guard",
@@ -87306,6 +87340,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/aura_provenance",
         "//:prismaquant/calibration_data",
         "//:prismaquant/tessera_joint_allocation",
         ":test_joint_aura_streamed_lib",
@@ -95503,6 +95538,7 @@ pq_py_library(
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/digests",
+        "//:prismaquant/joint_aura_transition_base",
         "@pq_pip//pytest",
     ],
 )
