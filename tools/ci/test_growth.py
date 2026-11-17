@@ -13,24 +13,24 @@ import sys
 LIMIT = 250
 
 
-def git(*arguments):
+def git_output(*arguments):
     return subprocess.run(['git', *arguments], capture_output=True, text=True, check=True).stdout
 
 
-def growth(base, head):
-    rows = git('diff', '--numstat', base, head, '--', 'tests/*.py').splitlines()
+def net_test_lines(base, head):
+    rows = git_output('diff', '--numstat', base, head, '--', 'tests/*.py').splitlines()
     return sum(int(added) - int(removed) for added, removed, _ in (row.split('\t') for row in rows) if added != '-')
 
 
 def refusals(base, head='HEAD'):
-    drafts = [(line[:40], line[41:]) for line in git('log', '--first-parent', '--format=%H %s', f'{base}..{head}')
+    drafts = [(line[:40], line[41:]) for line in git_output('log', '--first-parent', '--format=%H %s', f'{base}..{head}')
               .splitlines() if re.match(r'Merge of #\d+$', line[41:])]
     # (what the PR brought, its own commits, its name)
     prs = [((f'{merge}^1', merge), f'{merge}^1..{merge}^2', name) for merge, name in drafts] or [
         ((base, head), f'{base}..{head}', 'this PR')]
     return [f'{name} adds {lines} net lines to tests/*.py (limit {LIMIT}); add a "Test-lines: <reason>" trailer'
-            for change, commits, name in prs if (lines := growth(*change)) > LIMIT
-            and not re.search(r'(?m)^Test-lines: \S', git('log', '--format=%B', commits))]
+            for change, commits, name in prs if (lines := net_test_lines(*change)) > LIMIT
+            and not re.search(r'(?m)^Test-lines: \S', git_output('log', '--format=%B', commits))]
 
 
 if __name__ == '__main__':

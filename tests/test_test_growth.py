@@ -16,6 +16,7 @@ def git(repo, *arguments):
 
 def pr(repo, base, name, lines, message):
     git(repo, 'checkout', '-q', '-b', name, base)
+    (repo / 'tests').mkdir(exist_ok=True)  # the base tracks no tests/ directory
     (repo / 'tests' / f'test_{name}.py').write_text('x = 1\n' * lines)
     git(repo, 'add', '-A')
     git(repo, 'commit', '-q', '-m', message)
