@@ -50,3 +50,21 @@ def test_plan_rejects_nonpositive_stripe_count():
         assert "positive" in str(exc)
     else:
         raise AssertionError("expected a positive-stripe-count refusal")
+
+
+def test_stripe_probe_loader_requires_a_stats_mapping(tmp_path):
+    import pickle
+    from prismaquant.production_cache_stripes import _load_probe
+
+    path = tmp_path / "probe.pkl"
+    stats = {"layer.weight": {"n_params": 4, "in_features": 2}}
+    path.write_bytes(pickle.dumps({"stats": stats}))
+    assert _load_probe(path) == stats
+    for payload in ([], {}, {"stats": []}, {"stats": None}):
+        path.write_bytes(pickle.dumps(payload))
+        try:
+            _load_probe(path)
+        except ValueError as exc:
+            assert "probe has no stats mapping" in str(exc)
+        else:
+            raise AssertionError("invalid probe stats were accepted")
