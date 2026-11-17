@@ -120,3 +120,19 @@ def test_nonempty_lane_values_unchanged():
     assert result["top1_agreement"] == pytest.approx(expected_agree / 2)
     assert result["n_confident"] == 2
     assert result["n_positions"] == 3
+
+
+def test_text_chunks_keep_partial_tail_and_optional_bos(tmp_path):
+    from types import SimpleNamespace
+    from prismaquant.emu_forward_kl import _load_chunks
+
+    path = tmp_path / "text"
+    path.write_text("1 2 3 4 5 6")
+    tokenizer = SimpleNamespace(bos_token_id=99,
+        encode=lambda text, **kwargs: [int(value) for value in text.split()])
+    chunks = _load_chunks(tokenizer, path, seqlen=2, max_tokens=5)
+    assert [chunk.tolist() for chunk in chunks] == [[[99, 1, 2]], [[99, 3, 4]], [[99, 5]]]
+    assert all(chunk.dtype == torch.long for chunk in chunks)
+    tokenizer.bos_token_id = None
+    chunks = _load_chunks(tokenizer, path, seqlen=2, max_tokens=5)
+    assert [chunk.tolist() for chunk in chunks] == [[[1, 2]], [[3, 4]], [[5]]]
