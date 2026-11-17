@@ -32,10 +32,6 @@ class ForwardRecoveryRefused(RuntimeError):
     pass
 
 
-def capsule_byte_limit(document):
-    return PROOF_READ_MAX_BYTES
-
-
 def _read(path, expected=None):
     raw, _identity = read_document(path, PROOF_READ_MAX_BYTES)
     sha = bytes_sha256hex(raw)
