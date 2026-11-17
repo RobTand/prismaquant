@@ -227,3 +227,22 @@ def test_a_campaign_payload_carries_no_cost_mode_stamp_and_is_refused():
     assert "cost_mode" not in payload["provenance"]
     with pytest.raises(CostCurrencyError, match="cost_mode"):
         require_run_currency(payload)
+
+
+def test_currency_refuses_non_mapping_cost_tables_without_input_changes():
+    """A `costs` value that is not a mapping is refused with one exact
+    message, and the gate leaves the payload as it was."""
+    import copy
+
+    from prismaquant.cost_currency import (
+        CostCurrencyError,
+        require_run_currency,
+    )
+
+    for costs in (None, [], "not a table"):
+        payload = {"costs": costs, "provenance": {"cost_mode": "aura"}}
+        before = copy.deepcopy(payload)
+        with pytest.raises(CostCurrencyError) as excinfo:
+            require_run_currency(payload)
+        assert str(excinfo.value) == "cost payload carries no 'costs' table"
+        assert payload == before
