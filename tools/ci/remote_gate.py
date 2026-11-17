@@ -103,9 +103,9 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
                 break
         red = error is not None
         try:
-            # Read each admitted run's own evidence as it ends. In a PR gate the first shard
-            # that does not pass ends the wait, and the finally cancels its admitted siblings.
-            while pending and not (fail_fast and red):
+            # Read each admitted run's own evidence as it ends. An error, or in a PR gate the first
+            # shard that does not pass, ends the wait; the finally cancels every shard still pending.
+            while pending and not (error or fail_fast and red):
                 for item in list(pending):
                     invocation_id, expected, deadline = item
                     try:
@@ -117,11 +117,9 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
                         results.append(verify_shard_record(client, record, invocation_id,
                                                            expected, head))
                         red = red or results[-1]['verdict'] == 'fail'
-                    except RemoteError as failure:
-                        if item in pending:
-                            pending.remove(item)
+                    except RemoteError as failure:  # a shard still pending gave no record: cancel it too
                         error, red = error or failure, True
-                    if fail_fast and red:
+                    if error or fail_fast and red:
                         break
                 else:
                     if pending:
