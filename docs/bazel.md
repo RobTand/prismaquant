@@ -159,9 +159,12 @@ TL3 keeps BuildBuddy priority if a fallback batch arrives while its queue is bac
 
 ### Find the merge that broke a record
 
-The full record runs every 6 hours, so one red record can cover several merges. GitHub can start a
-scheduled slot late or not at all; 20 minutes after a slot with no run, the record is started once by hand. Bisect only the
-targets that failed, not the whole suite:
+A user timer on dl380g10 (`record-backstop.timer`, owned by the Fleet lead) starts the full record with
+`workflow_dispatch` 3 minutes after each slot: 00:17, 06:17, 12:17 and 18:17 UTC. It starts one only when main moved since
+the last finished record, green or red; it runs no test on the host. GitHub's own schedule came hours late or not at
+all, so the repository has none (#3874). If a slot has no record 30 minutes later, the CI-speed watch reports it; a lead
+then starts one with `gh workflow run ci.yml -R RobTand/prismaquant --ref main`. One red record can cover several
+merges. Bisect only the targets that failed, not the whole suite:
 
 1. Read the failed targets and their architecture from the red record's `failed test <label> on <arch>`
    annotations.
