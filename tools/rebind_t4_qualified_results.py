@@ -34,9 +34,8 @@ from prismaquant.digests import DIRECT_ASCII_LAX, bytes_sha256hex
 
 SCHEMA = 'prismaquant.t4_qualified_rebinding.v1'
 
-
 def cell_sha256(cell):
-    return bytes_sha256hex(json.dumps(cell, sort_keys=True, separators=(',', ':')).encode())
+    return bytes_sha256hex(DIRECT_ASCII_LAX.text(cell).encode())
 
 
 def cell_task_id(cell):
@@ -148,7 +147,7 @@ def main():
                 'rows': rows}
     if rebound is not None:
         document['old_prepared_rebound'] = rebound
-    raw = (json.dumps(document, sort_keys=True, separators=(',', ':')) + '\n').encode()
+    raw = (DIRECT_ASCII_LAX.text(document) + '\n').encode()
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open('xb') as handle:
         handle.write(raw)
