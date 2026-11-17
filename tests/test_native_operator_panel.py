@@ -365,3 +365,13 @@ def test_a_missing_consumed_receipt_field_is_a_refusal_not_a_key_error(joined, t
     path = tmp_path / "receipt.json"
     with pytest.raises(ValueError, match="missing field"):
         consume_native_receipt(path, expected_sha256=write(path, receipt), expected_panel=panel)
+
+
+def test_native_platform_refuses_when_cuda_is_unavailable(monkeypatch):
+    from prismaquant.native_operator_panel import native_platform
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "get_device_capability",
+                        lambda *_: pytest.fail("queried a device after CUDA was unavailable"))
+    with pytest.raises(ValueError, match="native panel: no CUDA device"):
+        native_platform()
