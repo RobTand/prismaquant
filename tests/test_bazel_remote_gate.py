@@ -385,6 +385,7 @@ def controller_manifest(mode='pr', selection='fallback'):
     return {'schema': 'prismaquant.bazel-shards.v1', 'mode': mode, 'base': BASE,
         'head': HEAD, 'selection': selection, 'scopes': ['//tests'],
         'all_scopes': selection == 'fallback' or mode == 'main', 'reason': [],
+        'rules': {'prismaquant/core.py': 'module-level, cycle member: 6 tests'},
         'hosted': [], 'hosted_arm64': [], 'architectures': architectures}
 
 
@@ -631,6 +632,8 @@ def test_controller_cli_publishes_scanned_results_and_scopes_only_after_own_proo
         assert output.read_text().splitlines() == [
             'scopes=["//tests"]', 'all_scopes=true', 'scopes_ready=true']
         assert 'Bazel verdict: ' + result['verdict'] in summary.read_text()
+        assert ('Selection: fallback, 6 tests on amd64\n\n- `prismaquant/core.py`: module-level, cycle member: 6 tests\n'
+                in summary.read_text())
     assert annotations == (['::error::failed test //tests:test_0 on amd64'] if fault == 'fail' else [])
 
 
