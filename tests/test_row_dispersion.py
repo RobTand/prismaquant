@@ -107,6 +107,22 @@ def test_prize_curve_surfaces_rows_where_expensive_is_worse():
     assert curve["uniform_references"]["expensive_everywhere"]["total_error"] == 6.5
 
 
+def test_row_error_refuses_integer_measurement_without_changing_inputs():
+    X = torch.tensor([[1, 2], [3, 4]], dtype=torch.int64)
+    W = torch.tensor([[5, 6], [7, 8]], dtype=torch.int64)
+    W_hat = torch.tensor([[4, 6], [7, 9]], dtype=torch.int64)
+    saved = [X.clone(), W.clone(), W_hat.clone()]
+
+    with pytest.raises(
+        TypeError,
+        match=r"^row-dispersion inputs must have floating-point dtype$",
+    ):
+        per_row_error(X, W, W_hat)
+
+    for tensor, copy in zip((X, W, W_hat), saved):
+        assert torch.equal(tensor, copy)
+
+
 def test_cli_smoke_writes_vectors_and_summary(tmp_path):
     root = Path(__file__).resolve().parents[1]
     out = tmp_path / "row-dispersion"
