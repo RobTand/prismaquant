@@ -157,6 +157,38 @@ No shard is retried to obtain a pass.
 
 TL3 keeps BuildBuddy priority if a fallback batch arrives while its queue is backed up; this cutover adds no scheduler.
 
+### Selection
+
+A PR or queue gate selects the tests of the change, not of the repository. When the diff only
+modifies files (no added or deleted file, no BUILD, REPO or WORKSPACE file, no tracked symlink),
+the plan takes these rules from the head query for each modified file:
+
+- the rules that list the file: its library, and the libraries and tests that read it as data,
+  also through filegroups;
+- the rules that import those rules directly (one step). A `py_test`'s own deps on product
+  rules are programs that it starts or names, not imports, so they are not a step;
+- the test-side rules above them (libraries under `tests/`, conftests, test helpers) up to each
+  `py_test`;
+- the tests named `test_<stem>` or `test_<stem>_*` after a modified module.
+
+The plan takes the whole reverse closure of a file instead when no test names or imports it (one
+step without filegroups reaches no test), or when it is a test-side file (`tests/`, a
+`conftest.py`). The hosted lanes, and the 12 whole-repository readers in `CLOSURE_TESTS` whose
+tree comes through a product module that their `py_test` names or starts, keep the whole
+closure. A diff that adds or deletes a file or edits a BUILD file uses bazel-diff and the whole
+closure; a gate input selects the full suite. `DIRECT = False` in `tools/ci/bazel_selection.py`
+selects the whole closure for every file.
+
+The gate does not select a test that reaches the change only through two or more imports, or
+only through a program that the test starts as a subprocess. The post-merge record runs every
+test and finds it. The plan writes the tests of the whole closure into the manifest field
+`closure`. After each red record, the shadow check lists each failed test that a covered gate's
+closure held and its selection did not.
+
+TL3b's own check runs the direct importers and the tests that name the changed path. The gate
+also runs the one-step data edges, the whole-repository readers, the closure of test-side files
+and of files that no test imports, and the hosted lanes.
+
 ### Find the merge that broke a record
 
 A user timer on dl380g10 (`record-backstop.timer`, owned by the Fleet lead) starts the full record with

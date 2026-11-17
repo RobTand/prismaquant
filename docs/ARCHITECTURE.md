@@ -927,6 +927,18 @@ explicit traffic wire bytes. DEFAULT-OFF, UNQUALIFIED FEATURE HOLD.
 CPU verification covers declaration uptake only; no pipeline default,
 format, serving lane or ship gate changes.
 
+As of: 2026-11-17, gate direct selection, PQ #3940.
+Source: `tools/ci/bazel_selection.py`, based on main `a8cf69c5`. A modified-only PR
+diff selects, for each modified file, the rules that list it (through
+filegroups), their direct importers and the test-side rules above them, plus
+the tests named after it; a py_test's deps on product rules (programs it starts
+or names) are not a step. Test-side files, files that no test imports, the
+hosted lanes and the 12 readers in `CLOSURE_TESTS` keep the whole closure.
+Replay of 240 merges on the real query at `3627b0a3`: modified-only merges with
+more than 1000 tests 62.7 % -> 27.3 %, median 1125 -> 149; 13 of 13
+change-caused failures selected; all 46 whole-repository readers selected.
+`DIRECT = False` restores the closure. Details: docs/bazel.md, "Selection".
+
 As of: 2026-11-16, gate plan phase, PQ #3768.
 Source: `tools/ci/bazel_selection.py` and `tools/ci/remote_gate.py`, based on
 main `087dd15b`. A PR diff that only modifies files (no add, delete,
