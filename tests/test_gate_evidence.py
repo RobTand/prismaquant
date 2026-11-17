@@ -66,6 +66,22 @@ def test_hosted_wall_percentiles_use_completed_successful_full_gates(tmp_path):
     assert shard['install_seconds'] == 5
 
 
+def test_hosted_summary_refuses_backward_step_timestamps(tmp_path):
+    (tmp_path / 'run.json').write_text(json.dumps({
+        'id': 1, 'run_attempt': 1, 'head_sha': 'a' * 40, 'conclusion': 'success'}))
+    (tmp_path / 'jobs.json').write_text(json.dumps({'jobs': [
+        {'name': 'shard-0', 'started_at': '2026-11-17T00:01:00Z', 'steps': [
+            {'name': 'Run assigned gate tests', 'started_at': '2026-11-17T00:00:00Z'}]}]}))
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    try:
+        evidence.hosted([tmp_path], 20)
+    except ValueError as error:
+        assert str(error) == 'hosted timestamps run backwards'
+    else:
+        raise AssertionError('hosted accepted backward step timestamps')
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+
+
 def test_hosted_imported_test_costs_follow_collection_identity(tmp_path):
     (tmp_path / 'run.json').write_text(json.dumps({
         'id': 123, 'run_attempt': 1, 'head_sha': 'a' * 40, 'conclusion': 'success'}))
