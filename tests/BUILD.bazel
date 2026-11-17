@@ -94511,9 +94511,10 @@ pq_py_library(
         "test_tool_imports_1304.py",
     ],
     data = [
-        "//:files",
+        "//:files/scripts",
+        "//:files/tools",
         "//tools/bazel:files",
-        ":files",
+        "test_tool_imports_1304.py",
     ],
     deps = [
         "@pq_pip//pytest",
