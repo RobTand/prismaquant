@@ -2900,9 +2900,15 @@ pq_py_library(
         "test_architecture_doc.py",
     ],
     data = [
-        "//:files",
-        "//tools/bazel:files",
-        ":files",
+        "//:AGENTS.md",
+        "//:CLAUDE.md",
+        "//:README.md",
+        "//:docs/ARCHITECTURE.md",
+        "//:docs/README.md",
+        "//:files/archive",
+        "//:files/prismaquant/serving_profile_specs",
+        "//:prismaquant/run-pipeline.sh",
+        "test_architecture_doc.py",
     ],
     deps = [
         "//:prismaquant/__init__",
