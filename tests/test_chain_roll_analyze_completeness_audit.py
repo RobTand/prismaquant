@@ -120,3 +120,20 @@ def test_complete_shuffled_two_repeat_census_preserves_all_results(tmp_path):
     assert all(row["repeats"] == 2 for row in report["arms"].values())
     assert all(row["roll_s"] == [1.0, 1.0] for row in report["arms"].values())
     assert report["payloads_identical_across_arms_and_repeats"] is True
+
+
+def test_slice_records_select_batches_and_refuse_incomplete_planes():
+    records = [{"metadata": {"identity": {"coordinates": {"batch": batch, "probe": probe}}}}
+               for probe in (4, 7) for batch in range(3)]
+    document = {"boundary_entries": {"2": records[:3]},
+                "checkpoint": {"boundary": 3, "activation_entries": records}}
+    rows, plane, probes = bench.slice_records(document, layer=2, batches=2)
+    assert rows == {0: records[0], 1: records[1]}
+    assert plane == {(4, 0): records[0], (4, 1): records[1], (7, 0): records[3], (7, 1): records[4]}
+    assert probes == [4, 7]
+    document["checkpoint"]["activation_entries"] = records[:4]
+    with pytest.raises(SystemExit, match="slice plane is incomplete"):
+        bench.slice_records(document, layer=2, batches=2)
+    document["checkpoint"]["boundary"] = 2
+    with pytest.raises(SystemExit, match="not 3"):
+        bench.slice_records(document, layer=2, batches=2)
