@@ -2325,9 +2325,9 @@ def handoff_template_id(quantum_id: str, template: Mapping) -> str:
     body names the handoff directory inside the quantum's own output space,
     so the same quantum id under another root gets another id (PQ #1054).
     """
+    from prismaquant.digests import DIRECT_ASCII_LAX
     body = {key: value for key, value in template.items() if key != "template_id"}
-    digest = _sha_bytes(json.dumps(body, sort_keys=True,
-                                   separators=(",", ":")).encode())
+    digest = _sha_bytes(DIRECT_ASCII_LAX.text(body).encode())
     return f"{HANDOFF_TEMPLATE_ID_PREFIX}{quantum_id}-{digest[:16]}"
 
 
@@ -2398,7 +2398,8 @@ def handoff_template(record: Mapping, *, plan: Mapping,
         raise DispatchRefused(
             f"quantum {quantum_id!r}: no handoff template derives from the "
             f"plan and slice: {exc}") from exc
-    payload = (json.dumps(template, sort_keys=True, indent=2) + "\n").encode()
+    from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
+    payload = (DIRECT_ASCII_INDENT2_LAX.text(template) + "\n").encode()
     path = (_band_serial_root(output_root)
             / f"{quantum_id}.handoff-template.{_sha_bytes(payload)[:16]}.json")
     return path, payload
@@ -3332,7 +3333,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
 
 def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
     """Run ``main`` on parsed ``args``; ``report`` receives the dry-run plan."""
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+    from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX, DIRECT_ASCII_SPACED_LAX
     gateway = _gateway if _gateway is not None else Gateway()
     if args.spec:
         global SPEC_PATH
@@ -3555,7 +3556,7 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
 
     if args.dry_run:
         by_id = {record["quantum_id"]: record for _, record in records}
-        print(json.dumps({"consumer_tags": list(tags), "priority": priority,
+        print(DIRECT_ASCII_INDENT2_LAX.text({"consumer_tags": list(tags), "priority": priority,
                           "execution_plan": execution_stamp,
                           "stage_a_terminal": bool(stage_a_keys) and bool(
                               receipt_ok),
@@ -3583,8 +3584,7 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                                            for key in ("checkpoint_boundary", "chain_layers")}}
                                        if row["kind"] == "quantum" else {}),
                                     "row": row["row"]}
-                                   for row in rows]},
-                         indent=2, sort_keys=True), file=report)
+                                   for row in rows]}), file=report)
         return 0
 
     try:
@@ -3640,16 +3640,15 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                                        "row": row["row"], "metadata": event})
             answer = gateway.submit(row["row"], state_dir=native_state, afterok=producers)
             _append_state(state_path, {**event, "submission": answer})
-            print(json.dumps({"published": row.get("quantum_id", "stage-a"),
-                              "submission": answer,
-                              "status": answer.get("status", "")},
-                             sort_keys=True))
+            print(DIRECT_ASCII_SPACED_LAX.text({"published": row.get("quantum_id", "stage-a"),
+                                                "submission": answer,
+                                                "status": answer.get("status", "")}))
     except (RuntimeError, OSError, ValueError) as exc:
         print(f"dispatch_joint_quanta: submission failed: {exc}", file=sys.stderr)
         return EXIT_SUBMIT_FAILED
     for waiting in band_pending:
-        print(json.dumps({"band_serial_pending": waiting["quantum_id"],
-                          "reason": waiting["reason"]}, sort_keys=True))
+        print(DIRECT_ASCII_SPACED_LAX.text({"band_serial_pending": waiting["quantum_id"],
+                                            "reason": waiting["reason"]}))
     if not rows:
         print(DIRECT_ASCII_SPACED_LAX.text({"published": [], "note": "nothing publishable"}))
     return 0
