@@ -267,3 +267,17 @@ def test_a_v2_policy_refuses_a_format_a_member_already_offers(policy_fixture, tm
     with pytest.raises(ValueError, match='only price newly added'):
         derive_policy(offered, formats=[R768, FORMAT])
     assert derive_policy(offered, formats=[FORMAT])['formats'] == [FORMAT]
+
+
+def test_verified_activation_policy_keeps_local_cache_checks(policy_fixture, monkeypatch):
+    from prismaquant import joint_served_activation as served
+
+    bound, policy, cache, names = policy_fixture
+    monkeypatch.setenv("PRISMAQUANT_PROD_ACT_SCALES", "0")
+    cache.weights = {(name, FORMAT): "/synthetic" for name in names}
+    monkeypatch.setattr(served, "verify_policy", lambda *_: pytest.fail("policy was re-derived"))
+    assert served.activate_verified_policy(cache, bound, policy) is policy
+    assert joint_activation_maxima(cache)[FORMAT_MAXIMA_KEY][FORMAT] == policy["effective_max_abs"]
+    cache.weights.pop((names[0], FORMAT))
+    with pytest.raises(ValueError, match="new A4 candidate missing"):
+        served.activate_verified_policy(cache, bound, policy)
