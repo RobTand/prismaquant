@@ -125,3 +125,17 @@ def test_kl_assignment_loader_uses_shared_canonicalizer(tmp_path):
         "model.layers.0.mlp.down_proj": "FP8_E4M3",
         "model.layers.0.self_attn.o_proj": "NVFP4",
     }
+
+
+def test_assignment_refuses_mxfp4_source_with_wrong_group_size(tmp_path):
+    path = tmp_path / "layer_config.json"
+    for group_size in (0, 16, 64):
+        entry = {"data_type": "fp4_e2m1", "bits": 4, "group_size": group_size}
+        path.write_text(json.dumps({"model.layers.0.mlp.down_proj": entry}))
+        before, names = path.read_bytes(), sorted(tmp_path.iterdir())
+        message = f"MXFP4_SOURCE is the OCP-MX group-of-32 passthrough; got group_size={group_size} in {entry!r}"
+        with pytest.raises(ValueError) as error:
+            load_assignment(path)
+        assert str(error.value) == message
+        assert path.read_bytes() == before
+        assert sorted(tmp_path.iterdir()) == names
