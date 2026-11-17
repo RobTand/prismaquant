@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from prismaquant.digests import bytes_sha256hex
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex
 from prismaquant.joint_catalog_extension import _artifact_fence, extended_roster
 from prismaquant.tessera_joint_aura import render_origin_census
 from rebind_t4_qualified_results import SCHEMA as REBINDING_SCHEMA
@@ -53,7 +53,7 @@ sha = bytes_sha256hex
 
 
 def doc(value):
-    return (json.dumps(value, sort_keys=True, indent=2) + '\n').encode()
+    return (DIRECT_ASCII_INDENT2_LAX.text(value) + '\n').encode()
 
 
 def publish(path, raw):
