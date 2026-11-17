@@ -7,8 +7,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 
-def test_allocator_exports_expanded_pareto_seed_assignments(tmp_path):
+
+def _write_seed_inputs(tmp_path):
     model_dir = tmp_path / "model"
     model_dir.mkdir()
     (model_dir / "config.json").write_text(json.dumps({
@@ -26,7 +28,6 @@ def test_allocator_exports_expanded_pareto_seed_assignments(tmp_path):
         "mtp.layers.0.mlp.down_proj",
         "lm_head",
     ]
-    expected_assignment_names = set(names) - {"lm_head"}
     stats = {}
     costs = {}
     for idx, name in enumerate(names):
@@ -51,6 +52,12 @@ def test_allocator_exports_expanded_pareto_seed_assignments(tmp_path):
             "costs": costs,
             "formats": ["NVFP4", "MXFP8_E4M3", "BF16"],
         }, f)
+    return model_dir, names, probe_path, cost_path
+
+
+def test_allocator_exports_expanded_pareto_seed_assignments(tmp_path):
+    model_dir, names, probe_path, cost_path = _write_seed_inputs(tmp_path)
+    expected_assignment_names = set(names) - {"lm_head"}
 
     out_dir = tmp_path / "pareto_seeds"
     subprocess.run(
@@ -119,6 +126,56 @@ def test_allocator_exports_expanded_pareto_seed_assignments(tmp_path):
         assert len(gate_up_formats) == 1
 
     assert saw_mxfp8
+
+
+def test_mtp_drift_after_fixed_format_accounting_is_refused(
+    tmp_path, monkeypatch,
+):
+    import prismaquant.allocator as allocator
+
+    # The allocator imports this class. The class is the same object.
+    AssignmentSpace = allocator.AssignmentSpace
+    model_dir, _names, probe_path, cost_path = _write_seed_inputs(tmp_path)
+    original_expand = AssignmentSpace.expand
+
+    def drifting_expand(self, *args, **kwargs):
+        expansion = original_expand(self, *args, **kwargs)
+        # Drift the final assignment. Keep the before-promotion copy equal,
+        # so that the promotion no-op check passes.
+        for table in (expansion.before_promotion, expansion.assignment):
+            for name in table:
+                if name.startswith("mtp."):
+                    table[name] = "NVFP4"
+        return expansion
+
+    monkeypatch.setattr(AssignmentSpace, "expand", drifting_expand)
+    # The MTP candidate set holds only BF16. Skip this earlier check.
+    monkeypatch.setattr(
+        allocator,
+        "_validate_assignment_candidate_membership",
+        lambda *args, **kwargs: None,
+    )
+
+    with pytest.raises(
+        AssertionError,
+        match="MTP assignment drifted after fixed-format accounting",
+    ):
+        allocator.main([
+            "--probe",
+            str(probe_path),
+            "--costs",
+            str(cost_path),
+            "--model-override",
+            str(model_dir),
+            "--formats",
+            "NVFP4,MXFP8_E4M3,BF16",
+            "--target-bits",
+            "8.0",
+            "--layer-config",
+            str(tmp_path / "layer_config.json"),
+            "--pareto-csv",
+            str(tmp_path / "pareto.csv"),
+        ])
 
 
 def test_allocator_excludes_fixed_quantized_mtp_from_body_budget(tmp_path):

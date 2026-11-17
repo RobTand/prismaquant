@@ -2345,6 +2345,7 @@ pq_py_library(
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/allocator_cycle",
         "//:prismaquant/layer_config",
+        "@pq_pip//pytest",
     ],
 )
 
