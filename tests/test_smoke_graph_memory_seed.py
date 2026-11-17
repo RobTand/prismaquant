@@ -36,3 +36,18 @@ def test_smoke_seed_env_override(monkeypatch):
     assert random.random() == 0.6394267984578837
     assert torch.rand(1).item() == 0.8822692632675171
     assert os.environ.get("CUBLAS_WORKSPACE_CONFIG") == ":4096:8"
+
+
+def test_smoke_linear_selection_prefers_body_and_excludes_head():
+    model = torch.nn.Module()
+    model.lm_head = torch.nn.Linear(16, 2)
+    model.fallback = torch.nn.Linear(16, 2)
+    model.model = torch.nn.Module()
+    model.model.layers = torch.nn.ModuleList([torch.nn.Linear(16, 2)])
+    assert smoke_graph_memory._pick_linear(model) == ("model.layers.0", model.model.layers[0])
+    del model.model
+    assert smoke_graph_memory._pick_linear(model) == ("fallback", model.fallback)
+    del model.fallback
+    model.unaligned = torch.nn.Linear(15, 2)
+    with pytest.raises(RuntimeError, match="no CUDA/NVFP4-compatible nn.Linear found"):
+        smoke_graph_memory._pick_linear(model)
