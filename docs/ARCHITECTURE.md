@@ -965,11 +965,11 @@ dl380g10 starts it 3 minutes after 00:17, 06:17, 12:17 and 18:17 UTC when main m
 the repository has no GitHub schedule (its slots came hours late or not at all). A push to main runs the hosted amd64 and arm64 lanes, each push in its own concurrency group;
 records run one at a time. The import surface runs only on pull requests and drafts (PQ #3791).
 
-As of: 2026-11-16, FIFO merge queue in batches of 3, PQ #3773 (after #3642).
+As of: 2026-11-17, FIFO merge queue in batches of up to 8, PQ #3927 (after #3773, #3642).
 Source: `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.mergify.yml`.
 One serial queue requires an issue line and a `prismaquant-<N>` branch on original PRs (PQ #3786;
 text only, no issue lookup) and `gate` on each draft.
-Each draft checks up to 3 PRs on the newest main, in `queue` label order; a failed batch is split.
+Each draft checks up to 8 PRs on the newest main, in `queue` label order; a failed batch is split.
 Bazel and hosted gate jobs run only on authenticated Mergify drafts or `gate-canary` PRs.
 Graph impact runs on every PR. The post-merge CPU suite remains on Python 3.12.
 
