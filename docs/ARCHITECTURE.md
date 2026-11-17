@@ -941,8 +941,8 @@ main `c1863eb7`. For a modified member of an import-cycle target, the direct
 rule reads `tools/ci/cycle_members.json` (generated, held by `--check`): the
 member's importers and readers and theirs, by module, not the importers of the
 whole target. A package `__init__.py`, a module that the generator lists as
-uncertain and a module that calls a `register` function at import keep the whole
-target. The gate summary prints each member's rule and test count; the manifest
+uncertain and a module that runs a call statement or a `register` call at import
+keep the whole target (14 of the 143 members of the largest cycle). The gate summary prints each member's rule and test count; the manifest
 field `shadow_v1` holds the selection with one step. Details: docs/bazel.md,
 "Selection".
 

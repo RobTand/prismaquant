@@ -1149,15 +1149,17 @@ def whole_target(evidence, path):
         return 'package __init__'
     if evidence.uncertain.get(path):
         return 'uncertain: ' + '; '.join(sorted(evidence.uncertain[path]))
-    pending, calls = list((evidence.trees[path] or ast.Module([])).body), []
-    while pending:  # what runs at import: all but function bodies
+    named = lambda node: 'register' in getattr(getattr(node, 'func', node), 'attr', getattr(getattr(node, 'func', node), 'id', ''))
+    pending, reasons = list((evidence.trees[path] or ast.Module([])).body), set()
+    while pending:  # the code that runs at import: all but function bodies and the __main__ block
         node = pending.pop()
-        calls += [node.func] if isinstance(node, ast.Call) else []
+        reasons |= {'a register call at import'} if named(node) and isinstance(node, ast.Call) or any(
+            map(named, getattr(node, 'decorator_list', []))) else set()
+        reasons |= {'a call statement at import'} if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) else set()
         pending += (node.decorator_list + node.args.defaults if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    else [] if isinstance(node, ast.Lambda) else ast.iter_child_nodes(node))
-    if any('register' in getattr(call, 'attr', getattr(call, 'id', '')).lower() for call in calls):
-        return 'a register call at import'
-    return None
+                    else [] if isinstance(node, ast.Lambda) or isinstance(node, ast.If) and '__main__' in ast.unparse(node.test)
+                    else ast.iter_child_nodes(node))
+    return '; '.join(sorted(reasons)) or None
 
 
 def cycle_record(evidence, graph, owner, libraries, importers):
@@ -1168,15 +1170,14 @@ def cycle_record(evidence, graph, owner, libraries, importers):
         for target in graph.edges[path] | graph.data[path]:
             importers[target].add(path)
     members = {}
-    for component in libraries:
-        home = owner[component[0]]
-        if len(component) > 1 and home[0] != 'tests':
-            for path in component:
-                members[path] = {'target': f'//{home[0]}:{home[1]}', 'whole': whole_target(evidence, path),
-                                 'importers': sorted(other if owner.get(other, home) == home else
-                                                     f'//{owner[other][0]}:{owner[other][1]}'
-                                                     for other in importers[path] - {path})}
-    return json.dumps({'schema': 'prismaquant.cycle_members.v1', 'members': members}, indent=1, sort_keys=True) + '\n'
+    for path in sorted(path for component in libraries if len(component) > 1 for path in component):
+        home = owner[path]
+        if home[0] != 'tests':
+            members[path] = {'importers': sorted(other if owner.get(other, home) == home else
+                                                 f'//{owner[other][0]}:{owner[other][1]}'
+                                                 for other in importers[path] - {path}),
+                             'target': f'//{home[0]}:{home[1]}', 'whole': whole_target(evidence, path)}
+    return json.dumps({'members': members, 'schema': 'prismaquant.cycle_members.v1'}, indent=1) + '\n'
 
 
 def generate(root=ROOT, files=None, extra=None):

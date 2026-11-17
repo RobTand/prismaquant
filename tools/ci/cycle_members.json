@@ -2469,7 +2469,7 @@
     "prismaquant/validate_assignments_kl.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
-   "whole": "a register call at import"
+   "whole": "a call statement at import; a register call at import"
   },
   "prismaquant/full_engine_resource_report.py": {
    "importers": [
@@ -4814,7 +4814,7 @@
     "prismaquant/perturbed_x_cache.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
-   "whole": null
+   "whole": "a call statement at import"
   },
   "prismaquant/kl_measurement.py": {
    "importers": [
@@ -9718,7 +9718,7 @@
     "prismaquant/tessera_campaign.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
-   "whole": "a register call at import"
+   "whole": "a call statement at import; a register call at import"
   },
   "prismaquant/serve_dispatch_table.py": {
    "importers": [
@@ -11341,7 +11341,7 @@
     "prismaquant/aura_cost.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
-   "whole": null
+   "whole": "a call statement at import"
   },
   "prismaquant/task_suite.py": {
    "importers": [

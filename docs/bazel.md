@@ -181,8 +181,10 @@ their direct importers, by module. It selects the test-side rules among them and
 the rules that read the member as data and the tests named after it. `tools/bazel/build_files.py`
 writes the table and `--check` holds it current. A member keeps the one step from its whole target
 when the table gives a reason: a package `__init__.py`, a module that the generator lists as uncertain
-(an import or a launch that it cannot follow), or a module that calls a function whose name holds
-`register` when it is imported. The gate summary prints the rule of each changed member and the test
+(an import or a launch that it cannot follow), or a module that runs a call statement, or a call
+whose name holds `register`, when it is imported (outside function bodies and the `__main__` block).
+A pull request that changes an import between cycle members must regenerate the table with
+`tools/bazel/generate.sh`; `build_files.py --check` names the stale file and that command. The gate summary prints the rule of each changed member and the test
 count. The manifest field `shadow_v1` holds the selection with only the member's own importers.
 
 The plan takes the whole reverse closure of a file instead when no test names or imports it (one

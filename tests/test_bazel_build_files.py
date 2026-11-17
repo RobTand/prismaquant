@@ -513,9 +513,11 @@ def test_an_import_cycle_across_packages_refuses_generation(tmp_path):
 
 
 def test_the_cycle_table_names_each_members_importers_and_why_a_member_selects_its_target(tmp_path):
-    sources = dict(SMALL, **{'prismaquant/a.py': 'from prismaquant import b\ndef later():\n    register_late()\n',
+    sources = dict(SMALL, **{'prismaquant/a.py': 'from prismaquant import b, c\ndef later():\n    register_late()\n',
                              'prismaquant/b.py': 'from prismaquant import a\nfor kind in (1,):\n    REGISTRY.register(kind)\n',
-                             'prismaquant/c.py': 'from prismaquant import a\n',
+                             'prismaquant/c.py': 'from prismaquant import a, d\nimport os\nos.environ.setdefault("K", "v")\n'
+                                                 "if __name__ == '__main__':\n    main()\n",
+                             'prismaquant/d.py': 'from prismaquant import a\nif True:\n    import prismaquant.c\n',
                              'tests/test_a.py': 'from prismaquant import a\n',
                              'tests/test_names.py': ("import importlib\nNAMES = ('prismaquant.b',)\n"
                                                      'MODULES = [importlib.import_module(name) for name in NAMES]\n')})
@@ -523,9 +525,12 @@ def test_the_cycle_table_names_each_members_importers_and_why_a_member_selects_i
     build_files.generate(tmp_path, write(tmp_path, sources), extra=extra)
     assert json.loads(extra[build_files.CYCLE_FILE])['members'] == {
         'prismaquant/a.py': {'target': '//:prismaquant/a_cycle', 'whole': None,
-                             'importers': ['//:prismaquant/c', '//tests:test_a_lib', 'prismaquant/b.py']},
-        'prismaquant/b.py': {'target': '//:prismaquant/a_cycle', 'whole': 'a register call at import',
-                             'importers': ['//tests:test_names', 'prismaquant/a.py']}}
+                             'importers': ['//tests:test_a_lib', 'prismaquant/b.py', 'prismaquant/c.py', 'prismaquant/d.py']},
+        'prismaquant/b.py': {'target': '//:prismaquant/a_cycle', 'whole': 'a call statement at import; a register call at import',
+                             'importers': ['//tests:test_names', 'prismaquant/a.py']},
+        'prismaquant/c.py': {'target': '//:prismaquant/a_cycle', 'whole': 'a call statement at import',
+                             'importers': ['prismaquant/a.py', 'prismaquant/d.py']},
+        'prismaquant/d.py': {'target': '//:prismaquant/a_cycle', 'whole': None, 'importers': ['prismaquant/c.py']}}
 
 
 def test_two_targets_with_one_name_refuse_generation():
