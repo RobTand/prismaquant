@@ -66,7 +66,7 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 SCHEMA = "prismaquant.serve_dispatch_table.v1"
 
@@ -603,21 +603,6 @@ def dispatch_family_for_format(fmt: str) -> str:
     return canonical
 
 
-def missing_family_report(
-    families: Iterable[str],
-    table: ServeDispatchTable,
-    *,
-    phase: str,
-    m_regime: str,
-) -> list[str]:
-    """Families with no row in one arena, sorted. Diagnostic helper."""
-    have = {
-        row.format_family for row in table.rows
-        if row.phase == phase and row.m_regime == m_regime
-    }
-    return sorted({str(f) for f in families} - have)
-
-
 __all__ = [
     "ArenaReference",
     "DispatchRow",
@@ -632,6 +617,5 @@ __all__ = [
     "dispatch_family_for_format",
     "example_table_path",
     "load_dispatch_table",
-    "missing_family_report",
     "parse_dispatch_table",
 ]
