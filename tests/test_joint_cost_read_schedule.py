@@ -244,3 +244,19 @@ def test_probe_count_argument_disagreeing_with_manifest_refused(tmp_path):
 def test_probe_count_must_be_an_exact_integer_of_at_least_two(tmp_path, bad, reason):
     with pytest.raises(ValueError, match=reason):
         _load(tmp_path, n_probes=bad)
+
+
+def test_cost_schedule_refuses_gzip_crc_damage_after_digest_verification(tmp_path):
+    damaged = bytearray(gzip.compress(json.dumps(_manifest()).encode(), mtime=0))
+    damaged[-8] ^= 1
+    path = tmp_path / "manifest.cas"
+    path.write_bytes(damaged)
+    with pytest.raises(ValueError) as exc:
+        load_joint_cost_read_schedule(manifest_path=path, manifest_bytes=len(damaged),
+            manifest_sha256=hashlib.sha256(damaged).hexdigest(), plan_path="/mnt/shared/plan.json",
+            plan_sha256=PLAN_SHA, prepared_path="/mnt/shared/prepared.json",
+            prepared_sha256=PREPARED_SHA, retained_budget=_budget(), source_owner_cap_bytes=100,
+            n_probes=4, target_names_by_layer=NAMES, validated_completed_units=())
+    assert str(exc.value) == "joint COST read schedule: invalid gzip data manifest"
+    assert path.read_bytes() == damaged
+    assert list(tmp_path.iterdir()) == [path]
