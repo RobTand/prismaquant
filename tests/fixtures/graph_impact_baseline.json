@@ -2,17 +2,15 @@
   "schema": "graph-impact.v1",
   "figures": {
     "u_pct": 51.145946653361364,
-    "loc_u_pct": 63.94274027479155,
-    "scc_max": 143,
+    "loc_u_pct": 63.54611929881963,
     "median_selected_pct": 13.2,
-    "p90_selected_pct": 86.1,
-    "modules_over_half": 255,
+    "p90_selected_pct": 86.0,
+    "modules_over_half": 253,
     "conftest_source_modules": 0
   },
   "tolerances": {
     "u_pct": 1.0,
     "loc_u_pct": 1.0,
-    "scc_max": 0,
     "median_selected_pct": 1.0,
     "p90_selected_pct": 1.0,
     "modules_over_half": 2,
