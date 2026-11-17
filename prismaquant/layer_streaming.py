@@ -2085,22 +2085,6 @@ def _read_layer_to_device(prefix: str,
     return out
 
 
-# Back-compat alias. Historically callers treated this as a "CPU cache"
-# reader, but the implementation has always returned tensors resident on
-# the requested execution device.
-_read_layer_to_cpu = _read_layer_to_device
-
-
-def _install_cached_tensors(model: nn.Module,
-                            cached_tensors: dict[str, torch.Tensor],
-                            device: torch.device):
-    """Install cached layer tensors into the model on `device`."""
-    for model_name, t in cached_tensors.items():
-        install_dtype = t.dtype if t.is_floating_point() else None
-        set_module_tensor_to_device(
-            model, model_name, device, value=t, dtype=install_dtype)
-
-
 def _build_install_resolver(model: nn.Module,
                             layer_qname: str) -> dict[str, tuple]:
     """Pre-compute `(parent_module, attr, is_buffer)` for every
@@ -2704,11 +2688,6 @@ def _get_final_norm(base_model: nn.Module) -> nn.Module | None:
         if n is not None:
             return n
     return None
-
-
-def _embed_prefix(base_model: nn.Module, full_path: str) -> str:
-    """Return the full-dotted prefix to the embed_tokens param."""
-    return f"{full_path}.embed_tokens." if full_path else "embed_tokens."
 
 
 #: Names a hybrid decoder layer gives its mixer child. The mixer is where a
