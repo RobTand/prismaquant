@@ -492,3 +492,21 @@ def test_gguf_transaction_publishes_or_cleans_after_budget_check(
         module.export_gguf(skeleton, layer_config, output, device="cpu")
         assert output.read_bytes() == b"complete-gguf"
     assert not _transaction_temps(output)
+
+
+def test_export_rollback_preserves_a_replaced_published_file(tmp_path):
+    from prismaquant.export_output_safety import _remove_owned_file_link
+
+    published = tmp_path / "published"
+    published.write_bytes(b"owned")
+    info = published.stat()
+    identity = (info.st_dev, info.st_ino)
+    held = tmp_path / "held"
+    published.rename(held)
+    published.write_bytes(b"replacement")
+    with pytest.raises(RuntimeError, match="refusing to unlink an untrusted replacement"):
+        _remove_owned_file_link(published, identity, where="test-export")
+    assert published.read_bytes() == b"replacement"
+    assert held.read_bytes() == b"owned"
+    _remove_owned_file_link(held, identity, where="test-export")
+    assert not held.exists()
