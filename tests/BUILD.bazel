@@ -54685,9 +54685,11 @@ pq_py_library(
         "test_package_model_runtime.py",
     ],
     data = [
-        "//:files",
+        "//:files/experiments",
+        "//:files/prismaquant",
+        "//:files/tools",
         "//tools/bazel:files",
-        ":files",
+        "test_package_model_runtime.py",
     ],
     deps = [
         "//:prismaquant/__init__",
