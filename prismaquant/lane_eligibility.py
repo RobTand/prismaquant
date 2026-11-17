@@ -3706,12 +3706,6 @@ def parse_runtime_code(payload: Any, where: str) -> tuple[str, str]:
     return commit, digest
 
 
-def parse_v5_runtime(payload: Any, where: str) -> tuple[str, tuple[str, ...]]:
-    """The v5 spelling, kept for callers that want only the two v5 fields."""
-    image, modes, _, _ = parse_runtime_scope(payload, where)
-    return image, modes
-
-
 def parse_v4_cell_contract(
     payload: Mapping[str, Any],
     where: str,
