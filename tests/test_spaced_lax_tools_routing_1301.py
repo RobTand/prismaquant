@@ -245,4 +245,4 @@ def test_separately_staged_model_worker_keeps_its_standard_library_help(tmp_path
 def test_retired_pb_lease_benchmark_cannot_be_launched():
     """The migration removed this PB-only benchmark, not its live CLI coverage."""
     for filename in RETIRED_HELP_TOOLS:
-        assert not (ROOT / filename).exists()
+        assert not (ROOT / "tools" / Path(filename).relative_to("tools")).exists()

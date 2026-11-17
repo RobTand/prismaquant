@@ -69795,9 +69795,10 @@ pq_py_library(
         "test_spaced_lax_tools_routing_1301.py",
     ],
     data = [
-        "//:files",
+        "//:files/tools",
         "//tools/bazel:files",
-        ":files",
+        ":files/fixtures",
+        "test_spaced_lax_tools_routing_1301.py",
     ],
     deps = [
         "//:prismaquant/__init__",
