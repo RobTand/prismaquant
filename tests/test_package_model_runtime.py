@@ -100,10 +100,9 @@ def test_every_hf_loader_boundary_explicitly_initializes_the_model_runtime():
     """An initializer must precede a loader in its execution scope."""
     root = Path(__file__).resolve().parents[1]
     missing = []
-    for directory in ('prismaquant', 'tools', 'experiments'):
-        for path in (root / directory).rglob('*.py'):
-            if 'vendored' in path.parts:
-                continue
-            missing.extend(f'{path.relative_to(root)}:{gap}'
-                           for gap in _hf_loader_runtime_gaps(path.read_text()))
+    for path in [*(root / 'prismaquant').rglob('*.py'), *(root / 'tools').rglob('*.py'), *(root / 'experiments').rglob('*.py')]:
+        if 'vendored' in path.parts:
+            continue
+        missing.extend(f'{path.relative_to(root)}:{gap}'
+                       for gap in _hf_loader_runtime_gaps(path.read_text()))
     assert not missing, missing
