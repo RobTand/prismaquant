@@ -53,3 +53,13 @@ def test_coverage_refuses_drift_and_bad_counts():
         verify_boundary_partition_coverage([], n_partitions=8)
     with pytest.raises(ValueError, match="1 <="):
         plan_boundary_partition_ranges(n_partitions=4, n_ranges=5)
+
+
+def test_partition_coverage_refuses_an_uncovered_tail_without_input_changes():
+    from prismaquant.streamed_boundary_artifacts import verify_boundary_partition_coverage, plan_boundary_partition_ranges
+
+    short = [{**r, "partition_end": 7, "partitions": 7} for r in plan_boundary_partition_ranges(n_partitions=8, n_ranges=1)]
+    saved = [{**r} for r in short]
+    with pytest.raises(ValueError, match=r"^boundary partition ranges under-cover the partitions$"):
+        verify_boundary_partition_coverage(short, n_partitions=8)
+    assert short == saved
