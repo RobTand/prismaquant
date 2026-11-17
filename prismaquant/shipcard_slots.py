@@ -1384,7 +1384,3 @@ def make_gold_record(payload, *, slot, model_sha, record_path, model_dir=None,
 def lane_slot_verifiers():
     return {name: adapter.policy for name, adapter in ship_slot_registry().items()
             if name not in _BASE_SLOTS}
-
-
-def lane_plugin_slot_verifiers():
-    return {name: replay for name, replay in lane_slot_verifiers().items() if name not in CORE_LANE_SLOTS}
