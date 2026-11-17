@@ -711,6 +711,10 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
             Path(command[command.index('--output') + 1]).write_text('//tests:test_consumer\n')
         return SimpleNamespace(returncode=0)
 
+    table = root / selection.CYCLE_PATH
+    table.parent.mkdir(parents=True, exist_ok=True)
+    table.write_text(json.dumps({'members': {'prismaquant/core.py': {
+        'target': '//prismaquant:gen', 'whole': None, 'importers': []}}}))
     found = selection.plan_revisions(root, tmp_path / 'private', base=base, head=head,
         mode='pr', java='java', jar=tmp_path / 'v42.jar', runner=planning_command)
     if request.node.callspec.params['planning_history'] is None:
@@ -718,6 +722,8 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
         assert found['selection'] == 'impacted'
         assert found['architectures']['amd64']['population'] == [
             '//prismaquant:gen', '//tests:test_consumer']
+        assert found['rules'] == {'prismaquant/core.py': 'whole target (no test within two imports): 1 tests'}
+        assert found['shadow_v1'] == ['//tests:test_consumer']
     else:
         assert tools == ['generate-hashes', 'generate-hashes', 'get-impacted-targets']
 
@@ -745,7 +751,7 @@ def test_direct_selection_takes_one_import_and_the_test_side_above_it():
         rule('//tests:test_launcher', 'py_test', '//:prismaquant/b', '//tests/unit:conftest'),
         rule('@@rules_python++pip+pq_pip_numpy//:pkg', 'py_library')]
     population = selection.query_population(rows, 'amd64')
-    tests = lambda path: sorted(selection.direct_impact(population, {path}) & set(population['tests']))
+    tests = lambda path: sorted(selection.direct_impact(population, {path})[0] & set(population['tests']))
     # One import from a (test_b is two away), the test-side helper above it, the whole-tree reader and its name.
     assert tests('prismaquant/a.py') == ['//tests:test_a', '//tests:test_a_names', '//tests:test_helped',
                                          '//tests:test_reader']
@@ -753,6 +759,34 @@ def test_direct_selection_takes_one_import_and_the_test_side_above_it():
     assert tests('prismaquant/b.py') == ['//tests:test_b']  # test_launcher starts b as a program
     assert tests('prismaquant/lonely.py') == ['//tests:test_c']  # no test imports it: its whole closure
     assert tests('tests/unit/conftest.py') == population['tests']  # a test-side file: its whole closure
+
+
+def test_a_cycle_member_selects_two_imports_from_its_own_table_unless_the_table_gives_a_reason():
+    def rule(label, kind, *inputs):
+        return {'rule': {'name': label, 'ruleClass': kind, 'ruleInput': list(inputs)}}
+    cycle = '//:prismaquant/cycle'
+    rows = [{'sourceFile': {'name': f'//:prismaquant/{name}.py'}} for name in 'mnoqw'] + [
+        rule(cycle, 'py_library', '//:prismaquant/m.py', '//:prismaquant/n.py', '//:prismaquant/q.py',
+             '//:prismaquant/w.py'),
+        rule('//:prismaquant/o', 'py_library', '//:prismaquant/o.py', cycle),
+        *[rule(f'//tests:test_{name}_lib', 'py_library', imported) for name, imported in (
+            ('m', cycle), ('n', cycle), ('w', cycle), ('o', '//:prismaquant/o'))],
+        *[rule(f'//tests:test_{name}', 'py_test', f'//tests:test_{name}_lib') for name in 'mnow'],
+        rule('@@rules_python++pip+pq_pip_numpy//:pkg', 'py_library')]
+    population = selection.query_population(rows, 'amd64')
+    row = lambda whole, *importers: {'target': cycle, 'whole': whole, 'importers': list(importers)}
+    members = {'prismaquant/m.py': row(None, '//:prismaquant/o', '//tests:test_m_lib', 'prismaquant/n.py'),
+               'prismaquant/n.py': row(None, '//tests:test_n_lib'), 'prismaquant/q.py': row(None),
+               'prismaquant/w.py': row('package __init__', '//tests:test_w_lib')}
+    found = lambda path: [sorted(rules & set(population['tests'])) if isinstance(rules, set) else rules
+                          for rules in selection.direct_impact(population, {path}, members)]
+    # Two imports: test_n through n, test_o through o; the shadow (one import) holds test_m only.
+    assert found('prismaquant/m.py') == [['//tests:test_m', '//tests:test_n', '//tests:test_o'], ['//tests:test_m'],
+                                        {'prismaquant/m.py': 'module-level, cycle member: 3 tests'}]
+    target = ['//tests:test_m', '//tests:test_n', '//tests:test_w']  # one import from the whole target
+    assert found('prismaquant/w.py') == [target, target, {'prismaquant/w.py': 'whole target (package __init__): 3 tests'}]
+    assert found('prismaquant/q.py') == [target, target,
+                                        {'prismaquant/q.py': 'whole target (no test within two imports): 3 tests'}]
 
 
 @pytest.mark.parametrize('fault', [None, 'leak', 'unscannable'])

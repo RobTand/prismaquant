@@ -29,6 +29,7 @@ GATE_INPUTS = {
 BAZEL_DIFF_URL = 'https://github.com/Tinder/bazel-diff/releases/download/v42.0.0/bazel-diff_deploy.jar'
 BAZEL_DIFF_SHA256 = '0170b70fe2f24477ab056c11f5c3240d8b45a1dca5ab73ad252c096679c5500c'
 DURATIONS_PATH = 'tools/ci/gate_durations.json'
+CYCLE_PATH = 'tools/ci/cycle_members.json'  # tools/bazel/build_files.py writes it
 BUILD_LANGUAGE = {'BUILD', 'REPO', 'WORKSPACE'}  # with or without the .bazel suffix
 # The one switch (docs/bazel.md, "Selection"): True selects the tests one import away from each modified
 # file; False selects its whole reverse closure.
@@ -245,29 +246,53 @@ def reverse_closure(consumers, modified, through=lambda node: True):
     return found
 
 
-def direct_impact(population, modified):
+def direct_impact(population, modified, members=None):
     """For each modified file: the rules that read it, their direct importers and the test-side rules above
     them (filegroups pass through), plus the tests named after it. A test-side file, or a file that no test
-    names or imports, keeps its whole reverse closure (docs/bazel.md, "Selection")."""
+    names or imports, keeps its whole reverse closure. A member of an import-cycle target counts its own
+    importers from `members` (CYCLE_PATH) and theirs, not the whole target's, unless the table gives a reason
+    (docs/bazel.md, "Selection"). Returns the impacted rules, the same with one import for members (the shadow),
+    and each modified member's rule."""
     consumers, tests, groups = population['consumers'], set(population['tests']), set(population['filegroups'])
+    members = members or {}
 
-    def near(path, through):
-        readers = reverse_closure(consumers, consumers.get(path, set()), through) | consumers.get(path, set())
+    def climb(rules, through=groups.__contains__):
+        return rules | reverse_closure(consumers, rules, lambda node: through(node) or node.startswith('//tests'))
+
+    def near(path, through, skip=None):
+        readers = consumers.get(path, set()) - {skip}
+        readers |= reverse_closure(consumers, readers, through)
         # A py_test's deps on product rules are programs it launches, not imports: its own library imports.
-        importers = readers | {rule for node in readers for rule in consumers.get(node, ())
-                               if rule not in tests or node.startswith('//tests')}
-        return importers | reverse_closure(consumers, importers,
-                                           lambda node: through(node) or node.startswith('//tests'))
+        return climb(readers | {rule for node in readers for rule in consumers.get(node, ())
+                                if rule not in tests or node.startswith('//tests')}, through)
 
-    impacted = set()
+    def test_side(rules, programs=True):  # a py_test in the table names, launches or reads the member
+        return {rule for rule in rules if rule.startswith('//tests') and (programs or rule not in tests)}
+
+    impacted, shadow, rules = set(), set(), {}
     for path in modified:
         name = 'test_' + Path(path).stem
+        named = {label for label in tests if path.endswith('.py') and (label.split(':')[1] + '_').startswith(name + '_')}
+        member = members.get(path)
+        if member and not member['whole']:
+            one = test_side(member['importers'])
+            two = one | {rule for other in member['importers'] for rule in test_side(
+                members[other]['importers'] if other in members else consumers.get(other, ()), other in members)}
+            base = near(path, groups.__contains__, member['target']) | named
+            if (found := base | climb(two)) & tests:
+                impacted |= found
+                shadow |= base | climb(one)
+                rules[path] = f'module-level, cycle member: {len(found & tests)} tests'
+                continue
         if path.startswith('tests/') or path.endswith('conftest.py') or not near(path, lambda node: False) & tests:
-            impacted |= reverse_closure(consumers, {path})
+            found = reverse_closure(consumers, {path})
         else:
-            impacted |= near(path, groups.__contains__) | {label for label in tests if path.endswith('.py')
-                and (label.split(':')[1] + '_').startswith(name + '_')}
-    return impacted
+            found = near(path, groups.__contains__) | named
+        impacted |= found
+        shadow |= found
+        if member:
+            rules[path] = f'whole target ({member["whole"] or "no test within two imports"}): {len(found & tests)} tests'
+    return impacted, shadow, rules
 
 
 def query_revision(root, directory, architecture, *, bazel='bazel', runner=subprocess.run):
@@ -368,11 +393,15 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
                   and not any(Path(path).name.removesuffix('.bazel') in BUILD_LANGUAGE for path in changed)
                   and not any(row.startswith('120000 ') for row in git('ls-files', '-s').splitlines())):
                 closure = reverse_closure(population['consumers'], changed)
-                impacted = (direct_impact(population, changed) | closure & (set(population['hosted']) | CLOSURE_TESTS)
-                            if DIRECT else closure)
-                decision = {**gate_decision(changed, deleted, impacted - set(population['excluded']),
+                cycle = root / CYCLE_PATH
+                members = json.loads(cycle.read_text())['members'] if cycle.is_file() else {}
+                impacted, shadow, rules = direct_impact(population, changed, members) if DIRECT else (closure, closure, {})
+                whole = closure & (set(population['hosted']) | CLOSURE_TESTS)
+                tests = set(population['tests']) - set(population['excluded'])
+                decision = {**gate_decision(changed, deleted, (impacted | whole) - set(population['excluded']),
                                             set(population['used_sources']), set(population['tests'])),
-                            'closure': sorted(closure & set(population['tests']))}
+                            'closure': sorted(closure & tests),
+                            **({'rules': rules, 'shadow_v1': sorted((shadow | whole) & tests)} if rules else {})}
             else:
                 if jar is None:
                     jar = bazel_diff_jar(directory)
@@ -431,7 +460,8 @@ def selection_manifest(decision, populations, *, hosted, base, head, mode,
                 'scopes': sorted(set(decision.get('scopes', ()))),
                 'all_scopes': mode == 'main' or decision.get('all_scopes', decision['selection'] == 'fallback'),
                 'reason': list(decision.get('reason', ())),
-                **({'closure': decision['closure']} if 'closure' in decision else {}),  # for the record's shadow check
+                # For the record's shadow checks
+                **{key: decision[key] for key in ('closure', 'rules', 'shadow_v1') if key in decision},
                 'hosted': sorted(hosted if full else hosted & requested),
                 'hosted_arm64': sorted(hosted_arm64) if mode == 'main' else [],
                 'architectures': {}}

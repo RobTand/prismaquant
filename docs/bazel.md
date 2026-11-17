@@ -174,6 +174,17 @@ the plan takes these rules from the head query for each modified file:
   `py_test`;
 - the tests named `test_<stem>` or `test_<stem>_*` after a modified module.
 
+A module in an import-cycle target (one `py_library` for each strongly connected component) is a
+step for every other member, so one step from the target reaches the importers of all members. For a
+cycle member the plan reads `tools/ci/cycle_members.json` instead: the member's direct importers, and
+their direct importers, by module. It selects the test-side rules among them and above them, and also
+the rules that read the member as data and the tests named after it. `tools/bazel/build_files.py`
+writes the table and `--check` holds it current. A member keeps the one step from its whole target
+when the table gives a reason: a package `__init__.py`, a module that the generator lists as uncertain
+(an import or a launch that it cannot follow), or a module that calls a function whose name holds
+`register` when it is imported. The gate summary prints the rule of each changed member and the test
+count. The manifest field `shadow_v1` holds the selection with only the member's own importers.
+
 The plan takes the whole reverse closure of a file instead when no test names or imports it (one
 step without filegroups reaches no test), or when it is a test-side file (`tests/`, a
 `conftest.py`). The hosted lanes, and the 12 whole-repository readers in `CLOSURE_TESTS` whose
