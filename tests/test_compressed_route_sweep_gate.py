@@ -244,6 +244,22 @@ def test_an_artifact_that_prices_nothing_is_refused():
         _compare(_sweep(), config=config)
 
 
+def test_route_gate_refuses_non_list_ignore_contract():
+    for ignore in ("lm_head", {"lm_head": True}, 1):
+        config = _config()
+        config["quantization_config"]["ignore"] = ignore
+        sweep = _sweep()
+        config_before = json.dumps(config, sort_keys=True)
+        sweep_before = json.dumps(sweep, sort_keys=True)
+        with pytest.raises(
+            gate.CompressedRouteSweepError,
+            match=r"\Aquantization_config ignore is not a list\Z",
+        ):
+            _compare(sweep, config=config)
+        assert json.dumps(config, sort_keys=True) == config_before
+        assert json.dumps(sweep, sort_keys=True) == sweep_before
+
+
 # --------------------------------------------------------------------------
 # The lane owes the slot, and the shipcard replays the comparison.
 # --------------------------------------------------------------------------
