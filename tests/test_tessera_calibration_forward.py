@@ -36,3 +36,23 @@ def test_named_statistics_keep_full_rows_for_hessian_counts_and_maximum():
     assert result.token_counts == {'0': 3}
     assert result.max_abs == {'0': 6.}
     assert not model[0]._forward_pre_hooks
+
+
+def test_boundary_capture_refuses_rank_one_ids_and_removes_hooks():
+    import torch
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
+
+    model = torch.nn.Sequential(torch.nn.Linear(2, 1, bias=False))
+    before = model[0].weight.detach().clone()
+    forwards, boundaries, message = [], [], None
+    try:
+        capture_activation_statistics(model, ['0'], [torch.tensor([1, 2])], 1, 'cpu',
+                                      boundary_consumer=lambda *call: boundaries.append(call),
+                                      forward_batch=lambda batch: forwards.append(batch))
+    except RuntimeError as refusal:
+        message = str(refusal)
+    assert message == 'boundary capture requires [sample, token] calibration IDs'
+    assert forwards == []
+    assert boundaries == []
+    assert not model[0]._forward_pre_hooks
+    assert torch.equal(model[0].weight, before)
