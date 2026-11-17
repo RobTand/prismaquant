@@ -69,3 +69,17 @@ def test_profile_validation_preserves_no_mtp_skip(tmp_path):
     result = _check_mtp(DefaultProfile(), {}, str(tmp_path / "absent"))
     assert result.ok, str(result)
     assert "skipped" in result.detail
+
+
+def test_profile_resolution_accepts_declared_forms_and_rejects_other_classes():
+    from prismaquant.model_profiles.validate import _get_profile
+
+    for spelling in ("Qwen3_5Profile", "prismaquant.model_profiles.qwen3_5.Qwen3_5Profile",
+                     "prismaquant.model_profiles.qwen3_5:Qwen3_5Profile"):
+        profile, source = _get_profile(spelling, "/unused")
+        assert type(profile) is Qwen3_5Profile
+        assert source == "explicit: Qwen3_5Profile"
+    with pytest.raises(SystemExit, match="Could not resolve profile"):
+        _get_profile("MissingProfileForTest", "/unused")
+    with pytest.raises(SystemExit, match="not a ModelProfile subclass"):
+        _get_profile("builtins:dict", "/unused")
