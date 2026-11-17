@@ -884,21 +884,6 @@ def load_activation_cache_samples(
     return values
 
 
-def load_activation_cache_max_abs(
-    cache_dir: str | Path,
-    targets: Iterable[str],
-) -> dict[str, float]:
-    """Compatibility view of :func:`load_activation_cache_samples`."""
-
-    return {
-        name: float(tensor.abs().max().item())
-        for name, tensor in load_activation_cache_samples(
-            cache_dir,
-            targets,
-        ).items()
-    }
-
-
 def select_mse_grid_input_global_scale(
     activation_samples: Iterable[torch.Tensor],
     *,
@@ -2556,7 +2541,6 @@ __all__ = [
     "group_fused_sibling_targets",
     "input_global_scale_from_max_abs",
     "input_global_scale_tensor",
-    "load_activation_cache_max_abs",
     "load_activation_cache_samples",
     "nvfp4_activation_qdq_served",
     "require_matching_input_global_scale",
