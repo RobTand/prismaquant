@@ -175,3 +175,21 @@ def test_selected_failure_precedes_unavailable_publication_verification(case):
         with pytest.raises(nr.ProducerFailed) as failed:
             nr.read_selected_result(selection)
     assert (failed.value.execution.status, failed.value.execution.payload_exit) == ('failed', 7)
+
+def test_stopped_job_refuses_unverified_terminal_evidence(case):
+    submission, _ = case.submit_fixture()
+    expected = {"argv": ["/bin/echo", "known"], "source": case.source,
+                "resources": vars(case.resources), "afterok": [], "environment": {}, "staged_input": None}
+    for status, error in (("running", None), ("unknown", None), ("failed", "query failed"),
+                          ("succeeded", "cleanup unverified"), ("succeeded", None), ("failed", None)):
+        result = jobs.ExecutionResult(status, submission.job_id, case.record, 0, error)
+        with patch.object(jobs, "verify_native_launch") as verify, \
+                patch.object(jobs, "collect_job", return_value=result) as collect:
+            if status in {"succeeded", "failed"} and error is None:
+                assert jobs.require_stopped_job(submission, expected_launch=expected) is result
+            else:
+                with pytest.raises(RuntimeError, match="native producer scope is not verified stopped"):
+                    jobs.require_stopped_job(submission, expected_launch=expected)
+            verify.assert_called_once_with(submission, max_evidence_bytes=64 << 20,
+                **{**expected, "resources": case.resources})
+            collect.assert_called_once_with(submission, wait=False)
