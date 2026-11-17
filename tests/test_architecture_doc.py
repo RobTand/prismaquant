@@ -609,13 +609,13 @@ def test_docs_index_leads_with_architecture():
 
 
 def test_normative_rule_files_reference_the_contract():
-    for name in ("CLAUDE.md", "AGENTS.md"):
-        text = (ROOT / name).read_text(encoding="utf-8")
-        assert "docs/ARCHITECTURE.md" in text, f"{name} lost the doc-sync rule"
+    for path in (ROOT / "CLAUDE.md", ROOT / "AGENTS.md"):
+        text = path.read_text(encoding="utf-8")
+        assert "docs/ARCHITECTURE.md" in text, f"{path.name} lost the doc-sync rule"
 
 
 def test_every_archive_wall_has_a_banner_readme():
-    walls = [p for p in (ROOT / "archive").iterdir() if p.is_dir()]
+    walls = [p for p in (ROOT / "archive").glob("*") if p.is_dir()]
     assert walls
     missing = [w.name for w in walls if not (w / "README.md").exists()]
     assert not missing, f"archive walls without a banner README: {missing}"
