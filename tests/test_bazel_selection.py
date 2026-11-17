@@ -722,6 +722,38 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
         assert tools == ['generate-hashes', 'generate-hashes', 'get-impacted-targets']
 
 
+def test_direct_selection_takes_one_import_and_the_test_side_above_it():
+    def rule(label, kind, *inputs):
+        return {'rule': {'name': label, 'ruleClass': kind, 'ruleInput': list(inputs)}}
+    rows = [{'sourceFile': {'name': name}} for name in ('//:prismaquant/a.py', '//:prismaquant/b.py',
+            '//:prismaquant/lonely.py', '//:prismaquant/spec.json', '//tests:conftest.py')] + [
+        rule('//:prismaquant/a', 'py_library', '//:prismaquant/a.py'),
+        rule('//:prismaquant/b', 'py_library', '//:prismaquant/b.py', '//:prismaquant/a', '//:prismaquant/spec.json'),
+        rule('//:prismaquant/lonely', 'py_library', '//:prismaquant/lonely.py'),
+        rule('//:prismaquant/c', 'py_library', '//:prismaquant/lonely', '//:prismaquant/b'),
+        rule('//:files', 'filegroup', '//:prismaquant/a.py'),
+        rule('//tests:conftest', 'py_library', '//tests:conftest.py'),
+        rule('//tests:helper', 'py_library', '//:prismaquant/a'),
+        rule('//tests:test_a_lib', 'py_library', '//:prismaquant/a'),
+        rule('//tests:test_a', 'py_test', '//tests:test_a_lib', '//tests:conftest'),
+        rule('//tests:test_a_names', 'py_test', '//tests:conftest'),
+        rule('//tests:test_b_lib', 'py_library', '//:prismaquant/b'),
+        rule('//tests:test_b', 'py_test', '//tests:test_b_lib', '//tests:conftest'),
+        rule('//tests:test_c', 'py_test', '//:prismaquant/c', '//tests:conftest'),
+        rule('//tests:test_helped', 'py_test', '//tests:helper', '//tests:conftest'),
+        rule('//tests:test_reader', 'py_test', '//:files', '//tests:conftest'),
+        rule('//tests:test_launcher', 'py_test', '//:prismaquant/b', '//tests:conftest')]
+    population = selection.query_population(rows, 'amd64')
+    tests = lambda path: sorted(selection.direct_impact(population, {path}) & set(population['tests']))
+    # One import from a (test_b is two away), the test-side helper above it, the whole-tree reader and its name.
+    assert tests('prismaquant/a.py') == ['//tests:test_a', '//tests:test_a_names', '//tests:test_helped',
+                                         '//tests:test_reader']
+    assert tests('prismaquant/spec.json') == ['//tests:test_b']  # a data file of a module that a test imports
+    assert tests('prismaquant/b.py') == ['//tests:test_b']  # test_launcher starts b as a program
+    assert tests('prismaquant/lonely.py') == ['//tests:test_c']  # no test imports it: its whole closure
+    assert tests('tests/conftest.py') == population['tests']  # a test-side file: its whole closure
+
+
 @pytest.mark.parametrize('fault', [None, 'leak', 'unscannable'])
 def test_remote_plan_cli_publishes_only_scanned_manifest_and_matching_receipt(
         tmp_path, monkeypatch, fault):
