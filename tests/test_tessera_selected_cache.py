@@ -72,8 +72,7 @@ def test_full_selected_bundle_includes_dense_and_expert(tmp_path):
 
 
 def test_sampled_research_bundle_keeps_same_source_hessian_encoder_and_wire_gates(tmp_path):
-    from prismaquant.tessera_sampled_stack_proposal import (
-        SCHEMA, selected_assignment_sha256)
+    from prismaquant.tessera_research_proposal import SCHEMA, selected_assignment_sha256
     source, names, records, handoff, metadata, data = fixture(tmp_path)
     assignment = {name: FMT for name in names}
     panel = {'status': 'diagnostic_pilot'}

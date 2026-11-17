@@ -656,3 +656,23 @@ def test_error_str_is_readable_but_fields_are_authoritative():
     exc = err.value
     assert (exc.name, exc.code, exc.tried) == (
         "nope", "unmapped_in_universe", exc.tried)
+
+
+def test_export_projection_checks_profile_results_and_preserves_error_fields(monkeypatch):
+    profile = Qwen3Profile()
+    projection = npx.NameProjection(profile)
+    monkeypatch.setattr(profile, "export_tensor_name", lambda name: "export." + name)
+    assert projection.recipe_to_export("layer.weight") == "export.layer.weight"
+    for result in ("", None, 7):
+        monkeypatch.setattr(profile, "export_tensor_name", lambda name: result)
+        with pytest.raises(npx.NameProjectionError) as caught:
+            projection.recipe_to_export("layer.weight")
+        error = caught.value
+        assert error.code == "malformed_profile_result"
+        assert (error.name, error.source_namespace, error.target_namespace) == ("layer.weight", npx.RECIPE, npx.EXPORT)
+    monkeypatch.delattr(profile, "export_tensor_name")
+    monkeypatch.setattr(profile, "export_tensor_name", lambda name: 1 / 0)
+    with pytest.raises(npx.NameProjectionError) as caught:
+        projection.recipe_to_export("layer.weight")
+    assert caught.value.code == "profile_accessor_failed"
+    assert isinstance(caught.value.__cause__, ZeroDivisionError)

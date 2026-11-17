@@ -233,3 +233,14 @@ def test_help_runs_without_the_fleet(module):
 
 def test_the_unused_show_status_stays_deleted():
     assert not {"show_status", "EXIT_NOTHING"} & set(vars(common))
+
+
+def test_dispatch_workspace_commit_includes_ignored_payload_and_detaches(tmp_path):
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
+    (tmp_path / ".git" / "info" / "exclude").write_text("*.bin\n")
+    (tmp_path / "weights.bin").write_bytes(b"staged-weights")
+    common.initialize_git(tmp_path, message="test staged workspace")
+    git = ["git", "-C", str(tmp_path)]
+    assert subprocess.check_output([*git, "show", "HEAD:weights.bin"]) == b"staged-weights"
+    assert subprocess.check_output([*git, "status", "--porcelain"]) == b""
+    assert subprocess.run([*git, "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode == 1
