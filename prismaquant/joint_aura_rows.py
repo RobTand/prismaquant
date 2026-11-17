@@ -20,9 +20,6 @@ JOINT_CURRENCY = "joint_aura_predicted_dloss"
 JOINT_AURA_COST_CURRENCY = JOINT_CURRENCY
 
 
-JOINT_AURA_COST_SOURCE = "joint_aura"
-
-
 PROBE_UNCERTAINTY_SCOPE = "probe_sampling_conditional_on_fixed_calibration"
 
 
