@@ -243,6 +243,16 @@ def test_config_reaches_the_mtp_index_without_touching_the_backbone():
     assert (config.layer_types, config.indexer_types, config.mlp_layer_types) == before
 
 
+def test_mtp_config_refuses_dense_last_layer_without_mutating_input():
+    config = _text_config()
+    config.mlp_layer_types[-1] = "dense"
+    before = config.to_dict()
+    with pytest.raises(ValueError) as refusal:
+        glm_mtp.mtp_text_config(config)
+    assert str(refusal.value) == "GLM MTP pricing expects a routed-MoE MTP layer"
+    assert config.to_dict() == before
+
+
 def test_one_mtp_layer_or_refuse():
     with pytest.raises(ValueError, match="exactly one MTP layer"):
         glm_mtp.mtp_layer_index(_text_config(num_nextn_predict_layers=2))
