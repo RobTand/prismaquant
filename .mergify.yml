@@ -1,4 +1,4 @@
-# FIFO queue: one draft at a time checks up to 3 PRs on the newest main, in queue-label order.
+# FIFO queue: one draft at a time checks one PR on the newest main, in queue-label order.
 # Each draft requires a passing "gate". A failed batch is split until the failing PR is found.
 # No parallel checks, priority lanes or automatic retries.
 # Add "queue" to queue. Remove it to dequeue. After failure, use "@mergifyio queue".
@@ -40,7 +40,7 @@ queue_rules:
     merge_conditions:
       - check-success = gate
     merge_method: merge
-    batch_size: 3
+    batch_size: 1  # 3 again when the executor keeps its tasks (PQ #3949)
     max_checks_retries: 0
     checks_timeout: 90 minutes
 
