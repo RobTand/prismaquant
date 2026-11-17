@@ -60,11 +60,6 @@ __all__ = [
 #: silent change to this one: published selections cite it.
 KNEE_RULE = MappingProxyType({"name": "chord_perpendicular_v1", "version": "v1"})
 
-#: Statuses that may appear in one frontier. ``measured`` and every screening
-#: status are kept apart, because a frontier that mixes them is a confound
-#: rather than a frontier (principle 3: a screen is not a result).
-_MEASURED = "measured"
-
 
 class KneeSelectionError(QualityPrefillContractError):
     """A frontier cannot nominate a development point.
