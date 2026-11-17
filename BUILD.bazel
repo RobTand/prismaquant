@@ -12153,6 +12153,13 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "tools/ci/test_growth",
+    srcs = [
+        "tools/ci/test_growth.py",
+    ],
+)
+
+pq_py_library(
     name = "tools/collect_row_netdata",
     srcs = [
         "tools/collect_row_netdata.py",
