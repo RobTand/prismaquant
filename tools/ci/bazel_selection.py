@@ -30,6 +30,15 @@ BAZEL_DIFF_URL = 'https://github.com/Tinder/bazel-diff/releases/download/v42.0.0
 BAZEL_DIFF_SHA256 = '0170b70fe2f24477ab056c11f5c3240d8b45a1dca5ab73ad252c096679c5500c'
 DURATIONS_PATH = 'tools/ci/gate_durations.json'
 BUILD_LANGUAGE = {'BUILD', 'REPO', 'WORKSPACE'}  # with or without the .bazel suffix
+# The one switch (docs/bazel.md, "Selection"): True selects the tests one import away from each modified
+# file; False selects its whole reverse closure.
+DIRECT = True
+# Whole-repository readers whose tree comes through a product module that their py_test names or launches:
+# one step cannot see it, so they keep their whole closure (PQ+T lead, 2026-11-17).
+CLOSURE_TESTS = frozenset('//tests:test_' + name for name in (
+    'boundary_control', 'boundary_stack_contract', 'exl3_replay_cli', 'gold_comparison_population_audit',
+    'gold_engine_options', 'kl_ab', 'measure_boundary_control_identity', 'serve_fingerprint_descendants',
+    'streamed_gold_companion', 'strict_json_tools_1605', 'tessera_serve_fingerprint', 'tessera_substitute_decoder'))
 
 
 class SelectionError(RuntimeError):
@@ -174,6 +183,7 @@ def query_population(rows, architecture):
                 'hosted_arm64': sorted(label for label, (_, tags) in rules.items()
                                        if 'hosted-arm64' in tags),
                 'used_sources': sorted(paths.values()), 'consumers': consumers,
+                'filegroups': sorted(label for label, (kind, _) in rules.items() if kind == 'filegroup'),
                 'wheel_repositories': wheel_repositories(labels)}
     except (AttributeError, KeyError, TypeError, ValueError):
         raise SelectionError('query population is incomplete or malformed') from None
@@ -224,14 +234,40 @@ def compare_graphs(base_graph, head_graph, changed, deleted, directory, *,
     return gate_decision(changed, deleted, impacted, used_sources, tests)
 
 
-def reverse_closure(consumers, modified):
-    """Rules that reach a modified source file. When a diff only modifies contents (no add,
-    delete, BUILD file or symlink), base and head share one graph, so bazel-diff impacts these."""
+def reverse_closure(consumers, modified, through=lambda node: True):
+    """Rules that reach a modified source file, walking up only from nodes `through` admits. When a diff only
+    modifies contents (no add, delete, BUILD file or symlink), base and head share one graph, so bazel-diff
+    impacts these."""
     found, frontier = set(), set(modified)
     while frontier:
-        frontier = set().union(*(consumers.get(node, ()) for node in frontier)) - found
+        frontier = set().union(*(consumers.get(node, ()) for node in frontier if through(node))) - found
         found |= frontier
     return found
+
+
+def direct_impact(population, modified):
+    """For each modified file: the rules that read it, their direct importers and the test-side rules above
+    them (filegroups pass through), plus the tests named after it. A test-side file, or a file that no test
+    names or imports, keeps its whole reverse closure (docs/bazel.md, "Selection")."""
+    consumers, tests, groups = population['consumers'], set(population['tests']), set(population['filegroups'])
+
+    def near(path, through):
+        readers = reverse_closure(consumers, consumers.get(path, set()), through) | consumers.get(path, set())
+        # A py_test's deps on product rules are programs it launches, not imports: its own library imports.
+        importers = readers | {rule for node in readers for rule in consumers.get(node, ())
+                               if rule not in tests or node.startswith('//tests')}
+        return importers | reverse_closure(consumers, importers,
+                                           lambda node: through(node) or node.startswith('//tests'))
+
+    impacted = set()
+    for path in modified:
+        name = 'test_' + Path(path).stem
+        if path.startswith('tests/') or path.endswith('conftest.py') or not near(path, lambda node: False) & tests:
+            impacted |= reverse_closure(consumers, {path})
+        else:
+            impacted |= near(path, groups.__contains__) | {label for label in tests if path.endswith('.py')
+                and (label.split(':')[1] + '_').startswith(name + '_')}
+    return impacted
 
 
 def query_revision(root, directory, architecture, *, bazel='bazel', runner=subprocess.run):
@@ -331,9 +367,12 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
             elif (set(status.values()) == {'M'}
                   and not any(Path(path).name.removesuffix('.bazel') in BUILD_LANGUAGE for path in changed)
                   and not any(row.startswith('120000 ') for row in git('ls-files', '-s').splitlines())):
-                impacted = reverse_closure(population['consumers'], changed)
-                decision = gate_decision(changed, deleted, impacted - set(population['excluded']),
-                                         set(population['used_sources']), set(population['tests']))
+                closure = reverse_closure(population['consumers'], changed)
+                impacted = (direct_impact(population, changed) | closure & (set(population['hosted']) | CLOSURE_TESTS)
+                            if DIRECT else closure)
+                decision = {**gate_decision(changed, deleted, impacted - set(population['excluded']),
+                                            set(population['used_sources']), set(population['tests'])),
+                            'closure': sorted(closure & set(population['tests']))}
             else:
                 if jar is None:
                     jar = bazel_diff_jar(directory)
@@ -392,6 +431,7 @@ def selection_manifest(decision, populations, *, hosted, base, head, mode,
                 'scopes': sorted(set(decision.get('scopes', ()))),
                 'all_scopes': mode == 'main' or decision.get('all_scopes', decision['selection'] == 'fallback'),
                 'reason': list(decision.get('reason', ())),
+                **({'closure': decision['closure']} if 'closure' in decision else {}),  # for the record's shadow check
                 'hosted': sorted(hosted if full else hosted & requested),
                 'hosted_arm64': sorted(hosted_arm64) if mode == 'main' else [],
                 'architectures': {}}
