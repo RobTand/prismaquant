@@ -332,3 +332,12 @@ def test_triton_warmup_compiles_kernel(monkeypatch):
         pytest.skip("CUDA unavailable")
     assert state["compiled"] is True
     assert (8, 8, 64, 16, 32, 64) in state["compiled_signatures"]
+
+
+def test_env_float_uses_default_only_for_missing_or_invalid_values(monkeypatch):
+    name = "PRISMAQUANT_TEST_FLOAT"
+    monkeypatch.delenv(name, raising=False)
+    assert mm.env_float(name, 2.5) == 2.5
+    for value, expected in (("", 2.5), ("invalid", 2.5), (" 0.125 ", 0.125), ("0", 0.0), ("-2", -2.0)):
+        monkeypatch.setenv(name, value)
+        assert mm.env_float(name, 2.5) == expected
