@@ -60,7 +60,6 @@ __all__ = [
     "hessian_from_rows",
     "text_sha256",
     "token_ids_sha256",
-    "unit_name_for",
 ]
 
 
@@ -134,18 +133,6 @@ def calibration_identity(text: str, batches: Sequence, *, fit_tokens: int,
             "is the one place that has to change with it"
         )
     return {**dict(extra), **identity}
-
-
-def unit_name_for(qname: str) -> str:
-    """Tessera's Hessian key for a PrismaQuant qname.
-
-    ``ActivationSource`` keys on the tensor name minus one trailing
-    ``.weight``, which is a PrismaQuant qname exactly.  Stated through
-    Tessera's own helper so the two cannot drift apart.
-    """
-    from tessera.export import ActivationSource
-
-    return ActivationSource.unit_name(f"{str(qname)}.weight")
 
 
 def encoder_recipe() -> dict:
