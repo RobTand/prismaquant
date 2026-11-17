@@ -493,7 +493,8 @@ def main(argv=None) -> int:
         "local_journal_written": written,
         **result,
     }
-    print("STAGE_B_HEAD_PROFILE " + json.dumps(report, sort_keys=True), flush=True)
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+    print("STAGE_B_HEAD_PROFILE " + DIRECT_ASCII_SPACED_LAX.text(report), flush=True)
     return 0
 
 
