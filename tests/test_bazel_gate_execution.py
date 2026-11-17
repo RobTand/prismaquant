@@ -798,7 +798,7 @@ def test_shard_refusal_names_fixed_phase_and_category_without_private_values(
                 raise urllib.error.URLError(reason) from None
             monkeypatch.setattr(urllib.request, 'urlopen', unavailable)
             return gate.fetch_artifact(uri)
-        if fault.startswith('local'):
+        if fault.startswith('local') and uri.startswith('file://'):
             return gate.fetch_artifact(uri)
         if fault == 'invalid_zip':
             return sentinel.encode()
@@ -867,6 +867,20 @@ def test_inventory_progress_does_not_change_successful_duplicate_or_mixed_source
     assert len(calls) == 2
 
 
+def test_inventory_reads_overlap_and_merge_in_source_order():
+    import threading
+    uris = [f'bytestream://remote.buildbuddy.io/own-output-{index}' for index in range(8)]
+    done = {uri: threading.Event() for uri in uris}
+
+    def fetch(uri):  # A read ends only after the next read ends, so serial reads time out.
+        index = uris.index(uri)
+        assert index == 7 or done[uris[index + 1]].wait(timeout=10)
+        done[uri].set()
+        return inventory_zip({'nodes': {uri: 'passed'}})
+
+    assert list(gate.inventory_evidence(events(*map(output_event, uris)), fetch)['nodes']) == uris
+
+
 def test_manifest_transport_refusal_keeps_manifest_phase(tmp_path, monkeypatch, capsys):
     upload = tmp_path / 'upload'
     sentinel = 'private-manifest-transport'
@@ -890,7 +904,7 @@ def test_manifest_transport_refusal_keeps_manifest_phase(tmp_path, monkeypatch, 
 def inventory_transport(monkeypatch):
     """Exercise real HTTP framing, connection reuse and DNS lookup boundaries."""
     import http.client
-    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from types import SimpleNamespace
     import threading
 
@@ -900,8 +914,10 @@ def inventory_transport(monkeypatch):
         uri = ('bytestream://remote.buildbuddy.io/instance/blobs/'
                + hashlib.sha256(raw).hexdigest() + '/' + str(len(raw)))
         payloads[uri] = raw
-    state = SimpleNamespace(payloads=payloads, requests=[], connections=0, dns=0,
-                            failures=0, error=None, corrupt=False, elapsed=0., sleeps=[])
+    state = SimpleNamespace(payloads=payloads, requests=[], connections=0, dns=0, fault_dns=0,
+                            failures=0, error=None, corrupt=False, elapsed={}, sleeps=[])
+    fault = list(payloads)[742]
+    current, lock = threading.local(), threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
@@ -916,17 +932,13 @@ def inventory_transport(monkeypatch):
                 raw = b'x' * len(raw)
             self.send_response(200)
             self.send_header('Content-Length', str(len(raw)))
-            # A server-initiated close forces a real reconnect at source 743.
-            if len(state.requests) == 742:
-                self.send_header('Connection', 'close')
-                self.close_connection = True
             self.end_headers()
             self.wfile.write(raw)
 
         def log_message(self, *_):
             pass
 
-    server = HTTPServer(('127.0.0.1', 0), Handler)
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -934,13 +946,15 @@ def inventory_transport(monkeypatch):
 
     def resolve(host, port, *args, **kwargs):
         if (host, port) == server.server_address:
-            state.dns += 1
-            if len(state.requests) == 742 and state.failures:
+            with lock:
+                state.dns += 1
+                state.fault_dns += current.uri == fault
+            if current.uri == fault and state.failures:
                 state.failures -= 1
                 if state.error == 'deadline':
-                    state.elapsed = 120.
+                    state.elapsed[threading.get_ident()] = 120.
                 elif state.error == 'short-budget':
-                    state.elapsed = 119.95
+                    state.elapsed[threading.get_ident()] = 119.95
                 if state.error == 'reset':
                     raise ConnectionResetError(errno.ECONNRESET, 'private-transport-sentinel')
                 code = (socket.EAI_NONAME if state.error == 'permanent' else
@@ -952,17 +966,25 @@ def inventory_transport(monkeypatch):
         def __init__(self, host, timeout=120, **_):
             assert host == 'app.buildbuddy.io'
             assert 0 < timeout <= 120
-            state.connections += 1
+            with lock:
+                state.connections += 1
             super().__init__(*server.server_address, timeout=timeout)
+
+        def request(self, method, url, body=None, **kwargs):
+            current.uri = json.loads(body)['uri']
+            if current.uri == fault:  # The faulted source always opens a new connection.
+                self.close()
+            super().request(method, url, body=body, **kwargs)
 
     def sleep(seconds):
         state.sleeps.append(seconds)
-        state.elapsed = 120. if state.error == 'oversleep' else state.elapsed + seconds
+        me = threading.get_ident()
+        state.elapsed[me] = 120. if state.error == 'oversleep' else state.elapsed.get(me, 0.) + seconds
 
     monkeypatch.setattr(socket, 'getaddrinfo', resolve)
     monkeypatch.setattr(http.client, 'HTTPSConnection', Connection)
     monkeypatch.setattr(gate, 'time', SimpleNamespace(
-        monotonic=lambda: state.elapsed, sleep=sleep), raising=False)
+        monotonic=lambda: state.elapsed.get(threading.get_ident(), 0.), sleep=sleep), raising=False)
     monkeypatch.setenv('BUILDBUDDY_API_KEY', 'private-transport-sentinel')
     try:
         yield state
@@ -990,7 +1012,7 @@ def test_inventory_reuses_one_connection_until_server_closes_it(inventory_transp
     found = gate.execute_shard(manifest, root=tmp_path, runner=native)
     assert len(found['nodes']) == 741
     assert len(state.requests) == 741
-    assert state.connections == state.dns == 1
+    assert 1 <= state.connections == state.dns <= 8
 
 
 @pytest.mark.parametrize('fault,failures,passes,attempts,eai', [
@@ -1038,9 +1060,9 @@ def test_inventory_late_dns_recovery_and_refusal_at_real_transport_boundary(
     assert 'bytestream://' not in captured.out + captured.err
     assert 'app.buildbuddy.io' not in captured.out + captured.err
     assert len(calls) == 1
-    assert state.dns == 1 + attempts
+    assert state.fault_dns == attempts
     assert len(state.sleeps) == (1 if fault == 'oversleep' else attempts - 1 if eai else 0)
-    assert state.elapsed <= 120
+    assert max(state.elapsed.values(), default=0.) <= 120
     if passes:
         receipt = json.loads((upload / 'gate-result.json').read_text())
         assert receipt['verdict'] == 'pass'
@@ -1050,7 +1072,8 @@ def test_inventory_late_dns_recovery_and_refusal_at_real_transport_boundary(
         assert captured.err == ''
     else:
         assert list(upload.iterdir()) == []
-        assert len(state.requests) == 742
+        assert len(state.requests) == len(set(state.requests)) >= 742
+        assert list(state.payloads)[742] not in state.requests
         category = 'network-dns' if eai else 'network-reset'
         detail = f'; eai={eai}; attempts={attempts}' if eai else ''
         assert captured.err == (

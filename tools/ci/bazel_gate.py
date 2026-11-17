@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import argparse
 import errno
@@ -18,6 +19,7 @@ from statistics import median
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from urllib.parse import unquote, urlsplit
 from urllib.error import HTTPError, URLError
@@ -293,39 +295,42 @@ def inventory_evidence(text, fetch):
                     sources.setdefault(uri, name)
     local = sum(uri.startswith('file://') for uri in sources)
     remote = sum(uri.startswith('bytestream://') for uri in sources)
-    for index, (uri, name) in enumerate(sources.items(), start=1):
-        try:
-            phase = ('inventory-local-read' if uri.startswith('file://') else
-                     'inventory-remote-fetch' if uri.startswith('bytestream://') else
-                     'inventory-fetch')
-            with evidence_phase(phase):
-                raw = fetch(uri)
-            with evidence_phase('inventory-parse'):
-                if name.endswith('inventory.json'):
-                    receipts = [json.loads(raw)]
-                else:
-                    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-                        receipts = [json.loads(archive.read(member)) for member in archive.namelist()
-                                    if Path(member).name == 'inventory.json']
-            with evidence_phase('inventory-validate'):
-                for receipt in receipts:
-                    found_nodes, found_warnings = receipt.get('nodes', {}), receipt.get('budget_warnings', [])
-                    if not isinstance(found_nodes, dict) or not isinstance(found_warnings, list):
-                        raise ValueError('invalid inventory structure')
-                    for node, status in found_nodes.items():
-                        if not isinstance(node, str) or status not in ('passed', 'skipped', 'failed'):
-                            raise ValueError('invalid inventory node')
-                        if nodes.get(node) != 'failed':
-                            nodes[node] = status
-                    for row in found_warnings:
-                        if (not isinstance(row, dict) or not isinstance(row.get('nodeid'), str)
-                                or any(type(row.get(key)) not in (int, float)
-                                       for key in ('seconds', 'budget_seconds'))):
-                            raise ValueError('invalid budget warning')
-                        warnings.append({key: row[key] for key in ('nodeid', 'seconds', 'budget_seconds')})
-        except ShardEvidenceError as error:
-            error.inventory_progress = (local, remote, index, len(sources))
-            raise
+    with ThreadPoolExecutor(8) as pool:  # Reads overlap; receipts merge in source order.
+        reads = {uri: pool.submit(fetch, uri) for uri in sources}
+        for index, (uri, name) in enumerate(sources.items(), start=1):
+            try:
+                phase = ('inventory-local-read' if uri.startswith('file://') else
+                         'inventory-remote-fetch' if uri.startswith('bytestream://') else
+                         'inventory-fetch')
+                with evidence_phase(phase):
+                    raw = reads.pop(uri).result()
+                with evidence_phase('inventory-parse'):
+                    if name.endswith('inventory.json'):
+                        receipts = [json.loads(raw)]
+                    else:
+                        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                            receipts = [json.loads(archive.read(member)) for member in archive.namelist()
+                                        if Path(member).name == 'inventory.json']
+                with evidence_phase('inventory-validate'):
+                    for receipt in receipts:
+                        found_nodes, found_warnings = receipt.get('nodes', {}), receipt.get('budget_warnings', [])
+                        if not isinstance(found_nodes, dict) or not isinstance(found_warnings, list):
+                            raise ValueError('invalid inventory structure')
+                        for node, status in found_nodes.items():
+                            if not isinstance(node, str) or status not in ('passed', 'skipped', 'failed'):
+                                raise ValueError('invalid inventory node')
+                            if nodes.get(node) != 'failed':
+                                nodes[node] = status
+                        for row in found_warnings:
+                            if (not isinstance(row, dict) or not isinstance(row.get('nodeid'), str)
+                                    or any(type(row.get(key)) not in (int, float)
+                                           for key in ('seconds', 'budget_seconds'))):
+                                raise ValueError('invalid budget warning')
+                            warnings.append({key: row[key] for key in ('nodeid', 'seconds', 'budget_seconds')})
+            except ShardEvidenceError as error:
+                error.inventory_progress = (local, remote, index, len(sources))
+                pool.shutdown(cancel_futures=True)
+                raise
     return {'nodes': nodes, 'budget_warnings': warnings}
 
 
@@ -431,21 +436,19 @@ def fetch_artifact(uri, limit=None):
 
 
 class InventoryFetcher:
-    """One inventory's fixed-host TLS connection; retry only immutable DNS reads."""
+    """One fixed-host TLS connection per thread; retry only immutable DNS reads."""
 
     def __init__(self):
-        self.connection = None
+        self.connections = {}  # By thread: one HTTP connection serves one read at a time.
+
+    connection = property(lambda self: self.connections.get(threading.get_ident()))
 
     def __enter__(self):
         return self
 
     def __exit__(self, *_):
-        self.close()
-
-    def close(self):
-        if self.connection is not None:
-            self.connection.close()
-            self.connection = None
+        while self.connections:
+            self.connections.popitem()[1].close()
 
     def remaining(self, deadline, sock=None):
         remaining = deadline - time.monotonic()
@@ -478,7 +481,7 @@ class InventoryFetcher:
             try:
                 remaining = self.remaining(deadline)
                 if self.connection is None:
-                    self.connection = http.client.HTTPSConnection(
+                    self.connections[threading.get_ident()] = http.client.HTTPSConnection(
                         'app.buildbuddy.io', timeout=remaining)
                 self.connection.request('POST', '/api/v1/GetFile', body=body,
                     headers={'x-buildbuddy-api-key': key, 'Content-Type': 'application/json'})
@@ -500,13 +503,13 @@ class InventoryFetcher:
                         raise TimeoutError('inventory fetch deadline exhausted')
                 raw = b''.join(chunks)
                 if want < size:  # The unread rest of the body makes this connection unusable.
-                    self.close()
+                    self.connections.pop(threading.get_ident()).close()
                     return raw[:want]
                 if len(raw) != size or bytes_sha256hex(raw) != digest:
                     raise GateError('inventory artifact digest or size mismatch')
                 return raw
             except socket.gaierror as error:
-                self.close()
+                self.connections.pop(threading.get_ident()).close()
                 backoff = 0.1 * attempt
                 if attempt < 3 and deadline - time.monotonic() > backoff:
                     time.sleep(backoff)
