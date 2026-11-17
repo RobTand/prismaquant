@@ -181,7 +181,7 @@ def validate_netdata_window(data, *, after, before):
             raise RuntimeError('required Netdata sample has malformed dimensions')
         stamp = row[0]
         if (type(stamp) not in (int, float) or not math.isfinite(stamp)
-                or not after <= stamp <= before):
+                or not math.floor(after) <= stamp <= math.ceil(before)):
             raise RuntimeError('required Netdata sample is outside its requested window')
         for index, value in enumerate(row[1:], 1):
             if value is None:
