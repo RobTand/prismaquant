@@ -28,6 +28,18 @@ def test_missing_metric_refuses():
         evaluate_criteria({}, [{"metric": "x", "op": "le", "threshold": 1}])
 
 
+def test_duplicate_quality_criterion_refuses_without_input_changes():
+    metrics = {"accuracy": 0.8}
+    criteria = [{"metric": "accuracy", "op": "ge", "threshold": 0.7},
+                {"metric": "accuracy", "op": "ge", "threshold": 0.9}]
+    metrics_before, criteria_before = copy.deepcopy(metrics), copy.deepcopy(criteria)
+    with pytest.raises(ValueError) as error:
+        evaluate_criteria(metrics, criteria)
+    assert str(error.value) == "duplicate criterion"
+    assert metrics == metrics_before
+    assert criteria == criteria_before
+
+
 def test_verifier_replays_gate_and_config_identity(tmp_path, monkeypatch):
     from test_g3_quality_replay import make_g3_replay_fixture
     config, result, _, _ = make_g3_replay_fixture(tmp_path)
