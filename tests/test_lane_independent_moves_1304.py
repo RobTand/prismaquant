@@ -115,6 +115,16 @@ def test_enforce_whole_artifact_budget_measures_every_regular_file(tmp_path):
         )
 
 
+def test_budget_measurement_refuses_missing_artifact_without_changes(tmp_path):
+    (tmp_path / "keep.bin").write_bytes(b"keep")
+    missing = tmp_path / "missing_export"
+    with pytest.raises(FileNotFoundError) as excinfo:
+        footprint.recursive_regular_file_bytes(missing)
+    assert str(excinfo.value) == f"export artifact does not exist: {missing}"
+    assert [item.name for item in tmp_path.iterdir()] == ["keep.bin"]
+    assert (tmp_path / "keep.bin").read_bytes() == b"keep"
+
+
 def test_the_helpers_have_one_owner():
     # The retired codebook lane's modules were archived in step 2 of #1304.
     for name in ("cb_imatrix", "nvfp4_cb_footprint"):
