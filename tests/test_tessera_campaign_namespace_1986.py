@@ -200,6 +200,17 @@ def test_symlink_escape_refusal(tmp_path, location):
     assert list(foreign.iterdir()) == []
 
 
+def test_namespace_path_refuses_regular_file_as_directory_without_changes(tmp_path):
+    scratch = tmp_path / "scratch"
+    scratch.write_bytes(b"owned file")
+    with pytest.raises(RuntimeError) as refusal:
+        namespace.namespace_path(str(scratch))
+    assert str(refusal.value) == f"scratch path is not a directory: {scratch}"
+    assert namespace.namespace_path(str(scratch), directory=False) == scratch
+    assert [item.name for item in tmp_path.iterdir()] == ["scratch"]
+    assert scratch.read_bytes() == b"owned file"
+
+
 def test_adapter_positive_and_source_refusal_before_docker(tmp_path, monkeypatch):
     row = prepared(tmp_path)[0]
     _publish_fixture([row])
