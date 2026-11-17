@@ -52,3 +52,15 @@ def test_zero_weight_unsampled_expert_is_valid():
 
 def test_sampled_only_probability_contract_stays_supported():
     validate_stack_sample(sample())
+
+
+def test_stack_draw_sizes_require_complete_census_counts():
+    from prismaquant.tessera_campaign_table import _stack_draw_sizes
+
+    values = {"0": 2, "1": 3, "2": 5}
+    assert _stack_draw_sizes({"sizes": {"source": "counts", "values": values}}, sample()) == {
+        "0": 2.0, "1": 3.0, "2": 5.0}
+    for record in ({}, {"sizes": {"source": "h_trace", "values": values}},
+                   {"sizes": {"source": "counts", "values": {"0": 2, "1": 3}}}):
+        with pytest.raises(StackSampleError, match="census counts|one value per expert"):
+            _stack_draw_sizes(record, sample())

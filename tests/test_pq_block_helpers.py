@@ -156,3 +156,13 @@ def test_concentration_tensor_and_member_digests(tmp_path, synthetic_parents):
     assert rendered.shape == (128, 32)
     assert stamp["container_sha256"] == tensor_sha256(tensor) == bytes_sha256hex(blob)
     assert stamp["member_sha256"] == bytes_sha256hex(member)
+
+
+def test_conditional_fit_prices_include_cross_block_residual():
+    from tools.pq_block_trial_math import conditional_fit_prices
+
+    source = torch.zeros((2, 2))
+    baseline = torch.ones((2, 2))
+    moment = torch.tensor([[2.0, 1.0], [1.0, 2.0]])
+    prices = conditional_fit_prices(source, baseline, [baseline, source], moment, 2, 1, 1)
+    np.testing.assert_array_equal(prices, [[0.0, -2.0]] * 4)

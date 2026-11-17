@@ -1103,3 +1103,15 @@ def test_current_contract_refuses_the_historical_glm_tp2_rows():
                               native_extensions=payload["native_extensions"])
     with pytest.raises(srp.ShapeRuntimeError, match="no pinned lane cell covers|not the row's launch"):
         _glm_table(table)
+
+
+def test_expected_shape_scope_file_requires_exact_fields(tmp_path):
+    path = tmp_path / "scope.json"
+    fields = vars(SCOPE)
+    path.write_text(json.dumps(fields))
+    assert srp._load_shape_table_scope(path) == SCOPE
+    for payload in ({**fields, "unexpected": 1},
+                    {name: value for name, value in fields.items() if name != "tensor_parallel"}, []):
+        path.write_text(json.dumps(payload))
+        with pytest.raises(RuntimePriceError, match="expected scope: expected exactly fields"):
+            srp._load_shape_table_scope(path)

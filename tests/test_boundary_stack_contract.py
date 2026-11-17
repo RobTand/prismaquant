@@ -279,3 +279,14 @@ def test_stack_contract_keeps_field_precedence_for_artifact_id():
     contract["roles"]["candidate"]["artifact_id"] = _Text("a" * 64)
     assert _refusal(bc.validate_stack_contract, contract) == (
         ValueError, "paired stack contract requires distinct treatment artifacts")
+
+
+def test_stack_binding_copies_nested_contract_and_manifest():
+    binding = _declared_pair()["candidate"]
+    declared = binding.pop("paired_stack")
+    proof = bc.bind_stack_contract(binding, declared["contract"], declared["manifest"], "candidate")
+    assert proof == declared
+    declared["contract"]["roles"]["candidate"]["resident_extensions"].append("changed.so")
+    declared["manifest"]["package_versions"]["vllm"] = "changed"
+    assert proof["contract"]["roles"]["candidate"]["resident_extensions"] == ["sampling.so", "trtllm_utils.so"]
+    assert proof["manifest"]["package_versions"] == {"vllm": "pinned"}

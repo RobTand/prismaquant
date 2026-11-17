@@ -131,3 +131,22 @@ def test_discover_units_groups_packed_experts_for_cooptimization():
     assert n_params["model.layers.0.mlp.experts"] == (
         2 * 128 * 64 + 2 * 64 * 64
     )
+
+
+def test_decision_pair_keys_canonicalize_formats_and_require_separator():
+    from prismaquant.decision_units import SCHEMA, parse_payload
+
+    pair = {"unit_a": "a", "unit_b": "b", "omega_ij": {"nvfp4__bf16": 0.25}}
+    payload = {"schema": SCHEMA, "blocks": {"block": {"pairs": [pair]}}}
+    blocks, singletons, pairs = parse_payload(payload)
+    assert blocks == {"block": []} and singletons == []
+    parsed, = pairs["block"]
+    assert (parsed.unit_a, parsed.unit_b, parsed.block_id) == ("a", "b", "block")
+    assert parsed.omega_ij == {("NVFP4", "BF16"): 0.25}
+    pair["omega_ij"] = {"NVFP4": 0.25}
+    try:
+        parse_payload(payload)
+    except ValueError as exc:
+        assert "invalid pair key" in str(exc)
+    else:
+        raise AssertionError("pair key without a separator was accepted")

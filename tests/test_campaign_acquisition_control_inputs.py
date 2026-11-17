@@ -122,3 +122,15 @@ def test_request_drift_during_cost_hash_cannot_seed_a_reusable_metadata_pair(
 def test_the_unused_acquisition_controls_function_stays_deleted():
     from prismaquant import tessera_acquisition_inputs as metadata
     assert not hasattr(metadata, "joint_campaign_acquisition_controls")
+
+
+def test_acquisition_comparison_ignores_only_raw_request_digest():
+    from prismaquant.tessera_acquisition_inputs import joint_campaign_acquisition_comparable_identity as compare
+
+    identity = {"request_sha256": "a" * 64, "request_control_sha256": "b" * 64, "cost_sha256": "c" * 64}
+    expected = compare(identity)
+    assert compare({**identity, "request_sha256": "d" * 64}) == expected
+    for field in ("request_control_sha256", "cost_sha256"):
+        assert compare({**identity, field: "e" * 64}) != expected
+    with pytest.raises(ValueError, match="authenticated acquisition control identity required"):
+        compare({"request_sha256": "a" * 64})

@@ -126,3 +126,24 @@ def test_lane_plugin_cannot_replace_a_base_slot_owner(monkeypatch):
         ("fixture", lambda: {"gold.kl": lambda *args, **kwargs: []}),))
     with pytest.raises(KeyError, match="gold.kl.*two"):
         ship_slot_registry()
+
+
+def test_weight_container_open_refuses_symlinks_and_directories(tmp_path):
+    from prismaquant.shipcard import _open_regular_nofollow
+
+    weight = tmp_path / "weight"
+    weight.write_bytes(b"known-weight")
+    (tmp_path / "alias").symlink_to(weight)
+    (tmp_path / "directory").mkdir()
+    directory_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for name, message in (("alias", "cannot safely open weight container"),
+                              ("directory", "weight container is not a regular file")):
+            with pytest.raises(ValueError, match=message):
+                _open_regular_nofollow(directory_fd, name)
+        fd, info = _open_regular_nofollow(directory_fd, "weight")
+        with os.fdopen(fd, "rb") as stream:
+            assert stream.read() == b"known-weight"
+        assert info.st_ino == weight.stat().st_ino
+    finally:
+        os.close(directory_fd)

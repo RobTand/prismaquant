@@ -5032,3 +5032,13 @@ class TestCholeskyFallbackKeepsJointGlobal(unittest.TestCase):
                 W, X, group_size=16, joint_scale_opt=True, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
 
         torch.testing.assert_close(got, expected)
+
+
+def test_export_vector_chunks_obey_memory_and_explicit_caps(monkeypatch):
+    monkeypatch.setattr(enc, "_host_mem_available_bytes", lambda: 200 << 20)
+    device = torch.device("cpu")
+    for value, expected in (("auto", 2), ("1", 1), ("invalid", 2), ("0", 1)):
+        monkeypatch.setenv("PQ_EXPORT_VECTOR_CHUNK", value)
+        assert enc._export_vector_chunk_len((512, 512), 50, device) == expected
+    monkeypatch.setenv("PQ_EXPORT_VECTOR_CHUNK", "auto")
+    assert enc._export_vector_chunk_len((512, 512), 1, device) == 1
