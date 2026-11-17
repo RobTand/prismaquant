@@ -47,3 +47,15 @@ def test_strict_indent2_recipe_golden():
     assert bytes_sha256hex(raw) == hashlib.sha256(raw).hexdigest()
     with pytest.raises(ValueError):
         indent2_json_file_bytes({"nan": float("nan")})
+
+
+def test_seed_loader_refuses_invalid_through_boundary_without_writes(tmp_path):
+    binding = {"path": "x", "sha256": "a" * 64}
+    for through in (-1, True, "0"):
+        raw = json.dumps(dict(schema=seed.SEED_SPEC_SCHEMA, checkpoint=binding, capsule=binding,
+                              through=through, implementation_compatibility=None, compare=None)).encode()
+        (tmp_path / "seed.json").write_bytes(raw)
+        with pytest.raises(seed.ChainSeedRefused) as info:
+            seed.load_seed_spec(tmp_path / "seed.json", hashlib.sha256(raw).hexdigest())
+        assert str(info.value) == "the seed's through boundary is a nonnegative integer"
+        assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {"seed.json": raw}
