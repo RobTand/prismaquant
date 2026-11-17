@@ -959,9 +959,10 @@ As of: 2026-11-16, fail-fast PR and queue gates, PQ #3777. Source: `tools/ci/baz
 `tools/ci/remote_gate.py`. A PR or queue shard stops at its first failed test, and the first red shard
 ends the gate and cancels its siblings; only tests that ran and failed are named. Records keep going.
 
-As of: 2026-11-16, post-merge record schedule, PQ #3763. Source: `.github/workflows/ci.yml`.
-The full no-cache Bazel record (amd64 and arm64) runs every 6 hours when main's head commit is younger
-than 7 hours, and on every manual dispatch. A push to main runs the hosted amd64 and arm64 lanes, each push in its own concurrency group;
+As of: 2026-11-17, post-merge record trigger, PQ #3874. Source: `.github/workflows/ci.yml`, `docs/bazel.md`.
+The full no-cache Bazel record (amd64 and arm64) runs only on `workflow_dispatch`. A Fleet-owned user timer on
+dl380g10 starts it 3 minutes after 00:17, 06:17, 12:17 and 18:17 UTC when main moved since the last finished record;
+the repository has no GitHub schedule (its slots came hours late or not at all). A push to main runs the hosted amd64 and arm64 lanes, each push in its own concurrency group;
 records run one at a time. The import surface runs only on pull requests and drafts (PQ #3791).
 
 As of: 2026-11-16, FIFO merge queue in batches of 3, PQ #3773 (after #3642).

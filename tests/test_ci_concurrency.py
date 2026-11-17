@@ -15,8 +15,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
 
 
@@ -54,10 +52,9 @@ def test_a_new_pr_push_cancels_the_superseded_run_of_that_pr():
     assert other["group"] != first["group"]
 
 
-@pytest.mark.parametrize("event", ["schedule", "workflow_dispatch"])
-def test_records_queue_in_one_group_and_a_running_one_is_never_cancelled(event):
-    first = _run(event, "refs/heads/main", "1", "a" * 40)
-    second = _run(event, "refs/heads/main", "2", "b" * 40)
+def test_records_queue_in_one_group_and_a_running_one_is_never_cancelled():
+    first = _run("workflow_dispatch", "refs/heads/main", "1", "a" * 40)
+    second = _run("workflow_dispatch", "refs/heads/main", "2", "b" * 40)
     assert first["cancel"] is False and second["cancel"] is False
     assert first["group"] == second["group"] != _run("push", "refs/heads/main", "3", "b" * 40)["group"]
 
