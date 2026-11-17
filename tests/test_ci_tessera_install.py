@@ -124,9 +124,9 @@ def test_ci_installs_the_authoritative_tessera_pin_without_private_credentials(f
     commands = [(index, line.strip()) for index, step in enumerate(steps)
                 for line in step.get("run", "").splitlines()]
     install = next(position for position, (_, command) in enumerate(commands)
-                   if command == "python -m pip install --no-deps .ci/tessera")
+                   if command == "uv pip install --system --no-deps .ci/tessera")
     prismaquant = next(position for position, (_, command) in enumerate(commands)
-                       if command.startswith("python -m pip install ") and "-e " in command)
+                       if command.startswith("uv pip install --system ") and "-e " in command)
     assert resolve_index < checkout_index < commands[install][0]
     assert install < prismaquant
 
