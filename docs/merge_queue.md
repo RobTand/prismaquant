@@ -16,6 +16,8 @@ as admitted Flux jobs; cite their job IDs and results in the PR body.
    Put the reference at the start of its own line.
 3. Run `tools/ci/static_checks.sh --merge-main` (in a Flux job, with the repo's Python 3.12 environment and `uv` on
    `PATH`). It runs the gate's checks that execute no test on your head merged with the current `main`.
+   One of them, `tools/ci/test_growth.py`, refuses a PR that adds more than 250 net lines to `tests/*.py`
+   unless one of its commits has a `Test-lines: <reason>` trailer. In a queue draft it counts each PR alone.
 4. Wait for `pr-gate` to pass.
 
 Classic branch protection requires a pull request but no status checks.

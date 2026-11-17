@@ -16,9 +16,10 @@ base="${GATE_BASE:?GATE_BASE names the base commit}"
 [ -z "${UV:-}" ] || PATH="$(dirname "$UV"):$PATH"  # a sandbox can name uv without putting it on PATH
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-$HOME/tmp}}/static-checks-XXXXXX")"
 status=0 jobs=()
-# The four checks overlap only with more than one core; on one core (a TL3b box slot) they run in turn.
+# The checks overlap only with more than one core; on one core (a TL3b box slot) they run in turn.
 check() { if [ "$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc)" -gt 1 ]; then "$@" & jobs+=($!); else "$@" || status=1; fi; }
 check python tools/ci/bazel_generated.py
+check python tools/ci/test_growth.py "$base"
 check python tools/ci/gate_select.py --base "$base" --head "$(git rev-parse HEAD)" --mode full --output "$work/plan.json" > /dev/null
 check python tools/ci/graph_impact_pq.py --write base --snapshots "$work"
 check python tools/ci/graph_impact_pq.py --write head --snapshots "$work"

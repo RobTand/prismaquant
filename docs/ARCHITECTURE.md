@@ -927,6 +927,14 @@ explicit traffic wire bytes. DEFAULT-OFF, UNQUALIFIED FEATURE HOLD.
 CPU verification covers declaration uptake only; no pipeline default,
 format, serving lane or ship gate changes.
 
+As of: 2026-11-17, gate test-growth check, PQ #3944.
+Source: `tools/ci/test_growth.py` and `tools/ci/static_checks.sh`, based on main
+`f1c698b5`. The gate's Graph impact job and the pre-queue command refuse a PR that
+adds more than 250 net lines to `tests/*.py` unless one of its commits has a
+`Test-lines: <reason>` trailer; a queue draft counts each "Merge of #N" alone.
+250 is the PQ+T lead's number: 17 of 250 merges of 30 days were above it and held
+77 % of the net test growth.
+
 As of: 2026-11-17, gate direct selection, PQ #3940.
 Source: `tools/ci/bazel_selection.py`, based on main `a8cf69c5`. A modified-only PR
 diff selects, for each modified file, the rules that list it (through
