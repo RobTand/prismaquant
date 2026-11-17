@@ -71,6 +71,25 @@ def test_exhausted_or_unknown_auto_budget_never_starts_file_reads(tmp_path, monk
     assert reads == []
 
 
+def test_source_prefetch_refuses_invalid_weight_map_before_reads(tmp_path, monkeypatch):
+    from prismaquant import source_prefetch
+
+    reads = []
+    monkeypatch.setattr(source_prefetch, "_read_file_to_page_cache",
+                        lambda path, **kwargs: reads.append(path) or 0)
+    index = tmp_path / "model.safetensors.index.json"
+    for weight_map in (None, [], "a.safetensors"):
+        index.write_text(json.dumps({"weight_map": weight_map}))
+        index_bytes = index.read_bytes()
+        paths_before = sorted(tmp_path.rglob("*"))
+        with pytest.raises(ValueError) as excinfo:
+            prefetch_safetensors_checkpoint(tmp_path, mode="require", progress=False)
+        assert str(excinfo.value) == f"invalid safetensors index: {index}"
+        assert reads == []
+        assert index.read_bytes() == index_bytes
+        assert sorted(tmp_path.rglob("*")) == paths_before
+
+
 def test_read_ahead_keeps_about_eight_files_ahead_and_starts_each_once():
     from prismaquant import source_prefetch
 
