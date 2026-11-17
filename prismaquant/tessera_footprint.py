@@ -178,11 +178,6 @@ def _max_ratio_bytes() -> int:
     return len(_CanonicalWriter().ratio(Fraction((top - 1) // 2, top)).bytes)
 
 
-def _fused_member_bytes(member_name: str) -> int:
-    """TSRFUSE1 bytes one member costs beside its blob: row plus UTF-8 name."""
-    return _FUSED_MEMBER.size + len(member_name.encode("utf-8"))
-
-
 def _container_side_bytes(
     *, spec, wire, rung, rows, columns, geometry, rates, planes, record,
     plane, body, span, window_bits, unit_id,
