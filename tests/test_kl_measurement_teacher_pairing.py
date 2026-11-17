@@ -200,3 +200,19 @@ def test_measure_assignment_kl_last_token_scope_has_no_nll(tmp_path, monkeypatch
     assert len(per_seq) == 1 and mean == pytest.approx(per_seq[0])
     # No next-token label exists for the only emitted position.
     assert stats["nll_per_sample"] is None
+
+
+def test_static_graph_inputs_clone_nested_tensors_without_gradients():
+    from prismaquant.kl_measurement import _clone_static_tree
+
+    original = torch.tensor([1.0, 2.0], requires_grad=True)
+    copied = _clone_static_tree({"args": (original, [original]), "mode": "fixed"})
+    assert isinstance(copied["args"], tuple)
+    assert isinstance(copied["args"][1], list)
+    assert copied["mode"] == "fixed"
+    first, second = copied["args"][0], copied["args"][1][0]
+    assert not first.requires_grad and not second.requires_grad
+    assert len({original.data_ptr(), first.data_ptr(), second.data_ptr()}) == 3
+    first.add_(10)
+    assert original.tolist() == second.tolist() == [1.0, 2.0]
+    assert first.tolist() == [11.0, 12.0]
