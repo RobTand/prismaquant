@@ -167,6 +167,19 @@ def test_plan_refuses_different_calibration(selection, monkeypatch):
         _plan(selection, monkeypatch)
 
 
+def test_plan_refuses_exportable_request_before_workspace_creation(selection):
+    s = selection
+    request = json.loads(s.request.read_text())
+    request['status'] = 'exportable'
+    s.request.write_text(json.dumps(request))
+    paths = (s.request, s.cost_path, s.census, s.spec)
+    before = [p.read_bytes() for p in paths]
+    with pytest.raises(RuntimeError, match=r'^not a non-exportable selected-wire request$'):
+        tm.plan(s.request, s.census, s.workspace, s.spec)
+    assert [p.read_bytes() for p in paths] == before
+    assert not s.workspace.exists() and not s.output.exists()
+
+
 class ReceiptAPI:
     def encoder_source_sha256(self):
         return 'producer-source'
