@@ -98,10 +98,12 @@ and git materialization outside the shared core. Its bitsets project that
 existing graph onto source files; they do not invent narrower import rules.
 The bridge prints the shortest path through conftests to the farthest hub.
 
-The head's `scc_max` must not exceed the live merge base or batch base value, or the
-absolute baseline ceiling. The baseline's `analyzer_sha256` must match `build_files.py`.
-A PR that changes the baseline, `build_files.py` or a graph_impact module also records
-`scc_max` and `test_to_test_count` no higher than its base, measured by its analyzer.
+The head's live `scc_max` must not exceed the live merge base or batch base value. The
+baseline does not record `scc_max`: a recorded figure went stale with each cycle cut (#4147).
+A person reads the cycle size in the check's output on each gate ("SCC max X → Y").
+The baseline's `analyzer_sha256` must match `build_files.py`. A PR that changes the baseline,
+`build_files.py` or a graph_impact module also records `test_to_test_count` no higher than
+its base, measured by its analyzer.
 Explicit baseline writes record gains and refuse structural losses. New-edge checks compare the aligned
 base graph with the head graph, without stored edge lists. New source files
 inherit a package when their existing-test consumers fit a peer's base consumers.

@@ -23,6 +23,16 @@ def test_backend_refuses_missing_fields(field):
         validate_config(c)
 
 
+def test_task_config_refuses_non_boolean_remote_code_permission():
+    for value in ["false", "true", 0, 1, None]:
+        payload = config()
+        payload["backend"]["trust_remote_code"] = value
+        before = repr(payload)
+        with pytest.raises(ValueError, match="^trust_remote_code must be explicit Boolean$"):
+            validate_config(payload)
+        assert repr(payload) == before
+
+
 @pytest.mark.parametrize("field", ["limit", "num_fewshot", "torch_seed", "fewshot_seed"])
 def test_sample_policy_refuses_missing_fields(field):
     c = config()

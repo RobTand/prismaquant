@@ -822,3 +822,12 @@ def test_the_real_fixtures_qualify_only_when_every_module_map_matches():
     assert refused["status"] == gate.REFUSED
     assert refused["exact_module_qualified"] is False
     assert refused["granularity"] == gate.EXACT_GRANULARITY
+
+
+def test_trace_header_refuses_zero_world_size_without_input_changes():
+    trace = {**_traces()[0][1], "rank": 0, "world_size": 0}
+    before = copy.deepcopy(trace)
+    message = r"^rank0: header world_size must be a positive integer$"
+    with pytest.raises(gate.TesseraRouteTraceError, match=message):
+        gate.parse_trace_header(trace, where="rank0")
+    assert trace == before

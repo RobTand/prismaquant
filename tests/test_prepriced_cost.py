@@ -157,6 +157,20 @@ def test_model_reference_missing_or_conflicting_refuses(tmp_path, condition, bf1
         _validate(bf16_source, _write(tmp_path, payload))
 
 
+def test_prepriced_input_refuses_non_sequence_shard_metadata(tmp_path, bf16_source):
+    for shards in ({"model": bf16_source}, "invalid", 1):
+        payload = _payload(bf16_source)
+        payload["meta"]["shards"] = shards
+        path = _write(tmp_path, payload)
+        before = path.read_bytes()
+        with pytest.raises(ValueError) as refused:
+            _validate(bf16_source, path)
+        assert str(refused.value) == (
+            f"prepriced cost input {path.resolve()}: "
+            "meta.shards: model metadata must be a sequence")
+        assert path.read_bytes() == before
+
+
 def test_format_report_uses_actual_rows_without_fabricating_missing_roster(tmp_path, bf16_source):
     payload = _payload(bf16_source)
     payload.pop("formats")

@@ -312,3 +312,24 @@ def test_checkpoint_stream_close_releases_charges_before_owned_inputs_close(tmp_
         assert held == [0] and 0 < peak[0] <= 192
         assert resolver._windows == 0
         resolver.close()
+
+
+def test_owned_unlink_retains_a_replacement_file(tmp_path):
+    from prismaquant.staged_manifest import ManifestRefused, signature, unlink_owned
+
+    root = tmp_path.resolve()
+    target = root / 'owned.bin'
+    target.write_bytes(b'owned bytes')
+    old_signature = signature(target.stat())
+    replacement = root / 'replacement.bin'
+    replacement.write_bytes(b'replacement bytes')
+    replacement.replace(target)
+    replacement_signature = signature(target.stat())
+
+    with pytest.raises(ManifestRefused) as refused:
+        unlink_owned(target, old_signature)
+
+    assert str(refused.value) == 'owned unlink file identity changed'
+    assert target.read_bytes() == b'replacement bytes'
+    assert signature(target.stat()) == replacement_signature
+    assert [path.name for path in root.iterdir()] == ['owned.bin']

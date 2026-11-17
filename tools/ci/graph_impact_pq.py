@@ -123,7 +123,9 @@ def load_snapshot(root, *, files=None, population=None, source_roots=SOURCE_ROOT
 
 
 def numeric_baseline(value):
-    return {key: item for key, item in value.items() if key != 'edge_groups'}
+    """The recorded limits. scc_max is compared live, head against base only: a recorded figure goes stale with each cut."""
+    return {key: {k: v for k, v in item.items() if k != 'scc_max'} if key in ('figures', 'tolerances') else item
+            for key, item in value.items() if key != 'edge_groups'}
 
 
 def record(live, previous=None):
@@ -157,8 +159,7 @@ def check(before, after, baseline_path, allowlist_path, *, changed_tests=(), wri
         count = len(core.test_to_test_edges(before))
         if kept.get('test_to_test_strict_by') != previous.get('test_to_test_strict_by'):
             errors.append('baseline test_to_test_strict_by may not change')
-        previous = {**previous, 'test_to_test_count': min(count, previous['test_to_test_count']),
-                    'figures': {**previous['figures'], 'scc_max': min(before['scc_max'], previous['figures']['scc_max'])}}
+        previous = {**previous, 'test_to_test_count': min(count, previous['test_to_test_count'])}
     errors += core.baseline_errors(kept, previous)
     errors += core.allowlist_errors(allowlist, base_allowlist if base_allowlist is not None else allowlist)
     # Supply live edge history to the frozen core; a write must leave a record the head meets.

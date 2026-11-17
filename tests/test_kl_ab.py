@@ -382,3 +382,16 @@ def test_cli_metric_autoselect_and_exit_codes(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "metric: ppl" in out
     assert "CROSS-STACK RANGE" in out
+
+
+def test_comparison_cli_refuses_non_object_results_without_a_report(tmp_path, capsys):
+    first, second = tmp_path / "a.json", tmp_path / "b.json"
+    for value in ([], None, "text"):
+        first.write_text(json.dumps(value))
+        second.write_text(json.dumps({"kl_mean": 0.1}))
+        before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+        with pytest.raises(SystemExit) as exc:
+            kl_ab_cli([str(first), str(second)])
+        assert exc.value.code == f"{first}: not a result object"
+        assert capsys.readouterr().out == ""
+        assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before

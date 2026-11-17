@@ -189,3 +189,12 @@ def test_global_probe_second_moment_matches_production_kl_hessian(
            'orthogonal_draws': len(matrix),
            'max_abs_second_moment_minus_kl_hessian': float((second_moment - hessian).abs().max()),
            'wrong_global_normalizer_refused': True})
+
+
+def test_causal_probe_refuses_a_single_token_without_changing_logits():
+    logits = torch.tensor([[[1.0, 2.0, 3.0]]], requires_grad=True)
+    before = logits.detach().clone()
+    with pytest.raises(ValueError, match="^causal KL/Fisher requires sequence length >= 2$"):
+        fisher_probe_scalar(logits, seed=7, token_scope="causal")
+    assert torch.equal(logits.detach(), before)
+    assert logits.grad is None

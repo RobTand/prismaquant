@@ -197,3 +197,11 @@ def test_lane_declares_existing_uniform_producer_and_fill_path():
     assert "fill-control" in gate.runner
     assert "--max-relative-slack" in gate.runner
     assert " && " in gate.runner  # Never fill from a stale report after producer failure.
+
+
+def test_release_ingest_refuses_file_records_path_without_writes(tmp_path):
+    _, card, _, window = _inputs(tmp_path)
+    before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match=r"^records_dir must be a directory$"):
+        ingest.ingest_receipts(card, records_dir=window, apply=True)
+    assert {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
