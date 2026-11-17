@@ -659,36 +659,6 @@ def read_observation(value: object, *, manifest_binding: dict, record_dir: Path)
     return expected
 
 
-def cancel_phase(manifest_binding: dict, *, phase: str, record_dir: Path) -> dict:
-    """Cancel only authenticated acknowledged children; never parents or discovered work."""
-    records = _phase_records(manifest_binding, phase, record_dir)
-    errors = []
-    try:
-        records = _authenticate_graph(manifest_binding, phase, record_dir)
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-        result = collect_phase(manifest_binding, phase=phase, record_dir=record_dir, wait=False)
-        result['errors'].append(f'cancel authority: {type(exc).__name__}: {str(exc)[:512]}')
-        if result['state'] == 'complete':
-            result['state'] = 'unknown'
-        return result
-    for index, child in enumerate(records['submission']['children']):
-        try:
-            saved = flux_jobs.load_submission(Path(child['record_dir']))
-            _authenticate_child(records, index)
-            flux_jobs.verify_native_launch(saved, max_evidence_bytes=16 << 20,
-                                          **_expected_child(records, index))
-            outcome = flux_jobs.cancel_job(saved)
-            if outcome.query_error:
-                errors.append(f"cancel {child['child_id']}: {outcome.query_error[:512]}")
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-            errors.append(f"cancel {child['child_id']}: {type(exc).__name__}: {str(exc)[:512]}")
-    result = collect_phase(manifest_binding, phase=phase, record_dir=record_dir, wait=not errors)
-    result['errors'].extend(errors)
-    if errors and result['state'] == 'complete':
-        result['state'] = 'unknown'
-    return result
-
-
 def publish_task_results(envelope_binding: dict, *, results: list[dict],
                          dependencies: tuple[str, ...] = ()) -> dict:
     """Publish actual admitted task bytes; selection still requires terminal success."""

@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256  # noqa: E402
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX  # noqa: E402
 from prismaquant.qnames import DOTTED_LAYER_QNAME  # noqa: E402
 
 
@@ -192,13 +193,13 @@ def main(argv=None) -> int:
                 for path in verdict.get("differed_paths", {}).get(name, [])[:8]:
                     line += f"\n      {name}: {path}"
         print(line)
-    record = {"schema": "prismaquant.joint_layer_gate_comparison.v1",
-              "single_run": str(args.single_run),
-              "quantum": str(args.quantum),
-              "all_match": bool(all_match),
-              "layers": verdicts}
     if args.json is not None:
-        args.json.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n")
+        args.json.write_text(DIRECT_ASCII_INDENT2_LAX.text(
+            {"schema": "prismaquant.joint_layer_gate_comparison.v1",
+             "single_run": str(args.single_run),
+             "quantum": str(args.quantum),
+             "all_match": bool(all_match),
+             "layers": verdicts}) + "\n")
     return 0 if all_match else 1
 
 

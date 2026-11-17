@@ -213,3 +213,20 @@ def test_calibration_provenance_hashes_are_per_repeat():
     # The combined digest is a different construction from the element hashes,
     # which is why the disjointness check intersects the ELEMENTS.
     assert prov["calib_hash"] not in prov["calib_repeat_hashes"]
+
+
+def test_temporary_validation_environment_restores_after_failure(monkeypatch):
+    import os
+    from prismaquant.validate_assignments_kl import _temporary_env
+
+    name = "PRISMAQUANT_TEST_TEMPORARY_ENV"
+    for previous in (None, "original"):
+        if previous is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, previous)
+        with pytest.raises(RuntimeError, match="validation failed"):
+            with _temporary_env(name, "temporary"):
+                assert os.environ[name] == "temporary"
+                raise RuntimeError("validation failed")
+        assert os.environ.get(name) == previous
