@@ -49,12 +49,12 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from prismaquant import format_registry as fr
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
 from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
 from prismaquant.allocator_candidates import (
     _scan_source_dtype_manifest,
@@ -448,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    out.write_text(DIRECT_ASCII_INDENT2_LAX.text(payload) + "\n")
 
     counts: dict[str, int] = {}
     for value in result.assignment.values():
@@ -472,7 +472,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[uniform] layer_config -> {out}")
 
     if args.report:
-        report = {
+        rp = Path(args.report)
+        rp.parent.mkdir(parents=True, exist_ok=True)
+        rp.write_text(DIRECT_ASCII_INDENT2_LAX.text({
             "meta": meta,
             "unit_count": result.unit_count,
             "assigned": len(result.assignment),
@@ -480,11 +482,7 @@ def main(argv: list[str] | None = None) -> int:
             "params_by_format": result.params_by_format,
             "achieved_bits": achieved,
             "demoted_units": list(result.demoted_units),
-            "excluded": result.excluded,
-        }
-        rp = Path(args.report)
-        rp.parent.mkdir(parents=True, exist_ok=True)
-        rp.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+            "excluded": result.excluded}) + "\n")
         print(f"[uniform] report -> {rp}")
     return 0
 
