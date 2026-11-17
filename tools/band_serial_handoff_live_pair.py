@@ -439,8 +439,7 @@ def main(argv=None) -> int:
         print(DIRECT_ASCII_SPACED_LAX.text(prepare(args.root, args.tier)))
         return 0
     if args.command == "derive":
-        print(json.dumps(derive(args.root, args.handoff, args.handoff_sha256),
-                         sort_keys=True))
+        print(DIRECT_ASCII_SPACED_LAX.text(derive(args.root, args.handoff, args.handoff_sha256)))
         return 0
     if args.command == "producer":
         return producer_role(args.root, args.data_manifest_sha256)
