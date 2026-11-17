@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import struct
 
 import pytest
@@ -372,3 +373,21 @@ def test_malformed_current_config_cannot_hide_behind_valid_legacy(tmp_path, wrap
     (root / "config.json").write_text(json.dumps(config))
     with pytest.raises(ValueError, match="object"):
         check_artifact_completeness(root)
+
+
+def test_completeness_refuses_non_object_legacy_decoder_contract(tmp_path):
+    root = tmp_path / "artifact"
+    _write_artifact(root, targets=[], tensors=[])
+    message = "artifact quant_config.json must contain an object"
+    for value in ([], None, "fp8"):
+        (root / "quant_config.json").write_text(json.dumps(value))
+        before = {
+            path.name: path.read_bytes() for path in sorted(root.iterdir())
+        }
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+            check_artifact_completeness(root)
+        after = {
+            path.name: path.read_bytes() for path in sorted(root.iterdir())
+        }
+        assert list(after) == list(before)
+        assert after == before
