@@ -37,7 +37,7 @@ check to the batch draft, so keep required status checks out of classic protecti
 
 ## What happens to a PR
 
-Mergify checks up to 3 PRs at a time, in `queue` label order. There are no priority lanes.
+Mergify checks up to 8 PRs at a time, in `queue` label order. There are no priority lanes.
 For each batch, Mergify opens a temporary draft on a `mergify/merge-queue/` branch.
 The draft contains the newest `main` and those PRs. Its `gate` must pass before merge.
 An external merge resets the check. Original PR heads stay unchanged.

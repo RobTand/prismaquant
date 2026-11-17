@@ -40,7 +40,7 @@ queue_rules:
     merge_conditions:
       - check-success = gate
     merge_method: merge
-    batch_size: 3
+    batch_size: 8
     max_checks_retries: 0
     checks_timeout: 90 minutes
 
