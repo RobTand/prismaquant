@@ -331,3 +331,14 @@ def test_every_registered_name_resolves_through_an_upper_cased_spelling():
     # naming the registry rather than resolving to something arbitrary.
     with pytest.raises(KeyError):
         fr.get_format("NOT_A_REGISTERED_FORMAT_pq218")
+
+
+def test_producer_format_list_filters_eligibility_and_family(monkeypatch):
+    specs = [fr.FormatSpec(name, bits, 0, 0, "fp32", "int4", family=family,
+                           producer_eligible=eligible)
+             for name, bits, family, eligible in (("high", 8, "a", True), ("retired", 2, "a", False),
+                                                  ("other", 3, "b", True), ("low", 4, "a", True))]
+    monkeypatch.setattr(fr, "REGISTRY", {spec.name: spec for spec in specs})
+    assert [spec.name for spec in fr.list_producer_formats()] == ["other", "low", "high"]
+    assert [spec.name for spec in fr.list_producer_formats("a")] == ["low", "high"]
+    assert fr.list_producer_formats("missing") == []
