@@ -1223,3 +1223,18 @@ def test_paused_returns_only_after_the_worker_drops_the_decoded_value(tmp_path):
     finally:
         resume.set()
         stream.close()
+
+
+def test_copy_digest_refusal_removes_only_its_temporary_file(tmp_path):
+    source, retained = tmp_path / "source", tmp_path / "retained"
+    source.write_bytes(b"source bytes")
+    retained.write_bytes(b"retained bytes")
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    with pytest.raises(RuntimeError) as refused:
+        io_engine.publish_copy(
+            source, tmp_path / "destination", length=len(b"source bytes"),
+            sha256=hashlib.sha256(b"other bytes").hexdigest(),
+            source_identity=io_engine._stat_signature(source.stat()),
+            destination_directory_identity=(tmp_path.stat().st_dev, tmp_path.stat().st_ino))
+    assert str(refused.value) == "copy source bytes changed"
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
