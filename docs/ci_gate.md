@@ -45,11 +45,10 @@ swap the architecture assigned to every shard.
 
 The runners are GitHub-hosted `ubuntu-24.04` and `ubuntu-24.04-arm`. CI uses no
 fleet admission or fleet runner. Python 3.12, CPU torch, the resolved Tessera
-commit, and `pip install -c .github/ci-constraints.txt -e '.[test]'`
+commit, and `uv pip install -c .github/ci-constraints.txt -e '.[test]'`
 preserve the existing CPU installation. The retired execution system's client is
 no longer a dependency: no dependency group installs it and tests that drove it were
 ported to the native stack or deleted.
-Pip caches include dependency declarations, constraints, and the Tessera pin.
 Native libraries get one thread each. Pytest workers are bounded by inherited
 CPU affinity and two GiB per worker after reserving one GiB for the runner. Work
 stealing shares long files across those workers, as in the post-merge suite.
