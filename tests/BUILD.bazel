@@ -16081,6 +16081,7 @@ pq_py_library(
     ],
     deps = [
         "//:tools/build_diverse_calibration",
+        "@pq_pip//pytest",
     ],
 )
 
