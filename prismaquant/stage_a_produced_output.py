@@ -55,10 +55,6 @@ class BoundaryProducedPublicationFailed(RuntimeError):
     pass
 
 
-class BoundaryMaterializationIncomplete(RuntimeError):
-    pass
-
-
 def require_produced_fields(value, keys, label):
     if not isinstance(value, dict) or set(value) != set(keys):
         raise BoundaryProducedBindingError(f'{label}: exact fields required')
