@@ -830,13 +830,6 @@ def register_budget_evictor(evictor: object) -> None:
         pass
 
 
-def unregister_budget_evictor(evictor: object) -> None:
-    try:
-        _BUDGET_EVICTORS.discard(evictor)
-    except TypeError:
-        pass
-
-
 def model_device(model) -> torch.device:
     for p in model.parameters():
         if not p.is_meta:
