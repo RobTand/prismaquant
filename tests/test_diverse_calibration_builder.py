@@ -36,6 +36,18 @@ def test_quota_counts_sum_to_requested_mix():
     assert sum(mod.quota_counts(17).values()) == 17
 
 
+def test_calibration_mix_refuses_fewer_than_five_rows():
+    import pytest
+
+    mod = _load_builder_module()
+
+    for rows in (-1, 0, 4):
+        with pytest.raises(ValueError) as excinfo:
+            mod.quota_counts(rows)
+        assert str(excinfo.value) == "total_rows must be at least 5"
+    assert mod.quota_counts(5) == {"prose": 2, "code": 1, "math": 1, "multilingual": 1}
+
+
 def test_pack_token_windows_emits_exact_count_and_metadata():
     mod = _load_builder_module()
     tokenizer = _FakeTokenizer()
