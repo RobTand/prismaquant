@@ -102,6 +102,23 @@ def test_fresh_finite_netdata_is_a_real_positive(tmp_path, partial_null, sample_
     assert (tmp_path/'netdata-sparklina.jsonl').read_text()
 
 
+def test_netdata_whole_second_samples_fit_a_fractional_window():
+    data={'labels':['time','power'], 'data':[[s,1.0] for s in range(100,112)]}
+    try:
+        validate_netdata_window(data, after=100.4, before=110.6)
+        refusal=None
+    except RuntimeError as error:
+        refusal=str(error)
+    assert refusal is None, refusal
+
+
+@pytest.mark.parametrize('stamp', [99, 112])
+def test_netdata_sample_beyond_the_whole_second_window_refuses(stamp):
+    data={'labels':['time','power'], 'data':[[stamp,1.0]]}
+    with pytest.raises(RuntimeError, match='outside its requested window'):
+        validate_netdata_window(data, after=100.4, before=110.6)
+
+
 @pytest.mark.parametrize('seen,alive,done,expected', [
     (False,False,False,False), (True,True,False,False),
     (True,False,False,False), (True,False,True,True)])

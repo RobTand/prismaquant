@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shlex
 import socket
 import subprocess
@@ -62,6 +63,7 @@ def main(argv=None) -> int:
                       "fetched_epoch": time.time(),
                       "fetch_host": socket.gethostname().split(".")[0],
                       "hosts": {}}
+    after, before = math.floor(args.after), math.ceil(args.before)
     for host in HOSTS:
         info = fetch(host, "charts")
         charts = [key for key, value in info["charts"].items()
@@ -74,11 +76,11 @@ def main(argv=None) -> int:
         series = {}
         for chart in charts:
             query = urllib.parse.urlencode(dict(
-                chart=chart, after=args.after, before=args.before,
-                points=max(10, int(args.before - args.after) + 4),
+                chart=chart, after=after, before=before,
+                points=max(10, before - after + 4),
                 group="average", format="json", options="seconds"))
             data = fetch(host, "data?" + query)
-            validate_netdata_window(data, after=args.after, before=args.before)
+            validate_netdata_window(data, after=after, before=before)
             series[chart] = {"points": len(data["data"]),
                              "labels": data["labels"],
                              "data": data["data"]}
