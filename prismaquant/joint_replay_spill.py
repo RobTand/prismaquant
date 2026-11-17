@@ -85,7 +85,6 @@ from .joint_replay_regime import OPERATOR_GEMM, PER_INVOCATION, normalize_replay
 from .routed_experts import PackedExpertProjection, ProfileRoutedExpertClassifier
 
 SPILL_ENV = ("PRISMAQUANT_STAGE_B_SPILL_ROOT", "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
-REPLAY_WINDOWED = "windowed"
 REPLAY_SPILL = "one_pass_spill"
 SPILL_DTYPES = (torch.bfloat16, torch.float16)
 #: Replayed operands keep the live tensor's address residue modulo this many
@@ -621,10 +620,6 @@ def _storage_order(tensor):
     if _is_dense(tensor):
         return tensor.as_strided((tensor.numel(),), (1,))
     return tensor.contiguous().view(-1)
-
-
-def _placed(cursor, residue):
-    return cursor + (residue - cursor) % ADDRESS_ALIGNMENT
 
 
 def _ceil(value, block):
