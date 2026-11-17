@@ -142,3 +142,14 @@ def test_declared_producer_resume_keeps_byte_integrity_refusals(tmp_path, monkey
         prepare_journal(root, stage="fixture", resume=True,
             identity={**identity, "implementation_sha256": "new implementation"},
             qnames=["unit", "next"], seal_fields={"implementation_sha256"})
+
+
+def test_journal_refuses_a_file_as_checkpoint_directory(tmp_path):
+    root = tmp_path / "parts"
+    root.write_bytes(b"retained checkpoint input\n")
+    with pytest.raises(RuntimeError) as error:
+        prepare_journal(root, stage="fixture", resume=True,
+                        identity={"source": "one"}, qnames=["unit"])
+    assert str(error.value) == f"fixture checkpoint path is not a directory: {root}"
+    assert root.read_bytes() == b"retained checkpoint input\n"
+    assert list(tmp_path.iterdir()) == [root]
