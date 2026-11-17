@@ -1059,37 +1059,6 @@ def build_mandatory_rate_set(
     )
 
 
-def rate_set_freeze_payload(rate_set: MandatoryRateSet) -> dict[str, object]:
-    return canonical_json(
-        {
-            "schema": "prismaquant.quality_prefill_rate_set.v1",
-            "family": rate_set.family,
-            "screen_policy_id": rate_set.screen_policy_id,
-            "source_sha256": rate_set.source_sha256,
-            "selection_seed": rate_set.selection_seed,
-            "mandatory": list(rate_set.mandatory),
-            "strata": [
-                {
-                    "stratum_id": stratum.stratum_id,
-                    "low": stratum.low,
-                    "high": stratum.high,
-                    "remaining_legal_rate_count": stratum.remaining_legal_rate_count,
-                    "drawn": list(stratum.drawn),
-                }
-                for stratum in rate_set.strata
-            ],
-            "roster": list(rate_set.roster),
-        },
-        where="quality-prefill rate set freeze",
-    )
-
-
-def rate_set_freeze_digest(rate_set: MandatoryRateSet) -> str:
-    return canonical_json_sha256(
-        rate_set_freeze_payload(rate_set), where="quality-prefill rate set freeze"
-    )
-
-
 # --------------------------------------------------------------------------
 # Census intake
 # --------------------------------------------------------------------------
