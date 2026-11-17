@@ -112,3 +112,20 @@ def test_each_hunk_is_unique_in_both_files():
     for old_snippet, new_snippet in reversed(pairs):
         payload = payload.replace(new_snippet, old_snippet, 1)
     assert payload == old
+
+
+def test_sealed_git_tree_reads_committed_bytes_and_skips_bytecode(tmp_path):
+    import subprocess
+    from tools.generate_transition_rewrites import _sealed_tree
+
+    package = _tree(tmp_path / "package", {"a.py": "sealed", "data.txt": "data",
+        "a.pyc": "cache", "b.pyo": "cache", "__pycache__/keep.txt": "cache"})
+    git = ["git", "-C", str(tmp_path)]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "-f", "package"], check=True)
+    subprocess.run([*git, "-c", "user.name=Test", "-c", "user.email=test@invalid",
+                    "commit", "-qm", "test package"], check=True)
+    (package / "a.py").write_text("changed")
+    (package / "untracked.py").write_text("untracked")
+    assert _sealed_tree("HEAD", "package", tmp_path) == {"a.py": b"sealed", "data.txt": b"data"}
+    assert (package / "a.py").read_text() == "changed"

@@ -594,3 +594,14 @@ def test_the_kl_preflight_names_every_unit_priced_at_another_scale(
 
 
 from priced_model_screen import priced_model_screen  # noqa: F401  (module-scoped model screen)
+
+
+def test_mse_grid_keeps_smallest_exact_scale_and_rejects_invalid_samples():
+    select = owner.select_mse_grid_input_global_scale
+    assert select([torch.ones((2, 16))], device="cpu") == 6.0
+    for samples, message in (([], "no activation samples"),
+            ([torch.ones((1, 15))], "width divisible by 16"),
+            ([torch.zeros((1, 16))], "invalid max_abs"),
+            ([torch.full((1, 16), float("nan"))], "invalid max_abs")):
+        with pytest.raises(ValueError, match=message):
+            select(samples, device="cpu")

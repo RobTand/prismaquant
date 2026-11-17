@@ -8,6 +8,7 @@ import struct
 
 import pytest
 
+from prismaquant import aura_provenance
 from prismaquant import digests
 from prismaquant import production_weight_cache as cache
 from source_framing_recording import record_source_frames
@@ -50,7 +51,7 @@ def _spy(monkeypatch):
         def update(self, name, raw):
             self._record(name, raw)
 
-    return record_source_frames(cache, monkeypatch, RecordingProfile)
+    return record_source_frames(aura_provenance, monkeypatch, RecordingProfile)
 
 
 @pytest.mark.parametrize("default_root", (False, True))
@@ -59,7 +60,7 @@ def test_package_source_routes_owner(tmp_path, monkeypatch, payload, default_roo
     root, rows = _fixture(tmp_path, payload)
     batches = _spy(monkeypatch)
     if default_root:
-        monkeypatch.setattr(cache, "__file__", str(root / "__init__.py"))
+        monkeypatch.setattr(aura_provenance, "__file__", str(root / "__init__.py"))
         result = cache._production_cache_source_sha256()
     else:
         result = cache._production_cache_source_sha256(root)

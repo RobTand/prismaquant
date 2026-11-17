@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 import prismaquant.aura_cost as aura
+from prismaquant import aura_provenance
 from prismaquant import production_weight_cache as pwc
 
 
@@ -42,6 +43,7 @@ def _point_default_root_at(monkeypatch, root: Path) -> None:
     # The established seam (tests/test_pwc_source_framing_1764.py): the digest
     # helpers resolve their roster from their own module's package directory.
     monkeypatch.setattr(pwc, "__file__", str(root / "__init__.py"))
+    monkeypatch.setattr(aura_provenance, "__file__", str(root / "__init__.py"))
 
 
 def _write_manifest(checkpoint: Path, digest: str) -> None:
