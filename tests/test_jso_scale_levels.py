@@ -60,3 +60,25 @@ def test_joint_mse_rule_uses_the_configured_levels(monkeypatch):
         return enc._nvfp4_mse_for_group_scale(g, scale)
     assert (mse(joint_full) <= mse(f46_full) + 1e-12).all()
     _resolve(monkeypatch, None)  # restore default for other tests
+
+
+def test_fp8_damping_sweep_uses_activation_error_and_default_fallback(monkeypatch):
+    weight = torch.zeros((1, 32))
+    activations = torch.eye(32)
+    activations[0, 0] = 10
+    first, second = weight.clone(), weight.clone()
+    first[0, 0], second[0, 1] = 0.2, 1.0
+    candidates = {0.01: (first, first, first), 0.1: (second, second, second)}
+    calls = []
+    def rounded(*args, damp, **kwargs):
+        calls.append(damp)
+        if damp == 0.001:
+            raise RuntimeError("candidate failed")
+        return candidates[damp]
+    monkeypatch.setattr(enc, "gptq_obs_rounding_fp8_like", rounded)
+    options = {"fmt": "FP8_DYNAMIC", "levers": NativeRenderLevers()}
+    assert enc.gptq_obs_rounding_fp8_like_swept(weight, activations,
+        damp_candidates=(0.001, 0.01, 0.1), **options) is candidates[0.1]
+    assert calls == [0.001, 0.01, 0.1]
+    assert enc.gptq_obs_rounding_fp8_like_swept(weight, activations,
+        damp_candidates=(), **options) is candidates[0.01]
