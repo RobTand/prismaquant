@@ -120,7 +120,7 @@ def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
     assert validation['required_for_production_promotion'] and validation['status'] == 'pending'
     # The schema the proposal requires has an implementation it names: the
     # archived helper, which is not live code.
-    helper = Path(__file__).resolve().parents[1] / validation['validation_helper_archive']
+    helper = Path(__file__).resolve().parents[1] / 'archive' / Path(validation['validation_helper_archive']).relative_to('archive')
     assert helper.parts[-4] == 'archive' and helper.is_file()
     assert (f"SAMPLED_PROPOSAL_VALIDATION_SCHEMA = \"{validation['validation_helper_schema']}\""
             in helper.read_text(encoding='utf-8'))
