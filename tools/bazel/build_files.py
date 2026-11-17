@@ -1176,8 +1176,7 @@ def cycle_record(evidence, graph, owner, libraries, importers):
                                  'importers': sorted(other if owner.get(other, home) == home else
                                                      f'//{owner[other][0]}:{owner[other][1]}'
                                                      for other in importers[path] - {path})}
-    rows = ',\n'.join(f'  {json.dumps(path)}: {json.dumps(row, sort_keys=True)}' for path, row in sorted(members.items()))
-    return '{\n "schema": "prismaquant.cycle_members.v1",\n "members": {\n' + rows + '\n }\n}\n'  # a line a member
+    return json.dumps({'schema': 'prismaquant.cycle_members.v1', 'members': members}, indent=1, sort_keys=True) + '\n'
 
 
 def generate(root=ROOT, files=None, extra=None):
