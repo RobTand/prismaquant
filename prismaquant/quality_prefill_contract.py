@@ -128,8 +128,6 @@ PHASE_STATES = (
 )
 _STATE_SET = frozenset(PHASE_STATES)
 
-TERMINAL_STATES = frozenset({"complete", "withdrawn", "requires_plan_revision"})
-
 #: The complete legal transition table.  Every pair absent from it refuses.
 #: ``failed -> ready`` is the retry edge and is legal only inside the original
 #: attempt budget, which :func:`transition` checks.
