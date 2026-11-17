@@ -197,6 +197,20 @@ def test_grid_arguments_refuse(tmp_path, capsys, own, message):
     assert message in capsys.readouterr().err
 
 
+def test_frontier_cli_refuses_empty_slo_list_before_allocator_or_writes(
+        tmp_path, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(allocator, "main", lambda *args, **kwargs: calls.append((args, kwargs)))
+    with pytest.raises(SystemExit) as exit_info:
+        prefill_frontier.main(["--slo-ms", ", ,", "--output", str(tmp_path / "f.json"),
+                               "--", "--probe", "unused"])
+    assert exit_info.value.code == 2
+    error = capsys.readouterr().err.splitlines()[-1]
+    assert error == "python -m prismaquant.prefill_frontier: error: --slo-ms is empty"
+    assert calls == []
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_sweep_without_a_table_refuses(tmp_path, capsys):
     _, argv = _main_fixture(tmp_path)
     cut = argv.index("--measured-runtime-table")
