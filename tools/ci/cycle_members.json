@@ -394,6 +394,7 @@
     "//:prismaquant/assignment_space",
     "//:prismaquant/glm53_stock_reprice",
     "//:prismaquant/stock_anchored_cost",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//:tools/make_uniform_assignment",
     "//:tools/reselect_mtp_fixed",
     "//tests:prismabuild_scan",
@@ -500,8 +501,7 @@
     "prismaquant/glm_mtp_selection.py",
     "prismaquant/select_validated_frontier.py",
     "prismaquant/tessera_export_lane.py",
-    "prismaquant/tessera_lane.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/tessera_lane.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
@@ -522,6 +522,7 @@
     "//:prismaquant/assignment_space",
     "//:prismaquant/exact_mckp",
     "//:prismaquant/pact_hull",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//tests:prismabuild_scan",
     "//tests:test_activation_fair_pricing_lib",
     "//tests:test_allocator_dual_interval_lib",
@@ -620,8 +621,7 @@
     "prismaquant/kl_measurement.py",
     "prismaquant/priced_cell.py",
     "prismaquant/read_traffic.py",
-    "prismaquant/tessera_allocator.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/tessera_allocator.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
@@ -1387,6 +1387,8 @@
     "//:prismaquant/allocator_cycle",
     "//:prismaquant/joint_quanta_join",
     "//:prismaquant/prepriced_cost",
+    "//:prismaquant/tessera_joint_allocation",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//tests:prismabuild_scan",
     "//tests:test_allocator_expert_projection_lib",
     "//tests:test_aura_checkpoint_resume_identity_lib",
@@ -1461,9 +1463,7 @@
     "//tests:test_wave3_selection_and_provenance_lib",
     "prismaquant/joint_aura_rows.py",
     "prismaquant/joint_price_step.py",
-    "prismaquant/tessera_full_domain_acquisition.py",
-    "prismaquant/tessera_joint_allocation.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/tessera_full_domain_acquisition.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
@@ -2241,6 +2241,7 @@
     "//:prismaquant/produced_render_publication",
     "//:prismaquant/production_recache",
     "//:prismaquant/stock_anchored_cost",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//:prismaquant/union_production_cache",
     "//:prismaquant/validation_harness",
     "//:tools/build_sensitivity_ablation_assignments",
@@ -2465,7 +2466,6 @@
     "prismaquant/tessera_joint_aura.py",
     "prismaquant/tessera_menu.py",
     "prismaquant/tessera_render.py",
-    "prismaquant/tessera_sampled_stack_proposal.py",
     "prismaquant/validate_assignments_kl.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -3230,6 +3230,7 @@
     "//:prismaquant/joint_cost_quantum",
     "//:prismaquant/joint_cost_stage_a",
     "//:prismaquant/native_moe_execution_binding",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//:tools/build_streamed_full_kl_teacher",
     "//:tools/build_t4_overlay_catalog",
     "//:tools/capture_glm_routed_layers",
@@ -3342,8 +3343,7 @@
     "prismaquant/native_moe_panel.py",
     "prismaquant/native_operator_panel.py",
     "prismaquant/source_generation.py",
-    "prismaquant/tessera_joint_aura.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/tessera_joint_aura.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
@@ -3430,6 +3430,7 @@
     "//:prismaquant/native_moe_execution_binding",
     "//:prismaquant/native_receipt_table",
     "//:prismaquant/prepriced_cost",
+    "//:prismaquant/tessera_joint_allocation",
     "//:tools/paired_trade_report_proof",
     "//:tools/unit_journal_bench",
     "//tests:canonical_quality_fixtures",
@@ -3545,7 +3546,6 @@
     "prismaquant/priced_cell.py",
     "prismaquant/rung_allowability.py",
     "prismaquant/tessera_full_domain_acquisition.py",
-    "prismaquant/tessera_joint_allocation.py",
     "prismaquant/tessera_joint_aura.py",
     "prismaquant/tessera_rate_surface.py"
    ],
@@ -3834,6 +3834,8 @@
   "prismaquant/joint_catalog_extension.py": {
    "importers": [
     "//:prismaquant/prepriced_cost",
+    "//:prismaquant/tessera_joint_allocation",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//:tools/assemble_t4_overlay",
     "//:tools/bench_fence_rehash",
     "//:tools/build_t4_overlay_catalog",
@@ -3925,11 +3927,9 @@
     "prismaquant/joint_stageb_resources.py",
     "prismaquant/tessera_export_lane.py",
     "prismaquant/tessera_formats.py",
-    "prismaquant/tessera_joint_allocation.py",
     "prismaquant/tessera_joint_aura.py",
     "prismaquant/tessera_lane.py",
-    "prismaquant/tessera_menu.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/tessera_menu.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
@@ -4428,6 +4428,7 @@
     "//:archive/pq_experiments_2026-11-09/tests/test_native_local_handoff",
     "//:prismaquant/joint_cost_quantum",
     "//:prismaquant/joint_stage_b_head",
+    "//:prismaquant/tessera_joint_allocation",
     "//:tools/check_stageb_a4_group_quantizer",
     "//:tools/profile_stage_b_head",
     "//tests:prismabuild_scan",
@@ -4500,7 +4501,6 @@
     "prismaquant/perturbed_x_cache.py",
     "prismaquant/tessera_cell_measurement.py",
     "prismaquant/tessera_export_lane.py",
-    "prismaquant/tessera_joint_allocation.py",
     "prismaquant/tessera_menu.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -5614,6 +5614,7 @@
     "//:prismaquant/production_recache",
     "//:prismaquant/ship_gates",
     "//:prismaquant/tessera_materialization",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//:prismaquant/unit_topology_restamp",
     "//:prismaquant/validate_native_export",
     "//:tools/build_streamed_full_kl_teacher",
@@ -5928,7 +5929,6 @@
     "prismaquant/tessera_export_lane.py",
     "prismaquant/tessera_joint_aura.py",
     "prismaquant/tessera_route_trace_gate.py",
-    "prismaquant/tessera_sampled_stack_proposal.py",
     "prismaquant/validate_assignments_kl.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -6985,6 +6985,7 @@
     "//:prismaquant/day0_model_intake",
     "//:prismaquant/incremental_probe",
     "//:prismaquant/model_profiles/validate",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//:prismaquant/validate_native_export",
     "//:tools/make_uniform_assignment",
     "//tests:fixtures/tessera_route_trace_1490/generate",
@@ -7073,8 +7074,7 @@
     "prismaquant/model_profiles/__init__.py",
     "prismaquant/model_profiles/structure.py",
     "prismaquant/model_walk.py",
-    "prismaquant/tessera_route_trace_gate.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/tessera_route_trace_gate.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
@@ -8828,7 +8828,9 @@
     "//:prismaquant/joint_stage_b_head",
     "//:prismaquant/mtp_production_cache",
     "//:prismaquant/production_recache",
+    "//:prismaquant/tessera_joint_allocation",
     "//:prismaquant/tessera_materialization",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//:prismaquant/union_production_cache",
     "//:tools/build_streamed_full_kl_teacher",
     "//:tools/check_t4_overlay_prepare",
@@ -9029,9 +9031,7 @@
     "prismaquant/tessera_calibration_forward.py",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_cell_measurement.py",
-    "prismaquant/tessera_joint_allocation.py",
     "prismaquant/tessera_joint_aura.py",
-    "prismaquant/tessera_sampled_stack_proposal.py",
     "prismaquant/validate_assignments_kl.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -12370,7 +12370,9 @@
     "//:experiments/pq309_native_moe_panel",
     "//:experiments/profile_row_head",
     "//:experiments/selected_source_authentication_ab",
+    "//:prismaquant/tessera_joint_allocation",
     "//:prismaquant/tessera_materialization",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//tests:prismabuild_scan",
     "//tests:projection_producer_fixture",
     "//tests:test_allocator_expert_projection_lib",
@@ -12460,10 +12462,8 @@
     "prismaquant/tessera_campaign_table.py",
     "prismaquant/tessera_census_cache.py",
     "prismaquant/tessera_export_lane.py",
-    "prismaquant/tessera_joint_allocation.py",
     "prismaquant/tessera_lane.py",
-    "prismaquant/tessera_plan_writer.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/tessera_plan_writer.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": "uncertain: launch arguments not followed"
@@ -12663,6 +12663,7 @@
     "//:experiments/pq267_native_panel",
     "//:experiments/pq309_native_moe_panel",
     "//:prismaquant/tessera_materialization",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//tests:prismabuild_scan",
     "//tests:test_allocator_expert_projection_lib",
     "//tests:test_allocator_family_licence_lib",
@@ -12780,8 +12781,7 @@
     "prismaquant/tessera_menu.py",
     "prismaquant/tessera_plan_writer.py",
     "prismaquant/tessera_rate_surface.py",
-    "prismaquant/tessera_render.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/tessera_render.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
@@ -12859,73 +12859,6 @@
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
   },
-  "prismaquant/tessera_joint_allocation.py": {
-   "importers": [
-    "//tests:prismabuild_scan",
-    "//tests:test_aura_checkpoint_resume_identity_lib",
-    "//tests:test_bazel_build_files_lib",
-    "//tests:test_bazel_inputs_lib",
-    "//tests:test_bound_publication_digest_routing_2639_lib",
-    "//tests:test_boundary_control",
-    "//tests:test_boundary_stack_contract",
-    "//tests:test_campaign_acquisition_control_inputs",
-    "//tests:test_campaign_acquisition_d32",
-    "//tests:test_campaign_acquisition_intake",
-    "//tests:test_ci_tessera_install_lib",
-    "//tests:test_digest_canonical_bytes_1639_lib",
-    "//tests:test_digest_canonical_twins_1646_lib",
-    "//tests:test_dispatch_digest_routing_1670_lib",
-    "//tests:test_doc_claims_driver_truth_lib",
-    "//tests:test_docs_staleness_lib",
-    "//tests:test_duplication_baseline_lib",
-    "//tests:test_exl3_grouped_down_replay_integration",
-    "//tests:test_exl3_grouped_down_replay_integration_lib",
-    "//tests:test_exl3_replay_cli",
-    "//tests:test_file_hash_routing_1672_lib",
-    "//tests:test_gold_comparison_population_audit",
-    "//tests:test_gold_engine_options",
-    "//tests:test_graph_impact_pq_history_lib",
-    "//tests:test_guarded_read_digest_retention_2637_lib",
-    "//tests:test_import_cycle_wave1_3215_lib",
-    "//tests:test_joint_replay_frontier_607_lib",
-    "//tests:test_joint_served_activation_lib",
-    "//tests:test_kl_ab",
-    "//tests:test_lane_spec_and_gguf_kl_lib",
-    "//tests:test_measure_boundary_control_identity",
-    "//tests:test_measure_served_gold",
-    "//tests:test_measure_served_gold_lib",
-    "//tests:test_native_render_codec_seam_lib",
-    "//tests:test_native_render_levers_explicit_lib",
-    "//tests:test_no_new_seals",
-    "//tests:test_no_new_seals_lib",
-    "//tests:test_no_secret_on_command_line_lib",
-    "//tests:test_package_model_runtime_lib",
-    "//tests:test_prefill_load_sweep_lib",
-    "//tests:test_serve_fingerprint_descendants",
-    "//tests:test_stage_settings_guard_lib",
-    "//tests:test_stdlib_tools_no_package_1605",
-    "//tests:test_stdlib_tools_no_package_1605_lib",
-    "//tests:test_streamed_gold_companion",
-    "//tests:test_strict_json_keeps_1660",
-    "//tests:test_strict_json_keeps_1660_lib",
-    "//tests:test_strict_json_tools_1605",
-    "//tests:test_tessera_campaign_namespace_1986_lib",
-    "//tests:test_tessera_joint_allocation_lib",
-    "//tests:test_tessera_joint_eval_panel_lib",
-    "//tests:test_tessera_public_metadata_api_lib",
-    "//tests:test_tessera_sampled_stack_proposal_lib",
-    "//tests:test_tessera_serve_fingerprint",
-    "//tests:test_tessera_substitute_decoder",
-    "//tests:test_tl3_harness_table_lib",
-    "//tests:test_tools_hash_routing_1680_lib",
-    "//tests:test_umbrella_acceptance_2768_lib",
-    "//tests:test_vendored_override_gate_lib",
-    "//tests:test_wave3_selection_and_provenance_lib",
-    "prismaquant/tessera_sampled_stack_proposal.py"
-   ],
-   "target": "//:prismaquant/activation_fair_pricing_cycle",
-   "whole": null
-  },
   "prismaquant/tessera_joint_aura.py": {
    "importers": [
     "//:archive/pq_experiments_2026-11-09/experiments/glm_native_moe_acquire",
@@ -12943,6 +12876,8 @@
     "//:prismaquant/joint_cost_stage_a",
     "//:prismaquant/joint_stage_b_head",
     "//:prismaquant/stage_a_head",
+    "//:prismaquant/tessera_joint_allocation",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//:tools/assemble_t4_overlay",
     "//:tools/capture_glm_routing_replay",
     "//:tools/check_t4_overlay_prepare",
@@ -13095,9 +13030,7 @@
     "prismaquant/joint_aura_source_transition.py",
     "prismaquant/joint_catalog_extension.py",
     "prismaquant/joint_layer_quanta.py",
-    "prismaquant/native_moe_panel.py",
-    "prismaquant/tessera_joint_allocation.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/native_moe_panel.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
@@ -13106,6 +13039,8 @@
    "importers": [
     "//:prismaquant/joint_cost_quantum",
     "//:prismaquant/joint_cost_stage_a",
+    "//:prismaquant/tessera_joint_allocation",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//:tools/dispatch_joint_quanta",
     "//:tools/regenerate_joint_quanta",
     "//tests:prismabuild_scan",
@@ -13167,9 +13102,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
     "prismaquant/joint_adjoint_band.py",
-    "prismaquant/tessera_joint_allocation.py",
-    "prismaquant/tessera_joint_aura.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/tessera_joint_aura.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
@@ -13333,6 +13266,7 @@
     "//:experiments/campaign_identity_hold_measure",
     "//:experiments/glm_menu_extent_profile",
     "//:experiments/hessian_reference_contract_check",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//tests:prismabuild_scan",
     "//tests:test_allocator_expert_projection_lib",
     "//tests:test_allocator_packed_group_menu_reduction_lib",
@@ -13443,8 +13377,7 @@
     "prismaquant/tessera_formats.py",
     "prismaquant/tessera_lane.py",
     "prismaquant/tessera_legal_domain.py",
-    "prismaquant/tessera_render.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/tessera_render.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
@@ -14097,73 +14030,6 @@
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
   },
-  "prismaquant/tessera_sampled_stack_proposal.py": {
-   "importers": [
-    "//tests:prismabuild_scan",
-    "//tests:test_aura_checkpoint_resume_identity_lib",
-    "//tests:test_bazel_build_files_lib",
-    "//tests:test_bazel_inputs_lib",
-    "//tests:test_bound_publication_digest_routing_2639_lib",
-    "//tests:test_boundary_control",
-    "//tests:test_boundary_stack_contract",
-    "//tests:test_campaign_acquisition_control_inputs",
-    "//tests:test_campaign_acquisition_d32",
-    "//tests:test_campaign_acquisition_intake",
-    "//tests:test_ci_tessera_install_lib",
-    "//tests:test_contract_checks_1300_lib",
-    "//tests:test_digest_canonical_bytes_1639_lib",
-    "//tests:test_digest_canonical_twins_1646_lib",
-    "//tests:test_digest_profiles_1301",
-    "//tests:test_dispatch_digest_routing_1670_lib",
-    "//tests:test_doc_claims_driver_truth_lib",
-    "//tests:test_docs_staleness_lib",
-    "//tests:test_duplication_baseline_lib",
-    "//tests:test_exl3_grouped_down_replay_integration",
-    "//tests:test_exl3_grouped_down_replay_integration_lib",
-    "//tests:test_exl3_replay_cli",
-    "//tests:test_file_hash_routing_1672_lib",
-    "//tests:test_gold_comparison_population_audit",
-    "//tests:test_gold_engine_options",
-    "//tests:test_graph_impact_pq_history_lib",
-    "//tests:test_guarded_read_digest_retention_2637_lib",
-    "//tests:test_import_cycle_wave1_3215_lib",
-    "//tests:test_joint_replay_frontier_607_lib",
-    "//tests:test_kl_ab",
-    "//tests:test_lane_spec_and_gguf_kl_lib",
-    "//tests:test_measure_boundary_control_identity",
-    "//tests:test_measure_served_gold",
-    "//tests:test_measure_served_gold_lib",
-    "//tests:test_native_render_codec_seam_lib",
-    "//tests:test_native_render_levers_explicit_lib",
-    "//tests:test_no_new_seals",
-    "//tests:test_no_new_seals_lib",
-    "//tests:test_no_secret_on_command_line_lib",
-    "//tests:test_package_model_runtime_lib",
-    "//tests:test_prefill_load_sweep_lib",
-    "//tests:test_serve_fingerprint_descendants",
-    "//tests:test_stage_settings_guard_lib",
-    "//tests:test_stdlib_tools_no_package_1605",
-    "//tests:test_stdlib_tools_no_package_1605_lib",
-    "//tests:test_streamed_gold_companion",
-    "//tests:test_strict_json_keeps_1660",
-    "//tests:test_strict_json_keeps_1660_lib",
-    "//tests:test_strict_json_tools_1605",
-    "//tests:test_tessera_campaign_namespace_1986_lib",
-    "//tests:test_tessera_public_metadata_api_lib",
-    "//tests:test_tessera_sampled_stack_proposal_lib",
-    "//tests:test_tessera_selected_cache_lib",
-    "//tests:test_tessera_serve_fingerprint",
-    "//tests:test_tessera_substitute_decoder",
-    "//tests:test_tl3_harness_table_lib",
-    "//tests:test_tools_hash_routing_1680_lib",
-    "//tests:test_umbrella_acceptance_2768_lib",
-    "//tests:test_vendored_override_gate_lib",
-    "//tests:test_wave3_selection_and_provenance_lib",
-    "prismaquant/tessera_export_lane.py"
-   ],
-   "target": "//:prismaquant/activation_fair_pricing_cycle",
-   "whole": null
-  },
   "prismaquant/tessera_serving_runtime_pin.py": {
    "importers": [
     "//tests:prismabuild_scan",
@@ -14273,6 +14139,7 @@
   "prismaquant/tessera_serving_scope.py": {
    "importers": [
     "//:archive/pq_experiments_2026-11-09/experiments/pq183_lfm_bound",
+    "//:prismaquant/tessera_sampled_stack_proposal",
     "//:tools/reselect_mtp_fixed",
     "//tests:prismabuild_scan",
     "//tests:test_aura_checkpoint_resume_identity_lib",
@@ -14342,8 +14209,7 @@
     "prismaquant/tessera_campaign_cli.py",
     "prismaquant/tessera_export_lane.py",
     "prismaquant/tessera_lane.py",
-    "prismaquant/tessera_route_receipt.py",
-    "prismaquant/tessera_sampled_stack_proposal.py"
+    "prismaquant/tessera_route_receipt.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
    "whole": null
