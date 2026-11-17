@@ -65,3 +65,12 @@ def test_export_gate_is_inert_for_unstamped_selection():
         acknowledged=False,
         where="test exporter",
     ) is None
+
+
+def test_export_acknowledgement_does_not_admit_unknown_research_provenance():
+    config = {"model.layers.0.linear": "NVFP4"}
+    config["__prismaquant__"] = {"cost_provenance": {"cost_provenance": "unknown"}}
+    before = json.dumps(config, sort_keys=True)
+    with pytest.raises(ValueError, match=r"^export: malformed or unknown research cost provenance$"):
+        enforce_research_export_acknowledgement(config, acknowledged=True, where="export")
+    assert json.dumps(config, sort_keys=True) == before
