@@ -59,6 +59,7 @@ import re
 import sys
 
 from prismaquant import format_registry as fr
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
 from prismaquant.priced_cell import (
     ANCHORED_AURA_COST_CURRENCY,
     ANCHORED_AURA_COST_SOURCE,
@@ -1222,7 +1223,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         report = payload["provenance"]["merge_report"]
         side = output.with_suffix(".provenance.json")
-        side.write_text(json.dumps({
+        side.write_text(DIRECT_ASCII_INDENT2_LAX.text({
             "schema": payload["schema"],
             "output": str(output),
             "merge_report": report,
@@ -1231,7 +1232,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "unpriced_probe_units"
             ],
             "campaign_identity": payload["provenance"]["campaign_identity"],
-        }, indent=2, sort_keys=True) + "\n")
+        }) + "\n")
         print(
             f"[glm53-stock] campaign cost payload -> {output} "
             f"(anchored {report['anchored_units']}, "
@@ -1303,9 +1304,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         checkpoint_dir=Path(args.checkpoint_dir),
     )
     if args.json:
-        print(json.dumps(
+        print(DIRECT_ASCII_INDENT2_LAX.text(
             {"checks": [asdict(check) for check in checks]},
-            indent=2, sort_keys=True,
         ))
     else:
         print_checks(checks)

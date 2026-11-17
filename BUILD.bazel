@@ -9595,6 +9595,7 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/anchored_cost",
         ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/digests",
         ":prismaquant/prepriced_cost",
         ":prismaquant/stock_anchored_cost",
     ],
