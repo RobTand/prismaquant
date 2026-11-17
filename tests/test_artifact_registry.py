@@ -124,3 +124,12 @@ def test_registry_compare_fails_on_ppl_regression(tmp_path):
     result = registry.compare("candidate", "baseline")
     assert result["pass"] is False
     assert result["metrics"]["ppl_wikitext"]["passed"] is False
+
+
+def test_registry_model_lookup_excludes_other_models(tmp_path):
+    registry = ArtifactRegistry(tmp_path / "registry.json")
+    for name, model in (("first", "/models/a"), ("other", "/models/ab"), ("last", "/models/a")):
+        registry.add(_record(name, "a" * 64, model_path=model))
+    reloaded = ArtifactRegistry(registry.path)
+    assert [row.record_id for row in reloaded.find_by_model("/models/a")] == ["first", "last"]
+    assert reloaded.find_by_model("/models/missing") == []
