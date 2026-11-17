@@ -191,6 +191,20 @@ def test_scc_below_baseline_keeps_gains_against_base(repo, capsys, base_scc, hea
     assert json.loads(path.read_text()) == config
 
 
+def test_a_head_recorded_before_a_cut_passes_after_it(repo, capsys):
+    graphs = {size: pq.core.measure({}, {('a', 'b')} | ({('b', 'a')} if size == 2 else set())) for size in (1, 2)}
+    for graph in graphs.values():
+        graph['duplication'] = pq.duplication_inventory.scan(repo)
+    # The head recorded its baseline while the cycle was 2; a cut on main made it 1 before the head's draft ran.
+    stale = {**pq.core.baseline_record(graphs[2]), 'analyzer_sha256': pq.file_sha256hex(pq.ROOT / pq.ANALYZER)}
+    before, after = graphs[1], dict(graphs[1])
+    before.update(recorded_baseline={**stale, 'analyzer_sha256': 'older'}, recorded_inputs=pq.ratchet_digests(pq.ROOT))
+    put(repo, str(pq.BASELINE), json.dumps(stale))
+    assert pq.check(before, after, repo / pq.BASELINE, repo / pq.ALLOWLIST) == 0, capsys.readouterr().err
+    # A recorded baseline holds no scc_max to go stale: the live head-against-base rule is the only one.
+    assert all('scc_max' not in pq.numeric_baseline(stale)[key] for key in ('figures', 'tolerances'))
+
+
 def test_committed_baseline_contains_only_limits():
     config = json.loads((ROOT / pq.BASELINE).read_text())
     assert set(config) == {'schema', 'figures', 'tolerances', 'reach_budget', 'test_to_test',

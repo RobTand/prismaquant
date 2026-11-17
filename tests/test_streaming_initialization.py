@@ -57,6 +57,18 @@ def test_selected_integer_counts_preserve_existing_output(derived):
     assert witness == before
 
 
+def test_selected_witness_refuses_body_tensor_as_head_coverage():
+    witness = selected_fixture()
+    del witness["state"]["embed_tokens.weight"]
+    witness["head_state_names"] = ["layers.0.weight"]
+    witness["persistent_tensors"] = 1
+    witness["state_sha256"] = DIRECT_ASCII_STRICT.sha256(witness["state"])
+    before = copy.deepcopy(witness)
+    with pytest.raises(ValueError, match=r"^Body state cannot stand in for head coverage$"):
+        validate_streaming_selected_initialization_witness(witness)
+    assert witness == before
+
+
 def test_existing_full_prefix_selected_imports_and_outputs():
     from prismaquant import streaming_initialization as policy
     from prismaquant import streaming_model as runtime

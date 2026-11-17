@@ -212,13 +212,12 @@ def test_pq_adapter_respects_generator_launch_and_conftest_rules(tmp_path):
 @pytest.mark.parametrize('changed', [None, 'tests/fixtures/graph_impact_baseline.json', 'tools/bazel/build_files.py',
                                      'tools/ci/graph_impact.py', 'tools/ci/graph_impact_pq.py'])
 @pytest.mark.parametrize('field,value,message', [('analyzer_sha256', '0' * 64, 'analyzer_sha256 is stale'),
-                                                 ('scc_max', 3, 'baseline figure scc_max may only shrink'),
                                                  ('test_to_test_count', 1, 'test_to_test_count may only shrink')])
 def test_pq_check_refuses_a_baseline_the_measured_base_does_not_meet(tmp_path, capsys, field, value, message, changed):
     from tools.ci import graph_impact_pq as pq
     base = {**measure(edges={('a', 'b'), ('b', 'a')}), 'duplication': pq.duplication_inventory.scan(tmp_path)}
     recorded = baseline(base, analyzer_sha256=pq.file_sha256hex(pq.ROOT / 'tools/bazel/build_files.py'))
-    (recorded['figures'] if field == 'scc_max' else recorded)[field] = value
+    recorded[field] = value
     base['recorded_baseline'] = {**recorded, 'reach_budget': recorded['reach_budget'] + (changed == str(pq.BASELINE))}
     base['recorded_inputs'] = {path: '0' * 64 if path == changed else digest
                                for path, digest in pq.ratchet_digests(pq.ROOT).items()}

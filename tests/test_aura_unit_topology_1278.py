@@ -228,3 +228,18 @@ def test_restamp_cli_writes_a_new_table_and_receipt(tmp_path, monkeypatch):
     assert table["provenance"]["unit_topology_restamp"]["input_sha256"] == digest
     with pytest.raises(Exception, match="exists"):
         tool.main(["--table", str(source), "--table-sha256", digest, "--output", str(output)])
+
+
+def test_restamp_refuses_missing_model_without_publication(tmp_path):
+    from prismaquant import unit_topology_restamp as tool
+    source = tmp_path / "joint-allocation.pkl"
+    raw = pickle.dumps({"stats": _legacy_rows(), "costs": {}, "provenance": {}})
+    source.write_bytes(raw)
+    output = tmp_path / "joint-allocation.topology.pkl"
+    with pytest.raises(ValueError) as refusal:
+        tool.main(["--table", str(source), "--table-sha256",
+                   hashlib.sha256(raw).hexdigest(), "--output", str(output)])
+    assert str(refusal.value) == (
+        "no model: pass --model or restamp a table whose provenance names one")
+    assert [path.name for path in tmp_path.iterdir()] == [source.name]
+    assert source.read_bytes() == raw
