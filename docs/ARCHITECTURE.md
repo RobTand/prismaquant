@@ -937,8 +937,9 @@ adds more than 250 net lines to `tests/*.py` unless one of its commits has a
 
 As of: 2026-11-17, gate cycle-member selection, PQ #3996.
 Source: `tools/ci/bazel_selection.py` and `tools/bazel/build_files.py`, based on
-main `c1863eb7`. For a modified member of an import-cycle target, the direct
-rule reads `tools/ci/cycle_members.json` (generated, held by `--check`): the
+main `c1863eb7`. Step A writes the table only: `MODULE_LEVEL` and
+`CYCLE_TABLE_ENFORCED` are False until step B. Then, for a modified member of an
+import-cycle target, the direct rule reads `tools/ci/cycle_members.json` (generated, held by `--check`): the
 member's importers and readers and theirs, by module, not the importers of the
 whole target. A package `__init__.py`, a module that the generator lists as
 uncertain and a module that runs a call statement or a `register` call at import

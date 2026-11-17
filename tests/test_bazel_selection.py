@@ -681,7 +681,7 @@ def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
 @pytest.mark.parametrize('planning_history', [None, 'build', 'add', 'delete', 'symlink'],
                          indirect=True)
 def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
-        tmp_path, planning_history, request):
+        tmp_path, planning_history, request, monkeypatch):
     root, (base, head) = planning_history
     rows = [
         {'sourceFile': {'name': '//prismaquant:core.py'}},
@@ -711,6 +711,7 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
             Path(command[command.index('--output') + 1]).write_text('//tests:test_consumer\n')
         return SimpleNamespace(returncode=0)
 
+    monkeypatch.setattr(selection, 'MODULE_LEVEL', True)
     table = root / selection.CYCLE_PATH
     table.parent.mkdir(parents=True, exist_ok=True)
     table.write_text(json.dumps({'members': {'prismaquant/core.py': {

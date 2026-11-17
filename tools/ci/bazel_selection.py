@@ -30,6 +30,8 @@ BAZEL_DIFF_URL = 'https://github.com/Tinder/bazel-diff/releases/download/v42.0.0
 BAZEL_DIFF_SHA256 = '0170b70fe2f24477ab056c11f5c3240d8b45a1dca5ab73ad252c096679c5500c'
 DURATIONS_PATH = 'tools/ci/gate_durations.json'
 CYCLE_PATH = 'tools/ci/cycle_members.json'  # tools/bazel/build_files.py writes it
+# Step B of #3996 sets True with build_files.CYCLE_TABLE_ENFORCED: cycle members select from CYCLE_PATH.
+MODULE_LEVEL = False
 BUILD_LANGUAGE = {'BUILD', 'REPO', 'WORKSPACE'}  # with or without the .bazel suffix
 # The one switch (docs/bazel.md, "Selection"): True selects the tests one import away from each modified
 # file; False selects its whole reverse closure.
@@ -393,8 +395,7 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
                   and not any(Path(path).name.removesuffix('.bazel') in BUILD_LANGUAGE for path in changed)
                   and not any(row.startswith('120000 ') for row in git('ls-files', '-s').splitlines())):
                 closure = reverse_closure(population['consumers'], changed)
-                cycle = root / CYCLE_PATH
-                members = json.loads(cycle.read_text())['members'] if cycle.is_file() else {}
+                members = json.loads((root / CYCLE_PATH).read_text())['members'] if MODULE_LEVEL else {}
                 impacted, shadow, rules = direct_impact(population, changed, members) if DIRECT else (closure, closure, {})
                 whole = closure & (set(population['hosted']) | CLOSURE_TESTS)
                 tests = set(population['tests']) - set(population['excluded'])
