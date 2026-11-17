@@ -91,12 +91,12 @@ jobs:
         unset BUILDBUDDY_API_KEY
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: dependency setup failed"; exit 75' ERR
-        python -m pip install --upgrade pip
-        python -m pip install --no-deps .ci/tessera
-        python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-        python -m pip install -c .github/ci-constraints.txt -e '.[test]'
+        python -m pip install -q uv==0.10.10
+        uv pip install --system --no-deps .ci/tessera
+        uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
+        uv pip install --system -c .github/ci-constraints.txt -e '.[test]'
         python --version
-        python -m pip --version
+        uv --version
     - name: Run assigned hosted tests
       id: tests
       run: |
