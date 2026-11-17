@@ -100,11 +100,6 @@ def assert_error_decomposition(
     torch.testing.assert_close(e.sum(), full, rtol=rtol, atol=atol)
 
 
-# A descriptive alias for callers that prefer the helper name to mirror the
-# measured function.  Both names intentionally execute the same assertion.
-assert_per_row_error_decomposition = assert_error_decomposition
-
-
 def _error_vector(e: torch.Tensor | Iterable[float], name: str) -> torch.Tensor:
     values = torch.as_tensor(e, dtype=torch.float64)
     if values.ndim != 1 or values.numel() == 0:
