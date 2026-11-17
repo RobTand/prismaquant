@@ -125,7 +125,7 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
                         break
                 else:
                     if pending:
-                        sleep(15)
+                        sleep(3)  # a shard's end reaches the verdict within 3 s, at about 2 reads/s
         finally:
             cancel_runs(client, [invocation_id for invocation_id, _, _ in pending])
         if error:
