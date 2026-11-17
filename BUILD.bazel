@@ -11585,6 +11585,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/digests",
         ":prismaquant/layer_config",
         ":prismaquant/schemas",
     ],
@@ -12187,6 +12188,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/digests",
         ":prismaquant/qnames",
     ],
 )
@@ -12744,6 +12746,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/digests",
         ":prismaquant/layer_config",
         ":prismaquant/model_runtime",
         ":prismaquant/schemas",
