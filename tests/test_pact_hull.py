@@ -131,6 +131,21 @@ def test_refusals():
         pact_hull.dichotomic_lower_hull({"u0": []}, {}, max_memory_bytes=1)
 
 
+def test_hull_refuses_invalid_operator_times_without_input_changes():
+    candidates, valid_times = _problem(0, n_units=1)
+    candidates_before = {u: [dict(vars(c)) for c in row] for u, row in candidates.items()}
+    for bad in (-1.0, float("nan"), float("inf"), "1"):
+        time_ms = dict(valid_times)
+        time_ms[("u0", "A")] = bad
+        with pytest.raises(pact_hull.PactHullError) as refused:
+            pact_hull.dichotomic_lower_hull(candidates, time_ms, max_memory_bytes=10**9)
+        assert str(refused.value) == "u0@A: time must be finite and nonnegative"
+        assert {u: [vars(c) for c in row] for u, row in candidates.items()} == candidates_before
+        assert time_ms[("u0", "A")] is bad
+        assert {k: v for k, v in time_ms.items() if k != ("u0", "A")} == \
+            {k: v for k, v in valid_times.items() if k != ("u0", "A")}
+
+
 def test_the_resolution_is_the_float64_sum_bound():
     candidates, time_ms = _problem(5)
     hull = pact_hull.dichotomic_lower_hull(candidates, time_ms, max_memory_bytes=10**9)
