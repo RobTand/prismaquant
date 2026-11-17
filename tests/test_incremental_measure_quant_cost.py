@@ -258,3 +258,16 @@ class TestIncrementalMeasureQuantCost(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_empty_cost_shard_keeps_menu_and_provenance(tmp_path, monkeypatch):
+    from prismaquant import incremental_measure_quant_cost as incremental
+    monkeypatch.setattr(incremental, "_PIPELINE_COST_MODE", "weight_only")
+    path = tmp_path / "nested" / "visual.pkl"
+    incremental._write_empty_cost_shard(str(path), shard_kind="visual",
+        specs=[fr.get_format("BF16"), fr.get_format("NVFP4")], model_name="model", probe_path="probe.pkl")
+    assert pickle.loads(path.read_bytes()) == {
+        "costs": {}, "formats": ["BF16", "NVFP4"], "provenance": {"cost_mode": "weight_only"},
+        "meta": {"model": "model", "probe": "probe.pkl", "n_linears": 0,
+                 "mode": "skipped", "shard_kind": "visual"},
+    }
