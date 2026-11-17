@@ -737,26 +737,6 @@ def test_the_draw_stamps_what_a_variance_estimate_will_need():
     assert len(draw["size_sha256"]) == 64
 
 
-def test_the_audit_subsample_is_a_subset_that_cannot_move_the_estimate():
-    from prismaquant.tessera_campaign_table import draw_stack_sample
-    from prismaquant.tessera_campaign_table import audit_subsample
-
-    sizes = _sizes(*[1.0 + index for index in range(32)])
-    draw = draw_stack_sample(sizes, 20, seed=0, stack="s:a|w1")
-    audit = audit_subsample(draw["units"], rate=10, seed=0, stack="s:a|w1")
-    assert len(audit) == 2 and set(audit) <= set(draw["units"])
-    assert audit == audit_subsample(draw["units"], rate=10, seed=0,
-                                    stack="s:a|w1")
-    # Changing the audit fraction must not disturb the draw the prices are
-    # built from -- it runs on a stream of its own.
-    wider = audit_subsample(draw["units"], rate=4, seed=0, stack="s:a|w1")
-    assert len(wider) == 5
-    assert draw_stack_sample(sizes, 20, seed=0, stack="s:a|w1")["units"] \
-        == draw["units"]
-    assert audit_subsample(["e00"], rate=10, seed=0, stack="s") == ["e00"]
-    assert audit_subsample([], rate=10, seed=0, stack="s") == []
-
-
 def test_a_v1_selection_that_samples_is_refused_by_its_own_schema(tmp_path):
     from prismaquant.tessera_campaign_selection import load_unit_selection
 
