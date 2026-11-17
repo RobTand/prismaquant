@@ -297,6 +297,14 @@ def test_a_stopped_shard_names_only_tests_that_ran_and_failed():
     assert (found['verdict'], found['failed']) == ('fail', [ran])
 
 
+def test_a_shard_that_bazel_left_without_results_has_no_verdict_and_names_no_test():
+    # Queue gate 44052361479: exit 34, "No registered executors", 181 passed, 44 never ran, none failed.
+    run = {'statuses': {LABEL: 'PASSED', '//tests:test_unrun': 'NO_STATUS'}, 'invocation': 'child',
+           'returncode': 34, 'executed_by_label': {LABEL: 1}}
+    with pytest.raises(gate.GateError, match='exited 34 before 1 selected tests had a result'):
+        gate.architecture_result({LABEL, '//tests:test_unrun'}, run)
+
+
 def test_a_red_shard_ends_the_aggregate_but_a_pass_needs_every_shard():
     labels = [LABEL, '//tests:test_second']
     shards = gate.partition_population(labels, shard_count=2)

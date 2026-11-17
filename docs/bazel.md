@@ -153,6 +153,9 @@ against the queried population exactly once, and fail closed on any missing
 or DISCONNECTED shard. A PR or queue shard stops at its first failed test
 (`--notest_keep_going`); the first shard that does not pass ends the gate red, and the
 controller cancels its admitted siblings. A record keeps going and lists every failure.
+A shard whose Bazel run ends with any exit code other than 0, 1 (build failed) or 3 (tests
+failed) before its selected tests have results, and with no test that ran and failed, has no
+verdict (exit 75). It names no failed test.
 No shard is retried to obtain a pass.
 
 TL3 keeps BuildBuddy priority if a fallback batch arrives while its queue is backed up; this cutover adds no scheduler.
