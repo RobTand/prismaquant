@@ -307,29 +307,6 @@ def start_mem_watchdog(min_mem_available_mb: int = 1024,
 # ---------------------------------------------------------------------------
 # Unbatched CPU path (legacy, robust)
 # ---------------------------------------------------------------------------
-def _stage_text_only(model_path: str) -> str:
-    from .sensitivity_probe import stage_text_only
-    return stage_text_only(model_path)
-
-
-def _load_live_model(model_path: str, device: str, dtype: torch.dtype,
-                     device_map: str | None = None) -> nn.Module:
-    from prismaquant.model_runtime import initialize_model_runtime
-    initialize_model_runtime()
-    from transformers import AutoModelForCausalLM
-
-    staged = _stage_text_only(model_path)
-    load_device_map = device_map if device_map is not None else device
-    model = AutoModelForCausalLM.from_pretrained(
-        staged, torch_dtype=dtype, device_map=load_device_map,
-        low_cpu_mem_usage=False, trust_remote_code=True,
-    )
-    model.eval()
-    for p in model.parameters():
-        p.requires_grad_(False)
-    return model
-
-
 def measure_unbatched(model: nn.Module, act_cache: "ActivationIndex",
                      target_names: set[str], specs: list[fr.FormatSpec],
                      device: str, dtype: torch.dtype,
