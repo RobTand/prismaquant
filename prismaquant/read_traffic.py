@@ -197,10 +197,6 @@ READ_CLASS_TABLE: dict[str, float | None] = {
 
 #: Classes whose bytes sum into ``read_bytes_per_token``.
 STREAMED_CLASSES = ("dense", "routed_experts", "held_fixed")
-#: Classes reported under ``excluded`` — real bytes, zero per-token traffic.
-EXCLUDED_CLASSES = (
-    "excluded_embedding", "excluded_indexed_lookup", "excluded_mtp",
-    "excluded_non_text_graph")
 
 #: safetensors dtype names that cannot be a float matmul operand *on their
 #: own*.  Necessary but NOT sufficient for the lookup class -- both quantized
@@ -1420,7 +1416,6 @@ __all__ = [
     "READ_SCOPE",
     "READ_CLASS_TABLE",
     "STREAMED_CLASSES",
-    "EXCLUDED_CLASSES",
     "ReadTrafficError",
     "RoutingFactor",
     "assignment_read_traffic",
