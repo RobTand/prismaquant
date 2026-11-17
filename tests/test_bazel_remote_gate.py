@@ -286,13 +286,14 @@ def test_concurrency_above_one_is_bounded_and_exclusive_to_pr_gates(
     assert client.events == []
 
 
-def test_fallback_parallel_failure_cancels_the_other_admitted_shard_and_stops():
+def test_fallback_parallel_failure_cancels_every_admitted_shard_and_stops():
     client = BoundedFallbackClient(fail_first=True)
     with pytest.raises(remote.RemoteError):
         remote.submit_shards(client, fallback_requests(), HEAD,
                              concurrency=2, clock=lambda: 1)
-    assert client.events == [('submit', 0), ('submit', 1), ('terminal', 0), ('cancel-child', 1),
-                             ('cancel', 1)]
+    # A disconnected runner gives no record, but its remote actions can still hold executor slots.
+    assert client.events == [('submit', 0), ('submit', 1), ('terminal', 0), ('cancel-child', 0),
+                             ('cancel', 0), ('cancel-child', 1), ('cancel', 1)]
 
 
 def test_first_red_pr_shard_ends_the_gate_and_cancels_running_siblings(tmp_path, monkeypatch):
