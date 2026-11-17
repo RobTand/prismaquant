@@ -46,7 +46,6 @@ from .tessera_formats import (
     scale_plane_name,
     tessera_served_wire_recipe,
 )
-from .tessera_serving_runtime_pin import TESSERA_SERVING_PLUGIN_NAME
 
 if TYPE_CHECKING:
     from .lane_eligibility import ServingContext
@@ -58,7 +57,6 @@ __all__ = [
     "TESSERA_PLANNED_DIAGONALS",
     "TESSERA_PLANNED_RELEASE_OVERRIDES",
     "TESSERA_PLANNED_ROTATION",
-    "is_tessera_format",
     "planned_wire_facts",
     "render_tessera_weight",
     "tessera_attesting_cells",
@@ -105,12 +103,6 @@ TESSERA_PLANNED_RELEASE_OVERRIDES = 0
 #: Legal for every family (columns a multiple of the 256-column superblock,
 #: rows a multiple of arity x span) and representative of a production Linear.
 _LABEL_SHAPE = (2048, 4096)
-
-
-#: The vLLM plugin every Tessera route requires.  Aliased from the pin module
-#: rather than retyped: one spelling of the runtime's identity, so a rename
-#: cannot leave the gate checking a name nothing publishes.
-TESSERA_SERVING_PLUGIN = TESSERA_SERVING_PLUGIN_NAME
 
 
 def tessera_serving_contract_path():
@@ -225,18 +217,6 @@ def tessera_lane_admission(
 
     return snapshot_rung_admission(
         name, installed_runtime_snapshot(), serving_context=serving_context)
-
-
-def is_tessera_format(name: object) -> bool:
-    """True for a Tessera-shaped format name, without raising on others."""
-    try:
-        return parse_tessera_format_name(name) is not None
-    except Exception:
-        # A Tessera-shaped name naming an illegal rung raises inside the parser.
-        # That is a real error for a caller that means to *use* the format, but
-        # this predicate is only ever asking "is this one of mine?", and the
-        # answer there is yes -- let the render path raise with the detail.
-        return isinstance(name, str) and name.startswith("TESSERA_")
 
 
 @lazily_sized_cache(family_cache_bound)
