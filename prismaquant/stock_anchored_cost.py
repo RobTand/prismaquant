@@ -949,18 +949,6 @@ def pinned_passthrough_rows(
     return rows
 
 
-# --------------------------------------------------------------------------
-# Packed-expert empirical merge
-# --------------------------------------------------------------------------
-#: What ``expert_empirical_cost`` measures is a serving-unit KL, not an AURA
-#: projection: the smooth cost is route-flip-blind for routed experts, so a
-#: rendered-dW surrogate cannot see the cost that matters there.  Its rows
-#: therefore keep their own provenance verbatim.  Re-stamping them
-#: ``production_arm_render`` would be the forgery this module refuses in the
-#: other direction, and would also claim a currency they are not in.
-EMPIRICAL_EXPERT_COST_SOURCE_FIELD = "cost_source"
-
-
 @dataclass(frozen=True)
 class MergeReport:
     """What the disjoint union did, in numbers a gate can read."""
