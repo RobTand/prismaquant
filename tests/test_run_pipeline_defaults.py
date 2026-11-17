@@ -257,3 +257,7 @@ def test_selected_cache_keeps_resident_expert_gate_before_recache():
     assert '--expert-gate-dataset "$EXPERT_GATE_DATASET"' in build
     assert '--output "$PROD_CACHE_RAW"' in build
     assert '--production-weight-cache "$PROD_CACHE_RAW"' in recache
+
+
+def test_mtp_format_default_is_bf16():
+    assert _shell_default(_run_pipeline_script(), "MTP_FORMAT") == "BF16"
