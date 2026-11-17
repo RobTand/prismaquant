@@ -985,7 +985,6 @@ CHECKER_EVIDENCE_MAX_BYTES = 4 * 1024 * 1024
 _OBSERVATION_CLAIMS = {"time_claim": TIME_CLAIM, "certifies_placement": False,
                        "served_p95": "not_claimed"}
 _FLAT_SHA = re.compile(r"[0-9a-f]{64}")
-_FLAT_COMMIT = re.compile(r"[0-9a-f]{40}")
 _OBSERVATION_TOP = ("schema", "status", "claims", "gpu_executed", "panel",
                     "expected_panel_sha256", "request", "expected_runtime", "contract",
                     "evidence", "preflight", "producer", "replay", "invocation", "scope",
@@ -1017,11 +1016,6 @@ def _observation_number(value, where, *, positive=True) -> float:
         raise ShapeRuntimeError(
             f"{where}: requires a finite {'positive ' if positive else ''}number")
     return float(value)
-
-
-def _observation_sha_in(value, candidates, where) -> None:
-    if value not in candidates:
-        raise ShapeRuntimeError(f"{where}: {value!r} names no bound artifact")
 
 
 def _observation_lane(value, where) -> KernelLane:
@@ -1155,10 +1149,6 @@ def _parse_observation_json(raw: bytes) -> Any:
             f"shape-time observation: duplicate JSON key {key!r}"),
         constant=lambda token: ShapeRuntimeError(
             f"shape-time observation: nonfinite JSON constant {token}"))
-
-
-def _observation_binding(reader: ArtifactReader, reference, where: str) -> tuple[Path, bytes]:
-    return reader.bytes(reference, where)
 
 
 def _observation_projection(observation: Mapping) -> dict:
