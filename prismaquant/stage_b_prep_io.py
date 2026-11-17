@@ -17,8 +17,6 @@ PREPARATION_SLOT = "stage_b_metadata"
 #: The template id prefix; the id's suffix digests the template body, so a
 #: changed root or ceiling files a declaration of its own (PQ #1054).
 PREPARATION_TEMPLATE_PREFIX = "pq-stage-b-preparation"
-#: Immutable application output declaration schema.
-PRODUCED_OUTPUT_TEMPLATE_SCHEMA = "prismaquant.produced_declaration.v1"
 #: The read phase the preparation's manifest declares.
 PREPARATION_READ_PHASE = "stage-b-preparation"
 #: Bound for the retained scientific manifest format.
