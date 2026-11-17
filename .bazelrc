@@ -37,6 +37,10 @@ build:remote --extra_execution_platforms=//tools/bazel:linux_amd64
 build:remote --platforms=//tools/bazel:linux_amd64
 build:remote --remote_timeout=600
 build:remote --remote_local_fallback=false
+# Bridge (PQ #3952): the executor loses its BuildBuddy connection every 30 minutes. 12 retries at
+# most 20 s apart wait about 105 s for one remote call (default: 5 retries, about 3 s).
+build:remote --remote_retries=12
+build:remote --remote_retry_max_delay=20s
 # Actions run remotely, so the client needs no local runfiles trees; 1,364
 # test trees of symlinks, each with torch, fill a runner's disk.
 build:remote --nobuild_runfile_links
@@ -54,6 +58,8 @@ build:remote-arm64 --platforms=//tools/bazel:linux_arm64
 build:remote-arm64 --host_platform=//tools/bazel:linux_arm64
 build:remote-arm64 --remote_timeout=600
 build:remote-arm64 --remote_local_fallback=false
+build:remote-arm64 --remote_retries=12
+build:remote-arm64 --remote_retry_max_delay=20s
 build:remote-arm64 --nobuild_runfile_links
 
 # Commit and branch metadata are supplied by the CI entrypoint.
