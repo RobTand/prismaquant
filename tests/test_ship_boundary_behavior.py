@@ -502,3 +502,17 @@ def test_verify_refuses_boundary_receipt_from_the_wrong_http_contract(
     path, model_dir = _full_card(tmp_path, **{field: value})
     problems = verify(load_shipcard(path), model_dir=model_dir)
     assert any(needle in problem for problem in problems), problems
+
+
+def test_validation_artifact_directory_uses_declared_priority(tmp_path):
+    from types import SimpleNamespace
+
+    local = tmp_path / "model"
+    local.mkdir()
+    args = SimpleNamespace(artifact_dir="/explicit/artifact", model_name=str(local))
+    assert vqm._resolve_artifact_dir(args, "/card/model") == "/explicit/artifact"
+    args.artifact_dir = None
+    assert vqm._resolve_artifact_dir(args, "/card/model") == str(local)
+    args.model_name = "remote/model"
+    assert vqm._resolve_artifact_dir(args, "/card/model") == "/card/model"
+    assert vqm._resolve_artifact_dir(args, None) is None
