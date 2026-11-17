@@ -1232,7 +1232,6 @@ pq_py_test(
         "//:tools/resolve_tessera_dev_pin",
         "//:tools/tessera_fleet/__init__",
         ":conftest",
-        ":test_kl_ab_lib",
     ],
     timeout = "moderate",
 )
