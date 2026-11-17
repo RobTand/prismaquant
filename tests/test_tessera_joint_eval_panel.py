@@ -77,6 +77,17 @@ def test_pilot_handoff_and_allocator_refuse_even_observed_zero():
         bind_allocation_payload(joint, data, prepared, metadata, **kwargs)
 
 
+def test_observation_status_refuses_inconsistent_counts_without_changes():
+    for count in (None, {}, {"tokens": True, "calls": 1}, {"tokens": -1, "calls": 1},
+                  {"tokens": 1, "calls": 0}, {"tokens": 0, "calls": -1},
+                  {"tokens": 1, "calls": 1.0}):
+        saved = copy.deepcopy(count)
+        with pytest.raises(ValueError) as error:
+            observation_status(count)
+        assert str(error.value) == "joint evaluation observation counts are invalid"
+        assert count == saved
+
+
 @pytest.mark.parametrize('alias', ['dotdot', 'symlink'])
 def test_plan_generator_refuses_alias_of_original_output_root(tmp_path, monkeypatch, alias):
     import json
