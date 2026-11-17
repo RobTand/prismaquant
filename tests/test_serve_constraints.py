@@ -32,6 +32,7 @@ from prismaquant.serve_constraints import (
     rejection_record,
 )
 from prismaquant.serve_dispatch_table import parse_dispatch_table, SCHEMA
+from prismaquant.serve_dispatch_table import DispatchTableError
 from prismaquant.serving_profiles import (
     serving_runtime_version,
     load_serving_profile,
@@ -426,3 +427,14 @@ def test_fastest_feasible_summary_is_per_phase_and_scoped():
     assert out["per_phase"]["p95_ttft_ms"]["n_feasible_probes_considered"] == 2
     assert out["scope"] == "fixture scope"
     assert "GLOBALLY FEASIBLE" in out["reference_rule"]
+
+
+def test_dispatch_rows_refuse_nonpositive_or_nonfinite_relative_cost():
+    for cost in (0.0, -1.0, float("nan"), float("inf")):
+        row = _row("NVFP4", "prefill", "dense", "native", cost)
+        before = repr(row)
+        with pytest.raises(DispatchTableError) as err:
+            _table([_arena("prefill", "dense", "ttft_ms", 1000.0)], [row])
+        assert str(err.value) == ("row 'NVFP4'/'prefill'/'dense'/'native': "
+            f"relative_unit_cost must be finite and > 0, got {cost!r}")
+        assert repr(row) == before
