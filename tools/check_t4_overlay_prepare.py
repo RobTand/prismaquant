@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from prismaquant.digests import bytes_sha256hex  # noqa: E402
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex  # noqa: E402
 
 
 def bound_json(binding):
@@ -124,7 +124,7 @@ def main():
               'scope': 'verify_catalog_pair + load_measured_anchor_input(verify_payloads=False) + '
                        'model-free prepared-completion checks; opens under the source model refused',
               'seconds': round(time.monotonic() - started, 1)}
-    raw = (json.dumps(result, sort_keys=True, indent=2) + '\n').encode()
+    raw = (DIRECT_ASCII_INDENT2_LAX.text(result) + '\n').encode()
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open('xb') as handle:
         handle.write(raw)
