@@ -177,6 +177,20 @@ def test_reader_namespace_preserves_primary_and_binds_actual_sources(tmp_path):
     assert load_declared_reader(declared).identity['source_sha256'] == declared['source_sha256']
 
 
+def test_reader_refuses_conflicting_legacy_profile_before_import(grammar_package):
+    from prismaquant import tessera_reader as reader
+    declared = dict(grammar_package, source_profiles={reader.SOURCE_TREE_V1: '0' * 64})
+    assert declared['source_sha256'] != '0' * 64
+    root = Path(declared['path'])
+    snapshot = lambda: ({p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob('*') if p.is_file()},
+                        dict(sys.modules), list(sys.meta_path))
+    before = snapshot()
+    with pytest.raises(ValueError) as refusal:
+        reader.load_declared_reader(declared)
+    assert str(refusal.value) == 'reader legacy scalar disagrees with its labelled profile'
+    assert snapshot() == before
+
+
 def test_reader_refuses_absolute_producer_import(tmp_path):
     from prismaquant.tessera_reader import load_declared_reader
     with pytest.raises(ImportError, match='absolute.*tessera'):
