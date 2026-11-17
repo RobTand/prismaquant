@@ -1358,28 +1358,6 @@ def tessera_rate_distortion_hull(
     )
 
 
-def trellis_lambda_choices(
-    hulls: Mapping[str, TesseraRateDistortionHull],
-    lambda_loss_per_byte: float,
-) -> dict[str, TesseraLambdaChoice]:
-    """Select all tensors for one price in O(U log U + sum(log H_u)).
-
-    The per-hull breakpoints are precomputed; sorting the ``U`` mapping keys is
-    the separate cost required for deterministic multi-unit output ordering.
-    """
-
-    result: dict[str, TesseraLambdaChoice] = {}
-    for unit_name in sorted(hulls):
-        hull = hulls[unit_name]
-        if hull.unit_name != unit_name:
-            raise TesseraFormatError(
-                f"RD hull key {unit_name!r} differs from hull unit "
-                f"{hull.unit_name!r}"
-            )
-        result[unit_name] = hull.choice_at_lambda(lambda_loss_per_byte)
-    return result
-
-
 def trellis_local_repair_solver_menu(
     frontier: TesseraParetoFrontier,
     choice: TesseraLambdaChoice,
@@ -1806,7 +1784,6 @@ __all__ = [
     "adaptive_trellis_rate_surface",
     "build_tessera_allocator_candidate",
     "tessera_pareto_frontier",
-    "trellis_lambda_choices",
     "trellis_local_repair_solver_menu",
     "tessera_rate_distortion_hull",
     "tessera_solver_candidate_menu",
