@@ -8,7 +8,7 @@ import inspect
 import pytest
 
 from prismaquant import digests
-from prismaquant import production_weight_cache as cache
+from prismaquant import aura_provenance as cache
 import test_pwc_source_framing_1764 as pwc_framing
 import test_source_framing_1752 as source_framing
 
