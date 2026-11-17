@@ -121,3 +121,20 @@ def test_changed_input_tokens_do_not_pair_with_the_old_teacher(configuration):
     configuration["panel"] = put(panel_path, panel)
     with pytest.raises(ValueError, match="panel.*pairing"):
         preflight_g3(configuration)
+
+
+def test_g3_exl3_render_decodes_bound_wire_to_bfloat16(tmp_path):
+    from prismaquant.g3_v2 import decode_render
+
+    path = tmp_path / "wire.bin"
+    scales = np.ones(128, dtype=np.float16).tobytes()
+    path.write_bytes(scales + scales + bytes(8192) + (0xCBAC1FED).to_bytes(4, "little"))
+    row = {"render": {"kind": "exl3", "wire": bind(path), "in_features": 128, "out_features": 128}}
+    expected = torch.zeros((128, 128), dtype=torch.bfloat16)
+    expected[0, 0] = 236
+    actual = decode_render(row, device="cpu")
+    assert actual.dtype == torch.bfloat16
+    assert torch.equal(actual, expected)
+    row["render"]["kind"] = "unsupported"
+    with pytest.raises(ValueError, match="unsupported G3 rendered wire kind"):
+        decode_render(row, device="cpu")
