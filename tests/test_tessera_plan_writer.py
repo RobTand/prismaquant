@@ -241,6 +241,17 @@ def test_group_option_spelling_is_refused_by_name(tmp_path, monkeypatch):
                            config["model.layers.0.mlp.down_proj"])
 
 
+def test_entry_refuses_family_that_disagrees_with_format():
+    entry = {"tessera_format": "TESSERA_E4M3_K1_R1024", "tessera_family": "TESSERA_E2M1_K2"}
+    before = dict(entry)
+    with pytest.raises(writer.PlanError) as caught:
+        writer.parse_entry("model.layers.0.linear", entry)
+    assert str(caught.value) == (
+        "model.layers.0.linear: tessera_family 'TESSERA_E2M1_K2' disagrees "
+        "with tessera_format 'TESSERA_E4M3_K1_R1024'")
+    assert entry == before
+
+
 def test_non_tessera_quantized_choice_is_refused(tmp_path, monkeypatch):
     surface = _surface()
     monkeypatch.setattr(writer, "tessera_surface", lambda: surface)
