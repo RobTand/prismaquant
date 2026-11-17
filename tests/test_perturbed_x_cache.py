@@ -422,3 +422,24 @@ def test_stage_text_only_uses_work_root_for_tempdir(tmp_path):
     assert "vision_config" not in cfg
     assert cfg["hidden_size"] == 8
     assert cfg["architectures"] == ["ToyForCausalLM"]
+
+
+def test_materialized_frozen_weights_restore_after_nested_failure(tmp_path):
+    from collections import OrderedDict
+
+    model = nn.Sequential(nn.Linear(32, 32, bias=False))
+    original = model[0].weight.detach().clone()
+    cache = PerturbedActivationCache(model, {"0": "BF16"}, tmp_path, input_rows=0, cal_hash="test")
+    with pytest.raises(RuntimeError, match="frozen weight cache is not active"):
+        with cache.materialized_frozen_weights():
+            pass
+    cache._frozen_weight_cache = OrderedDict({(id(model[0]), "weight"): torch.zeros_like(original)})
+    with pytest.raises(ValueError, match="body failed"):
+        with cache.materialized_frozen_weights():
+            assert torch.count_nonzero(model[0].weight) == 0
+            with cache.materialized_frozen_weights():
+                assert cache._materialized_frozen_weight_depth == 2
+            assert torch.count_nonzero(model[0].weight) == 0
+            raise ValueError("body failed")
+    assert torch.equal(model[0].weight, original)
+    assert cache._materialized_frozen_weight_depth == 0
