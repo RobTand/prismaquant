@@ -226,6 +226,22 @@ def test_runner_keeps_an_existing_result(tmp_path):
     assert output.read_bytes() == before
 
 
+def test_runner_refuses_duplicate_stage_destinations_without_writes(tmp_path):
+    from prismaquant.ship_gates import run_ship_gates
+    path = job_config(tmp_path)
+    config = json.loads(path.read_text())
+    config["stages"][1]["output"] = config["stages"][0]["output"]
+    path.write_text(json.dumps(config))
+    files = lambda: {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    before = files()
+    report = run_ship_gates(path, tmp_path / "duplicate-report.json", verify_only=True)
+    assert report["status"] == "refused"
+    assert report["runtime_qualification"] == "not_run"
+    assert report["stages"] == []
+    assert report["problems"] == ["stage, log and job output paths must be distinct"]
+    assert files() == before
+
+
 @pytest.mark.parametrize("protected", [True, False], ids=["protected-input", "retained-log"])
 def test_preflight_preserves_actual_log_bytes(tmp_path, protected):
     from prismaquant.ship_gates import run_ship_gates
