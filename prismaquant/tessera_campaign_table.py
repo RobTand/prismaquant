@@ -2752,22 +2752,6 @@ def parse_rate_band(text) -> "tuple[int, int] | None":
     return lo, hi
 
 
-def audit_subsample(drawn: "Sequence[str]", *, rate: int = 10, seed: int = 0,
-                    stack: str = "") -> list[str]:
-    """A simple random subsample of the draw: one unit in ``rate``, at least 1.
-
-    Drawn from a stream of its own, so changing the audit fraction cannot
-    disturb the sample the prices are built from -- the audit buys evidence
-    about interpolation, and must not be able to move the estimate.
-    """
-    units = sorted(drawn)
-    if not units:
-        return []
-    count = max(1, len(units) // int(rate))
-    stream = _keystream(seed, f"audit:{stack}")
-    return sorted(_permute(units, stream)[:count])
-
-
 def campaign_acquisition_scope(acquisition, scope_groups, *, selected=None):
     """Require every real atomic member and exactly the requested scope."""
     requests, sources = acquisition["requests"], acquisition["source_weights"]
