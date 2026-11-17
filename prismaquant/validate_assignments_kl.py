@@ -67,6 +67,7 @@ from prismaquant.perturbed_x_cache import (
 # emitting side and the reading side cannot drift (R9/D1).
 from prismaquant.select_validated_frontier import (
     TAIL_VETO_COLUMNS as _TAIL_REPEAT_COLUMNS,
+    _load_json,
 )
 from prismaquant.schemas import validate_cost_payload
 from prismaquant.source_prefetch import (
@@ -74,10 +75,6 @@ from prismaquant.source_prefetch import (
     prefetch_safetensors_checkpoint,
 )
 from .digests import DIRECT_UTF8_STRICT, text_sha256hex
-
-
-def _load_json(path: str | Path):
-    return json.loads(Path(path).read_text())
 
 
 def _load_probe_stats(path: str | Path, *, calib_hashes_out: set | None = None) -> dict:
