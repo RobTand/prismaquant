@@ -280,6 +280,15 @@ def _refused():
     return _forward().ForwardSplitRefused
 
 
+def test_forward_prep_refuses_an_empty_partition_roster():
+    for ranges in ([], None):
+        spec = {"role": "prep", "ranges": ranges}
+        before = json.dumps(spec, sort_keys=True)
+        with pytest.raises(_refused()) as refused:
+            _forward().normalize_forward_split(spec)
+        assert (str(refused.value), json.dumps(spec, sort_keys=True)) == ("a forward split prep names at least one range", before)
+
+
 def test_the_join_refuses_a_range_whose_quantum_did_not_run(tmp_path, monkeypatch):
     root = tmp_path / "run"
     _forward_prep(root, monkeypatch)
