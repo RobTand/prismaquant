@@ -722,6 +722,30 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
         assert tools == ['generate-hashes', 'generate-hashes', 'get-impacted-targets']
 
 
+@pytest.mark.parametrize('layout', ['file list', 'filegroup'])
+def test_a_new_test_file_selects_the_whole_tree_readers_in_both_build_layouts(layout):
+    def rule(label, kind, *inputs):
+        return {'rule': {'name': label, 'ruleClass': kind, 'ruleInput': list(inputs)}}
+    files = ['//tests:test_new.py', '//tests:test_old.py', '//tests:test_reader.py', '//tests:test_kl_ab.py']
+    group = [rule('//tests:test_files', 'filegroup', *files)] if layout == 'filegroup' else []
+    data = ['//tests:test_files'] if group else files
+    rows = [{'sourceFile': {'name': name}} for name in files + ['//:prismaquant/core.py']] + group + [
+        rule('//:prismaquant/core', 'py_library', '//:prismaquant/core.py'),
+        *[rule(f'//tests:{name}_lib', 'py_library', f'//tests:{name}.py', '//:prismaquant/core')
+          for name in ('test_new', 'test_old', 'test_reader', 'test_kl_ab')],
+        rule('//tests:test_new', 'py_test', '//tests:test_new_lib'), rule('//tests:test_old', 'py_test', '//tests:test_old_lib'),
+        rule('//tests:test_reader', 'py_test', '//tests:test_reader_lib', *data),
+        rule('//tests:test_kl_ab', 'py_test', '//tests:test_kl_ab_lib', *data),
+        rule('@@rules_python++pip+pq_pip_numpy//:pkg', 'py_library')]
+    population = selection.query_population(rows, 'amd64')
+    tests = set(population['tests'])
+    assert selection.direct_impact(population, {'tests/test_new.py'}) & tests == {
+        '//tests:test_new', '//tests:test_reader', '//tests:test_kl_ab'}
+    # A closure test keeps the whole closure of a product file in both layouts.
+    closure = selection.reverse_closure(population['consumers'], {'prismaquant/core.py'})
+    assert '//tests:test_kl_ab' in closure & selection.CLOSURE_TESTS
+
+
 def test_direct_selection_takes_one_import_and_the_test_side_above_it():
     def rule(label, kind, *inputs):
         return {'rule': {'name': label, 'ruleClass': kind, 'ruleInput': list(inputs)}}

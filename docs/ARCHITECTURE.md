@@ -927,6 +927,14 @@ explicit traffic wire bytes. DEFAULT-OFF, UNQUALIFIED FEATURE HOLD.
 CPU verification covers declaration uptake only; no pipeline default,
 format, serving lane or ship gate changes.
 
+As of: 2026-11-17, generated BUILD layout, PQ #4092.
+Source: `tools/bazel/build_files.py`, based on main `24a034e0`. The 27 tests that
+read every top-level test file take one filegroup, `//tests:test_files`, instead
+of 1,268 file names each (tests/BUILD.bazel 96,970 -> 62,805 lines), and the
+targets of each BUILD file are ordered by the SHA-256 of their names. A new test
+adds its own two blocks only, at an unrelated place: sibling pull requests no
+longer conflict in tests/BUILD.bazel. Details: docs/bazel.md, "Selection".
+
 As of: 2026-11-17, gate test-growth check, PQ #3944.
 Source: `tools/ci/test_growth.py` and `tools/ci/static_checks.sh`, based on main
 `f1c698b5`. The gate's Graph impact job and the pre-queue command refuse a PR that
