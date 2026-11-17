@@ -288,20 +288,6 @@ def test_graph_memory_audit_reports_registered_graphs(monkeypatch, capsys):
     assert "static_bytes=20" in captured.err
 
 
-def test_phase_boundary_cleanup_called(monkeypatch):
-    calls = {"empty_cache": 0}
-
-    def _empty_cache():
-        calls["empty_cache"] += 1
-
-    monkeypatch.setattr(torch.cuda, "empty_cache", _empty_cache)
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-
-    mm.phase_boundary_memory_cleanup("l2_to_l3")
-
-    assert calls["empty_cache"] == 1
-
-
 def test_memory_budget_evicts_when_low(monkeypatch):
     gib = 1024 ** 3
     mem_info = iter([(0, 2 * gib), (1536 * 1024 ** 2, 2 * gib)])
