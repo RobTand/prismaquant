@@ -1520,3 +1520,15 @@ def test_selector_preserves_destination_claims_for_exact_assignment(tmp_path):
         "--output-assignment", str(assignment_out), "--output-summary", str(summary))
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert json.loads(layer_config.read_text())["__prismaquant__"]["serve_constraints"] == {"old": "claim"}
+
+
+def test_selector_refuses_non_list_results_without_overwriting_outputs(tmp_path):
+    validation = tmp_path / "validation.json"
+    validation.write_text(json.dumps({"results": {"not": "a list"}}))
+    paths = [tmp_path / n for n in ("layer_config.json", "assignment.json", "summary.json")]
+    for path in paths:
+        path.write_text("old " + path.name)
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    with pytest.raises(ValueError, match=r"^--validation-json must contain a results list$"):
+        main(["--validation-json", str(validation), "--output-layer-config", str(paths[0]), "--output-assignment", str(paths[1]), "--output-summary", str(paths[2])])
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
