@@ -38,15 +38,6 @@ def load_sealed_manifest(bound_manifest_sha256):
     return read_contract_document(raw)
 
 
-def load_sealed_readset(bound_manifest_sha256):
-    from .residency_map import residency_resolver
-    resolver = residency_resolver()
-    if resolver is None:
-        raise ReadsetUnbound('explicit immutable staged manifest required')
-    resolver.bind_manifest_sha256(bound_manifest_sha256)
-    return resolver.declared_readset()
-
-
 class LeaseWindow:
     def __init__(self, resolver, entries):
         self.resolver, self.entries = resolver, dict(entries)
