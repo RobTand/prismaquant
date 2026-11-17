@@ -121,6 +121,14 @@ def test_completed_recipe_refuses_corrupt_controls(field, value):
         NativeRenderLevers.from_record(record)
 
 
+def test_stored_render_options_refuse_non_mapping_records():
+    for record, expected in ((None, None), ([], []), ("fp8", "fp8")):
+        with pytest.raises(ValueError) as error:
+            NativeRenderLevers.from_record(record)
+        assert str(error.value) == "native render options must be a mapping"
+        assert record == expected
+
+
 def test_completed_recipe_preserves_supported_disabled_controls():
     options = NativeRenderLevers(
         act_clip_quantile=None,
