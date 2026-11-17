@@ -89,7 +89,6 @@ __all__ = [
     "TesseraRateSurface",
     "allocation_regret",
     "densify_rate_surface",
-    "fit_rate_surface",
     "fit_stack_transfer_law",
     "leave_one_anchor_out",
     "predict_stack_rates",
@@ -290,56 +289,6 @@ class TesseraRateSurface:
             if body_rate_q256 in self.anchor_q256
             else PROVENANCE_INTERPOLATED
         )
-
-
-def fit_rate_surface(
-    records: Sequence[TesseraAllocatorCandidate],
-    *,
-    currency: str,
-    allowability=None,
-    anchor_scopes: Mapping[int, Mapping] | None = None,
-) -> TesseraRateSurface:
-    """Build one unit's surface from its measured anchor candidates."""
-
-    if not isinstance(currency, str) or not currency:
-        raise TesseraFormatError(
-            "currency must be a nonempty string naming the objective the "
-            "anchors were measured in"
-        )
-    materialized = list(records)
-    if not materialized:
-        raise TesseraFormatError("a rate surface needs anchor records")
-    units = {record.unit_name for record in materialized}
-    families = {record.family for record in materialized}
-    layouts = {record.layout for record in materialized}
-    if len(units) != 1:
-        raise TesseraFormatError("anchors must describe exactly one unit")
-    if len(families) != 1:
-        raise TesseraFormatError("anchors must share one trellis family")
-    if len(layouts) != 1:
-        raise TesseraFormatError(
-            "anchors must share one layout; fixed-quota and tight-offset "
-            "curves are different rate axes and cannot be interpolated across"
-        )
-    ordered = sorted(materialized, key=lambda record: record.body_rate_q256)
-    rates = tuple(record.body_rate_q256 for record in ordered)
-    if len(set(rates)) != len(rates):
-        raise TesseraFormatError("anchors must not repeat a rate")
-    return TesseraRateSurface(
-        unit_name=next(iter(units)),
-        family=next(iter(families)),
-        layout=next(iter(layouts)),
-        currency=currency,
-        anchor_q256=rates,
-        allowability=allowability,
-        anchor_scopes=anchor_scopes,
-        anchor_dloss=tuple(
-            float(record.predicted_dloss_mean) for record in ordered
-        ),
-        anchor_stderr=tuple(
-            record.require_measured_stderr(where="rate surface anchor") for record in ordered
-        ),
-    )
 
 
 def densify_rate_surface(
