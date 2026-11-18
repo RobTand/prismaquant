@@ -151,3 +151,22 @@ def test_optional_base_differences_do_not_override_shipped_identity(tmp_path, mo
         "every invariant field matches the shipped v1 layer-0 shard exactly\n"
         "GATE VERDICT: PASS\n")
     assert [path.read_bytes() for path in (shipped, base, candidate)] == originals
+
+
+def test_unusable_optional_base_is_diagnostic_and_keeps_shipped_pass(tmp_path, monkeypatch, capsys):
+    shipped, candidate, base, verdict = (
+        tmp_path / name for name in ("shipped.pkl", "candidate.pkl", "base.pkl", "verdict.txt"))
+    row = {"weight_mse": 0.125}
+    originals = [pickle.dumps({"costs": {QNAME: {FORMAT: entry}}})
+                 for entry in (row, dict(row, n_activation_rows=64))] + [pickle.dumps({})]
+    for path, content in zip((shipped, candidate, base), originals):
+        path.write_bytes(content)
+    monkeypatch.setattr(sys, "argv", [
+        str(gate.__file__), "--shipped", str(shipped), "--new", str(candidate),
+        "--base", str(base), "--min-rows", "1", "--verdict", str(verdict)])
+    assert gate.main() == 0
+    assert verdict.read_bytes() == b"PASS"
+    text = capsys.readouterr().out
+    assert "NOTE: base arm shard unusable (no 'costs' table); skipping base-vs-new cross-check\n" in text
+    assert "every invariant field matches the shipped v1 layer-0 shard exactly\n" in text
+    assert [path.read_bytes() for path in (shipped, candidate, base)] == originals
