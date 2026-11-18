@@ -48,6 +48,15 @@ def test_campaign_rules_distinguish_run_seals_from_the_measured_roster(record, m
         ledger.require_quantum_campaign(record, campaign)
 
 
+def test_campaign_refuses_a_missing_plan_digest_in_a_sealed_record(record):
+    del record["campaign"]["plan_sha256"]
+    record = ledger.seal_quantum_record(record)
+    original = copy.deepcopy(record)
+    with pytest.raises(ValueError, match="^the campaign binding names no plan_sha256: refusing$"):
+        ledger.require_quantum_campaign(record, record["campaign"])
+    assert record == original
+
+
 def test_unbound_and_slice_bound_records_have_distinct_admission(record):
     ledger.require_quantum_campaign(record, record["campaign"])
     expected = {**record["campaign"], "adjoint_slice_sha256": "f" * 64}
