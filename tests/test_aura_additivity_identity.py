@@ -129,3 +129,17 @@ def test_paired_report_requires_measured_rows_for_the_whole_roster():
     payload["costs"][UNIT_A]["BF16"] = {"predicted_dloss": 0.0}
     with pytest.raises(ValueError, match="complete joint"):
         paired_assignment_report(payload, ASSIGNMENT, {**ASSIGNMENT, UNIT_A: "BF16"})
+
+
+def test_paired_report_refuses_a_comparison_row_under_the_wrong_format():
+    a, b = _row(UNIT_A, [1, 2, 3]), _row(UNIT_B, [3, 2, 1])
+    payload = _payload(a, b)
+    payload["costs"][UNIT_A]["FP8_E5M2"] = copy.deepcopy(a)
+    assignment = dict(ASSIGNMENT)
+    comparison = {**assignment, UNIT_A: "FP8_E5M2"}
+    snapshot = copy.deepcopy((payload, assignment, comparison))
+    assert additivity_gate(payload, assignment, measured_kl=0.1)["probe_alignment_verified"] is True
+    with pytest.raises(ValueError) as error:
+        paired_assignment_report(payload, assignment, comparison)
+    assert str(error.value) == f"paired joint AURA format identity mismatch: {UNIT_A}"
+    assert (payload, assignment, comparison) == snapshot
