@@ -99,6 +99,21 @@ def test_dense_plan_partition_and_refusals():
     }
 
 
+def test_dense_plan_cap_keeps_the_first_unit_and_marks_only_a_narrowed_plan_partial():
+    from copy import deepcopy
+    probe, checkpoint = _censuses()
+    before = deepcopy((probe, checkpoint))
+    full = build_dense_plan(probe, checkpoint)
+    name = "model.language_model.layers.0.mlp.gate_proj"
+    limited = build_dense_plan(probe, checkpoint, max_units=1)
+    assert limited == {**full, "plan": {name: ("NVFP4",)}, "plan_scope": "filtered",
+                       "max_units": 1, "dense_units": [name]}
+    assert len(full["plan"]) == 2
+    for cap in (2, 3):
+        assert build_dense_plan(probe, checkpoint, max_units=cap) == {**full, "max_units": cap}
+    assert (probe, checkpoint) == before
+
+
 def test_dense_plan_filter_marks_partial():
     probe, checkpoint = _censuses()
     planned = build_dense_plan(probe, checkpoint, unit_filter="gate_proj")
