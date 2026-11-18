@@ -151,6 +151,19 @@ def test_fresh_run_carries_the_receipt_and_rewrites_the_measurement_source(seale
     assert context.install_calls == 0
 
 
+def test_dev_measurement_identity_preserves_actual_source_in_a_copy(sealed, monkeypatch):
+    cap = sealed["load"]()
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    actual = {"git_commit": "9" * 40, "producer_source_sha256": "a" * 64,
+              "checkpoint": "owned-checkpoint"}
+    before = dict(actual)
+    result = cap.measurement_identity(actual)
+    assert result == before
+    assert result is not actual
+    result["checkpoint"] = "changed-copy"
+    assert actual == before
+
+
 def test_receipt_created_under_one_snapshot_commit_loads_under_another_with_identical_bytes(sealed):
     """PrismaBuild seals a distinct commit per submission; the binding is the package bytes."""
     sealed["state"]["commit"] = "6" * 40
