@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import pickle
 import subprocess
+import warnings
 
 import pytest
 
@@ -51,6 +52,119 @@ def freeze(root, mode='strict'):
     config['test_to_test'] = mode
     put(root, str(pq.BASELINE), json.dumps(config))
     return commit(root, 'record numeric limits')
+
+
+def test_warm_cache_matches_uncached_snapshot(repo, monkeypatch):
+    source = ('import hashlib\n'
+              'def digest_parts(parts):\n'
+              '    result = []\n'
+              '    for part in parts:\n'
+              '        digest = hashlib.sha256(part)\n'
+              '        if digest is not None:\n'
+              '            result.append(digest.hexdigest())\n'
+              '    return tuple(result)\n')
+    put(repo, 'prismaquant/owner.py', source)
+    put(repo, 'prismaquant/peer.py', source)
+    git(repo, 'add', '.')
+    monkeypatch.delenv('GRAPH_IMPACT_CACHE', raising=False)
+    expected = pq.load_snapshot(repo)
+    assert expected['duplication']['near_duplicates'] == [
+        ['prismaquant/owner.py::digest_parts', 'prismaquant/peer.py::digest_parts']]
+    monkeypatch.setenv('GRAPH_IMPACT_CACHE', str(repo / '.cache'))
+    assert pq.load_snapshot(repo) == expected
+
+    def refuse_recompute(path, *args, **kwargs):
+        pytest.fail(f'Recomputed cache entry for {path}')
+
+    monkeypatch.setattr(pq.build, 'source_facts', refuse_recompute)
+    monkeypatch.setattr(pq.duplication_inventory, 'file_inventory', refuse_recompute)
+    assert pq.load_snapshot(repo) == expected
+
+
+def test_warm_cache_preserves_surrogate_code_points(repo, monkeypatch):
+    source = 'tests/test_a.py'
+    target = 'tests/test_\U0001f600.py'
+    surrogates = 'tests/test_\ud83d\ude00.py'
+    put(repo, source, f'import runpy\nrunpy.run_path({surrogates!r})\n')
+    put(repo, target, '')
+    monkeypatch.setenv('GRAPH_IMPACT_CACHE', str(repo / '.cache'))
+
+    cold = pq.build.Evidence(repo, [source, target])
+    warm = pq.build.Evidence(repo, [source, target])
+    assert surrogates in cold.facts[source].loaders
+    assert target not in cold.of(source)[0]
+    assert warm.syntax[source] == cold.syntax[source]
+    assert warm.of(source) == cold.of(source)
+
+
+def test_warning_filter_changes_interpreter_hash():
+    with warnings.catch_warnings():
+        warnings.simplefilter('default', SyntaxWarning)
+        default = pq.build.interpreter_hash()
+        warnings.simplefilter('error', SyntaxWarning)
+        assert pq.build.interpreter_hash() != default
+
+
+@pytest.mark.parametrize('source', [
+    'import importlib as loader\nloader.import_module(name)\n',
+    'from importlib import import_module as load\nload(name=name)\n',
+    '__import__(name)\n',
+    'from runpy import run_path\nrun_path(path_name=name)\n',
+    'import runpy\nrunpy.run_module(name)\n',
+    'from importlib.util import spec_from_file_location\nfrom pathlib import Path\n'
+    "spec_from_file_location(name, Path(__file__).with_name('gate_' + 'paths.py'))\n",
+])
+def test_tool_hash_rejects_computed_imports(tmp_path, source):
+    put(tmp_path, 'tools/ci/graph_impact_pq.py', 'from tools.ci import helper\n')
+    put(tmp_path, 'tools/ci/helper.py', source)
+    with pytest.raises(ValueError, match=r'Computed import in tools/ci/helper\.py'):
+        pq.build.tool_hash(tmp_path)
+
+
+def test_tool_source_change_invalidates_cached_file_facts(repo, monkeypatch):
+    tools = repo / 'tool-copy'
+    for path, source in pq.build.tool_sources(ROOT).items():
+        target = tools / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source)
+    monkeypatch.setattr(pq.build, 'ROOT', tools)
+    monkeypatch.setenv('GRAPH_IMPACT_CACHE', str(repo / '.cache'))
+    expected = pq.load_snapshot(repo)
+    inputs = pq.build.tool_sources(tools)
+    helper = next(path for path in inputs if Path(path).name == 'gate_paths.py')
+    old_hash = pq.build.tool_hash(tools)
+    (tools / helper).write_bytes(inputs[helper] + b'\n# Change the tool source.\n')
+    assert pq.build.tool_hash(tools) != old_hash
+
+    collected = set()
+
+    def record(owner, name):
+        collect = getattr(owner, name)
+
+        def collect_and_record(path, *args, **kwargs):
+            if path == 'prismaquant/owner.py':
+                collected.add(name)
+            return collect(path, *args, **kwargs)
+
+        monkeypatch.setattr(owner, name, collect_and_record)
+
+    record(pq.build, 'source_facts')
+    record(pq.duplication_inventory, 'file_inventory')
+    assert pq.load_snapshot(repo) == expected
+    assert collected == {'source_facts', 'file_inventory'}
+
+
+def test_changed_source_bytes_invalidate_cached_file_facts(repo, monkeypatch):
+    monkeypatch.setenv('GRAPH_IMPACT_CACHE', str(repo / '.cache'))
+    before = pq.load_snapshot(repo)
+    assert 'prismaquant/owner.py' in before['reach']['tests/test_a.py']
+    assert before['duplication']['primitive_digest_sites'] == []
+
+    put(repo, 'tests/test_a.py', 'def test_sample():\n    assert True\n')
+    put(repo, 'prismaquant/owner.py', 'import hashlib\nVALUE = hashlib.sha256(b"data")\n')
+    after = pq.load_snapshot(repo)
+    assert 'prismaquant/owner.py' not in after['reach']['tests/test_a.py']
+    assert after['duplication']['primitive_digest_sites'] == ['hashlib:prismaquant/owner.py::<module>']
 
 
 def check(root, base, capsys, *args):

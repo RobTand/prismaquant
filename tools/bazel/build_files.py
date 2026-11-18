@@ -43,7 +43,9 @@ import ast
 import builtins
 from collections import defaultdict
 import importlib.util
+import io
 import json
+import marshal
 import math
 import os
 import posixpath
@@ -51,11 +53,13 @@ import re
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
+import tempfile
 import textwrap
+import warnings
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from prismaquant.digests import text_sha256hex  # noqa: E402
+from prismaquant.digests import length_framed_bytes_sha256, text_sha256hex  # noqa: E402
 # Bazel packages that hold modules. Every other file belongs to the root
 # package: an import cycle joins prismaquant/ and tools/ (tools/serve_fingerprint.py),
 # and no target can span packages. tools/bazel is written by hand.
@@ -96,16 +100,11 @@ EMBEDDED_PY_PATH = re.compile(r'(?<![\w.-])/?((?:[A-Za-z_][\w.-]*/)+[\w.-]+\.py)
 DATA_MODULE_NAME = re.compile(r'''["']([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)(?::[\w.]+)?["']''')
 
 
-def import_from_path(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 # The merge gate's selector from this checkout: module names, path references
 # and the population all come from it.
-GATE_SELECT = import_from_path('gate_select_for_bazel', ROOT / 'tools/ci/gate_select.py')
+GATE_SELECT_SPEC = importlib.util.spec_from_file_location('gate_select_for_bazel', ROOT / 'tools/ci/gate_select.py')
+GATE_SELECT = importlib.util.module_from_spec(GATE_SELECT_SPEC)
+GATE_SELECT_SPEC.loader.exec_module(GATE_SELECT)
 gate_paths = GATE_SELECT.gate_paths
 
 
@@ -329,9 +328,8 @@ LOADER_SLOTS = {'importlib.util.spec_from_file_location': (1, 'location'),
 SYS_PATH_CALLS = frozenset({'sys.path.insert', 'sys.path.append', 'site.addsitedir'})
 
 
-def loader_evidence(tree, path, gate_paths, bindings=None):
-    """(module names imported by a literal import_module or __import__, loader paths,
-    whether a dynamic import's name is not a literal).
+def loader_evidence(tree, path, gate_paths, bindings=None, *, tool_walk=False):
+    """Return literal module names, loader paths, and computed import targets.
 
     PrismaBuild's gate_select.production_loads, which also follows names bound
     by for and with, and keeps every meaning of a reused alias.
@@ -342,8 +340,10 @@ def loader_evidence(tree, path, gate_paths, bindings=None):
         if not isinstance(node, ast.Call):
             continue
         for name in sorted(bindings.meanings(node.func)):
-            if name in {'importlib.import_module', '__import__'}:
-                target = next((item.value for item in node.keywords if item.arg == 'name'),
+            if name in {'importlib.import_module', '__import__'} or (
+                    tool_walk and name in {'builtins.__import__', 'runpy.run_module'}):
+                keyword = 'mod_name' if name == 'runpy.run_module' else 'name'
+                target = next((item.value for item in node.keywords if item.arg == keyword),
                               node.args[0] if node.args else None)
                 if isinstance(target, ast.Constant) and isinstance(target.value, str):
                     module = target.value
@@ -357,13 +357,22 @@ def loader_evidence(tree, path, gate_paths, bindings=None):
                         level = len(module) - len(module.lstrip('.'))
                         module = '.'.join(parts[:len(parts) - level + 1] + [module.lstrip('.')]).rstrip('.')
                     modules.add(module)
-                elif target is not None:
-                    dynamic.append(target)
+                elif target is not None or tool_walk:
+                    dynamic.append(target or node)
             if name not in LOADER_SLOTS:
                 continue
             position, keyword = LOADER_SLOTS[name]
             target = next((item.value for item in node.keywords if item.arg == keyword),
                           node.args[position] if len(node.args) > position else None)
+            if tool_walk:
+                values = bindings.values(target, path, gate_paths)[0] if target is not None else ()
+                prefix = gate_paths.REPOSITORY + '/'
+                resolved = {posixpath.normpath(value).removeprefix(prefix) for value in values}
+                if not resolved or any(value in {'.', '..'} or value.startswith(('/', '../'))
+                                       or any(char in value for char in '*?\n\0') for value in resolved):
+                    raise ValueError(f'Computed import in {path}')
+                paths.update(resolved)
+                continue
             if target is None:
                 continue
             followed, _, _ = bindings.follow([target])
@@ -525,6 +534,79 @@ def statement_imports(tree, path):
     return names
 
 
+def tool_sources(root):
+    """Read the graph impact driver's repository imports and their source."""
+    pending = ['tools/ci/graph_impact_pq.py']
+    seen, sources = set(), {}
+    while pending:
+        path = pending.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        file = root / path
+        if not file.is_file():
+            continue
+        source = sources[path] = file.read_bytes()
+        tree = ast.parse(source)
+        bindings = Bindings(tree)
+        imports, loaders, dynamic = loader_evidence(tree, path, gate_paths, bindings, tool_walk=True)
+        if dynamic:
+            # The tools do not use the package's lazy exports.
+            table = lazy_exports(tree) if path == 'prismaquant/__init__.py' else None
+            if not (table and len(dynamic) == 1 and table[0] in bindings.follow(dynamic)[2]
+                    and any(isinstance(node, ast.FunctionDef) and node.name == '__getattr__'
+                            and dynamic[0] in walk(node) for node in tree.body)):
+                raise ValueError(f'Computed import in {path}')
+        pending.extend(name for name in loaders if name.endswith('.py'))
+        for name in statement_imports(tree, path) | imports:
+            parts = name.split('.')
+            for end in range(1, len(parts) + 1):
+                stem = '/'.join(parts[:end])
+                pending.extend((stem + '.py', stem + '/__init__.py'))
+    return sources
+
+
+def tool_hash(root):
+    sources = tool_sources(root)
+    return length_framed_bytes_sha256(
+        (frame for path in sorted(sources) for frame in (path.encode(), sources[path])),
+        prefix=b'graph-impact-tools')
+
+
+def interpreter_hash():
+    state = (sys.version, sys.flags, sys.get_int_max_str_digits(), sorted(BUILTIN_NAMES),
+             sys.warnoptions, repr(warnings.filters))
+    return text_sha256hex(repr(state))
+
+
+class SourceCache:
+    def __init__(self, directory):
+        self.directory = Path(directory) if directory else None
+        if self.directory is not None:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            self.tool_hash = tool_hash(ROOT)
+            self.interpreter_hash = interpreter_hash()
+
+    def read(self, group, root, path, collect, *, encoding=None, errors=None):
+        file = root / path
+        if self.directory is None:
+            return collect(path, file.read_text(encoding=encoding, errors=errors))
+        source = file.read_bytes()
+        with io.TextIOWrapper(io.BytesIO(source), encoding=encoding, errors=errors) as stream:
+            header = (self.tool_hash, self.interpreter_hash, stream.encoding, stream.errors, group, path)
+            key = length_framed_bytes_sha256(
+                (*map(str.encode, header), source), prefix=b'graph-impact-file')
+            entry = self.directory / key
+            try:
+                return marshal.loads(entry.read_bytes())
+            except FileNotFoundError:
+                value = collect(path, stream.read())
+        with tempfile.NamedTemporaryFile(dir=self.directory, delete=False) as target:
+            target.write(marshal.dumps(value))
+        Path(target.name).replace(entry)
+        return value
+
+
 def dotted_parts(path):
     parts = path.removesuffix('.py').split('/')
     return parts[:-1] if parts[-1] == '__init__' else parts
@@ -556,6 +638,51 @@ class Facts:
         self.child_pytest = child_pytest
 
 
+def source_facts(path, source, paths):
+    tree = parse(source)
+    if tree is None:
+        return None
+    bindings = Bindings(tree)
+    trees = [tree] + [snippet for node in walk(tree)
+                      if isinstance(node, ast.Constant) and isinstance(node.value, str) and 'import ' in node.value
+                      for snippet in parse_snippets(node.value)]
+    names, loaders, references, launched_modules = set(), set(), set(), set()
+    dynamic, child_pytest = False, False
+    for index, each in enumerate(trees):
+        names |= statement_imports(each, path)
+        found, loaded, unnamed = loader_evidence(each, path, paths, bindings if index == 0 else None)
+        names |= found
+        loaders |= loaded
+        if index == 0:
+            dynamic = bool(unnamed)
+        references |= paths.references(each, path)
+        found, child = module_launches(each)
+        launched_modules |= found
+        child_pytest = child_pytest or child
+    launched, uncertain, built_names = set(), False, set()
+    if not is_test_side(path):
+        launched, uncertain = launched_references(tree, path, paths, bindings)
+        built_names = path_built_names(tree)
+    calls = [node for node in walk(tree) if isinstance(node, ast.Call)]
+    sys_paths = [bindings.values(node.args[-1], path, paths) for node in calls
+                 if node.args and gate_paths.dotted(node.func) in SYS_PATH_CALLS]
+    call_names = {leaf(node.func) for node in calls}
+    strings = [node for node in walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+    # A string statement can be a docstring. It does not identify an input file.
+    text = {id(node.value) for node in walk(tree) if isinstance(node, ast.Expr)}
+    return {
+        'facts': [*map(sorted, (names, loaders, references, sibling_names(tree), launched, launched_modules)),
+                  child_pytest],
+        'dynamic': dynamic, 'uncertain_launch': uncertain, 'built_names': sorted(built_names),
+        'sys_paths': [[sorted(values), opaque] for values, opaque in sys_paths],
+        'named_paths': sorted({name for node in strings if '.py' in node.value and id(node) not in text
+                               for name in EMBEDDED_PY_PATH.findall(node.value)}),
+        'test_names': sorted({node.value for node in strings if MODULE_NAME.fullmatch(node.value)})
+        if call_names & NAME_IMPORTERS else [],
+        'runs_command': bool(call_names & {'run', 'Popen', 'check_call', 'check_output', 'call'}),
+    }
+
+
 class Evidence:
     """Each module's library edges and the files it reads, from its source.
 
@@ -576,12 +703,16 @@ class Evidence:
         self.build_files = {f'{package}/BUILD.bazel'.lstrip('/')
                             for package in ('', *PACKAGES, HANDWRITTEN[0].rstrip('/'))}
         self.uncertain = defaultdict(set)
-        self.trees = {}
+        self.cache = SourceCache(os.environ.get('GRAPH_IMPACT_CACHE') if gate_select is None else None)
+        self.trees, self.syntax = {}, {}
         for path in self.modules + self.scripts:
-            self.trees[path] = parse((self.root / path).read_text(errors='replace'))
-            if self.trees[path] is None:
+            syntax = self.cache.read('evidence', self.root, path,
+                                     lambda path, source: source_facts(path, source, self.gate_paths), errors='replace')
+            self.syntax[path] = syntax
+            if syntax is None:
                 self.uncertain[path].add(NOT_PARSED)
-        self.bindings = {path: Bindings(tree) for path, tree in self.trees.items() if tree is not None}
+            elif PurePosixPath(path).name == '__init__.py':
+                self.tree(path)
         self.sys_path_roots = set()
         for path in self.modules:
             self.sys_path_roots |= self.sys_path_entries(path)
@@ -592,7 +723,7 @@ class Evidence:
         # A package whose __init__ sets __path__ to another directory serves that
         # directory's modules under its own name (tools/g3job/g3_pq_policy -> prismaquant).
         for path in self.modules:
-            if PurePosixPath(path).name == '__init__.py' and self.trees[path] is not None:
+            if path in self.trees:
                 for directory in self.path_redirects(path):
                     for module in self.modules:
                         if module.startswith(directory + '/'):
@@ -601,7 +732,7 @@ class Evidence:
                                 self.aliases[f'{alias}.{tail}' if tail else alias].add(module)
         self.lazy, self.lazy_tables = {}, {}
         for path in self.modules:
-            if PurePosixPath(path).name == '__init__.py' and self.trees[path] is not None:
+            if path in self.trees:
                 table = lazy_exports(self.trees[path])
                 if table:
                     self.lazy_tables[path] = table[0]
@@ -612,6 +743,11 @@ class Evidence:
         self._runs, self._tree_reads = {}, {}
         modules = self.root / PIP_MODULES
         self.pip_modules = json.loads(modules.read_text()) if modules.is_file() else {}
+
+    def tree(self, path):
+        if path not in self.trees:
+            self.trees[path] = parse((self.root / path).read_text(errors='replace'))
+        return self.trees[path]
 
     @staticmethod
     def relative_module(package, module):
@@ -625,14 +761,8 @@ class Evidence:
         An entry that resolves to no repository directory (a parameter,
         sys.argv, a path outside the checkout) is uncertain.
         """
-        tree, found = self.trees.get(path), set()
-        if tree is None:
-            return found
-        bindings = self.bindings[path]
-        for node in walk(tree):
-            if not isinstance(node, ast.Call) or not node.args or gate_paths.dotted(node.func) not in SYS_PATH_CALLS:
-                continue
-            values, opaque = bindings.values(node.args[-1], path, self.gate_paths)
+        syntax, found = self.syntax.get(path), set()
+        for values, opaque in syntax['sys_paths'] if syntax else ():
             directories = set()
             for value in values:
                 if value == self.gate_paths.REPOSITORY:
@@ -650,12 +780,14 @@ class Evidence:
     def path_redirects(self, path):
         """Repository directories a package __init__ assigns to __path__."""
         found = set()
-        for node in self.trees[path].body:
+        tree = self.tree(path)
+        bindings = Bindings(tree)
+        for node in tree.body:
             if (isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == '__path__'
                                                      for target in node.targets)
                     and isinstance(node.value, (ast.List, ast.Tuple))):
                 for item in node.value.elts:
-                    values, _ = self.bindings[path].values(item, path, self.gate_paths)
+                    values, _ = bindings.values(item, path, self.gate_paths)
                     for value in values:
                         if value.startswith(self.gate_paths.REPOSITORY + '/'):
                             directory = posixpath.normpath(value[len(self.gate_paths.REPOSITORY) + 1:])
@@ -683,48 +815,33 @@ class Evidence:
         return names
 
     def read(self, path):
-        tree = self.trees[path]
-        if tree is None:
+        syntax = self.syntax[path]
+        if syntax is None:
             return Facts()
-        trees = [tree] + [snippet for node in walk(tree)
-                          if isinstance(node, ast.Constant) and isinstance(node.value, str) and 'import ' in node.value
-                          for snippet in parse_snippets(node.value)]
-        names, loaders, dynamic = set(), set(), []
-        for index, each in enumerate(trees):
-            names |= statement_imports(each, path)
-            found, loaded, unnamed = loader_evidence(each, path, self.gate_paths, self.bindings[path] if index == 0 else None)
-            names |= found
-            loaders |= loaded
-            if index == 0:
-                dynamic += unnamed
-        if dynamic and not is_test(path) and not self.lazy_followed(path, dynamic):
+        facts = Facts(*syntax['facts'])
+        if syntax['dynamic'] and not is_test(path) and not self.lazy_followed(path):
             # A test file's own name strings cover it (test_modules); others can't be followed.
             self.uncertain[path].add(DYNAMIC_IMPORT_NOT_FOLLOWED)
-        references = set().union(*(self.gate_paths.references(each, path) for each in trees))
-        launched_modules, child_pytest = set(), False
-        for each in trees:
-            found, child = module_launches(each)
-            launched_modules |= found
-            child_pytest = child_pytest or child
-        launched = set()
         if not is_test_side(path):
-            launched, uncertain = launched_references(tree, path, self.gate_paths, self.bindings[path])
+            uncertain = syntax['uncertain_launch']
             if uncertain or not self.launch_rule:
                 # Prefer sound: a launch we can't follow may run any path named here.
                 if uncertain:
                     self.uncertain[path].add(LAUNCH_NOT_FOLLOWED)
-                launched |= {reference for reference in references if not wildcard(reference)}
+                facts.launched |= {reference for reference in facts.references if not wildcard(reference)}
             # A bare file name a path is built from: the repository module with that name.
-            for name in path_built_names(tree):
-                launched |= {module for module in self.modules if module.endswith('/' + name)}
-        return Facts(names, loaders, references, sibling_names(tree), launched, launched_modules, child_pytest)
+            for name in syntax['built_names']:
+                facts.launched |= {module for module in self.modules if module.endswith('/' + name)}
+        return facts
 
-    def lazy_followed(self, path, targets):
+    def lazy_followed(self, path):
         """Whether every non-literal dynamic import in a package reads its own lazy-export table."""
         table = self.lazy_tables.get(path)
         if table is None:
             return False
-        bindings = self.bindings[path]
+        tree = self.tree(path)
+        bindings = Bindings(tree)
+        _, _, targets = loader_evidence(tree, path, self.gate_paths, bindings)
         return all(table in bindings.follow([target])[2] for target in targets)
 
     def imported(self, name):
@@ -800,17 +917,8 @@ class Evidence:
     def named_paths(self, path):
         """Repository .py paths a test writes inside a longer string, such as
         "runpy.run_path(ROOT + '/experiments/x.py')" in a -c snippet."""
-        tree = self.trees.get(path)
-        if tree is None:
-            return set()
-        # A string that is only a statement (a docstring) is text, not a path.
-        text = {id(node.value) for node in walk(tree) if isinstance(node, ast.Expr)}
-        found = set()
-        for node in walk(tree):
-            if (isinstance(node, ast.Constant) and isinstance(node.value, str) and '.py' in node.value
-                    and id(node) not in text):
-                found.update(name for name in EMBEDDED_PY_PATH.findall(node.value) if name in self.file_set)
-        return found
+        syntax = self.syntax.get(path)
+        return self.file_set.intersection(syntax['named_paths']) if syntax else set()
 
     def directory_files(self, references):
         """Every file below each named repository directory."""
@@ -872,18 +980,13 @@ class Evidence:
         Test files it names by path, when it runs a child pytest: the child
         imports them.
         """
-        tree, facts = self.trees.get(path), self.facts[path]
-        if tree is None:
+        syntax, facts = self.syntax.get(path), self.facts[path]
+        if syntax is None:
             return set()
         found = set()
-        if any(isinstance(node, ast.Call) and leaf(node.func) in NAME_IMPORTERS
-               for node in walk(tree)):
-            for node in walk(tree):
-                if isinstance(node, ast.Constant) and isinstance(node.value, str) and MODULE_NAME.fullmatch(node.value):
-                    found |= self.imported(node.value)
-        if facts.launched_modules or found or facts.child_pytest or any(
-                isinstance(node, ast.Call) and leaf(node.func) in {'run', 'Popen', 'check_call', 'check_output', 'call'}
-                for node in walk(tree)):
+        for name in syntax['test_names']:
+            found |= self.imported(name)
+        if facts.launched_modules or found or facts.child_pytest or syntax['runs_command']:
             # Modules its own data files name: a table of entry points it runs.
             exact, _ = self.referenced(facts.references)
             found |= self.data_named_modules(exact, test_side=True)
@@ -1159,7 +1262,7 @@ def whole_target(evidence, path):
     if evidence.uncertain.get(path):
         return 'uncertain: ' + '; '.join(sorted(evidence.uncertain[path]))
     named = lambda node: 'register' in getattr(getattr(node, 'func', node), 'attr', getattr(getattr(node, 'func', node), 'id', ''))
-    pending, reasons = list((evidence.trees[path] or ast.Module([])).body), set()
+    pending, reasons = list((evidence.tree(path) or ast.Module([])).body), set()
     while pending:  # the code that runs at import: all but function bodies and the __main__ block
         node = pending.pop()
         reasons |= {'a register call at import'} if named(node) and isinstance(node, ast.Call) or any(

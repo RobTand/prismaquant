@@ -2,7 +2,7 @@
   "schema": "graph-impact.v1",
   "figures": {
     "u_pct": 51.145946653361364,
-    "loc_u_pct": 62.7379116504938,
+    "loc_u_pct": 62.72823328375272,
     "median_selected_pct": 13.2,
     "p90_selected_pct": 86.0,
     "modules_over_half": 249,
@@ -20,5 +20,5 @@
   "test_to_test": "strict",
   "test_to_test_count": 783,
   "test_to_test_strict_by": "2026-11-16",
-  "analyzer_sha256": "dc734186dc39a54fc1b329b2278740f0d701a05a9a1a6262d4ac8b61f517f1f5"
+  "analyzer_sha256": "92be25996a784bfb32aeb693da97e0c7da6a8db87c790ee52700a148dc13cd21"
 }
