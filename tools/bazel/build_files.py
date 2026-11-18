@@ -45,6 +45,7 @@ from collections import defaultdict
 import importlib.util
 import io
 import json
+import marshal
 import math
 import os
 import posixpath
@@ -331,9 +332,8 @@ LOADER_SLOTS = {'importlib.util.spec_from_file_location': (1, 'location'),
 SYS_PATH_CALLS = frozenset({'sys.path.insert', 'sys.path.append', 'site.addsitedir'})
 
 
-def loader_evidence(tree, path, gate_paths, bindings=None):
-    """(module names imported by a literal import_module or __import__, loader paths,
-    whether a dynamic import's name is not a literal).
+def loader_evidence(tree, path, gate_paths, bindings=None, *, tool_walk=False):
+    """Return literal module names, loader paths, and computed import targets.
 
     PrismaBuild's gate_select.production_loads, which also follows names bound
     by for and with, and keeps every meaning of a reused alias.
@@ -344,8 +344,10 @@ def loader_evidence(tree, path, gate_paths, bindings=None):
         if not isinstance(node, ast.Call):
             continue
         for name in sorted(bindings.meanings(node.func)):
-            if name in {'importlib.import_module', '__import__'}:
-                target = next((item.value for item in node.keywords if item.arg == 'name'),
+            if name in {'importlib.import_module', '__import__'} or (
+                    tool_walk and name in {'builtins.__import__', 'runpy.run_module'}):
+                keyword = 'mod_name' if name == 'runpy.run_module' else 'name'
+                target = next((item.value for item in node.keywords if item.arg == keyword),
                               node.args[0] if node.args else None)
                 if isinstance(target, ast.Constant) and isinstance(target.value, str):
                     module = target.value
@@ -359,13 +361,17 @@ def loader_evidence(tree, path, gate_paths, bindings=None):
                         level = len(module) - len(module.lstrip('.'))
                         module = '.'.join(parts[:len(parts) - level + 1] + [module.lstrip('.')]).rstrip('.')
                     modules.add(module)
-                elif target is not None:
-                    dynamic.append(target)
+                elif target is not None or tool_walk:
+                    dynamic.append(target or node)
             if name not in LOADER_SLOTS:
                 continue
             position, keyword = LOADER_SLOTS[name]
             target = next((item.value for item in node.keywords if item.arg == keyword),
                           node.args[position] if len(node.args) > position else None)
+            if tool_walk and name == 'runpy.run_path' and not (
+                    isinstance(target, ast.Constant) and isinstance(target.value, str)):
+                dynamic.append(target or node)
+                continue
             if target is None:
                 continue
             followed, _, _ = bindings.follow([target])
@@ -542,7 +548,14 @@ def tool_sources(root):
         source = sources[path] = file.read_bytes()
         tree = ast.parse(source)
         bindings = Bindings(tree)
-        imports, loaders, _ = loader_evidence(tree, path, gate_paths, bindings)
+        imports, loaders, dynamic = loader_evidence(tree, path, gate_paths, bindings, tool_walk=True)
+        if dynamic:
+            # The tools do not use the package's lazy exports.
+            table = lazy_exports(tree) if path == 'prismaquant/__init__.py' else None
+            if not (table and len(dynamic) == 1 and table[0] in bindings.follow(dynamic)[2]
+                    and any(isinstance(node, ast.FunctionDef) and node.name == '__getattr__'
+                            and dynamic[0] in walk(node) for node in tree.body)):
+                raise ValueError(f'Computed import in {path}')
         pending.extend(name for name in loaders if name.endswith('.py') and not wildcard(name))
         for name in statement_imports(tree, path) | imports:
             parts = name.split('.')
@@ -564,12 +577,18 @@ def tool_hash(root):
         prefix=b'graph-impact-tools')
 
 
+def interpreter_hash():
+    state = (sys.version, sys.flags, sys.get_int_max_str_digits(), sorted(BUILTIN_NAMES))
+    return text_sha256hex(repr(state))
+
+
 class SourceCache:
     def __init__(self, directory):
         self.directory = Path(directory) if directory else None
         if self.directory is not None:
             self.directory.mkdir(parents=True, exist_ok=True)
             self.tool_hash = tool_hash(ROOT)
+            self.interpreter_hash = interpreter_hash()
 
     def read(self, group, root, path, collect, *, encoding=None, errors=None):
         file = root / path
@@ -577,16 +596,16 @@ class SourceCache:
             return collect(path, file.read_text(encoding=encoding, errors=errors))
         source = file.read_bytes()
         with io.TextIOWrapper(io.BytesIO(source), encoding=encoding, errors=errors) as stream:
-            header = (self.tool_hash, sys.version, stream.encoding, stream.errors, group, path)
+            header = (self.tool_hash, self.interpreter_hash, stream.encoding, stream.errors, group, path)
             key = length_framed_bytes_sha256(
                 (*map(str.encode, header), source), prefix=b'graph-impact-file')
             entry = self.directory / key
             try:
-                return json.loads(entry.read_bytes())
+                return marshal.loads(entry.read_bytes())
             except FileNotFoundError:
                 value = collect(path, stream.read())
         with tempfile.NamedTemporaryFile(dir=self.directory, delete=False) as target:
-            target.write(json.dumps(value, separators=(',', ':')).encode())
+            target.write(marshal.dumps(value))
         Path(target.name).replace(entry)
         return value
 

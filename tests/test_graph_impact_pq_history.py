@@ -80,6 +80,36 @@ def test_warm_cache_matches_uncached_snapshot(repo, monkeypatch):
     assert pq.load_snapshot(repo) == expected
 
 
+def test_warm_cache_preserves_surrogate_code_points(repo, monkeypatch):
+    source = 'tests/test_a.py'
+    target = 'tests/test_\U0001f600.py'
+    surrogates = 'tests/test_\ud83d\ude00.py'
+    put(repo, source, f'import runpy\nrunpy.run_path({surrogates!r})\n')
+    put(repo, target, '')
+    monkeypatch.setenv('GRAPH_IMPACT_CACHE', str(repo / '.cache'))
+
+    cold = pq.build.Evidence(repo, [source, target])
+    warm = pq.build.Evidence(repo, [source, target])
+    assert surrogates in cold.facts[source].loaders
+    assert target not in cold.of(source)[0]
+    assert warm.syntax[source] == cold.syntax[source]
+    assert warm.of(source) == cold.of(source)
+
+
+@pytest.mark.parametrize('source', [
+    'import importlib as loader\nloader.import_module(name)\n',
+    'from importlib import import_module as load\nload(name=name)\n',
+    '__import__(name)\n',
+    'from runpy import run_path\nrun_path(path_name=name)\n',
+    'import runpy\nrunpy.run_module(name)\n',
+])
+def test_tool_hash_rejects_computed_imports(tmp_path, source):
+    put(tmp_path, 'tools/ci/graph_impact_pq.py', 'from tools.ci import helper\n')
+    put(tmp_path, 'tools/ci/helper.py', source)
+    with pytest.raises(ValueError, match=r'Computed import in tools/ci/helper\.py'):
+        pq.build.tool_hash(tmp_path)
+
+
 def test_tool_source_change_invalidates_cached_file_facts(repo, monkeypatch):
     tools = repo / 'tool-copy'
     for path, source in pq.build.tool_sources(ROOT).items():
@@ -96,15 +126,21 @@ def test_tool_source_change_invalidates_cached_file_facts(repo, monkeypatch):
     assert pq.build.tool_hash(tools) != old_hash
 
     collected = set()
-    collect = pq.build.source_facts
 
-    def record_source_facts(path, source, gate_paths):
-        collected.add(path)
-        return collect(path, source, gate_paths)
+    def record(owner, name):
+        collect = getattr(owner, name)
 
-    monkeypatch.setattr(pq.build, 'source_facts', record_source_facts)
+        def collect_and_record(path, *args, **kwargs):
+            if path == 'prismaquant/owner.py':
+                collected.add(name)
+            return collect(path, *args, **kwargs)
+
+        monkeypatch.setattr(owner, name, collect_and_record)
+
+    record(pq.build, 'source_facts')
+    record(pq.duplication_inventory, 'file_inventory')
     assert pq.load_snapshot(repo) == expected
-    assert 'prismaquant/owner.py' in collected
+    assert collected == {'source_facts', 'file_inventory'}
 
 
 def test_changed_source_bytes_invalidate_cached_file_facts(repo, monkeypatch):
