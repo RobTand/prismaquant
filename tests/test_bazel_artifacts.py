@@ -24,6 +24,19 @@ def controlled_scan_runtime(monkeypatch):
     monkeypatch.setattr(artifacts, 'scan_runtime_available', lambda: True)
 
 
+def test_runtime_cache_refuses_an_upload_directory_before_download(monkeypatch):
+    upload = Path.home()
+    upload.mkdir()
+    sentinel = upload / 'result.json'
+    sentinel.write_bytes(b'{}\n')
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    with pytest.raises(RuntimeError) as error:
+        artifacts.runtime_archive('unused', 'unused', lambda *args, **kwargs: pytest.fail('Do not download the runtime.'))
+    assert str(error.value) == 'runtime cache overlaps uploads'
+    assert list(upload.rglob('*')) == [sentinel]
+    assert sentinel.read_bytes() == b'{}\n'
+
+
 def test_children_get_only_the_declared_nonsecret_environment():
     source = {'PATH': '/usr/bin', 'HOME': '/private/home', 'TMPDIR': '/private/tmp',
               'LANG': 'C.UTF-8', 'BUILDBUDDY_API_KEY': 'bb-sentinel',
