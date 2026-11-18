@@ -65,6 +65,21 @@ def test_streamed_incoming_entries_remain_read_bytes_and_do_not_invent_work():
     assert row.phase_work_entries("spill-p0", {"entries": 1}, annotations) is None
 
 
+def test_a_phase_without_an_entry_count_keeps_unknown_work_without_input_changes():
+    fact = {"bytes": 128}
+    annotations = {"band_serial": {"streamed_incoming": {"spill-p0": 2}}}
+    count = row.phase_work_entries("spill-p0", fact, annotations)
+    assert count is None
+    assert row.compute_phase_work("spill-p0", replay_mode="spill", entries=count,
+                                  n_probes=2, capture_batch=2) == [
+        {"kind": "spill-capture", "units": None,
+         "work": "probe 0's spill capture: one group per capture_batch stored batches"},
+        {"kind": "spill-replay", "units": 1,
+         "work": "the first window's spill replay for probe 0"}]
+    assert fact == {"bytes": 128}
+    assert annotations == {"band_serial": {"streamed_incoming": {"spill-p0": 2}}}
+
+
 def _run_inputs():
     return row.QuantumRunInputs(
         row.QuantumFileBinding("/records/q.json", "q" * 64),
