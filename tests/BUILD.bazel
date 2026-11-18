@@ -39050,6 +39050,7 @@ pq_py_library(
         "//:prismaquant/calibration_data",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/glm53_stock_harvest",
+        "//:prismaquant/glm53_stock_reprice",
         "//:prismaquant/gpu_guard",
         ":native_source_contract_fixtures",
         ":test_resident_source_decode_audit_lib",
