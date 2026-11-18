@@ -9316,6 +9316,7 @@
     "//tests:test_no_secret_on_command_line_lib",
     "//tests:test_package_model_runtime_lib",
     "//tests:test_prefill_load_sweep_lib",
+    "//tests:test_runtime_shape_backend_verdict_lib",
     "//tests:test_serve_fingerprint_descendants",
     "//tests:test_serving_profiles_lib",
     "//tests:test_stage_settings_guard_lib",
