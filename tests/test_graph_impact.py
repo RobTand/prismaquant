@@ -413,7 +413,7 @@ def test_explicit_missing_graph_base_refuses_without_changing_the_repository(tmp
     import subprocess
     from tools.ci import graph_impact_pq as pq
     for args in [('init', '-q'), ('commit', '--allow-empty', '-qm', 'base')]:
-        subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', *args], cwd=tmp_path, check=True)
+        subprocess.run(['git', '-c', 'maintenance.auto=false', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', *args], cwd=tmp_path, check=True)
     monkeypatch.delenv('GATE_GRAPH_BASE_MODE', raising=False)
     before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
     with pytest.raises(ValueError, match=r'\Acannot resolve requested base missing-ref\Z'):
