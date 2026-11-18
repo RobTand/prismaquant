@@ -94,6 +94,19 @@ def test_local_provenance_needs_independent_exact_bytes(install):
     assert not check(install)[0]
 
 
+def test_install_check_refuses_non_object_provenance_without_changes(install):
+    _, site, info, _, _ = install
+    provenance = info / 'direct_url.json'
+    for value in ([], {'dir_info': []}):
+        provenance.write_text(json.dumps(value))
+        before = {p: p.read_bytes() for p in site.rglob('*') if p.is_file()}
+        ok, report = check(install)
+        assert ok is False
+        assert report['passed'] is False
+        assert report['refusal'] == 'ValueError: invalid installed provenance'
+        assert {p: p.read_bytes() for p in site.rglob('*') if p.is_file()} == before
+
+
 def test_missing_interpreter_is_a_named_refusal(install):
     _, site, _, clone, pin = install
     ok, report = _load()['check_install'](str(site / 'no-python'), clone=clone, pin_source=pin)
