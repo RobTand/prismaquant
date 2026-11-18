@@ -198,6 +198,11 @@ TL3b's own check runs the direct importers and the tests that name the changed p
 also runs the one-step data edges, the whole-repository readers, the closure of test-side files
 and of files that no test imports, and the hosted lanes.
 
+The generator names the data of a target that reads every top-level test file (its own modules
+excepted) with one filegroup, `//tests:test_files` (`glob(["test_*.py"])`). It orders the targets of
+each BUILD file by the SHA-256 of their names. A new test then adds only its own two blocks, at an
+unrelated place, so two pull requests that each add a test merge without a conflict (#4092).
+
 ### Find the merge that broke a record
 
 A user timer on dl380g10 (`record-backstop.timer`, owned by the Fleet lead) starts the full record with

@@ -54,6 +54,8 @@ import sys
 import textwrap
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from prismaquant.digests import text_sha256hex  # noqa: E402
 # Bazel packages that hold modules. Every other file belongs to the root
 # package: an import cycle joins prismaquant/ and tools/ (tools/serve_fingerprint.py),
 # and no target can span packages. tools/bazel is written by hand.
@@ -1106,32 +1108,39 @@ def pip_label(distribution):
 
 class Trees:
     """Name a set of files by the fewest labels: a directory whose every file is
-    in the set becomes one glob filegroup in its package."""
+    in the set becomes one glob filegroup in its package, and so do the test files
+    directly in a directory (files in `own`, the target's modules, may be missing: they are its sources)."""
 
     def __init__(self, files):
-        self.under = defaultdict(set)
+        self.under, self.tests = defaultdict(set), defaultdict(set)
         for path in files:
             package = package_of(path)
             parts = PurePosixPath(relative(path, package)).parts
             for end in range(len(parts)):
                 self.under[(package, '/'.join(parts[:end]))].add(path)
-        self.used = defaultdict(set)
+            if re.fullmatch(r'test_\w*\.py', parts[-1]):
+                self.tests[(package, '/'.join(parts[:-1]), 'tests')].add(path)
+        self.used, self.used_tests = defaultdict(set), defaultdict(set)
 
-    def labels(self, files, home):
+    def labels(self, files, home, own=frozenset()):
         remaining, labels = set(files), set()
-        for (package, directory), members in sorted(self.under.items(), key=lambda item: item[0][1].count('/')
-                                                     + bool(item[0][1])):
+        for (package, directory, *test), members in sorted(self.under.items(), key=lambda item: item[0][1].count('/')
+                                                           + bool(item[0][1])) + sorted(self.tests.items()):
             if package == HANDWRITTEN[0].rstrip('/') and directory:
                 continue
-            if len(members) > 1 and members <= remaining:
+            if len(members) > 1 and members - set(test and own) <= remaining:
                 remaining -= members
-                self.used[package].add(directory)
-                labels.add(label(package, tree_name(directory), home))
+                (self.used_tests if test else self.used)[package].add(directory)
+                labels.add(label(package, test_files_name(directory) if test else tree_name(directory), home))
         return sorted(labels | {file_label(path, home) for path in remaining})
 
 
 def tree_name(directory):
     return 'files/' + directory if directory else 'files'
+
+
+def test_files_name(directory):
+    return directory + '/test_files' if directory else 'test_files'
 
 
 def strings(values, indent='        '):
@@ -1201,7 +1210,7 @@ def generate(root=ROOT, files=None):
         deps.discard(label(*owner[path], home))
         packages[home].append((relative(path, home).removesuffix('.py'), 'pq_py_test', {
             'path': path, 'library': label(*owner[path], home), 'deps': sorted(deps),
-            'data': trees.labels(inputs['own_data'] - inputs['modules'], home),
+            'data': trees.labels(inputs['own_data'] - inputs['modules'], home, inputs['modules']),
             **test_attributes(path, durations)}))
     for package, directories in trees.used.items():
         if package == HANDWRITTEN[0].rstrip('/'):
@@ -1210,6 +1219,9 @@ def generate(root=ROOT, files=None):
             pattern = directory + '/**' if directory else '**'
             packages[package].append((tree_name(directory), 'filegroup', {
                 'srcs': f'glob([{json.dumps(pattern)}], exclude = {json.dumps(GLOB_EXCLUDE)})'}))
+    for package, directories in trees.used_tests.items():
+        packages[package] += [(test_files_name(directory), 'filegroup', {'srcs': 'glob([%s])' % json.dumps(
+            test_files_name(directory).removesuffix('test_files') + 'test_*.py')}) for directory in directories]
     return {package: render_package(package, targets) for package, targets in packages.items()}
 
 
@@ -1219,13 +1231,13 @@ def render_package(package, targets):
     if duplicates:
         raise GenerationError(f'two targets named {duplicates} in //{package}; rename a module')
     kinds = sorted({kind for _, kind, _ in targets} - {'filegroup'})
-    lines = [HEADER]
+    lines = [HEADER + '# Targets are in the order of the SHA-256 of their names, so that new ones land apart.\n']
     if kinds:
         lines.append('load("//tools/bazel:python.bzl", ' + ', '.join(f'"{kind}"' for kind in kinds) + ')\n')
     lines.append('package(default_visibility = ["//visibility:public"])\n')
     lines.append('# Other packages name these files as test data.\n'
                  f'exports_files(glob(["**"], exclude = {json.dumps(GLOB_EXCLUDE)}))\n')
-    for name, kind, attributes in sorted(targets):
+    for name, kind, attributes in sorted(targets, key=lambda target: text_sha256hex(target[0])):
         body = [f'    name = {json.dumps(name)},\n']
         for key, value in attributes.items():
             if value in ([], None):
