@@ -327,6 +327,52 @@ def test_owned_encoder_preserves_builtin_alias_bytes(tmp_path, cycle):
         ledger.close()
 
 
+def test_third_checkpoint_window_publishes_the_held_prefix_before_resumed_windows(monkeypatch, tmp_path):
+    from prismaquant.joint_checkpoint_publication import CheckpointPublicationLedger
+
+    entered, release = threading.Event(), threading.Event()
+    publish = aura_checkpoint_journal.UnitCheckpointWriter.publish
+
+    def held(writer, **kwargs):
+        entered.set()
+        assert release.wait(WAIT)
+        return publish(writer, **kwargs)
+
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", held)
+    completed, finished = {"resume-a", "resume-b"}, []
+    windows = [{"names": [name]} for name in ("unit", "resume-a", "resume-b")]
+    state = {"value": 7.0}
+    ledger = CheckpointPublicationLedger(
+        checkpoint_writer=aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, "a" * 64),
+        windows=windows, completed=completed, acknowledge=lambda: None,
+        window_done=finished.append, budget_bytes=16 << 20)
+    flush = ledger.flush
+
+    def release_and_flush():
+        release.set()
+        flush()
+
+    monkeypatch.setattr(ledger, "flush", release_and_flush)
+    try:
+        ledger.start_window(0, ["unit"])
+        assert ledger.submit("unit", lambda limit: state)
+        assert entered.wait(WAIT)
+        ledger.start_window(1, ["resume-a"])
+        assert finished == []
+        assert completed == {"resume-a", "resume-b"}
+        ledger.start_window(2, ["resume-b"])
+        assert finished == [0, 1, 2]
+        assert completed == {"unit", "resume-a", "resume-b"}
+        assert cost_stage_checkpoint.unit_path(tmp_path, "unit").read_bytes() == _expected_unit_bytes({"value": 7.0})
+        assert ledger.stats()["windows_pending_peak"] == 2
+        assert ledger.stats()["pending_units"] == 0
+        assert state == {"value": 7.0}
+        assert windows == [{"names": ["unit"]}, {"names": ["resume-a"]}, {"names": ["resume-b"]}]
+    finally:
+        release.set()
+        ledger.close()
+
+
 def test_encoder_failure_is_not_a_durable_ack(monkeypatch, tmp_path):
     import prismaquant.aura_cost as aura
     from prismaquant.joint_checkpoint_publication import CheckpointPublicationLedger
