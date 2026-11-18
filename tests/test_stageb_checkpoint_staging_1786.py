@@ -77,6 +77,20 @@ def test_explicit_job_limit_keeps_large_snapshot_slots_bounded():
     assert publication_geometry(3 << 30, [{"names": ["one"]}], max_jobs=4)[0] == 2
 
 
+def test_publication_geometry_refuses_slots_at_the_fixed_encoding_bound():
+    from prismaquant.joint_checkpoint_publication import (
+        ENCODER_FIXED_BYTES, publication_geometry)
+
+    windows = [{"names": ["unit"]}]
+    with pytest.raises(ValueError) as refusal:
+        publication_geometry(2 * ENCODER_FIXED_BYTES, windows)
+    assert str(refusal.value) == (
+        "checkpoint_publication_budget_bytes is too small for 2 bounded staging slots")
+    assert publication_geometry(
+        2 * (ENCODER_FIXED_BYTES + 1), windows) == (2, ENCODER_FIXED_BYTES + 1)
+    assert windows == [{"names": ["unit"]}]
+
+
 def test_single_slot_limit_serializes_without_unbounded_job_credit(engine, tmp_path):
     from prismaquant.joint_checkpoint_publication import CheckpointPublicationLedger
 
