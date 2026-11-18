@@ -1150,8 +1150,6 @@ def strings(values, indent='        '):
 
 
 CYCLE_FILE = 'tools/ci/cycle_members.json'
-# Step B of #3996 sets True: then --check fails on a stale table (tools/ci/bazel_selection.py MODULE_LEVEL).
-CYCLE_TABLE_ENFORCED = False
 
 
 def whole_target(evidence, path):
@@ -1322,7 +1320,7 @@ def main(argv=None):
     except GenerationError as error:
         sys.exit(f'Cannot generate BUILD files: {error}')
     stale = []
-    for package, text in sorted(generated.items()) + sorted(extra.items()) * (CYCLE_TABLE_ENFORCED or not args.check):
+    for package, text in sorted(generated.items()) + sorted(extra.items()):
         path = args.root / package / ('' if package in extra else 'BUILD.bazel')
         if path.exists() and path.read_text() == text:
             continue
