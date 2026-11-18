@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import shutil
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -127,6 +128,18 @@ def test_a_roster_that_does_not_hash_to_its_digest_is_refused():
     sealed[replay.ROSTER_SHA256_KEY] = "0" * 64
     with pytest.raises(ValueError, match="does not hash"):
         replay.sealed_from_annotations(sealed)
+
+
+def test_replay_frontier_refuses_a_repeated_unit_with_a_matching_digest():
+    sealed, _ = _sealed()
+    roster = sealed[replay.ROSTER_KEY]
+    roster.append(roster[-1])
+    sealed[replay.ROSTER_SHA256_KEY] = replay.roster_sha256(roster)
+    before = deepcopy(sealed)
+    with pytest.raises(ValueError) as exc:
+        replay.sealed_from_annotations(sealed)
+    assert str(exc.value) == "a sealed replay roster is a sorted, unique list of qnames"
+    assert sealed == before
 
 
 def test_a_replayed_unit_must_start_in_a_replay_phase():
