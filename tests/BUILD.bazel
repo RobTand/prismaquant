@@ -30466,10 +30466,14 @@ pq_py_library(
     srcs = [
         "test_glm_capture_compatibility_cli.py",
     ],
+    data = [
+        "test_glm_capture_compatibility_cli.py",
+    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/glm_source_derivative",
+        "//:prismaquant/model_runtime",
         "@pq_pip//pytest",
         "@pq_pip//torch",
         "@pq_pip//transformers",

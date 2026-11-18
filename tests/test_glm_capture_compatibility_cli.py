@@ -1,6 +1,8 @@
 """CPU control-flow/refusal tests; fixture identities never authorize real captures."""
 import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -170,6 +172,9 @@ def test_cli_reports_preflight_and_requires_a_bound_plan(controlled, tmp_path, c
 
 @pytest.mark.parametrize('auto', [False, True])
 def test_shared_skeleton_constructor_keeps_models_on_meta_and_preserves_resolver(auto, monkeypatch):
+    from prismaquant.model_runtime import initialize_model_runtime
+
+    initialize_model_runtime()
     import transformers
     from prismaquant import streaming_model as streaming
     config, resolved, calls = object(), object(), []
@@ -191,3 +196,12 @@ def test_shared_skeleton_constructor_keeps_models_on_meta_and_preserves_resolver
     result = streaming.build_streaming_skeleton(config, multimodal=False, log_prefix='fixture', attn_implementation='eager')
     assert all(parameter.is_meta for parameter in result.parameters())
     assert calls == [(resolved, dict(attn_implementation='eager', **({'trust_remote_code': True} if auto else {})))]
+
+
+def test_auto_case_passes_alone_in_a_fresh_process():
+    node = f'{__file__}::test_shared_skeleton_constructor_keeps_models_on_meta_and_preserves_resolver[True]'
+    result = subprocess.run(
+        [sys.executable, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', node],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
