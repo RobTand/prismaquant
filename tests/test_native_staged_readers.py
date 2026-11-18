@@ -70,6 +70,23 @@ def test_owned_whole_io_and_metadata_without_canonical_file(tmp_path, monkeypatc
     assert resolver.report()['bytes_from_pool'] == 0
 
 
+def test_sealed_source_refuses_a_size_that_disagrees_with_its_binding(tmp_path, monkeypatch):
+    from prismaquant.staged_lease import LeaseRefused
+    from prismaquant.staged_whole_file import read_staged_sealed_file
+    source, _, binding, _ = fixture(tmp_path, b'sealed input')
+    resolver = bind(monkeypatch, binding)
+    files = {p: p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+    before = copy.deepcopy(resolver.report())
+    with pytest.raises(LeaseRefused) as caught:
+        read_staged_sealed_file(source, sha(b'sealed input'), len(b'sealed input') + 1, label='original-material')
+    assert str(caught.value) == 'original-material-whole-file-binding-mismatch'
+    assert caught.value.kind == 'integrity'
+    before['range_hits'] += 1
+    assert resolver.report() == before
+    assert not resolver._windows
+    assert {p: p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()} == files
+
+
 def test_shard_dtypes_metadata_slices_owned_buffers_and_nonzero_offsets(tmp_path, monkeypatch):
     tensors = {'f32': torch.arange(8192, dtype=torch.float32).reshape(64, 128),
                'bf16': torch.arange(128).to(torch.bfloat16),
