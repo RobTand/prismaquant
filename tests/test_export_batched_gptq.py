@@ -170,6 +170,19 @@ def test_gptq_batched_cholesky_failure_falls_back_to_rtn(seeded):
     assert float((out - weights).pow(2).mean().item()) > 0.0
 
 
+def test_scale_sweep_without_activations_uses_uniform_error_weights():
+    weights = torch.zeros((2, 2, 16), dtype=torch.float32)
+    reference = torch.ones_like(weights)
+    activations = [None, torch.empty((0, 16))]
+    result = scale_sweep_nvfp4_batched(
+        weights, activations, reference_weights=reference, group_size=16,
+        grid=3, span=(0.5, 1.5), expert_chunk=1, levers=NativeRenderLevers.resolve())
+    assert torch.equal(result, torch.ones((2, 2, 16)))
+    assert torch.equal(weights, torch.zeros((2, 2, 16)))
+    assert torch.equal(reference, torch.ones((2, 2, 16)))
+    assert activations[0] is None and activations[1].shape == (0, 16)
+
+
 def test_scale_sweep_batched_matches_per_linear(seeded):
     """Same equivalence check for the scale-sweep path."""
     E, out_features, in_features = 4, 32, 64
