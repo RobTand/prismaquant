@@ -33,6 +33,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from prismaquant.production_weight_cache import (  # noqa: E402
     _LinearActivationCollector,
+    update_priority_reservoir,
 )
 
 
@@ -91,3 +92,21 @@ def test_stored_subset_keeps_the_full_runs_rows():
         assert torch.equal(full[name], partial[name]), (
             f"{name} sampled different rows when only a subset was stored"
         )
+
+
+def test_empty_activation_rows_keep_the_existing_reservoir_and_random_stream():
+    rows = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    priorities = torch.tensor([0.2, 0.8])
+    incoming = torch.empty((0, 2))
+    generator = torch.Generator().manual_seed(17)
+    before = generator.get_state()
+
+    result_rows, result_priorities = update_priority_reservoir(
+        rows, priorities, incoming, max_rows=2, generator=generator
+    )
+    assert result_rows is rows
+    assert result_priorities is priorities
+    assert rows.tolist() == [[1.0, 2.0], [3.0, 4.0]]
+    assert torch.equal(priorities, torch.tensor([0.2, 0.8]))
+    assert incoming.shape == (0, 2)
+    assert torch.equal(generator.get_state(), before)
