@@ -232,6 +232,23 @@ def test_assignment_artifact_bytes_honors_weight_only_nvfp4_marker():
     )
 
 
+def test_assignment_bits_use_recorded_canonical_and_legacy_memory_prices_without_changes():
+    from copy import deepcopy
+    from prismaquant.kl_measurement import assignment_bit_total
+    assignment = {'model.proj': 'FP8_DYNAMIC'}
+    spec = fr.get_format('FP8_E4M3')
+    specs = {'FP8_E4M3': spec}
+    for memory, expected in [({'FP8_DYNAMIC': 19}, 152.0),
+                             ({'FP8_E4M3': 23, 'FP8_DYNAMIC': 19}, 184.0)]:
+        stats = {'model.proj': {'n_params': 4, 'in_features': 2, 'out_features': 2,
+                               '_memory_bytes_by_format': memory}}
+        before = deepcopy((assignment, stats))
+        specs_before = specs.copy()
+        assert assignment_bit_total(stats, assignment, specs) == expected
+        assert (assignment, stats) == before
+        assert specs == specs_before
+
+
 def test_assignment_artifact_bytes_packed_nvfp4_counts_per_expert_globals():
     stats = {
         "layer.experts.gate_up_proj": {
