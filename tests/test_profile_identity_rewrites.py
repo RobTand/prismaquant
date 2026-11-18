@@ -3,6 +3,7 @@ from dataclasses import replace
 
 import pytest
 
+from prismaquant.model_profiles import vllm_registry
 from prismaquant.model_profiles.qwen3_5 import Qwen3_5Profile
 from prismaquant.model_profiles.qwen3_5_dense import Qwen3_5DenseProfile
 from prismaquant.model_profiles.registry import profile_from_config
@@ -42,3 +43,16 @@ def test_matched_rewrite_chain_returning_original_name_remains_authoritative(mon
     monkeypatch.setattr(profile, "structure_spec", lambda: spec)
     profile._name_remapper = name_remapper_from_prefix_map({"model.": "wrong."})
     assert profile.to_vllm_internal_name("model.proj") == "model.proj"
+
+
+def test_qwen3_refuses_vllm_fusion_that_disagrees_with_its_spec(monkeypatch):
+    class InstalledQwen3:
+        packed_modules_mapping = {"gate_up_proj": ["up_proj", "gate_proj"]}
+
+    profile = profile_from_config({"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]})
+    monkeypatch.setattr(vllm_registry, "vllm_class_for_architecture", lambda _arch: InstalledQwen3)
+    with pytest.raises(ValueError) as error:
+        profile.fused_sibling_leaf_mapping()
+    assert str(error.value) == ("Qwen3 fused group 'gate_up_proj' disagrees between vLLM "
+                                "('up_proj', 'gate_proj') and the structure spec ('gate_proj', 'up_proj')")
+    assert InstalledQwen3.packed_modules_mapping == {"gate_up_proj": ["up_proj", "gate_proj"]}
