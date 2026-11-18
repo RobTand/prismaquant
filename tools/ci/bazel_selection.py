@@ -32,6 +32,7 @@ BAZEL_DIFF_SHA256 = '0170b70fe2f24477ab056c11f5c3240d8b45a1dca5ab73ad252c096679c
 DURATIONS_PATH = 'tools/ci/gate_durations.json'
 CYCLE_PATH = 'tools/ci/cycle_members.json'  # tools/bazel/build_files.py writes it
 BUILD_LANGUAGE = {'BUILD', 'REPO', 'WORKSPACE'}  # with or without the .bazel suffix
+GENERATED_BUILD_FILES = {'BUILD.bazel', 'tests/BUILD.bazel'}
 # The direct path reads every main-repository target (rules and files); deps(//...) also fetches every external
 # repository, which only the bazel-diff hashes need (#4228: a cold plan 146 s -> 22 s, the same selections).
 MAIN_QUERY, DEPS_QUERY = '//...:all-targets union buildfiles(//...)', 'deps(//...) union buildfiles(//...)'
@@ -388,8 +389,9 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
             pass
     changed = {path for path, letter in (status or {}).items() if letter != 'D'}
     deleted = set(status or {}) - changed
-    direct = (bool(status) and set(status.values()) == {'M'} and not fallback_files(changed)
-              and not any(Path(path).name.removesuffix('.bazel') in BUILD_LANGUAGE for path in changed)
+    direct = (bool(status) and set(status.values()) <= {'M', 'A'} and not fallback_files(changed)
+              and not any(Path(path).name.removesuffix('.bazel') in BUILD_LANGUAGE
+                          for path in changed - GENERATED_BUILD_FILES)
               and not any(row.startswith('120000 ') for row in git('ls-files', '-s').splitlines()))
     # Query failure is fatal. A missing population can never become empty success.
     head_query = query_revision(root, directory / 'head', 'amd64', bazel=bazel, runner=runner,
