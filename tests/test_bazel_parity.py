@@ -124,3 +124,12 @@ def test_missing_imported_execution_fails_node_parity(tmp_path):
     assert bazel_parity.compare_receipts(
         bazel_parity.hosted_nodes([report]),
         bazel_parity.bazel_nodes(tmp_path / 'testlogs')) == {'nodes': 2, 'files': 2}
+
+
+def test_receipt_parity_refuses_two_empty_node_inventories():
+    expected, actual = {}, {}
+    with pytest.raises(RuntimeError) as refused:
+        bazel_parity.compare_receipts(expected, actual)
+    assert str(refused.value) == 'empty node inventory'
+    assert expected == {}
+    assert actual == {}
