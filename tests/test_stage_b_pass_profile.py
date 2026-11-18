@@ -112,6 +112,32 @@ def test_capture_session_times_every_unit_and_traces_the_active_ones(tmp_path):
     assert timing["errors"] == []
 
 
+def test_stack_profile_exports_the_exact_stack_table(tmp_path):
+    request = pass_profile_request({PROFILE_ENV: str(tmp_path), SPEC_ENV: "capture=1:stack"})
+    session = request.session(kind="capture", probe=1, identity={"quantum_id": "stack-check"})
+
+    class Profile:
+        def export_chrome_trace(self, path):
+            Path(path).write_bytes(b"\x00trace\xff")
+
+        def key_averages(self, group_by_stack_n=0):
+            self.grouped = group_by_stack_n > 0
+            return self
+
+        def table(self, sort_by, **kwargs):
+            return {
+                (False, "self_cuda_time_total"): "Ordinary table\n",
+                (True, "self_cpu_time_total"): "Stack table\n",
+            }[self.grouped, sort_by]
+
+    session._export(Profile())
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == {
+        "stack-check-p1-capture.key_averages_stack.txt": b"Stack table\n",
+        "stack-check-p1-capture.key_averages.txt": b"Ordinary table\n",
+        "stack-check-p1-capture.trace.json.gz": b"\x00trace\xff",
+    }
+
+
 def test_shadow_session_stops_after_its_bound(tmp_path):
     request = pass_profile_request({
         PROFILE_ENV: str(tmp_path),
