@@ -271,6 +271,14 @@ def _forgeries(payload):
     }
 
 
+def test_shared_state_pack_refuses_an_invalid_json_index_without_changes():
+    pack = bytearray(b'{' + struct.pack("<Q", 1) + _MAGIC)
+    before = bytes(pack)
+    with pytest.raises(RuntimeError, match=r"\Aadjoint checkpoint shared-state pack index is not JSON\Z"):
+        unpack_shared_states(pack)
+    assert bytes(pack) == before
+
+
 def test_every_pack_structure_fault_refuses(tmp_path, monkeypatch):
     space, _, record = _write(tmp_path, monkeypatch, packed=None)
     (row,) = record["shared_state_entries"]
