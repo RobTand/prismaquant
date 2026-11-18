@@ -284,6 +284,45 @@ def test_explicit_quantized_mtp_requires_activation_cache():
     assert all(not key[0].startswith("mtp.") for key in cache.weights)
 
 
+def test_mtp_render_refuses_a_missing_activation_directory_before_model_reads(
+    tmp_path, monkeypatch,
+):
+    from copy import deepcopy
+    from transformers import AutoConfig
+
+    monkeypatch.setattr(
+        AutoConfig,
+        "from_pretrained",
+        lambda *_args, **_kwargs: pytest.fail("Do not read the model configuration"),
+    )
+    activation_dir = tmp_path / "activations"
+    model_path = tmp_path / "model"
+    cache = _empty_cache()
+    metadata = deepcopy(cache.metadata)
+    weights = {key: value.clone() for key, value in cache.weights.items()}
+
+    with pytest.raises(RuntimeError) as error:
+        fill_profile_mtp_production_cache(
+            cache,
+            model_path,
+            profile=_TinyMtpProfile(),
+            activation_cache_dir=activation_dir,
+            render_assignment={"mtp.fc": "FP8_E4M3"},
+            device="cpu",
+            dtype=torch.float32,
+            progress=False,
+        )
+
+    assert str(error.value) == (
+        f"MTP activation cache directory does not exist: {activation_dir}"
+    )
+    assert cache.metadata == metadata
+    assert cache.weights.keys() == weights.keys()
+    for key, value in weights.items():
+        assert torch.equal(cache.weights[key], value)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_missing_mtp_activation_fails_before_any_render(tmp_path, monkeypatch):
     _patch_auto_config(monkeypatch)
     activation_dir = tmp_path / "activations"
