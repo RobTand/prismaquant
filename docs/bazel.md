@@ -181,10 +181,7 @@ step for every other member, so one step from the target reaches the importers o
 cycle member the plan reads `tools/ci/cycle_members.json` instead: the member's direct importers, and
 their direct importers, by module. It selects the test-side rules among them and above them, and also
 the rules that read the member as data and the tests named after it. `tools/bazel/build_files.py`
-writes the table and `--check` holds it current. This is step B of #3996. Until it, `MODULE_LEVEL` in `tools/ci/bazel_selection.py` and
-`CYCLE_TABLE_ENFORCED` in `tools/bazel/build_files.py` are `False`: the generator writes the table,
-`--check` does not compare it and the plan does not read it, so cycle members select the whole target. A
-member keeps the one step from its whole target
+writes the table and `--check` holds it current. A member keeps the one step from its whole target
 when the table gives a reason: a package `__init__.py`, a module that the generator lists as uncertain
 (an import or a launch that it cannot follow), or a module that runs a call statement, or a call
 whose name holds `register`, when it is imported (outside function bodies and the `__main__` block).

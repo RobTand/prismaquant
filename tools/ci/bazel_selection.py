@@ -31,8 +31,6 @@ BAZEL_DIFF_URL = 'https://github.com/Tinder/bazel-diff/releases/download/v42.0.0
 BAZEL_DIFF_SHA256 = '0170b70fe2f24477ab056c11f5c3240d8b45a1dca5ab73ad252c096679c5500c'
 DURATIONS_PATH = 'tools/ci/gate_durations.json'
 CYCLE_PATH = 'tools/ci/cycle_members.json'  # tools/bazel/build_files.py writes it
-# Step B of #3996 sets True with build_files.CYCLE_TABLE_ENFORCED: cycle members select from CYCLE_PATH.
-MODULE_LEVEL = False
 BUILD_LANGUAGE = {'BUILD', 'REPO', 'WORKSPACE'}  # with or without the .bazel suffix
 # The direct path reads every main-repository target (rules and files); deps(//...) also fetches every external
 # repository, which only the bazel-diff hashes need (#4228: a cold plan 146 s -> 22 s, the same selections).
@@ -409,7 +407,7 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
                 decision = everything(fallback_files(changed | deleted), population['tests'])
             elif direct:
                 closure = reverse_closure(population['consumers'], changed)
-                members = json.loads((root / CYCLE_PATH).read_text())['members'] if MODULE_LEVEL else {}
+                members = json.loads((root / CYCLE_PATH).read_text())['members']
                 impacted, shadow, rules = direct_impact(population, changed, members) if DIRECT else (closure, closure, {})
                 whole = closure & (set(population['hosted']) | CLOSURE_TESTS)
                 tests = set(population['tests']) - set(population['excluded'])

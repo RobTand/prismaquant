@@ -716,7 +716,6 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
             Path(command[command.index('--output') + 1]).write_text('//tests:test_consumer\n')
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(selection, 'MODULE_LEVEL', True)
     table = root / selection.CYCLE_PATH
     table.parent.mkdir(parents=True, exist_ok=True)
     table.write_text(json.dumps({'members': {'prismaquant/core.py': {
