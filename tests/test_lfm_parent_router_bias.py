@@ -74,3 +74,15 @@ def test_existing_correction_bias_router_remains_supported():
     indices, weights = packed_router_topk(CorrectionRouter(), x, bias)
     assert torch.equal(indices, torch.ones(2, 1, dtype=torch.long))
     torch.testing.assert_close(weights, (x + bias).softmax(-1)[:, 1:])
+
+
+def test_packed_router_refuses_a_mapping_result_without_changing_inputs():
+    class MappingRouter(nn.Module):
+        def forward(self, hidden_states):
+            return {'logits': hidden_states[:, :2]}
+    x = torch.tensor([[2., 0.], [3., 1.]])
+    before = x.clone()
+    with pytest.raises(ValueError) as exc:
+        packed_router_topk(MappingRouter(), x)
+    assert str(exc.value) == "unsupported router output type <class 'dict'>"
+    assert torch.equal(x, before)
