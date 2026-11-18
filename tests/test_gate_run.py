@@ -464,3 +464,14 @@ def test_scoped(): Path(__file__).with_name('scoped-ran').touch()
     assert code == 0
     assert (tmp_path / 'tests/scoped-ran').exists()
     assert calls[1][:4] == ['sudo', '-n', 'systemd-run', '--scope']
+
+
+def test_budget_reader_refuses_missing_slow_map_without_changes(tmp_path):
+    budget = tmp_path / 'tools/ci/gate_budget.json'
+    for text in ['[]', '{"seconds": 20}', '{"seconds": 20, "slow": []}']:
+        expected = text.encode()
+        budget.write_bytes(expected)
+        with pytest.raises(runner.BudgetFailure) as failure:
+            runner._budget_policy(tmp_path, None)
+        assert str(failure.value) == 'Test budget requires seconds and a slow map'
+        assert budget.read_bytes() == expected
