@@ -865,6 +865,34 @@ def test_overlay_intake_preserves_base_and_consumes_only_bound_measured_addition
         assert result.payload['costs'] == case.scalar_costs
 
 
+def test_overlay_subset_keeps_independent_expert_receipts_for_only_selected_units(tmp_path, campaign, probe):
+    from prismaquant.joint_catalog_extension import attach_candidate_overlay
+    case = _overlay_case(tmp_path, campaign, probe)
+    data, bound = case.bind()
+    name = case.qnames[0]
+    data.formats_by_qname = {name: data.formats_by_qname[name]}
+    data.cells = {pair: cell for pair, cell in data.cells.items() if pair[0] == name}
+    original = copy.deepcopy(data.cells)
+    data.payload['costs'] = {name: {}}
+    old = {fmt: copy.deepcopy(cell['record']) for (_, fmt), cell in original.items()}
+    data.payload['tessera_expert_wires'] = {name: old}
+    before = {path: path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()}
+    row = next(row for row in case.rows if row['qname'] == name)
+    expected = {name: {**copy.deepcopy(old), ADDED_FORMAT: copy.deepcopy(row['record'])}}
+
+    result = attach_candidate_overlay(data, bound, verify_payloads=True)
+
+    assert result is data
+    assert set(result.cells) == set(original) | {(name, ADDED_FORMAT)}
+    assert {pair: result.cells[pair] for pair in original} == original
+    assert result.payload['costs'] == {name: case.scalar_costs[name]}
+    assert result.payload['tessera_expert_wires'] == expected
+    assert set(result.formats_by_qname) == {name}
+    result.cells[name, ADDED_FORMAT]['record']['identity']['unit'] = 'changed'
+    assert result.payload['tessera_expert_wires'] == expected
+    assert {path: path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()} == before
+
+
 def _touch_ctime(path):
     """Move only ctime, the way a hard link staged and dropped does (PQ #1495)."""
     link = Path(str(path) + '.hl')
