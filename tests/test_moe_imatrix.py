@@ -151,6 +151,38 @@ def test_synthesizes_gateup_and_down(ckpt):
     assert "model.layers.0.self_attn.q_proj.down_proj" not in cw
 
 
+def test_unvisited_expert_down_weights_use_the_visited_expert_mean(ckpt):
+    import math
+
+    model_dir, act_dir = ckpt
+    weights = load_file(str(model_dir / "model.safetensors"))
+    weights["model.layers.0.mlp.gate.weight"] = torch.zeros(E, HID)
+    weights["model.layers.0.mlp.gate.weight"][0, 0] = 1.0
+    for expert in range(E):
+        for role, value in (("gate_proj", 1.0), ("up_proj", 2.0)):
+            weight = torch.zeros(INTER, HID)
+            weight[:, 0] = value
+            weights[f"model.layers.0.mlp.experts.{expert}.{role}.weight"] = weight
+    save_file(weights, str(model_dir / "model.safetensors"))
+    torch.save({"inputs": torch.ones(4, HID), "name": "model.layers.0.mlp.experts"},
+               act_dir / "model__layers__0__mlp__experts.pt")
+    before = {path: path.read_bytes() for directory in (model_dir, act_dir)
+              for path in directory.iterdir()}
+    sentinel = torch.tensor([17.0])
+    moments = {"already-priced": sentinel}
+    name = "model.layers.0.mlp.experts.down_proj"
+    assert synthesize_packed_expert_col_weights(
+        model_dir, act_dir, moments, profile=_IdentityProfile(), device="cpu",
+        target_names={name}) == [name]
+    expected = torch.full((E, 1, INTER), (2.0 / (1.0 + math.exp(-1.0))) ** 2)
+    torch.testing.assert_close(moments[name], expected, rtol=1e-6, atol=1e-6)
+    assert set(moments) == {"already-priced", name}
+    assert moments["already-priced"] is sentinel
+    assert sentinel.tolist() == [17.0]
+    assert {path: path.read_bytes() for directory in (model_dir, act_dir)
+            for path in directory.iterdir()} == before
+
+
 def test_physically_packed_gateup_matches_split_checkpoint(ckpt, tmp_path):
     """Qwen3.5/3.6 stores every expert in one gate_up rank-3 tensor."""
     model_dir, act_dir = ckpt
