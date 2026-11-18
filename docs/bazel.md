@@ -165,9 +165,10 @@ TL3 keeps BuildBuddy priority if a fallback batch arrives while its queue is bac
 
 ### Selection
 
-A PR or queue gate selects the tests of the change, not of the repository. When the diff only
-modifies files (no added or deleted file, no BUILD, REPO or WORKSPACE file, no tracked symlink),
-the plan takes these rules from the head query for each modified file:
+For a PR or queue gate, the direct path uses the head query when the diff only adds or modifies
+files and the index has no tracked symlink. The only BUILD, REPO, or WORKSPACE files that qualify
+are the generated `BUILD.bazel` and `tests/BUILD.bazel`. The head query supplies these rules for
+each changed file:
 
 - the rules that list the file: its library, and the libraries and tests that read it as data,
   also through filegroups;
@@ -198,9 +199,11 @@ The plan takes the whole reverse closure of a file instead when no test names or
 step without filegroups reaches no test), or when it is a test-side file (`tests/`, a
 `conftest.py`). The hosted lanes, and the 12 whole-repository readers in `CLOSURE_TESTS` whose
 tree comes through a product module that their `py_test` names or starts, keep the whole
-closure. A diff that adds or deletes a file or edits a BUILD file uses bazel-diff and the whole
-closure; a gate input selects the full suite. `DIRECT = False` in `tools/ci/bazel_selection.py`
-selects the whole closure for every file.
+closure. The direct path keeps the generated BUILD files in the change set and selects their
+readers, including the test that runs `build_files.py --check`. The plan uses bazel-diff for a
+deletion, a tracked symlink, or a change to any other BUILD, REPO, or WORKSPACE file. A fallback
+file selects the full suite. `DIRECT = False` in `tools/ci/bazel_selection.py` selects the whole
+closure for every file.
 
 The gate does not select a test that reaches the change only through two or more imports, or
 only through a program that the test starts as a subprocess. The post-merge record runs every
