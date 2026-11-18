@@ -2,10 +2,10 @@
   "schema": "graph-impact.v1",
   "figures": {
     "u_pct": 51.145946653361364,
-    "loc_u_pct": 63.54373073244412,
+    "loc_u_pct": 62.772300741049726,
     "median_selected_pct": 13.2,
     "p90_selected_pct": 86.0,
-    "modules_over_half": 253,
+    "modules_over_half": 249,
     "conftest_source_modules": 0
   },
   "tolerances": {
@@ -16,7 +16,7 @@
     "modules_over_half": 2,
     "conftest_source_modules": 0
   },
-  "reach_budget": 291,
+  "reach_budget": 289,
   "test_to_test": "strict",
   "test_to_test_count": 783,
   "test_to_test_strict_by": "2026-11-16",
