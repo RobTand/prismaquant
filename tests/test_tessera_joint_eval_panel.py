@@ -15,6 +15,66 @@ from prismaquant.tessera_joint_eval_panel import (
     validate_eval_draw_descriptor)
 
 
+def test_evaluation_descriptors_use_shared_sha256_grammar(monkeypatch):
+    import sys
+
+    consumer = sys.modules['prismaquant.tessera_joint_eval_panel']
+    owner = sys.modules['prismaquant.digests']
+    real_predicate = owner.is_sha256hex
+    calls = []
+
+    def record(value):
+        calls.append(value)
+        return real_predicate(value)
+
+    monkeypatch.setattr(owner, 'is_sha256hex', record, raising=False)
+    monkeypatch.setattr(consumer, 'is_sha256hex', record, raising=False)
+    ids = torch.arange(24, dtype=torch.int64, device='cpu').reshape(6, 4)
+    panel = make_panel(ids, artifact_sha256='a' * 64, seed=7, size=2)
+    draw = {'schema': DRAW_SCHEMA, 'status': STATUS,
+            'encoding_calibration_input_sha256': 'a' * 64,
+            'calibration_sha256': 'b' * 64,
+            'calibration_input': {'path': '/fixture/draw.safetensors', 'sha256': 'c' * 64},
+            'shape': [2, 4]}
+
+    class Digest(str):
+        pass
+
+    fields = (
+        ('eval_ids_sha256', 'joint evaluation indices, shape or hash descriptor differ'),
+        ('encoding_calibration_input_sha256',
+         'joint evaluation draw old encoding binding requires a SHA256 digest'),
+        ('calibration_sha256',
+         'joint evaluation draw token identity requires a SHA256 digest'),
+        ('sha256', 'joint evaluation draw artifact pin requires a SHA256 digest'))
+    for field, message in fields:
+        for value in (None, 7, b'a' * 64, 'a' * 63, 'a' * 65, 'A' * 64,
+                      'g' * 64, 'a' * 64 + '\n', Digest('a' * 64)):
+            descriptor = copy.deepcopy(panel if field == 'eval_ids_sha256' else draw)
+            target = descriptor['calibration_input'] if field == 'sha256' else descriptor
+            target[field] = value
+            if field == 'eval_ids_sha256':
+                validate = consumer.validate_panel_descriptor
+                kwargs = {'n_samples': 6, 'seqlen': 4, 'artifact_sha256': 'a' * 64}
+            else:
+                validate = validate_eval_draw_descriptor
+                kwargs = {'encoding_artifact_sha256': 'a' * 64}
+            if isinstance(value, Digest):
+                assert validate(descriptor, **kwargs) is descriptor
+                if field != 'eval_ids_sha256':
+                    assert consumer._draw_sha256(value, 'artifact pin') is value
+            else:
+                with pytest.raises(ValueError) as error:
+                    validate(descriptor, **kwargs)
+                assert type(error.value) is ValueError
+                assert str(error.value) == message
+    calls.clear()
+    assert consumer.validate_panel_descriptor(
+        panel, n_samples=6, seqlen=4, artifact_sha256='a' * 64) is panel
+    assert validate_eval_draw_descriptor(draw, encoding_artifact_sha256='a' * 64) is draw
+    assert calls == [panel['eval_ids_sha256'], 'a' * 64, 'b' * 64, 'c' * 64]
+
+
 def test_legacy_full_draw_and_nested_deterministic_prefix():
     ids = torch.arange(512 * 4, dtype=torch.int64).reshape(512, 4)
     calibration = {'artifact_sha256': 'a' * 64, 'shape': [512, 4]}
