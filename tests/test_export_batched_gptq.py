@@ -382,6 +382,21 @@ def test_gptq_batched_realistic_moe_shape(seeded):
         f"max abs diff: {(per_stack - batch_out).abs().max().item():.3e}")
 
 
+def test_grouped_gptq_refuses_a_width_outside_group_geometry():
+    module = torch.nn.Linear(17, 2, bias=False)
+    weight_before = module.weight.detach().clone()
+    items = [("unit", "unit", "unit", module)]
+    items_before = items.copy()
+    levers = replace(NativeRenderLevers.resolve(), gptq=True, gptq_damp_sweep=False, scale_sweep=False)
+    with pytest.raises(ValueError) as error:
+        _native_render_codec.quantize_2d_nvfp4_group_batched(
+            items, joint_globals={}, device=torch.device("cpu"), levers=levers,
+        )
+    assert str(error.value) == "GPTQ requires group_size=16 ∤ 17"
+    assert torch.equal(module.weight, weight_before)
+    assert items == items_before
+
+
 def test_quantize_2d_nvfp4_group_batched_integration(seeded):
     """Exercise grouped codec plumbing with explicit activations and levers.
 
