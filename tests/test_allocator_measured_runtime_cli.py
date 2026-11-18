@@ -97,7 +97,7 @@ def admit_synthetic_table(monkeypatch):
     """
     from dataclasses import replace
 
-    import prismaquant.measured_runtime_prices as mrp
+    import prismaquant.native_row_admission as mrp
     real_load = mrp.load_measured_runtime_table
 
     def admitted_load(*args, **kwargs):
@@ -309,7 +309,7 @@ def test_real_cli_binds_expected_context_to_joint_cost_evidence(tmp_path, monkey
 
 def test_real_cli_rejects_cost_bytes_swapped_between_admission_and_parsing(tmp_path, monkeypatch):
     """Restoring admitted bytes after parsing must not authenticate different prices."""
-    from prismaquant import measured_runtime_prices
+    from prismaquant import native_row_admission
     from prismaquant.joint_aura_rows import make_joint_aura_entry
 
     name, argv = _main_fixture(tmp_path)
@@ -324,7 +324,7 @@ def test_real_cli_rejects_cost_bytes_swapped_between_admission_and_parsing(tmp_p
     )
     changed_bytes = pickle.dumps(changed)
     assert hashlib.sha256(changed_bytes).digest() != hashlib.sha256(admitted_bytes).digest()
-    real_admit = measured_runtime_prices.load_measured_runtime_table
+    real_admit = native_row_admission.load_measured_runtime_table
     real_load = pickle.load
 
     def admit_then_replace(*args, **kwargs):
@@ -340,7 +340,7 @@ def test_real_cli_rejects_cost_bytes_swapped_between_admission_and_parsing(tmp_p
             cost_path.write_bytes(admitted_bytes)
         return value
 
-    monkeypatch.setattr(measured_runtime_prices, "load_measured_runtime_table", admit_then_replace)
+    monkeypatch.setattr(native_row_admission, "load_measured_runtime_table", admit_then_replace)
     monkeypatch.setattr(pickle, "load", parse_then_restore)
     monkeypatch.setattr(sys, "argv", argv)
     with pytest.raises(SystemExit, match="cost payload changed after measured runtime admission"):

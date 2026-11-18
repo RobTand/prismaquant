@@ -288,7 +288,7 @@ exists, and the consumer's own gates say exactly what is owed:
 
 - Native rows: one `native_receipt_bindings` entry per priced `(unit,
   format)` -- `panel`, `receipt` and `memory_trace` artifacts -- admitted by
-  `runtime_provenance.admit_native_rows` (`runtime_provenance.py:622-697`)
+  `native_row_admission.admit_native_rows`
   through the same `consume_native_receipt` / `consume_moe_receipt`
   consumers as #267. Each row needs **both** measured phases (`prefill` and
   `decode`; a null decode refuses as "lacks a complete measured phase"), a

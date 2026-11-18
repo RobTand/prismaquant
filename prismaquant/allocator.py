@@ -2051,7 +2051,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         peak_scratch_bytes=int(args.serve_peak_scratch_bytes or 0),
     )
     if args.measured_runtime_table:
-        from .measured_runtime_prices import load_runtime_context, load_measured_runtime_table
+        from .measured_runtime_prices import load_runtime_context
+        from .native_row_admission import load_measured_runtime_table
         try:
             expected_runtime = load_runtime_context(args.measured_runtime_context)
             with open(args.costs, "rb") as cost_file:

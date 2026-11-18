@@ -23,7 +23,7 @@ from typing import Any, Mapping, Sequence
 from .lane_eligibility import ServingContext
 from .serve_dispatch_table import DispatchTableError
 from .schemas import strict_json_loads
-from .digests import DIRECT_ASCII_STRICT, file_digest_sha256hex, is_sha256hex
+from .digests import DIRECT_ASCII_STRICT, is_sha256hex
 
 SCHEMA = "prismaquant.measured_runtime_prices.v1"
 CONTEXT_SCHEMA = "prismaquant.measured_runtime_context.v1"
@@ -890,35 +890,6 @@ def parse_measured_runtime_table(payload: Mapping, *, expected_context: RuntimeC
                                 _sha(payload["fixed_resources_receipt_sha256"], "fixed_resources_receipt_sha256"),
                                 tuple(sorted(rows, key=lambda row: row.key)), source_path,
                                 provenance, receipt_bindings)
-
-
-def load_measured_runtime_table(path: str | Path, *, expected_context: RuntimeContext,
-                                expected_cost_sha256: str, now: datetime | None = None) -> MeasuredRuntimeTable:
-    table = parse_measured_runtime_table(_json(path), expected_context=expected_context,
-                                        expected_cost_sha256=expected_cost_sha256, now=now, source_path=str(path))
-    receipts = {(table.fixed_resources_receipt_path, table.fixed_resources_receipt_sha256)}
-    for row in table.rows:
-        for measurement in (row.prefill, row.decode):
-            if measurement:
-                receipts.add((measurement.receipt_path, measurement.receipt_sha256))
-    for receipt, expected in sorted(receipts):
-        receipt_path = Path(receipt)
-        if not receipt_path.is_absolute():
-            receipt_path = Path(path).parent / receipt_path
-        try:
-            with receipt_path.open("rb") as stream:
-                actual = file_digest_sha256hex(stream)
-        except OSError as exc:
-            raise RuntimePriceError(f"cannot read measurement receipt {receipt_path}: {exc}") from exc
-        if actual != expected:
-            raise RuntimePriceError(f"measurement receipt SHA-256 mismatch: {receipt_path}")
-    if table.runtime_provenance is not None:
-        from .runtime_provenance import admit_runtime_provenance
-        refusal = admit_runtime_provenance(table)
-        table = replace(table, native_rows_admitted=True,
-                        fixed_resources_admitted=refusal is None,
-                        fixed_resources_refusal=refusal)
-    return table
 
 
 def admitted_fixed_resources(table: MeasuredRuntimeTable) -> RuntimeResources:

@@ -19,7 +19,7 @@ from prismaquant import measured_runtime_prices as mrp
 from prismaquant.measured_runtime_prices import (
     RuntimePriceError, RuntimeResources, admitted_fixed_resources, build_runtime_resources,
 )
-from prismaquant.runtime_provenance import admit_runtime_provenance
+from prismaquant.native_row_admission import admit_runtime_provenance
 
 FIXED_REFUSAL = "no qualified recomputable full-engine resource partition: synthetic"
 
@@ -47,7 +47,7 @@ def _table(**overrides):
 
 
 def _patch(monkeypatch, *, native_raises=None, fixed_raises=None):
-    import prismaquant.runtime_provenance as rp
+    import prismaquant.native_row_admission as rp
     monkeypatch.setattr(rp, "load_runtime_relation", lambda *a, **k: {"relation": True})
 
     def native(table, relation):

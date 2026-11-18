@@ -8,9 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from prismaquant.native_row_admission import load_measured_runtime_table
+
 from prismaquant.measured_runtime_prices import (
     CONTEXT_SCHEMA, SCHEMA, RuntimeBinding, RuntimePriceError, RuntimeResources,
-    build_runtime_resources, load_measured_runtime_table, load_runtime_context,
+    build_runtime_resources, load_runtime_context,
     parse_measured_runtime_table, parse_runtime_context,
 )
 

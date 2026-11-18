@@ -46,7 +46,7 @@ D37 = ("no qualified recomputable full-engine resource partition: "
 
 def _stand_in_for_the_gates(monkeypatch, *, fixed_refusal=D37):
     """Control native-row admission and the fixed-resource refusal for this fixture."""
-    import prismaquant.runtime_provenance as rp
+    import prismaquant.native_row_admission as rp
 
     monkeypatch.setattr(rp, "load_runtime_relation", lambda *a, **k: {"relation": True})
     monkeypatch.setattr(rp, "admit_native_rows", lambda table, relation: None)

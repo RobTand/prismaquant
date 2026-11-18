@@ -620,7 +620,7 @@ warmups and at least three complete repeats per phase under the existing gate;
 use the fuller paired policy for reported comparisons. Qualify observer impact
 and trace completeness from raw control/partition arms before admitting prices.
 
-Current `runtime_provenance.admit_native_rows` requires **both prefill and
+Current `native_row_admission.admit_native_rows` requires **both prefill and
 one-token decode** timing/resource evidence per native row, even if the
 allocation's decode constraint is unset. Its peak charges span both phases.
 The new full-engine partition must cover both accordingly. A genuinely
