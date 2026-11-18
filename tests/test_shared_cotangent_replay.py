@@ -74,3 +74,13 @@ def test_replay_cap_refuses_before_any_accumulator_clone(monkeypatch):
         parent.fork_for_replay(max_resident_bytes=23)
     monkeypatch.setattr(torch.Tensor, 'clone', original_clone)
     assert torch.equal(parent.resident_tensors()[0], torch.full((2, 3), 3.))
+
+
+def test_shared_cotangent_restore_refuses_missing_counters_without_changes():
+    owner = SharedStateCotangents(enabled=True)
+    before = owner.state_dict()
+    state = {'enabled': False, 'accumulators': []}
+    with pytest.raises(ValueError, match=r'\Ashared cotangent state dict is not one\Z'):
+        owner.load_state_dict(state)
+    assert owner.state_dict() == before
+    assert state == {'enabled': False, 'accumulators': []}
