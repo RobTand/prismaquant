@@ -107,3 +107,17 @@ def test_publish_requires_samples_and_preserves_exact_bytes(tmp_path):
     payload['profiles'][0]['endValue']=0
     source.write_text(json.dumps(payload))
     with pytest.raises(RuntimeError,match='sampled profiles'): publish_profile(source,tmp_path/'empty')
+
+
+def test_child_profile_refuses_stale_outputs_before_launch(tmp_path, monkeypatch):
+    def call(command):
+        pytest.fail('subprocess.call ran with a stale output')
+    monkeypatch.setattr('tools.pq_profile_child.subprocess.call', call)
+    for name in ('profile', 'profile.workload-status.json'):
+        case = tmp_path/name.replace('.', '_')
+        case.mkdir()
+        (case/name).write_bytes(b'keep')
+        with pytest.raises(FileExistsError) as error:
+            run_child_profile(['python3', 'row.py'], executable='py-spy', destination=case/'profile')
+        assert str(error.value) == 'refusing stale child profile or workload status'
+        assert {path.name: path.read_bytes() for path in case.iterdir()} == {name: b'keep'}
