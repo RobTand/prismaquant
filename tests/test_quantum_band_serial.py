@@ -333,6 +333,20 @@ def test_a_handoff_binds_its_consumer_and_refuses_everything_else(tmp_path, monk
     path.write_bytes(raw)
 
 
+def test_handoff_refuses_noncanonical_bytes_with_a_matching_digest(tmp_path, monkeypatch):
+    _single, receipt, _root, producer_record, path = _producer(tmp_path, monkeypatch, layer=2)
+    record, adjoint_slice = _consumer_record(producer_record, layer=1, receipt=receipt)
+    path.write_bytes(path.read_bytes() + b" ")
+    files = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    mappings = json.loads(json.dumps([record, adjoint_slice]))
+    with pytest.raises(QuantumHandoffRefused) as refused:
+        load_quantum_handoff(path, hashlib.sha256(files[path]).hexdigest(), record=record,
+                             adjoint_slice=adjoint_slice, kda_capture_kernel=None)
+    assert str(refused.value) == "the handoff record is not in canonical form"
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == files
+    assert [record, adjoint_slice] == mappings
+
+
 def test_owner_states_travel_per_probe_and_sample(tmp_path, monkeypatch, capsys):
     """Distinct shared-state owners survive the handoff, coordinate by coordinate.
 
