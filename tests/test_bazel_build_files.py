@@ -458,6 +458,9 @@ def test_record_durations_sums_shard_times_and_keeps_the_largest_total(tmp_path)
     assert 'first, second' in result.pop('source')
     assert result == {'files': {'tests/test_one.py': 1.2, 'tests/test_two.py': 5.0},
                       'nodes': {'tests/test_one.py::test_a': 1}}
+    second.write_text('//tests:test_two  FAILED in 4.0s\n')
+    with pytest.raises(SystemExit, match='test_two FAILED'):  # a failed test would lose its shards and timeout
+        record_durations(table, [first, second])
 
 
 def test_a_test_importing_another_test_depends_on_its_library_not_its_test():

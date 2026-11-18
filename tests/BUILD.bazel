@@ -11795,11 +11795,6 @@ pq_py_test(
     timeout = "moderate",
 )
 
-filegroup(
-    name = "files/fixtures/compressed_route_sweep_0p6b",
-    srcs = glob(["fixtures/compressed_route_sweep_0p6b/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
-)
-
 pq_py_library(
     name = "test_joint_statistics_scale_profile_lib",
     srcs = [
@@ -16288,11 +16283,6 @@ pq_py_test(
         ":conftest",
     ],
     timeout = "moderate",
-)
-
-filegroup(
-    name = "files/fixtures/native_fp4_o_proj_20260918",
-    srcs = glob(["fixtures/native_fp4_o_proj_20260918/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
 )
 
 pq_py_test(
@@ -21920,148 +21910,6 @@ pq_py_test(
     ],
     data = [
         "//:files/prismaquant/lane_specs",
-        ":files/boundary_allowlists",
-        ":files/fixture-data",
-        ":files/fixtures/cas-r5",
-        ":files/fixtures/compressed_route_sweep_0p6b",
-        ":files/fixtures/compressed_route_sweep_moe",
-        ":files/fixtures/glm_tr3_runtime",
-        ":files/fixtures/native_fp4_o_proj_20260918",
-        ":files/fixtures/rung_allowability",
-        ":files/fixtures/rung_allowability_v3",
-        ":files/fixtures/tessera_full_engine_tp2",
-        ":files/fixtures/tessera_route_trace_1490/measured",
-        ":files/fixtures/tessera_route_trace_1490/named",
-        ":files/fixtures/tessera_route_trace_m44e1",
-        ":files/g3job",
-        ":files/own_process_samples",
-        ":test_files",
-        "_rung_allowability_producer.py",
-        "bazel_runner_runtime.py",
-        "bazel_scan_runtime.py",
-        "bench_stage_a_forward_split.py",
-        "bench_stage_a_io_overlap.py",
-        "boundary_gate.py",
-        "canonical_quality_fixtures.py",
-        "cgroup_readings.py",
-        "container_admission.py",
-        "container_inspection_fixture.py",
-        "cpu_staged_fixtures.py",
-        "cuda_sync_sites.py",
-        "delegation_recording.py",
-        "fake_podman.py",
-        "fixtures/_pre1432_build_t4_overlay_catalog.py",
-        "fixtures/census_digest_owner_1301.json",
-        "fixtures/cgroup_memory_stat_layer044_sparky.json",
-        "fixtures/contract_checks_1300.json",
-        "fixtures/cost_surrogate_calibration_anchors.json",
-        "fixtures/digest_calibration_cache_1512.json",
-        "fixtures/digest_canonical_bytes_1639.json",
-        "fixtures/digest_canonical_twins_1646.json",
-        "fixtures/digest_export_lane_1599.json",
-        "fixtures/digest_hex_1457.json",
-        "fixtures/digest_joint_aura_1593.json",
-        "fixtures/digest_main_scopes_2638.json",
-        "fixtures/digest_prepare_io_1301.json",
-        "fixtures/digest_profiles_1301.json",
-        "fixtures/digest_profiles_1301_files.json",
-        "fixtures/digest_rosters_1446.json",
-        "fixtures/dsv4_fake_trace_cell/config.json",
-        "fixtures/duplication_baseline.json",
-        "fixtures/full_engine_resource_report.synthetic.json",
-        "fixtures/full_engine_resource_report.synthetic_steps.json",
-        "fixtures/function_pairs_1302.json",
-        "fixtures/g01_suite_container_controls.json",
-        "fixtures/glm_sealed_prepared_rosters.json",
-        "fixtures/graph_impact_allowlist.json",
-        "fixtures/graph_impact_baseline.json",
-        "fixtures/lfm_quality_endpoint.json",
-        "fixtures/module_pairs_1302.json",
-        "fixtures/native_campaign_row_2320.txt",
-        "fixtures/numerics_pairs_1394.json",
-        "fixtures/numerics_pairs_1414_cpu.json",
-        "fixtures/numerics_pairs_1414_cpu.provenance.md",
-        "fixtures/pact_frontier_after640_m2048.csv",
-        "fixtures/pact_frontier_pre685_m2048.csv",
-        "fixtures/pact_glm53_e4m3_prefix_1584.json",
-        "fixtures/pq2319-predicted-table-units.csv",
-        "fixtures/pq3017/README.md",
-        "fixtures/pq3017/native-v2/container_entry.py",
-        "fixtures/pq3017/native-v2/probe_selftest.py",
-        "fixtures/pq3017/native-v2/run_suite.py",
-        "fixtures/pq3017/preserved-files.json",
-        "fixtures/pq3017/requalification.json",
-        "fixtures/pq3017/research-evidence.md",
-        "fixtures/pq3017/run2/container_entry.py",
-        "fixtures/pq3017/run2/probe_selftest.py",
-        "fixtures/pq3017/run2/run_suite.py",
-        "fixtures/pq3017/snapshot-digests.json",
-        "fixtures/pre226_native_export_args.sh",
-        "fixtures/pre226_unary_recorder.py",
-        "fixtures/retained_sample_activation_reader.json",
-        "fixtures/shape_runtime_contract_v60.json",
-        "fixtures/spaced_lax_tools_consumers_2320.json",
-        "fixtures/spaced_lax_tools_launch_contracts_2320.json",
-        "fixtures/super_item_menu_golden.json",
-        "fixtures/telemetry_tools_1299.json",
-        "fixtures/tensor_digests_1384.json",
-        "fixtures/tensor_digests_1384_portable.json",
-        "fixtures/tessera_activation_quantizers_v25.json",
-        "fixtures/tessera_activation_quantizers_v34.json",
-        "fixtures/tessera_cells_withdrawn_v38.json",
-        "fixtures/tessera_checkpoint_settings_identity.json",
-        "fixtures/tessera_lane_v12_v66_routed.json",
-        "fixtures/tessera_route_trace_1490/SOURCE.md",
-        "fixtures/tessera_route_trace_1490/config.json",
-        "fixtures/tessera_route_trace_1490/sources.json",
-        "fixtures/tessera_route_trace_1620/SOURCE.md",
-        "fixtures/tessera_route_trace_1620/config.json",
-        "fixtures/tessera_route_trace_1620/sources.json",
-        "fixtures/tessera_route_trace_1620/tr3-rank0.json",
-        "fixtures/tessera_route_trace_1620/tr3-rank1.json",
-        "fixtures/tessera_route_trace_509/PROVENANCE.md",
-        "fixtures/tessera_route_trace_509/routes-rank0.json",
-        "fixtures/tessera_route_trace_509/routes-rank1.json",
-        "fixtures/tessera_route_trace_509/routes-swapped-rank0.json",
-        "fixtures/tessera_route_trace_509/routes-swapped-rank1.json",
-        "fixtures/tessera_route_trace_union/PROVENANCE.md",
-        "fixtures/tessera_route_trace_union/config.json",
-        "fixtures/tessera_route_trace_union/empty-rank0.json",
-        "fixtures/tessera_route_trace_union/empty-rank1.json",
-        "fixtures/tessera_route_trace_union/nonspec-rank0.json",
-        "fixtures/tessera_route_trace_union/nonspec-rank1.json",
-        "fixtures/tessera_route_trace_union/spec-rank0.json",
-        "fixtures/tessera_route_trace_union/spec-rank1.json",
-        "fixtures/tessera_serving_identity_v2_snapshot.json",
-        "fixtures/tessera_stack_lfm_layer18.json",
-        "fixtures/token_kl_old_2778.py",
-        "fleet_acceptance_matrix.json",
-        "fleet_data_samples/sample_fleet_data.py",
-        "glm-dense-authentic-activation-quantizers.json",
-        "golden_table.py",
-        "graph_lane_fixtures.py",
-        "graph_receipt_fixtures.py",
-        "handoff_emitter_stub.py",
-        "lane_table_fixtures.py",
-        "legacy_capture_fixtures.py",
-        "native_dispatch_fixture.py",
-        "native_original_fixtures.py",
-        "native_runtime_fixtures.py",
-        "native_runtime_observer.py",
-        "native_source_contract_fixtures.py",
-        "nvfp4_served_qdq_fixtures.py",
-        "pq1317_bindings.py",
-        "priced_model_screen.py",
-        "prismabuild_scan.py",
-        "produced_native_fixtures.py",
-        "projection_producer_environment.json",
-        "readset_oracles.py",
-        "source_framing_recording.py",
-        "stage_a_spool_spec.py",
-        "staged_native_fixtures.py",
-        "tessera_metadata_fixture.py",
-        "tessera_serving_identity_snapshot.py",
-        "tessera_withdrawn_v38.py",
     ],
     timeout = "moderate",
 )
@@ -27441,11 +27289,6 @@ pq_py_test(
     timeout = "moderate",
 )
 
-filegroup(
-    name = "files/fixtures/tessera_route_trace_m44e1",
-    srcs = glob(["fixtures/tessera_route_trace_m44e1/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
-)
-
 pq_py_library(
     name = "test_model_walk_lib",
     srcs = [
@@ -32417,11 +32260,6 @@ pq_py_test(
     timeout = "moderate",
 )
 
-filegroup(
-    name = "files/fixtures/rung_allowability",
-    srcs = glob(["fixtures/rung_allowability/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
-)
-
 pq_py_test(
     name = "test_joint_served_activation",
     path = "tests/test_joint_served_activation.py",
@@ -33836,11 +33674,6 @@ filegroup(
     srcs = glob(["g3job/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
 )
 
-filegroup(
-    name = "files/fixtures/cas-r5",
-    srcs = glob(["fixtures/cas-r5/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
-)
-
 pq_py_library(
     name = "test_gate_workflow_lib",
     srcs = [
@@ -33856,11 +33689,6 @@ pq_py_library(
         "@pq_pip//pytest",
         "@pq_pip//pyyaml",
     ],
-)
-
-filegroup(
-    name = "files/fixtures/glm_tr3_runtime",
-    srcs = glob(["fixtures/glm_tr3_runtime/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
 )
 
 pq_py_test(
@@ -55477,11 +55305,6 @@ pq_py_library(
     ],
 )
 
-filegroup(
-    name = "files/fixtures/compressed_route_sweep_moe",
-    srcs = glob(["fixtures/compressed_route_sweep_moe/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
-)
-
 pq_py_test(
     name = "test_stage_b_fp8_source_strict_reads_1219",
     path = "tests/test_stage_b_fp8_source_strict_reads_1219.py",
@@ -56764,11 +56587,6 @@ pq_py_test(
         ":g3job/conftest",
     ],
     timeout = "moderate",
-)
-
-filegroup(
-    name = "files/fixtures/rung_allowability_v3",
-    srcs = glob(["fixtures/rung_allowability_v3/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
 )
 
 pq_py_test(
