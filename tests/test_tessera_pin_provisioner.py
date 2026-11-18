@@ -35,6 +35,22 @@ def test_the_provisioner_reads_the_commit_the_ci_resolver_prints():
     assert len(sha) == 64
 
 
+def test_reviewed_pin_refuses_noncanonical_commit_text_without_changes(tmp_path):
+    mod = _load()
+    pin = tmp_path / "pin.py"
+    for commit in ("a" * 39, "A" * 40, "g" * 40):
+        text = (
+            f"TESSERA_DEV_PIN_COMMIT = {commit!r}\n"
+            f"TESSERA_DEV_PIN_CONTRACT_SHA256 = {'b' * 64!r}\n"
+        )
+        pin.write_text(text, encoding="utf-8")
+        with pytest.raises(SystemExit) as exc:
+            mod.reviewed_pin(pin)
+        assert str(exc.value) == f"{pin}: TESSERA_DEV_PIN_COMMIT must be a full lowercase Git SHA"
+        assert list(tmp_path.iterdir()) == [pin]
+        assert pin.read_text(encoding="utf-8") == text
+
+
 def test_the_provisioner_needs_neither_prismaquant_nor_tessera():
     """It runs on an interpreter that has neither; that is the point of it.
 
