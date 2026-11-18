@@ -927,6 +927,14 @@ explicit traffic wire bytes. DEFAULT-OFF, UNQUALIFIED FEATURE HOLD.
 CPU verification covers declaration uptake only; no pipeline default,
 format, serving lane or ship gate changes.
 
+As of: 2026-11-17, generated BUILD layout, PQ #4092.
+Source: `tools/bazel/build_files.py`, based on main `24a034e0`. The 27 tests that
+read every top-level test file take one filegroup, `//tests:test_files`, instead
+of 1,268 file names each (tests/BUILD.bazel 96,970 -> 62,805 lines), and the
+targets of each BUILD file are ordered by the SHA-256 of their names. A new test
+adds its own two blocks only, at an unrelated place: sibling pull requests no
+longer conflict in tests/BUILD.bazel. Details: docs/bazel.md, "Selection".
+
 As of: 2026-11-17, gate test-growth check, PQ #3944.
 Source: `tools/ci/test_growth.py` and `tools/ci/static_checks.sh`, based on main
 `f1c698b5`. The gate's Graph impact job and the pre-queue command refuse a PR that
@@ -1001,7 +1009,7 @@ As of: 2026-11-17, FIFO merge queue in batches of 3 again, PQ #3949 (after #3773
 Source: `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.mergify.yml`.
 One serial queue requires an issue line and a `prismaquant-<N>` branch on original PRs (PQ #3786;
 text only, no issue lookup) and `gate` on each draft.
-Each draft checks up to 3 PRs on the newest main, in `queue` label order; a failed batch is split.
+Each draft checks up to 8 PRs on the newest main, in `queue` label order; a failed batch is split. A PR with the label `priority` (a lead puts it, on the global lead's ruling) goes next after the running draft (#4276).
 Bazel and hosted gate jobs run only on authenticated Mergify drafts or `gate-canary` PRs.
 Graph impact runs on every PR. The post-merge CPU suite remains on Python 3.12.
 

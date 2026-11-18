@@ -192,6 +192,10 @@ A pull request that changes an import between cycle members must regenerate the 
 `tools/bazel/generate.sh`; `build_files.py --check` names the stale file and that command. The gate summary prints the rule of each changed member and the test
 count. The manifest field `shadow_v1` holds the selection with only the member's own importers.
 
+The plan reads the diff first. For the direct path it queries `//...:all-targets union buildfiles(//...)`, which
+loads the main repository only; the bazel-diff path also queries `deps(//...)`, whose external repositories
+(the pip wheels) only the bazel-diff hashes need. On a cold runner that is 22 s against 146 s (#4228).
+
 The plan takes the whole reverse closure of a file instead when no test names or imports it (one
 step without filegroups reaches no test), or when it is a test-side file (`tests/`, a
 `conftest.py`). The hosted lanes, and the 12 whole-repository readers in `CLOSURE_TESTS` whose
@@ -209,6 +213,11 @@ closure held and its selection did not.
 TL3b's own check runs the direct importers and the tests that name the changed path. The gate
 also runs the one-step data edges, the whole-repository readers, the closure of test-side files
 and of files that no test imports, and the hosted lanes.
+
+The generator names the data of a target that reads every top-level test file (its own modules
+excepted) with one filegroup, `//tests:test_files` (`glob(["test_*.py"])`). It orders the targets of
+each BUILD file by the SHA-256 of their names. A new test then adds only its own two blocks, at an
+unrelated place, so two pull requests that each add a test merge without a conflict (#4092).
 
 ### Find the merge that broke a record
 

@@ -560,6 +560,19 @@ def test_check_ignores_a_stale_cycle_table_until_it_is_enforced(tmp_path, monkey
     assert build_files.main(['--check', '--root', str(tmp_path)]) == 0
 
 
+def test_a_target_that_reads_every_test_file_takes_one_glob_and_targets_are_in_hash_order():
+    trees = build_files.Trees(['tests/test_a.py', 'tests/test_b.py', 'tests/test_c.py', 'tests/helper.py'])
+    # The reader's own module and the test modules it imports are its sources, so they may be missing from its data.
+    assert trees.labels({'tests/test_b.py'}, 'tests', {'tests/test_a.py', 'tests/test_c.py'}) == [':test_files']
+    assert trees.labels({'tests/test_b.py'}, 'tests') == ['test_b.py']
+    assert trees.used_tests == {'tests': {''}}
+    names = ['test_b', 'test_a', 'test_a_lib']
+    text = build_files.render_package('tests', [(name, 'filegroup', {}) for name in names])
+    assert text.splitlines()[1] == '# Targets are in the order of the SHA-256 of their names, so that new ones land apart.'
+    assert [line.split('"')[1] for line in text.splitlines() if line.startswith('    name')] == sorted(
+        names, key=build_files.text_sha256hex)
+
+
 def test_committed_build_files_carry_the_generated_header():
     for path in [ROOT / 'BUILD.bazel', ROOT / 'tests/BUILD.bazel']:
         assert path.read_text().startswith(build_files.HEADER), path

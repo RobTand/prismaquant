@@ -2,6 +2,8 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('gate_partition', ROOT / 'tools/ci/gate_partition.py')
 partition = importlib.util.module_from_spec(SPEC)
@@ -13,6 +15,17 @@ def test_longest_files_balance_deterministically():
     rows = partition.shards(files, dict(zip(files, [10, 9, 2, 1])), 2, unknown_seconds=3)
     assert [row['files'] for row in rows] == [['a', 'd'], ['b', 'c']]
     assert [row['estimated_seconds'] for row in rows] == [11, 11]
+
+
+def test_partition_refuses_invalid_duration_values_without_input_changes():
+    for value in (True, False, -1.0, float('nan'), float('inf'), '1'):
+        files, durations = ['a'], {'a': value}
+        before = repr(durations)
+        with pytest.raises(ValueError) as error:
+            partition.shards(files, durations, 1, unknown_seconds=1)
+        assert str(error.value) == 'durations must be finite nonnegative numbers, not booleans'
+        assert files == ['a']
+        assert repr(durations) == before
 
 
 def test_large_selection_fans_out_and_unknown_cost_is_conservative():

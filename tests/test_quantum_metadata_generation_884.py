@@ -48,6 +48,17 @@ from prismaquant.joint_layer_quanta import (  # noqa: E402
 )
 
 
+def test_regeneration_refuses_trailing_gzip_bytes_even_with_a_valid_digest(tmp_path: Path):
+    path = tmp_path / "plan.json.gz"
+    for suffix in (b"trailing", gzip.compress(b"{}")):
+        wire = gzip.compress(b"{}") + suffix
+        path.write_bytes(wire)
+        with pytest.raises(ValueError) as exc:
+            regen._load_json(path, digest=hashlib.sha256(wire).hexdigest(), where="plan")
+        assert str(exc.value) == f"plan has trailing bytes after its gzip member at {path}: refusing"
+        assert {entry.name: entry.read_bytes() for entry in tmp_path.iterdir()} == {path.name: wire}
+
+
 def _reseal_record_identity(record: dict) -> None:
     """Reseal a tampered prior record's identity so the prior set stays
     internally consistent -- the honest shape of a real drifted generation,

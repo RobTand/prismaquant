@@ -308,9 +308,13 @@ def test_wheel_repository_inventory_keeps_each_canonical_package_separate():
 
 @pytest.mark.parametrize('labels', [[], ['//tests:test_consumer'],
     ['@@rules_python++pip+pq_pip//numpy:pkg']])
-def test_missing_canonical_wheel_inventory_refuses_opaque_hub_selection(labels):
-    with pytest.raises(selection.SelectionError, match='wheel'):
-        selection.wheel_repositories(labels)
+def test_missing_canonical_wheel_inventory_refuses_opaque_hub_selection(tmp_path, labels):
+    # Only bazel-diff needs the wheels; a main-repository query for the direct path names none.
+    assert selection.wheel_repositories(labels) == []
+    population = {'wheel_repositories': selection.wheel_repositories(labels)}
+    with pytest.raises(selection.SelectionError, match='revision graph'):
+        selection.collect_revision(ROOT, tmp_path, 'amd64', java='java', jar=tmp_path / 'v42.jar',
+                                   runner=None, queried={'population': population, 'query': tmp_path / 'q'})
 
 
 def test_bazel_diff_impact_query_uses_both_private_graph_snapshots(tmp_path):
@@ -696,12 +700,13 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
         {'rule': {'name': '//tests:test_unrelated', 'ruleClass': 'py_test'}},
         {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg', 'ruleClass': 'py_library'}},
     ]
-    tools = []
+    tools, queries = [], []
 
     def planning_command(command, **kwargs):
         if command[0] == 'git':
             return subprocess.run(command, **kwargs)
         if command[1] == 'query':
+            queries.append(command[2])
             return SimpleNamespace(returncode=0, stdout='\n'.join(map(json.dumps, rows)))
         tools.append(command[3])
         if command[3] == 'generate-hashes':
@@ -725,8 +730,34 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
             '//prismaquant:gen', '//tests:test_consumer']
         assert found['rules'] == {'prismaquant/core.py': 'whole target (no test within two imports): 1 tests'}
         assert found['shadow_v1'] == ['//tests:test_consumer']
+        assert queries == [selection.MAIN_QUERY]  # the direct path fetches no external repository
     else:
         assert tools == ['generate-hashes', 'generate-hashes', 'get-impacted-targets']
+        assert queries == [selection.DEPS_QUERY] * 2  # an add, delete, BUILD or symlink change: bazel-diff
+
+
+@pytest.mark.parametrize('layout', ['file list', 'filegroup'])
+def test_a_new_test_file_selects_the_whole_tree_readers_in_both_build_layouts(layout):
+    def rule(label, kind, *inputs):
+        return {'rule': {'name': label, 'ruleClass': kind, 'ruleInput': list(inputs)}}
+    closure = min(selection.CLOSURE_TESTS).split(':')[1]  # a whole-repository reader with the whole closure
+    files = ['//tests:test_new.py', '//tests:test_old.py', '//tests:test_reader.py', f'//tests:{closure}.py']
+    group = [rule('//tests:test_files', 'filegroup', *files)] if layout == 'filegroup' else []
+    data = ['//tests:test_files'] if group else files
+    rows = [{'sourceFile': {'name': name}} for name in files + ['//:prismaquant/core.py']] + group + [
+        rule('//:prismaquant/core', 'py_library', '//:prismaquant/core.py'),
+        *[rule(f'//tests:{name}_lib', 'py_library', f'//tests:{name}.py', '//:prismaquant/core')
+          for name in ('test_new', 'test_old', 'test_reader', closure)],
+        rule('//tests:test_new', 'py_test', '//tests:test_new_lib'), rule('//tests:test_old', 'py_test', '//tests:test_old_lib'),
+        rule('//tests:test_reader', 'py_test', '//tests:test_reader_lib', *data),
+        rule(f'//tests:{closure}', 'py_test', f'//tests:{closure}_lib', *data),
+        rule('@@rules_python++pip+pq_pip_numpy//:pkg', 'py_library')]
+    population = selection.query_population(rows, 'amd64')
+    tests = set(population['tests'])
+    assert selection.direct_impact(population, {'tests/test_new.py'})[0] & tests == {
+        '//tests:test_new', '//tests:test_reader', f'//tests:{closure}'}
+    # A closure test keeps the whole closure of a product file in both layouts.
+    assert f'//tests:{closure}' in selection.reverse_closure(population['consumers'], {'prismaquant/core.py'})
 
 
 def test_direct_selection_takes_one_import_and_the_test_side_above_it():

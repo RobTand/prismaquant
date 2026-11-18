@@ -811,6 +811,26 @@ def test_the_override_refuses_when_there_is_nothing_to_override(tmp_path):
     ]) == 2
 
 
+def test_override_control_refuses_an_empty_slot_without_writes(tmp_path, capsys):
+    model_dir = _artifact(tmp_path)
+    before = {p.name: p.read_bytes() for p in model_dir.iterdir()}
+
+    assert shipcard_cli([
+        "override-control", str(model_dir / "shipcard.json"),
+        "--reason", "r", "--authorized-by", "a",
+        "--confirm-name", model_dir.name,
+    ]) == 2
+
+    out = capsys.readouterr()
+    assert out.out == ""
+    assert out.err == (
+        "[shipcard] REFUSED: no uniform_control record to override; "
+        "fill the slot first (fill-control)\n")
+    after = {p.name: p.read_bytes() for p in model_dir.iterdir()}
+    assert after.keys() == before.keys()
+    assert after == before
+
+
 # ---------------------------------------------------------------------------
 # The fill path
 # ---------------------------------------------------------------------------

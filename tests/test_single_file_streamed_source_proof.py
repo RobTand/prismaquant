@@ -151,6 +151,22 @@ def test_single_file_capture_roster_must_cover_the_shard(single_file_source_chec
         _adopt_single_file_proof_fixture(root, cache, source_files={})
 
 
+def test_identity_validation_refuses_corrupt_cache_without_source_changes(
+    single_file_source_checkpoint, tmp_path
+):
+    root, runner, _ = single_file_source_checkpoint
+    cache, _ = _build_single_file_proof_fixture(root, runner, tmp_path)
+    cache.write_bytes(b"{")
+    source_before = {path.name: path.read_bytes() for path in root.iterdir()}
+    with pytest.raises(RuntimeError) as refusal:
+        cost_streaming_identity.validate_cached_streamed_model_identity(root, cache)
+    assert str(refusal.value) == (
+        f"streamed model identity cache {cache} is corrupt; refusing identity reuse"
+    )
+    assert cache.read_bytes() == b"{"
+    assert {path.name: path.read_bytes() for path in root.iterdir()} == source_before
+
+
 def test_invalid_single_file_header_is_not_complete_checkpoint_coverage(tmp_path):
     (tmp_path / "model.safetensors").write_bytes(b"not a safetensors checkpoint")
     with pytest.raises(RuntimeError, match="header|safetensors|checkpoint"):

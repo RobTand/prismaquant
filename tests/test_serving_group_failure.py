@@ -86,6 +86,24 @@ def test_registry_metadata_loader_does_not_require_runtime_model_config(monkeypa
         "qkv_proj": ["q_proj", "k_proj", "v_proj"]}
 
 
+def test_registered_metadata_loader_refuses_an_empty_result(monkeypatch):
+    entry = SimpleNamespace(load_model_cls=lambda: None)
+    entries = {"Qwen3ForCausalLM": entry}
+    module = ModuleType("vllm.model_executor.models")
+    module.registry = SimpleNamespace(ModelRegistry=SimpleNamespace(
+        get_supported_archs=lambda: ["Qwen3ForCausalLM"], models=entries))
+    monkeypatch.setitem(sys.modules, "vllm.model_executor.models", module)
+    profile = DefaultProfile()
+    profile._architectures = ["Qwen3ForCausalLM"]
+    for _ in range(2):
+        with pytest.raises(RuntimeError) as raised:
+            profile.fused_sibling_leaf_mapping()
+        assert str(raised.value) == (
+            "registered vLLM architecture 'Qwen3ForCausalLM' loaded no model class")
+        assert entries == {"Qwen3ForCausalLM": entry}
+        assert entries["Qwen3ForCausalLM"] is entry
+
+
 def test_registered_metadata_loader_failure_propagates(monkeypatch):
     def fail():
         raise DeclarationFailed("registered metadata cannot load")

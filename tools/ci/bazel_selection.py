@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 import urllib.request
 
@@ -33,6 +34,9 @@ CYCLE_PATH = 'tools/ci/cycle_members.json'  # tools/bazel/build_files.py writes 
 # Step B of #3996 sets True with build_files.CYCLE_TABLE_ENFORCED: cycle members select from CYCLE_PATH.
 MODULE_LEVEL = False
 BUILD_LANGUAGE = {'BUILD', 'REPO', 'WORKSPACE'}  # with or without the .bazel suffix
+# The direct path reads every main-repository target (rules and files); deps(//...) also fetches every external
+# repository, which only the bazel-diff hashes need (#4228: a cold plan 146 s -> 22 s, the same selections).
+MAIN_QUERY, DEPS_QUERY = '//...:all-targets union buildfiles(//...)', 'deps(//...) union buildfiles(//...)'
 # The one switch (docs/bazel.md, "Selection"): True selects the tests one import away from each modified
 # file; False selects its whole reverse closure.
 DIRECT = True
@@ -123,8 +127,6 @@ def wheel_repositories(labels):
         match = re.match(r'^@@?(rules_python\+\+pip\+pq_pip_[A-Za-z0-9_.+-]+)//', label)
         if match:
             repositories.add(match[1])
-    if not repositories:
-        raise SelectionError('query produced no canonical wheel repositories')
     return sorted(repositories)
 
 
@@ -297,14 +299,15 @@ def direct_impact(population, modified, members=None):
     return impacted, shadow, rules
 
 
-def query_revision(root, directory, architecture, *, bazel='bazel', runner=subprocess.run):
+def query_revision(root, directory, architecture, *, bazel='bazel', runner=subprocess.run, expression=DEPS_QUERY):
     """Freeze the queried population before optional hash evidence can fail."""
     directory = Path(directory)
     phase = 'output-precondition'
     try:
         directory.mkdir(parents=True, exist_ok=True)
         phase = 'command'
-        queried = runner([bazel, 'query', 'deps(//...) union buildfiles(//...)',
+        started = time.monotonic()
+        queried = runner([bazel, 'query', expression,
                           '--output=streamed_jsonproto', '--keep_going=false',
                           '--config=ci'], cwd=root, env=child_environment(), text=True,
                          capture_output=True, check=False)
@@ -319,6 +322,7 @@ def query_revision(root, directory, architecture, *, bazel='bazel', runner=subpr
                 yield row
         phase = 'population'
         population = query_population(rows(), architecture)
+        print(f'Plan query {expression!r}: {time.monotonic() - started:.1f} s', file=sys.stderr)
         phase = 'query-record'
         query = directory / 'query.jsonl'
         query.write_text(queried.stdout)
@@ -338,6 +342,8 @@ def collect_revision(root, directory, architecture, *, java, jar, bazel='bazel',
         graph = queried or query_revision(root, directory, architecture,
                                           bazel=bazel, runner=runner)
         population = graph['population']
+        if not population['wheel_repositories']:
+            raise SelectionError('query produced no canonical wheel repositories')
         wheels.write_text('\n'.join('@@' + name for name in population['wheel_repositories']) + '\n')
         generated = runner(generate_hashes_command(java, jar, root, bazel, hashes, edges, wheels),
                            cwd=root, env=child_environment(), text=True,
@@ -371,13 +377,8 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
 
     if git('rev-parse', 'HEAD').strip() != head:
         raise SelectionError('planner checkout has the wrong head')
-    # Query failure is fatal. A missing population can never become empty success.
-    head_query = query_revision(root, directory / 'head', 'amd64',
-                                bazel=bazel, runner=runner)
-    population = head_query['population']
-    if mode == 'main':
-        decision = everything(['post-merge full record'], population['tests'])
-    else:
+    status, direct = None, False
+    if mode == 'pr':
         try:
             try:
                 git('cat-file', '-e', base + '^{commit}')
@@ -385,15 +386,28 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
                 git('fetch', '--no-tags', 'origin', base)
             entries = git('diff', '--no-renames', '--name-status', '-z', base, head, '--').split('\0')
             status = dict(zip(entries[1::2], entries[0::2]))
-            changed = {path for path, letter in status.items() if letter != 'D'}
-            deleted = set(status) - changed
+        except SelectionError:
+            pass
+    changed = {path for path, letter in (status or {}).items() if letter != 'D'}
+    deleted = set(status or {}) - changed
+    direct = (bool(status) and set(status.values()) == {'M'} and not fallback_files(changed)
+              and not any(Path(path).name.removesuffix('.bazel') in BUILD_LANGUAGE for path in changed)
+              and not any(row.startswith('120000 ') for row in git('ls-files', '-s').splitlines()))
+    # Query failure is fatal. A missing population can never become empty success.
+    head_query = query_revision(root, directory / 'head', 'amd64', bazel=bazel, runner=runner,
+                                expression=MAIN_QUERY if direct else DEPS_QUERY)
+    population = head_query['population']
+    if mode == 'main':
+        decision = everything(['post-merge full record'], population['tests'])
+    else:
+        try:
+            if status is None:
+                raise SelectionError('Git revision evidence is unavailable')
             if not status:
                 raise SelectionError('empty source diff')
             if fallback_files(changed | deleted):
                 decision = everything(fallback_files(changed | deleted), population['tests'])
-            elif (set(status.values()) == {'M'}
-                  and not any(Path(path).name.removesuffix('.bazel') in BUILD_LANGUAGE for path in changed)
-                  and not any(row.startswith('120000 ') for row in git('ls-files', '-s').splitlines())):
+            elif direct:
                 closure = reverse_closure(population['consumers'], changed)
                 members = json.loads((root / CYCLE_PATH).read_text())['members'] if MODULE_LEVEL else {}
                 impacted, shadow, rules = direct_impact(population, changed, members) if DIRECT else (closure, closure, {})
