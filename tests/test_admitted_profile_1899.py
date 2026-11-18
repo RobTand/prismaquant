@@ -59,6 +59,17 @@ def test_stale_output_refuses_before_any_process(tmp_path, monkeypatch):
     assert calls==[]
 
 
+def test_profile_launch_refuses_malformed_arguments_before_any_output(tmp_path):
+    launch = tmp_path / 'launch.json'
+    for argv in ([], 'not-a-list', ['command', 1]):
+        original = json.dumps({'argv': argv}).encode(); launch.write_bytes(original)
+        with pytest.raises(RuntimeError) as error:
+            module.main(['--launch', str(launch), '--observations', str(tmp_path / 'obs'), '--profile-local', str(tmp_path / 'profile')])
+        assert str(error.value) == 'launch must carry a nonempty string argv'
+        assert list(tmp_path.iterdir()) == [launch]
+        assert launch.read_bytes() == original
+
+
 @pytest.mark.parametrize('observer_code', [0, 7])
 def test_row_failure_survives_observer_result(tmp_path, monkeypatch, observer_code):
     observations=tmp_path/'obs';observer=Process(observer_code);row=Process(9)
