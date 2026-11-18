@@ -213,6 +213,25 @@ def test_a_prefetch_outside_the_walk_is_a_gap(tmp_path):
     assert [(gap["kind"], gap["layer"]) for gap in gaps] == [("prefetch-outside-walk", 1)]
 
 
+def test_quantum_coverage_refuses_an_invalid_prefetch_lookahead_without_writes(tmp_path):
+    prepared = tmp_path / "prepared.json"
+    prepared.write_text(json.dumps({"formats_by_qname": {"model.layers.0.mlp.gate_proj": "fp16"}}))
+    plan = tmp_path / "plan.json"
+    campaign = {"prepared_path": str(prepared),
+                "prepared_sha256": hashlib.sha256(prepared.read_bytes()).hexdigest(),
+                "plan_path": str(plan)}
+    row = {"record": {"campaign": campaign},
+           "manifest_path": str(tmp_path / "missing.json"), "manifest_sha256": "0" * 64}
+    for lookahead in (0, True):
+        plan.write_text(json.dumps({"source_prefetch": {"prefetch_lookahead": lookahead}}))
+        campaign["plan_sha256"] = hashlib.sha256(plan.read_bytes()).hexdigest()
+        before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+        assert rc.quantum_rows_gaps([row]) == [
+            {"kind": "unreadable", "phase": None, "layer": None,
+             "detail": f"campaign inputs: plan source_prefetch lookahead {lookahead!r}"}]
+        assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+
+
 def test_the_dispatcher_refuses_a_gap_in_one_pass(capsys):
     import dispatch_joint_quanta as dispatch
     seen = []
