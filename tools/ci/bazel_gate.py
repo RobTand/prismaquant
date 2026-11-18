@@ -353,7 +353,7 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
     patterns.write_text('\n'.join(targets) + '\n')
     config = 'remote' if architecture == 'amd64' else 'remote-arm64'
     # A record shard keeps 16, so that it leaves room for gates on the shared executor.
-    jobs = min(16, max(1, AMD64_TASK_BUDGET // manifest.get('concurrent_shards', 1))) if architecture == 'amd64' else 16
+    jobs = min(16, AMD64_TASK_BUDGET // manifest.get('concurrent_shards', 1)) if architecture == 'amd64' else 16
     command = ['bazel', 'test' if tests else 'build', '--config=' + config, '--config=ci', f'--jobs={jobs}',
                '--spawn_strategy=remote,local', '--remote_local_fallback=false',
                # A PR or queue shard stops at its first failed test; a record lists every failure.
