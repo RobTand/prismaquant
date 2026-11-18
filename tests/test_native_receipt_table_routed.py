@@ -29,6 +29,7 @@ import pytest
 import torch
 
 from prismaquant import native_receipt_table as emitter
+from prismaquant.native_row_admission import admit_native_rows
 from prismaquant.measured_runtime_prices import (
     PROVENANCE_CONTEXT_SCHEMA, PROVENANCE_IDENTITY_KIND, RANK_RESOURCES_SCHEMA,
     RANK_TIMING_RULE, MeasuredRuntimeRow, OperatorMeasurement, RuntimeBinding,
@@ -39,7 +40,7 @@ from prismaquant.native_moe_panel import FORMAT
 from prismaquant.native_operator_panel import operator_route_identity
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity as tensor_id
 from prismaquant.runtime_provenance import (
-    LATENCY_SCOPE_KIND, RUNTIME_COLLECTIVE_OP, RUNTIME_COLLECTIVE_SITE, ArtifactReader, admit_native_rows,
+    LATENCY_SCOPE_KIND, RUNTIME_COLLECTIVE_OP, RUNTIME_COLLECTIVE_SITE, ArtifactReader,
     routed_rank_bound,
 )
 from test_native_moe_panel import joined, receipt_fixture  # noqa: F401 - fixtures
@@ -565,7 +566,7 @@ def test_the_intake_gate_re_derives_a_routed_rows_rank_vector(joined, tmp_path, 
     """The row the emitter writes is the row the loader's own gate re-derives.
 
     This is the gate ``allocator.main`` reaches through
-    ``measured_runtime_prices.load_measured_runtime_table``: it rehashes every
+    ``native_row_admission.load_measured_runtime_table``: it rehashes every
     rank's receipt, requires each to carry the frozen panel, re-consumes each
     one, and recomputes the rank vector -- so the ranked row is not a number
     that travelled and was trusted.

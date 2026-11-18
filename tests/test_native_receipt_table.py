@@ -21,7 +21,7 @@ from prismaquant.measured_runtime_prices import (
     RuntimePriceError, identity_sha256, parse_measured_runtime_table, parse_runtime_context,
 )
 from prismaquant.native_operator_panel import freeze_native_panel, operator_route_identity
-from prismaquant.runtime_provenance import admit_native_rows
+from prismaquant.native_row_admission import admit_native_rows
 from test_native_operator_panel import joined, receipt_fixture
 from test_runtime_fixed_resource_admission import agreeing_report
 from test_runtime_provenance import relation_fixture, relation_load

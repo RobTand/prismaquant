@@ -1194,6 +1194,7 @@ pq_py_library(
         ":prismaquant/joint_run_progress",
         ":prismaquant/memory_management",
         ":prismaquant/model_runtime",
+        ":prismaquant/native_execution_binding_cycle",
         ":prismaquant/residency_map",
         ":prismaquant/residency_shard_reader",
         "@pq_pip//safetensors",
@@ -1296,6 +1297,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/native_execution_binding_cycle",
         ":prismaquant/tessera_hessian",
         "@pq_pip//safetensors",
         "@pq_pip//tessera_quant",
@@ -1771,6 +1773,7 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/calibration_data",
         ":prismaquant/model_runtime",
+        ":prismaquant/native_execution_binding_cycle",
         ":prismaquant/tessera_hessian",
         "@pq_pip//safetensors",
         "@pq_pip//tessera_quant",
@@ -2067,6 +2070,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/native_execution_binding_cycle",
         ":prismaquant/native_receipt_table",
     ],
 )
@@ -3806,6 +3810,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/native_execution_binding_cycle",
     ],
 )
 
@@ -3958,10 +3963,6 @@ pq_py_library(
         "prismaquant/moe_imatrix.py",
         "prismaquant/mxfp4_widen.py",
         "prismaquant/name_projection.py",
-        "prismaquant/native_execution_binding.py",
-        "prismaquant/native_moe_panel.py",
-        "prismaquant/native_operator_panel.py",
-        "prismaquant/native_panel_kind.py",
         "prismaquant/native_render_codec.py",
         "prismaquant/native_render_levers.py",
         "prismaquant/native_runtime_cohort.py",
@@ -4546,6 +4547,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/native_row_admission",
     ],
 )
 
@@ -6497,6 +6499,8 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
+        ":prismaquant/native_execution_binding_cycle",
+        ":prismaquant/native_row_admission",
         ":prismaquant/record_fields",
     ],
 )
@@ -6631,6 +6635,29 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/anchored_shape",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/native_execution_binding_cycle",
+    srcs = [
+        "prismaquant/native_execution_binding.py",
+        "prismaquant/native_moe_panel.py",
+        "prismaquant/native_operator_panel.py",
+        "prismaquant/native_panel_kind.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/digests",
+        ":prismaquant/memory_management",
+        ":prismaquant/record_fields",
+        ":prismaquant/schemas",
+        ":prismaquant/stage_inputs",
+        ":prismaquant/streaming_initialization",
+        "@pq_pip//tessera_quant",
+        "@pq_pip//torch",
     ],
 )
 
@@ -7712,6 +7739,7 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/calibration_data",
         ":prismaquant/model_runtime",
+        ":prismaquant/native_execution_binding_cycle",
         ":prismaquant/tessera_hessian",
         "@pq_pip//safetensors",
         "@pq_pip//tessera_quant",
@@ -7812,6 +7840,19 @@ pq_py_library(
         "@pq_pip//compressed_tensors",
         "@pq_pip//pytest",
         "@pq_pip//torch",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/native_row_admission",
+    srcs = [
+        "prismaquant/native_row_admission.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/digests",
+        ":prismaquant/native_execution_binding_cycle",
     ],
 )
 
@@ -8324,6 +8365,7 @@ pq_py_library(
         ":prismaquant/calibration_data",
         ":prismaquant/digests",
         ":prismaquant/glm_routing_replay",
+        ":prismaquant/native_execution_binding_cycle",
         ":prismaquant/stage_inputs",
         "@pq_pip//torch",
     ],
@@ -8903,6 +8945,7 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/calibration_data",
         ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/native_execution_binding_cycle",
         ":prismaquant/render_cache_paths",
         ":prismaquant/tessera_hessian",
         "@pq_pip//safetensors",
@@ -9439,6 +9482,7 @@ pq_py_library(
         ":prismaquant/calibration_data",
         ":prismaquant/memory_management",
         ":prismaquant/model_runtime",
+        ":prismaquant/native_execution_binding_cycle",
         "@pq_pip//safetensors",
         "@pq_pip//torch",
         "@pq_pip//transformers",
@@ -11465,6 +11509,7 @@ pq_py_library(
         ":prismaquant/digests",
         ":prismaquant/fixed_head",
         ":prismaquant/layer_config",
+        ":prismaquant/native_row_admission",
         ":prismaquant/pact_hull",
         ":prismaquant/pact_selection",
         ":prismaquant/research_cost_acceptance",
@@ -11484,6 +11529,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/native_execution_binding_cycle",
     ],
 )
 
@@ -12208,6 +12254,7 @@ pq_py_library(
         ":prismaquant/joint_run_progress",
         ":prismaquant/matmul_arithmetic",
         ":prismaquant/memory_management",
+        ":prismaquant/native_execution_binding_cycle",
         ":prismaquant/stage_inputs",
         "@pq_pip//torch",
     ],
