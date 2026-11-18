@@ -107,6 +107,22 @@ def test_wire_exact_roundtrip_checksum_and_refusals(synthetic_parents):
         wire.pack_projection(parents, tags, 64, 2, target_bytes=len(blob) - 1)
 
 
+def test_fixed_wire_budget_matches_real_uniform_parent_body_bytes(synthetic_parents):
+    from tessera.stock import materialize_stock, stock_dequant
+
+    parents, _ = synthetic_parents
+    fixed = wire.fixed_bytes(parents, 128, 2)
+    for index, rate in enumerate((3, 4)):
+        parent = parents[index]
+        assert set(parent.unit.rates) == {rate}
+        tags = np.full((1, 16), index, dtype=np.int64)
+        blob, _ = wire.pack_projection(parents, tags, 128, 2)
+        assert len(blob) - 128 * 32 * rate // 8 == fixed
+        expected = stock_dequant(materialize_stock(parent.unit, parent.forests, parent.code))
+        assert torch.equal(wire.decode_projection(blob), expected)
+        np.testing.assert_array_equal(tags, np.full((1, 16), index))
+
+
 def test_schedule_actual_cli_raw_wrapper_and_bad_digest(tmp_path, synthetic_parents):
     parents, entries = synthetic_parents
     tags = (np.arange(32).reshape(2, 16) % 2).astype(np.int64)
