@@ -3,6 +3,7 @@
 # the graph impact with its recorded baseline. The gate's Graph impact job runs this script. Before the `queue` label,
 # run it on the PR head merged with the current main: tools/ci/static_checks.sh --merge-main
 set -Eeuo pipefail
+export PYTHONSAFEPATH=1  # Cache keys assume that the script directory cannot hide standard library modules.
 if [ "${1:-}" = --merge-main ]; then
   git fetch -q origin main
   tree="$(mktemp -d "${TMPDIR:-$HOME/tmp}/static-checks-XXXXXX")"

@@ -43,6 +43,7 @@ jobs:
         restore-keys: graph-impact-${{ steps.graph-tool.outputs.hash }}-
     - name: Write the main snapshot
       env:
+        PYTHONSAFEPATH: '1'
         GRAPH_IMPACT_CACHE: ${{ runner.temp }}/graph-impact-cache
       run: |
         unset BUILDBUDDY_API_KEY
