@@ -30,6 +30,8 @@ from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_s
 SCHEMA = 'prismaquant.bazel-gate.v1'
 NONHERMETIC = Path(__file__).resolve().parents[2] / 'tools/bazel/nonhermetic.bzl'
 EXCERPT_LABELS, EXCERPT_BYTES, EXCERPT_READ = 5, 4096, 1 << 20
+# The amd64 executor allows 64 tasks. The CPU limits throughput at about 56 (Fleet lead 3, 2026-11-18).
+AMD64_TASK_BUDGET = 56
 
 
 class GateError(RuntimeError):
@@ -334,8 +336,9 @@ def inventory_evidence(text, fetch):
 def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
     """Execute one immutable build partition, keeping diagnostics out of uploads."""
     root = Path(root or Path(__file__).resolve().parents[2])
+    architecture = manifest['architecture']
     targets, tests = manifest['targets'], manifest['tests']
-    if (manifest['architecture'] not in ('amd64', 'arm64') or not targets
+    if (architecture not in ('amd64', 'arm64') or not targets
             or len(set(targets)) != len(targets) or not set(tests) <= set(targets)
             or any(not re.fullmatch(r'//[^\s]*:[^\s]+', label) for label in targets)
             or not re.fullmatch('[0-9a-f]{40}', manifest['head'])):
@@ -348,8 +351,10 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
     private = Path(tempfile.mkdtemp(prefix='pq-bazel-shard-'))
     patterns, bep = private / 'targets.txt', private / 'events.jsonl'
     patterns.write_text('\n'.join(targets) + '\n')
-    config = 'remote' if manifest['architecture'] == 'amd64' else 'remote-arm64'
-    command = ['bazel', 'test' if tests else 'build', '--config=' + config, '--config=ci', '--jobs=16',
+    config = 'remote' if architecture == 'amd64' else 'remote-arm64'
+    # A record shard keeps 16, so that it leaves room for gates on the shared executor.
+    jobs = min(16, AMD64_TASK_BUDGET // manifest.get('concurrent_shards', 1)) if architecture == 'amd64' else 16
+    command = ['bazel', 'test' if tests else 'build', '--config=' + config, '--config=ci', f'--jobs={jobs}',
                '--spawn_strategy=remote,local', '--remote_local_fallback=false',
                # A PR or queue shard stops at its first failed test; a record lists every failure.
                '--keep_going' if manifest['mode'] == 'main' else '--nokeep_going',
@@ -380,7 +385,7 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
     if not tests and result['verdict'] == 'skipped':
         result['verdict'] = 'pass'
     return {'schema': SCHEMA, 'mode': manifest['mode'], 'head': manifest['head'],
-            'base': manifest['base'], 'architecture': manifest['architecture'],
+            'base': manifest['base'], 'architecture': architecture,
             'index': manifest['index'], 'targets': targets, 'run': run,
             'nodes': inventory['nodes'], 'excerpts': excerpts, **result}
 

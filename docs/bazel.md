@@ -130,12 +130,11 @@ to BuildBuddy's hosted arm64 executors, with no fallback. Remote Bazel runners
 keep their existing four-CPU cloud placement. Hosted pytest exception lanes stay
 on GitHub-hosted runners.
 
-Selected gates and post-merge records submit one Remote Bazel shard at a
-time. The gate's fail-closed `//...` PR fallback uses six shards and may submit six
-concurrent Remote Bazel runs per controller on the self-hosted amd64 pool, each with
-`--jobs=16`. The controller rejects concurrency above six, and rejects
-concurrency above one outside PR fallback. Post-merge and development runs
-remain serial. The shard request cap remains 55 minutes and the controller's
+PR gates submit up to six amd64 shards at a time. Post-merge records and
+development runs submit one shard at a time. Each amd64 shard sets `--jobs` to
+56 divided by its batch size, rounded down, with a maximum of 16: 9 for a
+six-shard PR gate and 16 for a record shard. Each arm64
+shard uses `--jobs=16`. The shard request cap remains 55 minutes and the controller's
 per-shard await deadline remains 58 minutes. Mergify's `checks_timeout` and merge
 conditions stay unchanged.
 

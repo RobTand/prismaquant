@@ -86,9 +86,12 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
     fail_fast, results = any(expected['mode'] == 'pr' for _, expected in planned), []
     for start in range(0, len(planned), concurrency):
         pending, error = [], None
-        for request, expected in planned[start:start + concurrency]:
+        batch = planned[start:start + concurrency]
+        for request, expected in batch:
             try:
-                response = client.call('Run', request)
+                shard = json.dumps({**expected, 'concurrent_shards': len(batch)}, separators=(',', ':'))
+                environment = {**request['env'], 'PQ_BAZEL_SHARD': shard}
+                response = client.call('Run', {**request, 'env': environment})
                 invocation_id = response.get('invocationId', response.get('invocation_id'))
                 if not invocation_id:
                     raise RemoteError('shard submission returned no acknowledgement ID')
