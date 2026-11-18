@@ -78,6 +78,19 @@ def test_dirty_producer_dev_mode_publishes_and_reuses_checkpoint(
             for path in root.rglob("*") if path.is_file()} == retained
 
 
+def test_checkpoint_open_refuses_an_existing_manifest_without_resume(tmp_path):
+    identity = {"fixture": "existing checkpoint"}
+    aura_checkpoint_journal.AuraCheckpointJournal.open(
+        tmp_path, resume=False, identity=identity, names=[])
+    retained = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    with pytest.raises(RuntimeError) as error:
+        aura_checkpoint_journal.AuraCheckpointJournal.open(
+            tmp_path, resume=False, identity=identity, names=[])
+    assert str(error.value) == f"AURA checkpoint manifest already exists at {tmp_path / 'manifest.json'}; pass --resume to validate and reuse it"
+    assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == retained
+    assert identity == {"fixture": "existing checkpoint"}
+
+
 def test_dirty_producer_certified_mode_keeps_refusal(monkeypatch, capsys, producer_git):
     _root, source, commit = producer_git
     source.write_text("# changed producer\n", encoding="utf-8")
