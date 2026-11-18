@@ -129,6 +129,28 @@ def test_checkpoint_spelled_group_target_still_claims_its_unit(
     assert report.ok
 
 
+def test_shared_mlp_checkpoint_units_keep_their_collapsed_config_group_claims(
+        tmp_path, wrapper_profile):
+    for component in ("shared_mlp", "shared_experts"):
+        root = tmp_path / component
+        unit = f"model.layers.0.mlp.{component}.down_proj"
+        _write_artifact(
+            root,
+            targets=["re:^model[.]layers[.]0[.]mlp[.]down_proj$"],
+            tensors=[(unit + ".weight", "F8_E4M3", (32, 8), 256),
+                     (unit + ".weight_scale", "F32", (32, 1), 128)],
+        )
+        before = {path.name: path.read_bytes() for path in root.iterdir()}
+        report = check_artifact_completeness(root)
+        assert report.ok
+        assert report.cb_units == [unit]
+        assert report.undeclared == report.orphan_scale == report.missing_scale == []
+        assert report.passthrough_units == report.embedding_units == report.verbatim_namespace_units == []
+        assert report.declared_units == {}
+        assert report.failure_text() == ""
+        assert {path.name: path.read_bytes() for path in root.iterdir()} == before
+
+
 def test_a_group_for_a_different_module_still_fails(tmp_path, wrapper_profile):
     """The negative control. Mapping the unit forward must not turn the gate
     into one that accepts any target at all: a group naming a NEIGHBOURING
