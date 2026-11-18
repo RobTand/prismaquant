@@ -235,3 +235,14 @@ def test_pinned_root_graph_receipt_api_retains_all_nine_scope_fields():
     assert observed["invalid_socket"] and observed["invalid_none"]
     assert "names no fabric" in observed["v1"]
     assert observed["serving_imported"] is False
+
+
+def test_pin_reader_refuses_duplicate_members_without_writes(tmp_path):
+    payload = _pin_payload()
+    raw = (json.dumps(payload)[:-1] + ', "commit": ' + json.dumps(payload["commit"]) + '}').encode()
+    path = tmp_path / "pin.json"
+    path.write_bytes(raw)
+    with pytest.raises(TesseraServingRuntimePinError, match=r"\Atessera_serving_runtime_pin\.json: duplicate member 'commit'\Z"):
+        load_tessera_serving_runtime_pin(path)
+    assert list(tmp_path.iterdir()) == [path]
+    assert path.read_bytes() == raw
