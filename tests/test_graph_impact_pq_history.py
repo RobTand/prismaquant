@@ -306,3 +306,26 @@ def test_graph_snapshots_built_for_another_base_are_refused(tmp_path, monkeypatc
         (tmp_path / f'{name}.pickle').write_bytes(pickle.dumps(('a' * 40, {})))
     with pytest.raises(SystemExit, match='graph snapshots are for base'):
         pq.main(['--root', str(tmp_path), '--snapshots', str(tmp_path)])
+
+
+def test_computed_directory_paths_keep_exact_source_dependencies(tmp_path):
+    a, b = 'tools/dynamic/a.py', 'tools/dynamic/b.py'
+    cases = (
+        ('Path(os.path.dirname(str(ROOT / "tools/dynamic/a.py"))) / unknown', [a, b]),
+        ('os.path.join(ROOT, "tools/dynamic", unknown)', [a, b]),
+        ('(ROOT / "tools/dynamic/a.py").with_suffix(".json") / "ignored"', [a, b]),
+        ('ROOT / "tools/dynamic/a.py"', [a]),
+    )
+    base = {a: 'VALUE = 1\n', b: 'VALUE = 2\n', 'tools/other.py': 'VALUE = 3\n'}
+    test_path = 'tests/test_reads.py'
+    for expression, expected in cases:
+        sources = {**base, test_path: 'from pathlib import Path\nimport os\n'
+                                     'ROOT = Path(__file__).resolve().parents[1]\n'
+                                     f'path = {expression}\n'}
+        for path, text in sources.items():
+            put(tmp_path, path, text)
+        live = pq.load_snapshot(tmp_path, files=sorted(sources),
+                                population=[test_path], legacy=False)
+        assert live['reach'] == {test_path: expected}
+        assert live['dependents'] == {path: int(path in expected) for path in base}
+        assert {path: (tmp_path / path).read_text() for path in sources} == sources
