@@ -64,6 +64,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.digests import (  # noqa: E402
+    DIRECT_ASCII_INDENT2_LAX,
     DIRECT_ASCII_SPACED_LAX,
     bytes_sha256hex,
     indent2_json_file_bytes,
@@ -347,7 +348,7 @@ def build(*, original_manifest, original_manifest_sha256, plan, output_root,
     root.mkdir(parents=True, exist_ok=False)
     for path, data, _manifest, _stat in described:
         path.write_bytes(data)
-    (root / PACKAGE_NAME).write_text(json.dumps(package, indent=2, sort_keys=True) + "\n")
+    (root / PACKAGE_NAME).write_text(DIRECT_ASCII_INDENT2_LAX.text(package) + "\n")
     return package
 
 
