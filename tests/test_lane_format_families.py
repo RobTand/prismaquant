@@ -55,6 +55,15 @@ def test_family_claims_by_prefix_after_canonical_case():
     assert not family.claims("NVFP4") and not family.claims(None)
 
 
+def test_lane_spec_refuses_an_unknown_schema_without_changes():
+    raw = _minimal_lane(schema="prismaquant.lane_spec.v999")
+    before = json.loads(json.dumps(raw))
+    with pytest.raises(ValueError) as exc:
+        LaneSpec.from_dict(raw)
+    assert str(exc.value) == "unknown lane spec schema 'prismaquant.lane_spec.v999'"
+    assert raw == before
+
+
 def test_family_without_plugin_is_refused():
     with pytest.raises(ValueError, match="no `plugin`"):
         LaneSpec.from_dict(_minimal_lane(format_families=[
