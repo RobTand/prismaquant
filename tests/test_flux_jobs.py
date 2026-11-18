@@ -71,7 +71,7 @@ class FluxJobsTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(dir=tempfile.gettempdir())
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         shared_root = patch.object(jobs, '_SHARED_ROOT', self.root)
         shared_root.start()
         self.addCleanup(shared_root.stop)
@@ -907,3 +907,14 @@ def test_generated_fixture_placement_preserves_the_source_cleanliness_guard(
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_fixture_root_survives_a_linked_temporary_directory(tmp_path, monkeypatch):
+    target = tmp_path / 'target'
+    target.mkdir()
+    link = tmp_path / 'link'
+    link.symlink_to(target, target_is_directory=True)
+    monkeypatch.setattr(tempfile, 'tempdir', str(link))
+    result = unittest.TestResult()
+    FluxJobsTests('test_profile_renders_stock_slot_and_memory_and_portability').run(result)
+    assert result.wasSuccessful()
