@@ -78,6 +78,101 @@ def test_input_hash_is_reused_only_for_unchanged_verified_files(tmp_path, monkey
         model.verified_inputs(source, identity, cache)
 
 
+@pytest.mark.parametrize('small_limit', [1024, 0])
+@pytest.mark.parametrize('clock_offset', [0, -10_000_000_000])
+def test_same_stamp_rewrites_refuse_at_worker_boundaries(tmp_path, monkeypatch, small_limit, clock_offset):
+    source, identity = _source(tmp_path)
+    weights = source / 'weights'
+    real_stamp = model.stamp
+    fixed_ctime = {p: p.stat().st_ctime_ns for p in source.iterdir()}
+    clock = [max(p.stat().st_ctime_ns for p in source.iterdir()) + clock_offset]
+    monkeypatch.setattr(model, 'time', SimpleNamespace(time_ns=lambda: clock[0]), raising=False)
+    monkeypatch.setattr(model, 'SMALL_FILE_BYTES', small_limit, raising=False)
+
+    def stamp(path, **kwargs):
+        value = real_stamp(path, **kwargs)
+        value[4] = fixed_ctime[Path(path)]
+        return value
+
+    monkeypatch.setattr(model, 'stamp', stamp)
+
+    def rewrite():
+        before = model.stamp(weights)[:5]
+        info = weights.stat()
+        assert weights.read_bytes() == b'original'
+        weights.write_bytes(b'modified')
+        os.utime(weights, ns=(info.st_atime_ns, info.st_mtime_ns))
+        assert model.stamp(weights)[:5] == before
+
+    cache = tmp_path / 'cache'
+    model.verified_inputs(source, identity, cache)
+    snapshots = model.verified_inputs(source, identity, cache)
+    model.check_stamps(source, snapshots)
+    rewrite()
+    with pytest.raises(ValueError) as error:
+        model.verified_inputs(source, identity, cache)
+    assert type(error.value) is ValueError
+    assert str(error.value) == 'source changed: weights'
+    assert error.value.__cause__ is None
+    clock[0] += 10_000_000_000
+    with pytest.raises(ValueError) as error:
+        model.check_stamps(source, snapshots)
+    assert type(error.value) is ValueError
+    assert str(error.value) == 'source changed during export: weights'
+    assert error.value.__cause__ is None
+
+    weights.write_bytes(b'original')
+    clock[0] = weights.stat().st_mtime_ns + clock_offset
+    monkeypatch.chdir(tmp_path)
+    Path('plan.json').write_text('{}')
+    spec = {'plan_sha256': model.digest_file('plan.json'), 'image': 'x@sha256:' + '0' * 64,
+            'source': str(source), 'out': str(tmp_path / 'out')}
+    model.atomic_json('job.json', spec)
+
+    def source_identity(path):
+        assert path == source
+        rewrite()
+        clock[0] += 10_000_000_000
+        return {'tensors': {'model.layers.0.w': 'weights'}}
+
+    parts = SimpleNamespace(source_identity=source_identity, BODY_LAYER=PRODUCER.BODY_LAYER,
+                            partition_owner=PRODUCER.partition_owner)
+    monkeypatch.setattr(model, 'verify_image', lambda image: 'id')
+    monkeypatch.setattr(model, 'producer_parts', lambda root: parts)
+    with pytest.raises(ValueError) as error:
+        model.main(['prepare', '--host', 'sparky'])
+    assert type(error.value) is ValueError
+    assert str(error.value) == 'source changed during preparation'
+    assert error.value.__cause__ is None
+    assert not model.prepared_path(spec, 'sparky').exists()
+
+    weights.write_bytes(b'original')
+    clock[0] = max(p.stat().st_ctime_ns for p in source.iterdir()) + 10_000_000_000
+    snapshots = model.verified_inputs(source, identity, cache)
+    real_digest = model.digest_file
+    calls = []
+
+    def digest(path):
+        calls.append(Path(path).name)
+        return real_digest(path)
+
+    monkeypatch.setattr(model, 'digest_file', digest)
+    model.verified_inputs(source, identity, cache)
+    assert calls == []
+    historical = {name: dict(record, stamp=record['stamp'][:5]) for name, record in snapshots.items()}
+    model.check_stamps(source, historical)
+    assert 'weights' in calls
+    cache_path = cache / (model.digest_json([str(source.resolve()),
+                         {**identity['files'], 'config.json': identity['config_sha256']}]) + '.json')
+    model.atomic_json(cache_path, historical)
+    calls.clear()
+    model.verified_inputs(source, identity, cache)
+    assert 'weights' in calls
+    rewrite()
+    with pytest.raises(ValueError, match='^source changed during export: weights$'):
+        model.check_stamps(source, historical)
+
+
 def test_mid_export_source_mutation_is_detected(tmp_path):
     source, identity = _source(tmp_path)
     stamps = model.verified_inputs(source, identity, tmp_path / 'cache')
