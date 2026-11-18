@@ -12,6 +12,7 @@ moves with content edits. A basename change remains a deletion and addition.
 
 Set `GRAPH_IMPACT_CACHE` to share per-file results between Graph impact and the Bazel generator.
 Each entry uses the relative file path, file bytes, and a hash of the graph tool and its repository imports.
+To use the cache, enable `PYTHONSAFEPATH` before you start Python.
 
 The check reports the expected fraction of tests selected by a uniformly
 chosen source-file change, U, and a LOC-weighted U. It also reports source
