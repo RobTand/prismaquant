@@ -689,3 +689,13 @@ def test_streamed_candidate_selector_refuses_unknown_candidate():
             model_identity=_model_identity("joint-source"),
             sequence_attribution={"candidates": [["absent", "FP8_E4M3"]]})
     assert context.install_calls == 0
+
+
+def test_sequence_attribution_refuses_an_invalid_relative_gate_without_changes():
+    for gate in (0, 1, True, float("inf")):
+        config = {"candidates": [[UNIT_A, "FP8_E4M3"]], "gate_relative": gate}
+        before = copy.deepcopy(config)
+        with pytest.raises(ValueError) as exc:
+            joint.normalize_sequence_attribution(config)
+        assert str(exc.value) == "sequence_attribution gate_relative must be a fraction in (0, 1)"
+        assert config == before
