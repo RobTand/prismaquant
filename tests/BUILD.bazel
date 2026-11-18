@@ -6041,6 +6041,35 @@ pq_py_library(
     ],
 )
 
+pq_py_test(
+    name = "test_package_json_publication_3879_stock",
+    path = "tests/test_package_json_publication_3879_stock.py",
+    library = ":test_package_json_publication_3879_stock_lib",
+    deps = [
+        "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
+        "//:pqtel/__init__",
+        "//:prismaquant/lane_shipcard",
+        "//:prismaquant/shipcard_cli",
+        "//:tools/build_streamed_full_kl_teacher",
+        "//:tools/dsv4_wikitext_inputs",
+        "//:tools/full_kl_teacher_payload",
+        "//:tools/g3job/g3_pq_policy/__init__",
+        "//:tools/gold_engine_options",
+        "//:tools/gold_measurement_fidelity",
+        "//:tools/measure_served_gold",
+        "//:tools/measure_vllm_full_kl",
+        "//:tools/measure_vllm_wikitext_ppl",
+        "//:tools/pq_profile_child",
+        "//:tools/prepare_dsv4_wikitext_inputs",
+        "//:tools/prismaquant_source_bootstrap",
+        "//:tools/spec_decode_guard",
+        "//:tools/tessera_campaign_container",
+        "//:tools/tessera_fleet/__init__",
+        ":conftest",
+    ],
+    timeout = "moderate",
+)
+
 pq_py_library(
     name = "test_native_prefix_intake_lib",
     srcs = [
@@ -46054,6 +46083,19 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/container_runtime_identity",
+    ],
+)
+
+pq_py_library(
+    name = "test_package_json_publication_3879_stock_lib",
+    srcs = [
+        "test_package_json_publication_3879_stock.py",
+    ],
+    deps = [
+        "//:prismaquant/__init__",
+        "//:prismaquant/digests",
+        "//:prismaquant/glm53_stock_reprice",
+        "@pq_pip//pytest",
     ],
 )
 
