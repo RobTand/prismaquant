@@ -254,6 +254,23 @@ def test_an_unknown_lane_predicate_is_still_refused_without_a_mark():
         _parse(payload)
 
 
+def test_contract_reader_refuses_non_array_native_extensions_without_changes(tmp_path):
+    import hashlib
+
+    for bad in (None, {}, "invalid"):
+        payload = _installed_contract()
+        payload["native_extensions"] = bad
+        raw = json.dumps(payload).encode()
+        contract = tmp_path / "contract.json"
+        contract.write_bytes(raw)
+        with pytest.raises(trc.TesseraContractError) as refused:
+            trc.read_tessera_contract(
+                str(contract), hashlib.sha256(raw).hexdigest(), "t")
+        assert str(refused.value) == f"{contract}.native_extensions must be a JSON array"
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["contract.json"]
+        assert contract.read_bytes() == raw
+
+
 # ---------------------------------------------------------------------------
 # full_engine_resource_report (#927's observations and derived blocks)
 # ---------------------------------------------------------------------------
