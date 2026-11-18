@@ -38,6 +38,34 @@ def test_source_prefetch_reads_unique_index_shards(tmp_path):
     assert stats["skipped"] is False
 
 
+def test_source_prefetch_uses_sysconf_memory_when_proc_is_unavailable(tmp_path, monkeypatch):
+    from prismaquant import source_prefetch
+
+    path = tmp_path / "model.safetensors"
+    payload = b"checkpoint\x00bytes"
+    path.write_bytes(payload)
+    calls = []
+
+    def unavailable():
+        raise OSError
+
+    def sysconf(name):
+        calls.append(name)
+        return {"SC_AVPHYS_PAGES": 8 * 1024**2, "SC_PAGE_SIZE": 4096}[name]
+
+    monkeypatch.setattr(source_prefetch.io_spans, "mem_available_bytes", unavailable)
+    monkeypatch.setattr(source_prefetch.os, "sysconf", sysconf)
+    stats = prefetch_safetensors_checkpoint(tmp_path, workers=1, chunk_mb=1, progress=False)
+
+    assert calls == ["SC_AVPHYS_PAGES", "SC_PAGE_SIZE"]
+    assert stats["available_bytes"] == 32 * 1024**3
+    assert stats["max_resident_bytes"] == 16 * 1024**3
+    assert stats["prefetched_bytes"] == stats["bytes"] == 16
+    assert stats["shards"] == 1
+    assert stats["skipped"] is False
+    assert path.read_bytes() == payload
+
+
 def test_source_prefetch_budget_fail_fast(tmp_path):
     (tmp_path / "model.safetensors").write_bytes(b"x" * 32)
 
