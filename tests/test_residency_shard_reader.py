@@ -196,6 +196,22 @@ def test_a_whole_file_entry_serves_every_tensor(tmp_path, monkeypatch):
     assert report['bytes_from_pool'] == 0 and len(report['fallbacks']) == 0
 
 
+def test_staged_shard_refuses_a_non_object_header_without_writes(tmp_path, monkeypatch):
+    path = tmp_path / 'non-object.safetensors'
+    path.write_bytes((8).to_bytes(8, 'little') + b'[]      ')
+    root = _stage_root(tmp_path)
+    staged = _stage_whole(root, path)
+    resolver = _bind(monkeypatch, _write_map(tmp_path, root, [(path, 0, 16, staged)]))
+    source_before, staged_before = path.read_bytes(), staged.read_bytes()
+    with staged_shard_opener(path, safe_open)(str(path), framework='pt') as reader:
+        with pytest.raises(staged_tier_policy.TierPolicyRefused) as error:
+            reader.keys()
+        assert str(error.value) == f'staged-tier-forbidden: header-unreadable: {path}'
+    assert resolver._windows == 0
+    assert path.read_bytes() == source_before
+    assert staged.read_bytes() == staged_before
+
+
 def test_an_entry_running_past_the_declared_file_refuses(tmp_path, monkeypatch):
     from prismaquant.staged_manifest import ManifestRefused, publish_staged_json
     path, tensors = _shard(tmp_path)
