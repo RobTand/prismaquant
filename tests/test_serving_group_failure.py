@@ -86,6 +86,21 @@ def test_registry_metadata_loader_does_not_require_runtime_model_config(monkeypa
         "qkv_proj": ["q_proj", "k_proj", "v_proj"]}
 
 
+def test_default_profile_preserves_declared_runtime_fused_groups(monkeypatch):
+    class RuntimeMetadata:
+        packed_modules_mapping = {"custom_fused": ["left_proj", "right_proj"]}
+
+    monkeypatch.setattr(vllm_registry, "vllm_class_for_architecture", lambda _: RuntimeMetadata)
+    profile = DefaultProfile(["RuntimeMetadata"])
+    assert profile.fused_sibling_leaf_mapping() == {
+        "custom_fused": ("left_proj", "right_proj")}
+    assert profile.fused_sibling_group("model.block.left_proj") == "model.block.custom_fused"
+    assert profile.fused_sibling_group("model.block.right_proj") == "model.block.custom_fused"
+    assert profile.fused_sibling_group("model.block.q_proj") is None
+    assert RuntimeMetadata.packed_modules_mapping == {
+        "custom_fused": ["left_proj", "right_proj"]}
+
+
 def test_registered_metadata_loader_refuses_an_empty_result(monkeypatch):
     entry = SimpleNamespace(load_model_cls=lambda: None)
     entries = {"Qwen3ForCausalLM": entry}
