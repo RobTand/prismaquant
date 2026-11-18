@@ -175,6 +175,19 @@ def test_invalid_runtime_rows_refuse_even_if_candidate_is_infeasible(field, valu
             max_memory_bytes=0, max_prefill_ms=0)
 
 
+def test_runtime_frontier_refuses_finite_prices_whose_sum_overflows():
+    candidates = {name: [candidate("W4A16", 1, 0.0)] for name in ("a", "b")}
+    resources = {(name, rows[0].fmt): price(rows[0], 1e308) for name, rows in candidates.items()}
+    before = repr((candidates, resources))
+    assert solver.solve_runtime_frontier({"a": candidates["a"]}, resources,
+        max_memory_bytes=2, max_prefill_ms=1.5e308)[0].prefill_ms == 1e308
+    with pytest.raises(ValueError) as exc:
+        solver.solve_runtime_frontier(candidates, resources,
+            max_memory_bytes=2, max_prefill_ms=1.5e308)
+    assert str(exc.value) == "runtime totals overflowed at unit 'b'"
+    assert repr((candidates, resources)) == before
+
+
 def test_missing_decode_refuses_only_when_constrained():
     c = candidate("a", 1, 1)
     resources = {("u", "a"): price(c, 1, decode=None)}
