@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import math
 import random
-import re
 import statistics
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone

@@ -113,13 +113,9 @@ def admit_native_rows(table, relation):
             # receipt, not re-read from the row: the emitter used this same
             # function to fill it, so what this compares is two emissions of one
             # implementation rather than a number that travelled and was trusted.
-            _equal(row.resources.as_dict(),
-                   routed_owner_rank_resources(
-                       panel,
-                       [(rank, rank_receipt, observations[rank])
-                        for rank, _path, rank_receipt, _trace, _sha in roster],
-                       world_size=kind.world_size(panel), where=f"native row {row.unit}"),
-                   "native row per-rank resources")
+            _equal(row.resources.as_dict(), routed_owner_rank_resources(
+                panel, [(rank, rank_receipt, observations[rank]) for rank, _path, rank_receipt, _trace, _sha in roster],
+                world_size=kind.world_size(panel), where=f"native row {row.unit}"), "native row per-rank resources")
         else:
             _equal(observation["serialized_unit_bytes"], row.resources.serialized_bytes, "native serialized bytes")
             _equal(observation["resident_bytes"], row.resources.resident_bytes, "native resident bytes")
@@ -194,9 +190,7 @@ def load_measured_runtime_table(path: str | Path, *, expected_context: RuntimeCo
             if measurement:
                 receipts.add((measurement.receipt_path, measurement.receipt_sha256))
     for receipt, expected in sorted(receipts):
-        receipt_path = Path(receipt)
-        if not receipt_path.is_absolute():
-            receipt_path = Path(path).parent / receipt_path
+        receipt_path = Path(receipt) if Path(receipt).is_absolute() else Path(path).parent / receipt
         try:
             with receipt_path.open("rb") as stream:
                 actual = file_digest_sha256hex(stream)
@@ -206,7 +200,6 @@ def load_measured_runtime_table(path: str | Path, *, expected_context: RuntimeCo
             raise RuntimePriceError(f"measurement receipt SHA-256 mismatch: {receipt_path}")
     if table.runtime_provenance is not None:
         refusal = admit_runtime_provenance(table)
-        table = replace(table, native_rows_admitted=True,
-                        fixed_resources_admitted=refusal is None,
+        table = replace(table, native_rows_admitted=True, fixed_resources_admitted=refusal is None,
                         fixed_resources_refusal=refusal)
     return table
