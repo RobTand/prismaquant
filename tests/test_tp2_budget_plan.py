@@ -90,6 +90,16 @@ def test_unknown_dtype_is_a_hard_error():
         T.tensor_bytes("F4_E2M1", [16])
 
 
+def test_header_entries_refuse_negative_dimension_without_input_changes():
+    header = {"model.layers.0.weight": {"dtype": "F16", "shape": [2, -1],
+                                        "data_offsets": [0, 4]}}
+    before = json.dumps(header, sort_keys=True)
+    with pytest.raises(T.HeaderError) as caught:
+        T.entries_from_header(header, "checkpoint.safetensors")
+    assert str(caught.value) == "negative dimension in shape [2, -1]"
+    assert json.dumps(header, sort_keys=True) == before
+
+
 def test_artifact_byte_totals_are_exact_across_dtypes(workdir):
     tensors = {
         "model.embed_tokens.weight": ("BF16", [10, 4]),      # 80
