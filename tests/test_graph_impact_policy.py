@@ -90,6 +90,21 @@ def test_reach_does_not_relax_conftest_edges_or_cycles():
     assert any('SCC grew or merged' in e for e in core.compare(before, cyclic, policy(before)))
 
 
+def test_helper_importer_reach_follows_cycles_and_keeps_only_sources():
+    graph = {
+        'reach': {'tests/test_a.py': ['pkg/a.py']}, 'edges': [],
+        'path_edges': [('tests/helper.py', 'tests/middle.py'),
+                       ('tests/middle.py', 'pkg/a.py'),
+                       ('pkg/a.py', 'tests/helper.py'),
+                       ('tests/helper.py', 'pkg/b.py'),
+                       ('tests/other.py', 'pkg/c.py')],
+        'loc': {'pkg/a.py': 2, 'pkg/b.py': 1, 'pkg/c.py': 1},
+    }
+    before = repr(graph)
+    assert core.importer_reach(graph, 'tests/helper.py') == {'pkg/a.py', 'pkg/b.py'}
+    assert repr(graph) == before
+
+
 def test_reach_summary_reports_total_and_reminds_without_switching(tmp_path, capsys):
     before, after = sibling_graphs()
     baseline = policy(before)
