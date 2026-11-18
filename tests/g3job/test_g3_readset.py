@@ -32,6 +32,18 @@ def fixture(tmp_path):
     return q, tensors, row
 
 
+@pytest.mark.timeout(5)
+def test_wire_range_refuses_a_short_file_without_changes(tmp_path):
+    path = tmp_path / 'wire'
+    path.write_bytes(b'abc')
+    paths = set(tmp_path.rglob('*'))
+    with pytest.raises(OSError) as error:
+        L.read_range(str(path), 1, 4)
+    assert str(error.value) == f'short read of {path} at 3: wanted 2 more bytes'
+    assert path.read_bytes() == b'abc'
+    assert set(tmp_path.rglob('*')) == paths
+
+
 def test_omission_uses_requested_arm_plan_and_preserves_unassigned_source(tmp_path):
     from g3_readset import SourceReads
     q, tensors, row = fixture(tmp_path)
