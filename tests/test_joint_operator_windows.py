@@ -112,6 +112,25 @@ def test_policy_refuses_unknown_or_nonfinite_budgets(change):
         normalize_operator_windows(value)
 
 
+def test_operator_admission_refuses_a_target_above_either_workspace_limit():
+    from prismaquant.joint_statistics_replay import preflight_joint_operator_admission
+
+    _, _, _, cache = _fixture()
+    name = 'model.layers.0.proj'
+    module = torch.nn.Linear(4, 2, bias=False)
+    before = module.weight.detach().clone()
+    for field in ('max_candidate_bytes', 'workspace_reserve_bytes'):
+        limits = policy(**{field: 31})
+        original = dict(limits)
+        with pytest.raises(RuntimeError) as exc:
+            preflight_joint_operator_admission({0: [name]}, {name: module},
+                {name: ['NVFP4A16']}, cache, policy=limits)
+        assert str(exc.value) == 'joint single target exceeds candidate or matrix workspace budget'
+        assert limits == original
+        assert torch.equal(module.weight, before)
+        assert module.weight.grad is None
+
+
 def test_window_refuses_training_or_rng_source(monkeypatch):
     model, _, runner, cache = _fixture()
     model.train()
