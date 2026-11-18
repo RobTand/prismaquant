@@ -194,6 +194,16 @@ def test_wait_walks_the_chain_and_stops_at_a_row_without_its_outputs(sealed, mon
     assert len(fleet.submitted) == 2
 
 
+def test_capture_round_refuses_wrong_schema_without_changing_files(tmp_path):
+    round_file = tmp_path / "round.json"
+    round_file.write_text(json.dumps({"schema": "unsealed", "census": {}}))
+    original = round_file.read_bytes()
+    with pytest.raises(dispatch.ChainDispatchRefused) as refused:
+        dispatch.load_capture_round(tmp_path)
+    assert str(refused.value) == f"{tmp_path} holds no sealed capture chain"
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == {"round.json": original}
+
+
 def test_a_round_refuses_a_changed_census(sealed):
     fixture, _spec, _document, round_dir, fleet = sealed
     fixture.census.write_text(fixture.census.read_text() + " ")
