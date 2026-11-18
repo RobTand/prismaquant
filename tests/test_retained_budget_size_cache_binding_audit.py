@@ -21,6 +21,27 @@ FORMAT = "FP8_E4M3"
 MIB = 1024**2
 
 
+def test_budget_derivation_refuses_to_replace_its_input_plan(tmp_path):
+    repository = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "budget_size_cache_audit", repository / "tools/derive_retained_window_budget.py",
+    )
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    plan = tmp_path / "plan.json"
+    plan.write_bytes(b"input plan must survive")
+    with pytest.raises(SystemExit) as error:
+        tool.main([
+            "--plan", str(plan), "--out", str(plan),
+            "--prepared", str(tmp_path / "prepared.json"),
+            "--census", str(tmp_path / "census.json"),
+        ])
+    assert str(error.value) == "refusing to overwrite the input plan"
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == {
+        "plan.json": b"input plan must survive",
+    }
+
+
 def _sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
