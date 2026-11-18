@@ -107,6 +107,15 @@ def test_explicit_options_read_the_campaign_after_the_last_module_invocation():
         'seed_checkpoint': 'actual-checkpoint', 'publication_overlap_bytes': 4096}
 
 
+def test_campaign_options_refuse_an_action_without_a_python_module():
+    from prismaquant.tessera_campaign_cli import explicit_campaign_options
+    argv = ['python', 'campaign.py', '--nsamples', '8']
+    with pytest.raises(ValueError) as error:
+        explicit_campaign_options(argv)
+    assert str(error.value) == 'row argv runs no python module, so its demand cannot be derived'
+    assert argv == ['python', 'campaign.py', '--nsamples', '8']
+
+
 @pytest.mark.parametrize('option', ['--mod=other-checkpoint', '--out=other-cost',
                                     '--deadline-seconds=0'])
 def test_spec_cannot_hide_dispatcher_owned_or_deadline_options_in_another_spelling(tmp_path, option):
