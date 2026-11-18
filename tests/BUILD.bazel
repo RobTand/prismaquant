@@ -22226,6 +22226,7 @@ pq_py_library(
     ],
     deps = [
         "//:tools/ci/gate_partition",
+        "@pq_pip//pytest",
     ],
 )
 
