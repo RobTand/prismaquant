@@ -33,3 +33,36 @@ def test_conflicted_index_cannot_publish_a_verification_checkout(tmp_path):
         freeze_refactor_checkout(source, target)
     assert not target.exists()
     assert git('worktree', 'list', '--porcelain').stdout == before
+
+
+def test_frozen_checkout_applies_tracked_binary_patch(tmp_path):
+    source, target = tmp_path / 'source', tmp_path / 'verification'
+    source.mkdir()
+
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(source), *args])
+
+    git('init', '-q', '-b', 'base')
+    tracked = source / 'payload.bin'
+    tracked.write_bytes(b'before\x00payload\xff')
+    git('add', tracked.name)
+    git('-c', 'user.name=Capture fixture', '-c', 'user.email=capture@example.invalid',
+        'commit', '-qm', 'base')
+    base = git('rev-parse', 'HEAD').decode().strip()
+    edited = b'after\x00payload\xfe'
+    tracked.write_bytes(edited)
+    patch = git('diff', '--binary', 'HEAD')
+    status = git('status', '--porcelain')
+    try:
+        result = freeze_refactor_checkout(source, target)
+        assert (target / tracked.name).read_bytes() == edited
+        assert result['base'] == base
+        assert result['patch_bytes'] == len(patch)
+        assert result['untracked'] == []
+        assert tracked.read_bytes() == edited
+        assert git('diff', '--binary', 'HEAD') == patch
+        assert git('status', '--porcelain') == status
+        assert git('rev-parse', 'HEAD').decode().strip() == base
+    finally:
+        if target.exists():
+            git('worktree', 'remove', '--force', str(target))
