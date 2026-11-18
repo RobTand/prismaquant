@@ -201,6 +201,21 @@ def test_native_journal_admission_precedes_any_unit_read_or_restore(
     assert {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()} == before
 
 
+def test_stock_harvest_refuses_an_empty_dense_plan():
+    from prismaquant.glm53_stock_harvest import build_dense_plan
+    from prismaquant.glm53_stock_reprice import Glm53StockError
+
+    probe = {'units': {}}
+    checkpoint = {'units': {}}
+    with pytest.raises(Glm53StockError) as error:
+        build_dense_plan(probe, checkpoint)
+    assert str(error.value) == (
+        'dense plan is empty; a harvest with nothing to render is a '
+        'mis-specified filter, not a fast success')
+    assert probe == {'units': {}}
+    assert checkpoint == {'units': {}}
+
+
 @pytest.mark.parametrize('native', [True, False], ids=['native-binding', 'bf16-unchanged'])
 @pytest.mark.parametrize('legacy_resume', [False, True], ids=['fresh', 'old-journal'])
 def test_real_harvest_binds_native_before_numerical_measurement(
