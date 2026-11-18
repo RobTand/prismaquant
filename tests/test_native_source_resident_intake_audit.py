@@ -223,6 +223,34 @@ def test_actual_resident_caller_receives_decoded_source(owned_root, monkeypatch,
     assert seen == [caller]
 
 
+def test_recache_refuses_cpu_device_map_before_model_load(owned_root, monkeypatch):
+    from prismaquant import perturbed_x_cache, production_recache
+    from prismaquant.production_weight_cache import ProductionWeightCache
+
+    root, _ = _source(owned_root, native=False)
+    _setup(owned_root, monkeypatch)
+    cache = ProductionWeightCache(weights={}, levers={}, metadata={
+        "source_binding": build_source_model_binding(root, dtype=torch.bfloat16)})
+    source_cache = owned_root / "cache.pkl"
+    assignment = owned_root / "assignment.json"
+    output = owned_root / "recache.pkl"
+    cache_bytes = pickle.dumps(cache)
+    assignment_bytes = b"{}"
+    source_cache.write_bytes(cache_bytes)
+    assignment.write_bytes(assignment_bytes)
+    monkeypatch.setattr(perturbed_x_cache, "load_text_model_under_work_root",
+                        lambda *args, **kwargs: pytest.fail("The CLI called the model loader."))
+    with pytest.raises(RuntimeError) as error:
+        production_recache.main(["--model", str(root), "--layer-config", str(assignment),
+            "--production-weight-cache", str(source_cache), "--output", str(output),
+            "--device", "cuda", "--device-map", "cpu", "--work-root", str(owned_root / "work")])
+    assert str(error.value) == (
+        "production_recache requires a CUDA-resident model. CPU/offload device_map='cpu' is not allowed.")
+    assert source_cache.read_bytes() == cache_bytes
+    assert assignment.read_bytes() == assignment_bytes
+    assert not output.exists()
+
+
 def test_streamed_expert_caller_installs_on_low_memory_host(owned_root, monkeypatch):
     # The streamed context must not read the real host memory. The fixture sets the headroom and the floor.
     monkeypatch.setattr(streaming_model, "mem_available_bytes", lambda: 4 << 30)
