@@ -72,3 +72,14 @@ def test_gemma_source_header_census_covers_both_roots_and_exact_shapes(tmp_path,
     assert (stats[VISION]["out_features"], stats[VISION]["in_features"]) == (12, 4)
     assert stats[PROJECTOR]["n_params"] == 24
     assert allocator.discover_visual_linears_from_source(str(tmp_path), profile=profile) == sorted(stats)
+
+
+def test_visual_census_refuses_a_missing_indexed_shard_without_changes(tmp_path):
+    profile = detect_profile(_config(tmp_path, "gemma4", "Gemma4ForConditionalGeneration"))
+    (tmp_path / "model.safetensors.index.json").write_text(json.dumps({"weight_map": {VISION + ".weight": "missing.safetensors"}}))
+    before = {path: path.read_bytes() for path in tmp_path.iterdir()}
+    assert not (tmp_path / "missing.safetensors").exists()
+    with pytest.raises(RuntimeError) as exc:
+        allocator.discover_visual_linear_stats_from_source(str(tmp_path), strict=True, profile=profile)
+    assert str(exc.value) == "exact visual source discovery was incomplete: missing indexed shard 'missing.safetensors' for ['model.vision_tower.vision_model.encoder.layers.0.attn.qkv.weight']"
+    assert {path: path.read_bytes() for path in tmp_path.iterdir()} == before
