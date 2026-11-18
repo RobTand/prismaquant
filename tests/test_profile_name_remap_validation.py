@@ -57,3 +57,14 @@ def test_dsv4_checkpoint_remap_accepts_the_shared_profile_keyword(source, expect
     profile = DeepseekV4Profile()
     assert profile.checkpoint_to_live_name(ckpt_key=source) == expected
     assert profile.checkpoint_to_live_name(source) == expected
+
+
+def test_dsv4_scale_map_refuses_an_orphan_mtp_scale_without_changes(tmp_path):
+    from prismaquant.model_profiles.deepseek_v4 import DeepseekV4Profile
+    raw_weight_map = {"mtp.0.attn.wq.scale": "weights.safetensors"}
+    assert list(tmp_path.iterdir()) == []
+    with pytest.raises(RuntimeError) as exc:
+        DeepseekV4Profile().fp8_scale_pairs(str(tmp_path), raw_weight_map=raw_weight_map)
+    assert str(exc.value) == "DeepSeek-v4 MTP scale 'mtp.0.attn.wq.scale' has no serialized weight sibling 'mtp.0.attn.wq.weight'"
+    assert raw_weight_map == {"mtp.0.attn.wq.scale": "weights.safetensors"}
+    assert list(tmp_path.iterdir()) == []
