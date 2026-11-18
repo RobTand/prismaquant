@@ -98,3 +98,103 @@ def test_existing_full_prefix_selected_imports_and_outputs():
             shared(pending)
         with pytest.raises(ValueError):
             shared({**fixture, "extra": "not in the existing schema"})
+
+
+def test_initialization_contracts_use_shared_sha256_grammar(monkeypatch):
+    import json
+    import sys
+
+    policy = sys.modules["prismaquant.streaming_initialization"]
+    owner = sys.modules["prismaquant.digests"]
+    real = owner.is_sha256hex
+    calls = []
+
+    def record(value):
+        calls.append(value)
+        return real(value)
+
+    monkeypatch.setattr(owner, "is_sha256hex", record, raising=False)
+    monkeypatch.setattr(policy, "is_sha256hex", record, raising=False)
+
+    class DigestText(str):
+        pass
+
+    selected = selected_fixture(derived=True)
+    prefix = {**selected, "schema": "prismaquant.streaming_prefix_initialization.v1",
+              "scope": "streamed_text_source_prefix"}
+    full = {key: selected[key] for key in (
+        "status", "transformers_version", "model_class", "dtype", "layers_prefix",
+        "persistent_tensors", "derived_buffers", "state_sha256", "source_map_sha256")}
+    full.update(schema="prismaquant.streaming_initialization.v1",
+                scope="streamed_text_source_forward", num_layers=2)
+    state = {"mtp.weight": {"shape": [1], "dtype": "torch.float32", "sha256": "a" * 64}}
+    mtp = {
+        "schema": "prismaquant.mtp_layer_initialization.v1",
+        "scope": "mtp_layer_checkpoint_load", "status": "completed",
+        "transformers_version": "fixture", "model_class": "fixture.Model",
+        "dtype": "torch.float32", "layer_prefix": "mtp.", "experts_implementation": "fixture",
+        "checkpoint_tensors": 1, "state": state,
+        "state_sha256": DIRECT_ASCII_STRICT.sha256(state), "source_map_sha256": "b" * 64,
+        "input": {"schema": "fixture", "path": "fixture.json", "sha256": "c" * 64},
+    }
+    incomplete = "Missing or incomplete streaming initialization contract"
+    derived = "Invalid derived-buffer digest"
+    cases = (
+        (policy.validate_streaming_initialization_contract, full, (
+            (("source_map_sha256",), incomplete, False),
+            (("state_sha256",), incomplete, False))),
+        (policy.validate_streaming_prefix_initialization_contract, prefix, (
+            (("source_map_sha256",), "Streaming prefix state digest/counts differ", True),
+            (("state", "layers.0.weight", "sha256"), derived, True),
+            (("state_sha256",), "Streaming prefix state digest/counts differ", False))),
+        (policy.validate_streaming_selected_initialization_witness, selected, (
+            (("source_map_sha256",), "Streaming selected-layer state digest/counts differ", True),
+            (("state", "layers.0.weight", "sha256"), derived, True),
+            (("state_sha256",), "Streaming selected-layer state digest/counts differ", False))),
+        (policy.validate_mtp_layer_initialization_contract, mtp, (
+            (("source_map_sha256",), "Missing or incomplete MTP layer initialization contract", False),
+            (("state", "mtp.weight", "sha256"), "Invalid MTP layer tensor witness", False),
+            (("state_sha256",), "MTP layer state digest differs from its tensor witnesses", False),
+            (("input", "sha256"), "MTP layer initialization contract has no hash-bound input", False))),
+    )
+    values = (None, 17, 1.5, b"a" * 64, "a" * 63, "a" * 65,
+              "A" * 64, "g" * 64, "a" * 64 + "\n", DigestText("a" * 64),
+              int("1" * 64), "a" * 64)
+    routed = []
+    for validate, fixture, sites in cases:
+        start = len(calls)
+        before = copy.deepcopy(fixture)
+        result = validate(fixture)
+        assert result == before
+        assert result is not fixture
+        assert fixture == before
+        if validate is policy.validate_mtp_layer_initialization_contract:
+            assert result["state"] is not fixture["state"]
+        elif "state" in fixture:
+            assert result["state"] is fixture["state"]
+        for path, message, coerces in sites:
+            for value in values:
+                candidate = copy.deepcopy(fixture)
+                target = candidate
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = value
+                accepts = isinstance(value, str) and value == "a" * 64
+                accepts |= coerces and type(value) is int and value == int("1" * 64)
+                if path[0] == "state" and accepts:
+                    candidate["state_sha256"] = DIRECT_ASCII_STRICT.sha256(candidate["state"])
+                if path == ("state_sha256",) and validate is not policy.validate_streaming_initialization_contract:
+                    accepts = False
+                before = copy.deepcopy(candidate)
+                if accepts:
+                    expected = json.loads(json.dumps(before)) if fixture is mtp else before
+                    assert validate(candidate) == expected
+                else:
+                    with pytest.raises(ValueError) as caught:
+                        validate(candidate)
+                    assert type(caught.value) is ValueError
+                    assert str(caught.value) == message
+                assert candidate == before
+        routed.append((validate.__name__, len(calls) - start))
+    for name, count in routed:
+        assert count > 0, f"The shared SHA-256 predicate received no calls from {name}."

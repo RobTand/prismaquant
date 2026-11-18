@@ -7,7 +7,7 @@ import json
 from collections.abc import Iterable
 from typing import Any, TypedDict
 
-from .digests import DIRECT_ASCII_STRICT
+from .digests import DIRECT_ASCII_STRICT, is_sha256hex
 
 
 class StreamingInitializationContract(TypedDict):
@@ -52,7 +52,7 @@ def validate_streaming_initialization_contract(value):
                 for k in ("transformers_version", "model_class", "dtype", "layers_prefix")) or
             any(type(value.get(k)) is not int or value[k] < minimum
                 for k, minimum in (("num_layers", 1), ("persistent_tensors", 1), ("derived_buffers", 0))) or
-            any(not isinstance(value.get(k), str) or not re.fullmatch(r"[0-9a-f]{64}", value[k])
+            any(not isinstance(value.get(k), str) or not is_sha256hex(value[k])
                 for k in ("state_sha256", "source_map_sha256"))):
         raise ValueError("Missing or incomplete streaming initialization contract")
     return dict(value)
@@ -106,14 +106,14 @@ def validate_streaming_prefix_initialization_contract(value):
             seen.add(index)
         checkpoint += kind == "checkpoint"
         derived += kind == "derived_buffer"
-        if kind == "derived_buffer" and not re.fullmatch(r"[0-9a-f]{64}", str(record["sha256"])):
+        if kind == "derived_buffer" and not is_sha256hex(str(record["sha256"])):
             raise ValueError("Invalid derived-buffer digest")
     if seen != set(layers) or not any(state[name]["kind"] == "checkpoint" for name in heads):
         raise ValueError("Streaming prefix omitted a head or body layer")
     if (type(value["persistent_tensors"]) is not int or value["persistent_tensors"] != checkpoint
             or type(value["derived_buffers"]) is not int or value["derived_buffers"] != derived
             or value["state_sha256"] != _initialization_digest(state)
-            or not re.fullmatch(r"[0-9a-f]{64}", str(value["source_map_sha256"]))):
+            or not is_sha256hex(str(value["source_map_sha256"]))):
         raise ValueError("Streaming prefix state digest/counts differ")
     return dict(value)
 
@@ -161,7 +161,7 @@ def validate_streaming_selected_initialization_witness(value):
                 or any(type(n) is not int or n < 0 for n in record["shape"])
                 or not isinstance(record["dtype"], str) or not record["dtype"]):
             raise ValueError("Invalid streaming selected-layer tensor witness")
-        if kind == "derived_buffer" and not re.fullmatch(r"[0-9a-f]{64}", str(record["sha256"])):
+        if kind == "derived_buffer" and not is_sha256hex(str(record["sha256"])):
             raise ValueError("Invalid derived-buffer digest")
         if name not in heads:
             index = _prefix_layer_index(name, prefix)
@@ -177,7 +177,7 @@ def validate_streaming_selected_initialization_witness(value):
     if (type(value["persistent_tensors"]) is not int or value["persistent_tensors"] != checkpoint
             or type(value["derived_buffers"]) is not int or value["derived_buffers"] != derived
             or value["state_sha256"] != _initialization_digest(state)
-            or not re.fullmatch(r"[0-9a-f]{64}", str(value["source_map_sha256"]))):
+            or not is_sha256hex(str(value["source_map_sha256"]))):
         raise ValueError("Streaming selected-layer state digest/counts differ")
     return dict(value)
 
@@ -318,7 +318,6 @@ def validate_mtp_layer_initialization_contract(value):
     keys = {"schema", "scope", "status", "transformers_version", "model_class",
             "dtype", "layer_prefix", "experts_implementation", "checkpoint_tensors",
             "state", "state_sha256", "source_map_sha256", "input"}
-    hex64 = re.compile(r"[0-9a-f]{64}")
     if (not isinstance(value, dict) or set(value) != keys or
             value.get("schema") != _MTP_LAYER_INITIALIZATION_SCHEMA or
             value.get("scope") != "mtp_layer_checkpoint_load" or
@@ -328,7 +327,7 @@ def validate_mtp_layer_initialization_contract(value):
                           "experts_implementation")) or
             type(value.get("checkpoint_tensors")) is not int or value["checkpoint_tensors"] < 1 or
             not isinstance(value.get("source_map_sha256"), str) or
-            not hex64.fullmatch(value["source_map_sha256"])):
+            not is_sha256hex(value["source_map_sha256"])):
         raise ValueError("Missing or incomplete MTP layer initialization contract")
     state = value["state"]
     if not isinstance(state, dict) or not state:
@@ -339,13 +338,13 @@ def validate_mtp_layer_initialization_contract(value):
                 not isinstance(record["shape"], list) or
                 any(type(n) is not int or n < 0 for n in record["shape"]) or
                 not isinstance(record["dtype"], str) or not record["dtype"] or
-                not isinstance(record["sha256"], str) or not hex64.fullmatch(record["sha256"])):
+                not isinstance(record["sha256"], str) or not is_sha256hex(record["sha256"])):
             raise ValueError("Invalid MTP layer tensor witness")
     if value["state_sha256"] != _initialization_digest(state):
         raise ValueError("MTP layer state digest differs from its tensor witnesses")
     source = value["input"]
     if (not isinstance(source, dict) or set(source) != {"schema", "path", "sha256"} or
             any(not isinstance(source.get(k), str) or not source[k] for k in source) or
-            not hex64.fullmatch(source["sha256"])):
+            not is_sha256hex(source["sha256"])):
         raise ValueError("MTP layer initialization contract has no hash-bound input")
     return json.loads(json.dumps(value))
