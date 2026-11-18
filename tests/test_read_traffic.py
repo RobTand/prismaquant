@@ -181,6 +181,31 @@ def test_synthetic_ledger_matches_hand_computation(model_dir: Path, profile):
     assert report["excluded"]["mtp_bytes"] == 128
 
 
+def test_weight_leaf_assignments_count_exact_native_sidecars_and_source_passthrough_bytes(model_dir):
+    from copy import deepcopy
+
+    before = {path: path.read_bytes() for path in model_dir.iterdir()}
+    for fmt, weight_only, dense_bytes, total_bytes, read_bytes in [
+        ("NVFP4", False, 48, 1024, 512),
+        ("NVFP4", True, 44, 1020, 508),
+        ("BF16", False, 128, 1104, 592),
+    ]:
+        assignment = {Q_PROJ + ".weight": fmt}
+        stats = {Q_PROJ: {**STATS[Q_PROJ], fp.NVFP4_WEIGHT_ONLY_STATS_KEY: weight_only}}
+        arguments = deepcopy((assignment, stats))
+        report = rt.assignment_read_traffic(assignment, stats, model_path=str(model_dir))
+        assert report["classes"]["dense"]["stored_bytes"] == dense_bytes
+        assert report["classes"]["routed_experts"]["stored_bytes"] == 256
+        assert report["breakdown"] == {
+            "dense": dense_bytes, "routed": 128, "held_fixed": 336, "resident_codebooks": 0}
+        assert report["read_bytes_per_token"] == read_bytes
+        assert report["reconciliation"]["ledger_stored_bytes"] == total_bytes
+        assert report["reconciliation"]["footprint_artifact_payload_bytes"] == total_bytes
+        assert report["reconciliation"]["agrees"] is True
+        assert (assignment, stats) == arguments
+        assert {path: path.read_bytes() for path in model_dir.iterdir()} == before
+
+
 def test_read_probability_is_topk_over_e_for_routed_and_one_for_dense(
     model_dir: Path, profile,
 ):
