@@ -30,6 +30,7 @@ import json
 from pathlib import Path
 import pickle
 import shutil
+import sys
 from types import SimpleNamespace
 import uuid
 
@@ -90,6 +91,58 @@ def _offline_tier_policy():
     deactivate_staged_tier_policy_for_tests()
     yield
     deactivate_staged_tier_policy_for_tests()
+
+
+def test_resume_declaration_compatibility():
+    consumer = sys.modules["prismaquant.stage_a_chain_resume"]
+    owner = sys.modules["prismaquant.digests"]
+    declaration = f"{ONE}:{TWO}"
+
+    class Declaration:
+        def __str__(self):
+            return declaration
+
+    valid = ("return", {"from": ONE, "to": TWO})
+    valid_digest = "6fca00a85ce44d4f7ecee7ac6ad39fef9a17741a66604a9daaf738a45b9a6858"
+    refused = (
+        "prismaquant.stage_a_chain_resume.ChainResumeRefused",
+        "--resume-implementation-compatibility takes FROM:TO, two sha256 implementation digests",
+    )
+    refused_digest = "6883f617a65b1e82f4ae7bfb2e8e8caede5ded6aae10c9b4051b2bc771a147d0"
+    cases = [
+        (None, ("return", None), "d33eeb4763e8703f05a96bd6e638f7136cbfb4bea4b78d6519248a9f75da70e6"),
+        (declaration, valid, valid_digest),
+        (Declaration(), valid, valid_digest),
+        *((text, refused, refused_digest) for text in (
+            f"{'A' * 64}:{TWO}", f"{ONE[:-1]}:{TWO}", f"{ONE}1:{TWO}",
+            f"{declaration}:x", f":{TWO}", ONE, f"{'z' * 64}:{TWO}", f"{ONE}\n:{TWO}", "",
+        )),
+    ]
+    for text, expected, digest in cases:
+        try:
+            outcome = ("return", consumer.parse_declaration(text))
+        except ChainResumeRefused as error:
+            error_type = type(error)
+            outcome = (f"{error_type.__module__}.{error_type.__qualname__}", str(error))
+        assert outcome == expected, repr(text)
+        assert owner.bytes_sha256hex(repr(outcome).encode("utf-8")) == digest, repr(text)
+
+
+def test_resume_declaration_uses_shared_sha256_grammar(monkeypatch):
+    test_resume_declaration_compatibility()
+    consumer = sys.modules["prismaquant.stage_a_chain_resume"]
+    owner = sys.modules["prismaquant.digests"]
+    real = owner.is_sha256hex
+    seen = []
+
+    def recording(value):
+        seen.append(value)
+        return real(value)
+
+    monkeypatch.setattr(owner, "is_sha256hex", recording, raising=False)
+    monkeypatch.setattr(consumer, "is_sha256hex", recording, raising=False)
+    consumer.parse_declaration(f"{ONE}:{TWO}")
+    assert seen == [ONE, TWO], "The recorder must get both digests in order."
 
 
 class _Interrupted(Exception):
