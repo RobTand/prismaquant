@@ -626,6 +626,21 @@ def test_a_partial_binding_is_refused_not_guessed(tmp_path):
         _argv(tmp_path, environ, _staged_spec(_files(binding)))
 
 
+def test_staged_container_refuses_a_non_ssd_tier_before_reading_files(tmp_path):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    declared = spec()
+    environ = dict(zip(runner.STAGED_ENV, (
+        str(tmp_path / "manifest.json"), "a" * 64, "b" * 64,
+        str(tmp_path / "contract.json"), "hdd")))
+    before = json.dumps([declared, environ], sort_keys=True)
+    assert list(tmp_path.iterdir()) == []
+    with pytest.raises(RuntimeError) as refused:
+        runner.staged_input_environment(declared, environ)
+    assert str(refused.value) == "staged inputs are admitted from the ssd tier only"
+    assert json.dumps([declared, environ], sort_keys=True) == before
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_a_changed_manifest_or_contract_digest_is_refused(tmp_path):
     from prismaquant.staged_manifest import ManifestRefused
     _data, binding = _binding(tmp_path)
