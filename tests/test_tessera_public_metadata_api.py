@@ -254,3 +254,16 @@ def test_graph_equality_records_never_claim_served_kl(change):
         evidence = lane.parse_cell_evidence(payload, 'graph', cell_regime='decode', execution_modes=['eager'],
                                             schema=lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V6)
         assert evidence.grade == 'route_only'
+
+
+def test_cell_evidence_refuses_a_repeated_kl_receipt_without_changes():
+    entry = dict(kind='graph_equality', top_k=None, regime='decode',
+                 execution_modes=['eager'], receipt='docs/measurements/graph-equality.md')
+    payload = dict(grade='route_only', kl=[entry, copy.deepcopy(entry)],
+                   smoke=dict(status='not_recorded', receipt=None))
+    before = copy.deepcopy(payload)
+    with pytest.raises(lane.LaneEligibilityError) as error:
+        lane.parse_cell_evidence(payload, 'graph', cell_regime='decode', execution_modes=['eager'],
+                                 schema=lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V6)
+    assert str(error.value) == 'graph.kl repeats an entry; the field is a set of receipts'
+    assert payload == before
