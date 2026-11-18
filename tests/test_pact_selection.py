@@ -273,6 +273,18 @@ def test_validate_refuses_an_identity_that_was_recomputed_over_an_inconsistent_b
         validate_pact_selection(bad)
 
 
+def test_pact_selection_refuses_a_missing_endpoint_time_without_changes():
+    record = _select(_two_candidate_frontier(half=1.0))
+    fastest = next(e for e in record["roster"] if "endpoint_fastest" in e["roles"])
+    del fastest["time_ms"]
+    body = {k: v for k, v in record.items() if k != "identity_sha256"}
+    record["identity_sha256"] = canonical_sha256(body)
+    before = copy.deepcopy(record)
+    with pytest.raises(PactSelectionError) as error:
+        validate_pact_selection(record)
+    assert str(error.value) == "PACT selection roster endpoints are malformed: 'time_ms'"
+    assert record == before
+
 # -------------------------------------------------- the scratch frontiers
 
 
