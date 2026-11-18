@@ -4820,18 +4820,15 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             path = out_dir / f"{label}.json"
             record_budget_stamp = None
             if args.target_disk_gb is not None:
-                record_budget_bytes = int(math.floor(
-                    float(args.target_disk_gb) * 1_000_000_000.0
-                ))
                 upper = record.get("whole_artifact_upper_bound_bytes")
                 payload_bytes = record.get("artifact_tensor_payload_bytes")
                 if (
                     isinstance(upper, int)
                     and isinstance(payload_bytes, int)
-                    and upper <= record_budget_bytes
+                    and upper <= budget_bytes_pareto
                 ):
                     record_budget_stamp = whole_artifact_budget_stamp(
-                        budget_bytes=record_budget_bytes,
+                        budget_bytes=budget_bytes_pareto,
                         selection_tensor_payload_bytes=payload_bytes,
                         selection_non_tensor_reserve_bytes=int(
                             args.artifact_overhead_reserve_bytes
