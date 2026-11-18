@@ -106,7 +106,7 @@ def load_snapshot(root, *, files=None, population=None, source_roots=SOURCE_ROOT
         path_edges.update((test, start_node) for start_node in [*graph.conftests_for(test), *evidence.test_modules(test)])
     loc = {path: len((root / path).read_text(errors='replace').splitlines()) for path in sources}
     live = core.measure(tests, edges, loc, test_packages={test: str(Path(test).parent) for test in tests})
-    live['duplication'] = duplication_inventory.scan(root)
+    live['duplication'] = duplication_inventory.scan(root, cache=evidence.cache)
     live['path_edges'] = [list(edge) for edge in sorted(path_edges)]
     live['contents'] = {test: file_sha256hex(root / test) for test in population}
     live['edge_groups'] = {
@@ -280,14 +280,18 @@ def main(argv=None):
     parser.add_argument('--write-baseline', action='store_true')
     parser.add_argument('--snapshots', type=Path, help='with --write, keep one graph here; alone, check both')
     parser.add_argument('--write', choices=['base', 'head'])
+    parser.add_argument('--cache-tool-hash', action='store_true', help='print the hash of the tool source')
     args = parser.parse_args(argv)
+    if args.cache_tool_hash:
+        print(build.tool_hash(ROOT))
+        return 0
     started = time.perf_counter()
     head_sha = args.head or 'HEAD'
     base_sha = base_revision(args.root, args.base, head=head_sha)
-    build = {'base': lambda: snapshot_at(args.root, base_sha) if base_sha else None,
-             'head': lambda: snapshot_at(args.root, args.head) if args.head else load_snapshot(args.root)}
+    snapshots = {'base': lambda: snapshot_at(args.root, base_sha) if base_sha else None,
+                 'head': lambda: snapshot_at(args.root, args.head) if args.head else load_snapshot(args.root)}
     if args.write:  # Two processes build the base and head graphs at the same time.
-        (args.snapshots / f'{args.write}.pickle').write_bytes(pickle.dumps((base_sha, build[args.write]())))
+        (args.snapshots / f'{args.write}.pickle').write_bytes(pickle.dumps((base_sha, snapshots[args.write]())))
         return 0
     if args.snapshots:
         (base_of_base, before), (base_of_head, after) = (
@@ -295,7 +299,7 @@ def main(argv=None):
         if {base_of_base, base_of_head} != {base_sha}:
             raise SystemExit(f'graph snapshots are for base {base_of_base}/{base_of_head}, not {base_sha}')
     else:
-        before, after = build['base'](), build['head']()
+        before, after = snapshots['base'](), snapshots['head']()
     if before is not None:
         before = align_base(before, rename_paths(args.root, base_sha, head_sha))
     changed = {test for test, digest in after['contents'].items()

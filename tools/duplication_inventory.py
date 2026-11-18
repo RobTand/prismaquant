@@ -204,55 +204,70 @@ def _digest_sites(rel: str, tree: ast.Module) -> set[str]:
     return sites
 
 
-def _scan_paths(root: Path, paths: list[Path], *, include_same_file: bool) -> dict:
+def file_inventory(rel, source, *, include_same_file, salts):
+    fingerprints = []
+    functions = {}
+    namespace = rel.removesuffix('.py').replace('/', '.')
+    tree = ast.parse(source)
+    names = [top.name for top in tree.body
+             if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef))
+             and not top.name.startswith("__") and top.name not in ENTRY_POINTS
+             and namespace not in STANDALONE_HELPER_NAMESPACES]
+
+    def walk(node, scope):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                qual = scope + [child.name]
+                location = f"{rel}:{child.lineno}" if include_same_file else rel
+                identity = f"{location}::{'.'.join(qual)}"
+                if not isinstance(child, ast.ClassDef):
+                    functions[identity] = {"line": child.lineno, "end_line": child.end_lineno}
+                if not isinstance(child, ast.ClassDef) and child.end_lineno - child.lineno >= MIN_LINES:
+                    body = child.body
+                    if (body and isinstance(body[0], ast.Expr)
+                            and isinstance(body[0].value, ast.Constant)
+                            and isinstance(body[0].value.value, str)):
+                        body = body[1:]
+                    shingles = _shingles([t for stmt in body for t in _tokens(stmt)])
+                    if len(shingles) >= MIN_SHINGLES:
+                        signature = [min(((h ^ s) * 0x9E3779B97F4A7C15) & ((1 << 61) - 1) for h in shingles)
+                                     for s in salts]
+                        fingerprints.append((identity, list(shingles), signature))
+                walk(child, qual)
+            else:
+                walk(child, scope)
+
+    walk(tree, [])
+    return fingerprints, functions, sorted(_digest_sites(rel, tree)), names
+
+
+def _scan_paths(root: Path, paths: list[Path], *, include_same_file: bool, cache=None) -> dict:
     fingerprints = []
     functions = {}
     sites = set()
     names: dict[str, set[str]] = defaultdict(set)
-    for path in paths:
-        rel = path.relative_to(root).as_posix()
-        namespace = rel.removesuffix('.py').replace('/', '.')
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        sites.update(_digest_sites(rel, tree))
-        for top in tree.body:
-            if (isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and not top.name.startswith("__") and top.name not in ENTRY_POINTS
-                    and namespace not in STANDALONE_HELPER_NAMESPACES):
-                names[top.name].add(rel)
-
-        def walk(node, scope):
-            for child in ast.iter_child_nodes(node):
-                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    qual = scope + [child.name]
-                    location = f"{rel}:{child.lineno}" if include_same_file else rel
-                    identity = f"{location}::{'.'.join(qual)}"
-                    if not isinstance(child, ast.ClassDef):
-                        functions[identity] = {
-                            "line": child.lineno, "end_line": child.end_lineno,
-                        }
-                    if not isinstance(child, ast.ClassDef) and child.end_lineno - child.lineno >= MIN_LINES:
-                        body = child.body
-                        if (body and isinstance(body[0], ast.Expr)
-                                and isinstance(body[0].value, ast.Constant)
-                                and isinstance(body[0].value.value, str)):
-                            body = body[1:]
-                        shingles = _shingles([t for stmt in body for t in _tokens(stmt)])
-                        if len(shingles) >= MIN_SHINGLES:
-                            fingerprints.append((identity, shingles))
-                    walk(child, qual)
-                else:
-                    walk(child, scope)
-
-        walk(tree, [])
     rng = random.Random(7)
     salts = [rng.getrandbits(61) for _ in range(_K)]
     rows = _K // _BANDS
     buckets = defaultdict(list)
-    for index, (_, shingles) in enumerate(fingerprints):
-        signature = [min(((h ^ s) * 0x9E3779B97F4A7C15) & ((1 << 61) - 1) for h in shingles)
-                     for s in salts]
-        for band in range(_BANDS):
-            buckets[(band, tuple(signature[band * rows:(band + 1) * rows]))].append(index)
+
+    def collect(rel, source):
+        return file_inventory(rel, source, include_same_file=include_same_file, salts=salts)
+
+    for path in paths:
+        rel = path.relative_to(root).as_posix()
+        local, locations, digest_calls, helpers = (
+            collect(rel, path.read_text(encoding="utf-8")) if cache is None else
+            cache.read('duplication', root, rel, collect, encoding="utf-8"))
+        functions.update(locations)
+        sites.update(digest_calls)
+        for name in helpers:
+            names[name].add(rel)
+        for identity, shingles, signature in local:
+            index = len(fingerprints)
+            fingerprints.append((identity, frozenset(shingles)))
+            for band in range(_BANDS):
+                buckets[(band, tuple(signature[band * rows:(band + 1) * rows]))].append(index)
     pairs = set()
     for members in buckets.values():
         for i in range(len(members)):
@@ -272,8 +287,8 @@ def _scan_paths(root: Path, paths: list[Path], *, include_same_file: bool) -> di
     }
 
 
-def scan(root: Path = ROOT) -> dict:
-    live = _scan_paths(root, list(_files(root)), include_same_file=False)
+def scan(root: Path = ROOT, *, cache=None) -> dict:
+    live = _scan_paths(root, list(_files(root)), include_same_file=False, cache=cache)
     del live["functions"]
     return live
 

@@ -16,6 +16,39 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  graph-impact-cache:
+    name: Fill the graph impact cache on main
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      with:
+        python-version: '3.12'
+    - name: Get the graph impact tool hash
+      id: graph-tool
+      run: |
+        unset BUILDBUDDY_API_KEY
+        hash="$(python -m tools.ci.graph_impact_pq --cache-tool-hash)"
+        echo "hash=$hash" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      id: graph-cache
+      with:
+        path: ${{ runner.temp }}/graph-impact-cache
+        # A saved key never changes: one key per main commit, restored by the tool-hash prefix.
+        key: graph-impact-${{ steps.graph-tool.outputs.hash }}-${{ github.sha }}
+        restore-keys: graph-impact-${{ steps.graph-tool.outputs.hash }}-
+    - name: Write the main snapshot
+      env:
+        GRAPH_IMPACT_CACHE: ${{ runner.temp }}/graph-impact-cache
+      run: |
+        unset BUILDBUDDY_API_KEY
+        python -m pip install -q packaging uv==0.10.10
+        python tools/ci/graph_impact_pq.py --base HEAD --write head --snapshots "$RUNNER_TEMP"  # the gate's own command line: the interpreter state is in the key
+        python tools/ci/bazel_generated.py
   tests:
     if: github.event_name == 'workflow_dispatch'
     name: Post-merge Bazel record (amd64 and arm64)
