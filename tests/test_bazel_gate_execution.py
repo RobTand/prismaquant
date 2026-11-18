@@ -329,7 +329,8 @@ def test_remote_shard_executes_once_with_private_bep_and_preserves_timeout(
     calls = []
     def run(command, **kwargs):
         calls.append(command)
-        assert '--config=remote-arm64' in command and '--jobs=16' in command
+        assert '--config=remote-arm64' in command
+        assert [arg for arg in command if arg.startswith('--jobs=')] == ['--jobs=16']
         assert '--nocache_test_results' in command and '--noremote_accept_cached' in command
         assert '--flaky_test_attempts=1' in command
         # A record lists every failure; a PR or queue shard stops at its first failed test.
@@ -668,20 +669,22 @@ def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_f
         assert found['partition_sha256'] == reference['partition_sha256']
 
 
-@pytest.mark.parametrize('mode,include_test,build_exit,passes', [
-    ('pr', False, 0, True), ('pr', True, 0, True),
-    ('main', True, 0, True), ('main', False, 0, False),
-    ('pr', True, 1, False),
+@pytest.mark.parametrize('mode,include_test,build_exit,passes,build_count,amd64_jobs', [
+    ('pr', False, 0, True, 1, 16), ('pr', True, 0, True, 1, 16),
+    ('pr', True, 0, True, 5, 9),
+    ('main', True, 0, True, 1, 16), ('main', False, 0, False, 1, 16),
+    ('pr', True, 1, False, 1, 16),
 ])
 def test_build_only_partitions_survive_the_cli_and_controller_handoff(
-        tmp_path, monkeypatch, mode, include_test, build_exit, passes):
+        tmp_path, monkeypatch, mode, include_test, build_exit, passes, build_count, amd64_jobs):
     monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
     monkeypatch.setattr(gate.artifacts, 'scan_runtime_available', lambda: True)
     from argparse import Namespace
     from types import SimpleNamespace
     from tools.ci import remote_gate
-    library = '//prismaquant:library'
-    population = [library] + ([LABEL] if include_test else [])
+    population = [f'//prismaquant:library_{index}' for index in range(build_count)]
+    if include_test:
+        population.append(LABEL)
     row = {'population': population, 'tests': [LABEL] if include_test else [],
            'shards': [[label] for label in population]}
     document = {'schema': 'prismaquant.bazel-shards.v1', 'mode': mode,
@@ -696,6 +699,8 @@ def test_build_only_partitions_survive_the_cli_and_controller_handoff(
     execute = gate.execute_shard
     def run_partition(manifest):
         def bazel(command, **kwargs):
+            jobs = amd64_jobs if manifest['architecture'] == 'amd64' else 16
+            assert [arg for arg in command if arg.startswith('--jobs=')] == [f'--jobs={jobs}']
             calls.append((list(manifest['tests']), command[1]))
             report = Path(next(word.split('=', 1)[1] for word in command
                                if word.startswith('--build_event_json_file=')))
