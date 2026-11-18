@@ -82,6 +82,23 @@ def test_read_contract_size_refuses_before_any_payload_read(tmp_path, monkeypatc
     assert read == []
 
 
+def test_read_contract_missing_path_refuses_without_reads_or_writes(tmp_path, monkeypatch):
+    from prismaquant.staged_lease import ReadsetUnbound
+    source = tmp_path / 'input'
+    source.write_bytes(b'known')
+    binding = publish_inputs(tmp_path, [source])
+    resolver = bind(monkeypatch, binding)
+    report = resolver.report()
+    files = {path: path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()}
+    monkeypatch.delenv('PRISMAQUANT_READ_CONTRACT_PATH')
+    with pytest.raises(ReadsetUnbound) as exc:
+        load_sealed_manifest(binding['read_contract_sha256'])
+    assert str(exc.value) == 'explicit scientific read-contract path required; no PB claim discovery'
+    assert resolver.report() == report
+    assert resolver._windows == 0
+    assert {path: path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()} == files
+
+
 def test_read_contract_changed_digest_refuses_before_decode(tmp_path, monkeypatch):
     source = tmp_path / 'input'
     source.write_bytes(b'known')
