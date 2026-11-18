@@ -66,6 +66,32 @@ def test_invalid_profile_contract_never_publishes(tmp_path, field, value):
     assert not destination.exists()
 
 
+def test_profile_publication_refuses_invalid_shared_frames_without_writes(tmp_path, monkeypatch):
+    source, destination = trace(tmp_path)
+    status = source.with_name(source.name + '.workload-status.json')
+    partial = destination.with_name(destination.name + '.copying')
+    real_open = Path.open
+
+    def guarded_open(path, mode='r', *args, **kwargs):
+        if path in (destination, partial) and any(flag in mode for flag in 'wax+'):
+            pytest.fail('Publication tried to write an invalid profile.')
+        return real_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'open', guarded_open)
+    for frame in (None, {}, {'name': ''}, {'name': 'work', 'line': True}):
+        data = json.loads(source.read_text())
+        data['shared']['frames'] = [frame]
+        source.write_text(json.dumps(data))
+        source_before, status_before = source.read_bytes(), status.read_bytes()
+        with pytest.raises(RuntimeError) as refused:
+            publish_profile(source, destination)
+        assert str(refused.value) == 'py-spy output has an invalid shared frame'
+        assert source.read_bytes() == source_before
+        assert status.read_bytes() == status_before
+        assert not destination.exists()
+        assert not partial.exists()
+
+
 @pytest.mark.parametrize('pid', [None, True, 0, -1, '42'])
 def test_missing_or_invalid_namespace_pid_never_qualifies(tmp_path, pid):
     source, destination = trace(tmp_path)
