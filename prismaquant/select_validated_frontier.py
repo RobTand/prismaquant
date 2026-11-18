@@ -25,7 +25,7 @@ from prismaquant.footprint import (
     assignment_serialization_sha256,
     whole_artifact_budget_from_assignment_payload,
 )
-from .digests import text_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, text_sha256hex
 
 
 def _load_json(path: str | Path):
@@ -1341,7 +1341,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             carried["whole_artifact_budget"] = dict(selected_budget)
         layer_config[LAYER_CONFIG_META_KEY] = carried
     layer_config_path.parent.mkdir(parents=True, exist_ok=True)
-    layer_config_path.write_text(json.dumps(layer_config, indent=2, sort_keys=True) + "\n")
+    layer_config_path.write_text(DIRECT_ASCII_INDENT2_LAX.text(layer_config) + "\n")
 
     assignment_payload = {
         "schema": "prismaquant.validated_frontier_assignment.v1",
@@ -1354,7 +1354,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     }
     assignment_path = Path(args.output_assignment)
     assignment_path.parent.mkdir(parents=True, exist_ok=True)
-    assignment_path.write_text(json.dumps(assignment_payload, indent=2, sort_keys=True) + "\n")
+    assignment_path.write_text(DIRECT_ASCII_INDENT2_LAX.text(assignment_payload) + "\n")
 
     summary = {
         "schema": "prismaquant.validated_frontier_selection.v1",
@@ -1393,7 +1393,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     }
     summary_path = Path(args.output_summary)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    summary_path.write_text(DIRECT_ASCII_INDENT2_LAX.text(summary) + "\n")
 
     mse = selected.get("mse", {}) if isinstance(selected, Mapping) else {}
     mse_msg = ""
