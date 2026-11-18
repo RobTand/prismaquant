@@ -30,6 +30,21 @@ def test_topmost_containing_mount_owns_options(tmp_path, kind):
     assert find_mount("/stage/staged-other/a", table=table).filesystem == "ext4"
 
 
+def test_later_parent_mount_cannot_replace_deeper_mount(tmp_path):
+    table = tmp_path / "mountinfo"
+    table.write_bytes(
+        b"2 3 0:2 / /stage/staged rw - nfs4 host:/export rw,timeo=600,nconnect=8\n"
+        b"1 0 0:1 / / rw - ext4 /dev/root rw\n"
+        b"3 1 0:3 / /stage rw - tmpfs tmpfs rw,size=100k\n"
+    )
+    before = table.read_bytes()
+    mounted = find_mount("/stage/staged/model/weights", table=table)
+    assert mounted.point == "/stage/staged"
+    assert mounted.filesystem == "nfs4"
+    assert mounted.options == {"rw": "", "timeo": "600", "nconnect": "8"}
+    assert table.read_bytes() == before
+
+
 def test_missing_or_malformed_mount_table_has_no_facts(tmp_path):
     table = tmp_path / "mountinfo"
     assert find_mount("/a", table=table) is None
