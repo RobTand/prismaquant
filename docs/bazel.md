@@ -176,6 +176,10 @@ the plan takes these rules from the head query for each modified file:
   `py_test`;
 - the tests named `test_<stem>` or `test_<stem>_*` after a modified module.
 
+The plan reads the diff first. For the direct path it queries `//...:all-targets union buildfiles(//...)`, which
+loads the main repository only; the bazel-diff path also queries `deps(//...)`, whose external repositories
+(the pip wheels) only the bazel-diff hashes need. On a cold runner that is 22 s against 146 s (#4228).
+
 The plan takes the whole reverse closure of a file instead when no test names or imports it (one
 step without filegroups reaches no test), or when it is a test-side file (`tests/`, a
 `conftest.py`). The hosted lanes, and the 12 whole-repository readers in `CLOSURE_TESTS` whose
