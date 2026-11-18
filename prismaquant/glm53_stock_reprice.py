@@ -71,6 +71,7 @@ from prismaquant.anchored_cost import (
     plan_anchor_requests,
     run_scalar_render_campaign,
 )
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
 from prismaquant.stock_anchored_cost import (
     DEFAULT_COSTED_FORMAT,
     RENDER_LEVERS,
@@ -1222,7 +1223,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         report = payload["provenance"]["merge_report"]
         side = output.with_suffix(".provenance.json")
-        side.write_text(json.dumps({
+        side.write_text(DIRECT_ASCII_INDENT2_LAX.text({
             "schema": payload["schema"],
             "output": str(output),
             "merge_report": report,
@@ -1231,7 +1232,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "unpriced_probe_units"
             ],
             "campaign_identity": payload["provenance"]["campaign_identity"],
-        }, indent=2, sort_keys=True) + "\n")
+        }) + "\n")
         print(
             f"[glm53-stock] campaign cost payload -> {output} "
             f"(anchored {report['anchored_units']}, "
@@ -1303,10 +1304,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         checkpoint_dir=Path(args.checkpoint_dir),
     )
     if args.json:
-        print(json.dumps(
-            {"checks": [asdict(check) for check in checks]},
-            indent=2, sort_keys=True,
-        ))
+        print(DIRECT_ASCII_INDENT2_LAX.text({"checks": [asdict(check) for check in checks]}))
     else:
         print_checks(checks)
     blocked = any(check.status == "BLOCK" for check in checks)
