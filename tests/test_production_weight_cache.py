@@ -1243,6 +1243,67 @@ def test_production_recache_measures_quantized_upstream_activation_range():
     assert delta["ratio_p50"] == pytest.approx(2.0)
 
 
+def test_recache_prefetch_and_progress_report_real_replay_ranges(tmp_path, monkeypatch, capsys):
+    import json
+    import prismaquant.production_recache as production_recache
+
+    model = _TinyChain()
+    original = {name: value.clone() for name, value in model.state_dict().items()}
+    key = ("l1", "NVFP4")
+    path = tmp_path / cache_weight_filename(*key)
+    rendered = 3.0 * torch.eye(32)
+    torch.save(rendered, path)
+    before = path.read_bytes()
+    cache = ProductionWeightCache(
+        weights={key: path.name},
+        levers={"gptq": True},
+        cache_dir=str(tmp_path),
+        activation_max_abs={"l1": 2.0, "l2": 2.0},
+    )
+
+    def check_resident(_module, _args):
+        assert isinstance(cache.weights[key], torch.Tensor)
+
+    model.register_forward_pre_hook(check_resident)
+    start, end = 100.0, 102.5
+    ticks = iter((start, end))
+    monkeypatch.setattr(production_recache, "time", SimpleNamespace(monotonic=ticks.__next__))
+    assignment = {"l1": "NVFP4", "l2": "BF16"}
+    result = recache_production_weight_cache(
+        model,
+        torch.tensor([[0, 1]], dtype=torch.long),
+        assignment,
+        cache,
+        include_activation_quant=False,
+        preload_production_cache=True,
+        require_preload=True,
+        progress=True,
+        temp_parent=tmp_path,
+    )
+
+    assert result == {"l1": 2.0, "l2": 6.0}
+    assert cache.activation_max_abs == result
+    assert json.loads((tmp_path / "activation_max_abs.json").read_bytes()) == result
+    delta = json.loads((tmp_path / "activation_max_abs_delta.json").read_bytes())
+    assert delta["n_common"] == 2
+    assert delta["ratio_min"] == 1.0
+    assert delta["ratio_p50"] == 2.0
+    assert delta["ratio_max"] == 3.0
+    assert delta["changed_gt_5pct"] == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert "[prod-recache] preloading production cache: 1 entries, 0.00 GiB" in lines
+    assert "[prod-recache] preloaded 1/1 production cache entries" in lines
+    assert f"[prod-recache] measured activation max_abs for 2 Linears in {end - start:.1f}s" in lines
+    assert (
+        "[prod-recache] activation max_abs after/before ratio p50=2 p95=2.9 max=3; moved>5%=1/2"
+        in lines
+    )
+    assert path.read_bytes() == before
+    assert assignment == {"l1": "NVFP4", "l2": "BF16"}
+    assert all(torch.equal(model.state_dict()[name], value) for name, value in original.items())
+    assert torch.equal(cache.weights[key], rendered)
+
+
 def test_production_recache_atomically_publishes_activation_sidecar(
     monkeypatch,
     tmp_path,
