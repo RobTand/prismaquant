@@ -128,3 +128,26 @@ def test_existing_invariant_difference_still_refuses(tmp_path, monkeypatch):
     shipped = {"costs": {QNAME: {FORMAT: {"weight_mse": 0.125}}}}
     new = {"costs": {QNAME: {FORMAT: {"weight_mse": 0.5, "n_activation_rows": 64}}}}
     assert _invoke(tmp_path, monkeypatch, shipped, new) == (1, "MISMATCH")
+
+
+def test_optional_base_differences_do_not_override_shipped_identity(tmp_path, monkeypatch, capsys):
+    shipped, base, candidate, verdict = (
+        tmp_path / name for name in ("shipped.pkl", "base.pkl", "candidate.pkl", "verdict.txt"))
+    rows = ({"weight_mse": 0.125}, {"weight_mse": 0.5},
+            {"weight_mse": 0.125, "n_activation_rows": 64})
+    originals = [pickle.dumps({"costs": {QNAME: {FORMAT: row}}}) for row in rows]
+    for path, content in zip((shipped, base, candidate), originals):
+        path.write_bytes(content)
+    monkeypatch.setattr(sys, "argv", [
+        str(gate.__file__), "--shipped", str(shipped), "--new", str(candidate),
+        "--base", str(base), "--min-rows", "1", "--verdict", str(verdict)])
+    assert gate.main() == 0
+    assert verdict.read_bytes() == b"PASS"
+    assert capsys.readouterr().out == (
+        "shipped rows=1  new rows=1\n"
+        "base-vs-new invariant diffs: 1\n"
+        f"    ({QNAME!r}, {FORMAT!r}, 'weight_mse', (0.5, 0.125))\n"
+        "n_activation_rows present and == 64 on 1 entries\n"
+        "every invariant field matches the shipped v1 layer-0 shard exactly\n"
+        "GATE VERDICT: PASS\n")
+    assert [path.read_bytes() for path in (shipped, base, candidate)] == originals
