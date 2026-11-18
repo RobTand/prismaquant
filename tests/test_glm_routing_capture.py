@@ -395,6 +395,16 @@ def capture_cli_arguments(tmp_path):
             '--output-root', str(tmp_path / 'output')]
 
 
+def test_legacy_routed_capture_refuses_missing_dev_authority_before_output(tmp_path, monkeypatch):
+    from tools.capture_glm_routed_layers import main
+
+    monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    with pytest.raises(ValueError) as error:
+        main(capture_cli_arguments(tmp_path))
+    assert str(error.value) == 'fresh routed capture retains its explicit DEV source authority'
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize('extra', [
     ['--original-authority', '/authority'],
     ['--original-authority-sha256', '3' * 64],
