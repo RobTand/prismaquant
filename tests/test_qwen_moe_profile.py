@@ -376,6 +376,27 @@ def test_qwen36_35b_fused_groups_match_real_layout():
     ) == "model.layers.0.linear_attn.in_proj_ba"
 
 
+def test_profile_detection_refuses_supplied_non_object_config_without_fallback(
+    tmp_path,
+):
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"model_type":"qwen3"}')
+    config_bytes = config_path.read_bytes()
+    names = sorted(p.name for p in tmp_path.iterdir())
+
+    for invalid in ([], "invalid", 1):
+        before = json.dumps(invalid)
+        with pytest.raises(ValueError) as excinfo:
+            detect_profile(str(tmp_path), config=invalid)
+
+        assert str(excinfo.value) == (
+            f"the config.json given for {tmp_path} is not a JSON object"
+        )
+        assert json.dumps(invalid) == before
+        assert sorted(p.name for p in tmp_path.iterdir()) == names
+        assert config_path.read_bytes() == config_bytes
+
+
 def test_qwen36_dense_profile_still_wins_for_non_moe_arch():
     profile = profile_from_config({
         "model_type": "qwen3_5",
