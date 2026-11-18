@@ -55,6 +55,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import warnings
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -99,16 +100,11 @@ EMBEDDED_PY_PATH = re.compile(r'(?<![\w.-])/?((?:[A-Za-z_][\w.-]*/)+[\w.-]+\.py)
 DATA_MODULE_NAME = re.compile(r'''["']([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)(?::[\w.]+)?["']''')
 
 
-def import_from_path(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 # The merge gate's selector from this checkout: module names, path references
 # and the population all come from it.
-GATE_SELECT = import_from_path('gate_select_for_bazel', ROOT / 'tools/ci/gate_select.py')
+GATE_SELECT_SPEC = importlib.util.spec_from_file_location('gate_select_for_bazel', ROOT / 'tools/ci/gate_select.py')
+GATE_SELECT = importlib.util.module_from_spec(GATE_SELECT_SPEC)
+GATE_SELECT_SPEC.loader.exec_module(GATE_SELECT)
 gate_paths = GATE_SELECT.gate_paths
 
 
@@ -368,9 +364,14 @@ def loader_evidence(tree, path, gate_paths, bindings=None, *, tool_walk=False):
             position, keyword = LOADER_SLOTS[name]
             target = next((item.value for item in node.keywords if item.arg == keyword),
                           node.args[position] if len(node.args) > position else None)
-            if tool_walk and name == 'runpy.run_path' and not (
-                    isinstance(target, ast.Constant) and isinstance(target.value, str)):
-                dynamic.append(target or node)
+            if tool_walk:
+                values = bindings.values(target, path, gate_paths)[0] if target is not None else ()
+                prefix = gate_paths.REPOSITORY + '/'
+                resolved = {posixpath.normpath(value).removeprefix(prefix) for value in values}
+                if not resolved or any(value in {'.', '..'} or value.startswith(('/', '../'))
+                                       or any(char in value for char in '*?\n\0') for value in resolved):
+                    raise ValueError(f'Computed import in {path}')
+                paths.update(resolved)
                 continue
             if target is None:
                 continue
@@ -556,17 +557,12 @@ def tool_sources(root):
                     and any(isinstance(node, ast.FunctionDef) and node.name == '__getattr__'
                             and dynamic[0] in walk(node) for node in tree.body)):
                 raise ValueError(f'Computed import in {path}')
-        pending.extend(name for name in loaders if name.endswith('.py') and not wildcard(name))
+        pending.extend(name for name in loaders if name.endswith('.py'))
         for name in statement_imports(tree, path) | imports:
             parts = name.split('.')
             for end in range(1, len(parts) + 1):
                 stem = '/'.join(parts[:end])
                 pending.extend((stem + '.py', stem + '/__init__.py'))
-        for node in walk(tree):
-            if isinstance(node, ast.Call) and leaf(node.func) == 'import_from_path':
-                values, _ = bindings.values(node.args[1], path, gate_paths)
-                prefix = gate_paths.REPOSITORY + '/'
-                pending.extend(value.removeprefix(prefix) for value in values if value.startswith(prefix))
     return sources
 
 
@@ -578,7 +574,8 @@ def tool_hash(root):
 
 
 def interpreter_hash():
-    state = (sys.version, sys.flags, sys.get_int_max_str_digits(), sorted(BUILTIN_NAMES))
+    state = (sys.version, sys.flags, sys.get_int_max_str_digits(), sorted(BUILTIN_NAMES),
+             sys.warnoptions, repr(warnings.filters))
     return text_sha256hex(repr(state))
 
 

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import pickle
 import subprocess
+import warnings
 
 import pytest
 
@@ -96,12 +97,22 @@ def test_warm_cache_preserves_surrogate_code_points(repo, monkeypatch):
     assert warm.of(source) == cold.of(source)
 
 
+def test_warning_filter_changes_interpreter_hash():
+    with warnings.catch_warnings():
+        warnings.simplefilter('default', SyntaxWarning)
+        default = pq.build.interpreter_hash()
+        warnings.simplefilter('error', SyntaxWarning)
+        assert pq.build.interpreter_hash() != default
+
+
 @pytest.mark.parametrize('source', [
     'import importlib as loader\nloader.import_module(name)\n',
     'from importlib import import_module as load\nload(name=name)\n',
     '__import__(name)\n',
     'from runpy import run_path\nrun_path(path_name=name)\n',
     'import runpy\nrunpy.run_module(name)\n',
+    'from importlib.util import spec_from_file_location\nfrom pathlib import Path\n'
+    "spec_from_file_location(name, Path(__file__).with_name('gate_' + 'paths.py'))\n",
 ])
 def test_tool_hash_rejects_computed_imports(tmp_path, source):
     put(tmp_path, 'tools/ci/graph_impact_pq.py', 'from tools.ci import helper\n')
