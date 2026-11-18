@@ -328,6 +328,22 @@ def test_a_conftest_selects_every_test_beneath_it(tmp_path):
     assert (live['median_selected_pct'], live['p90_selected_pct'], live['modules_over_half']) == (33.3, 100.0, 2)
 
 
+def test_root_conftest_enters_the_import_graph_and_source_inventory(tmp_path):
+    sources = {'conftest.py': 'from prismaquant import owner\n',
+               'tests/test_leaf.py': 'def test_leaf(): pass\n',
+               'prismaquant/__init__.py': '', 'prismaquant/owner.py': 'VALUE = 1\n'}
+    root = write_tree(tmp_path, sources)
+    graph = fanout.ImportGraph(root)
+    assert graph.files == sorted(sources)
+    assert graph.edges['conftest.py'] == {'prismaquant/__init__.py', 'prismaquant/owner.py'}
+    result = fanout.measure_fanout(root, population=['tests/test_leaf.py'])
+    assert result['dependents'] == {'prismaquant/__init__.py': 1, 'prismaquant/owner.py': 1}
+    assert result['conftest_source_modules'] == 2
+    assert result['conftest_source_imports'] == [
+        'conftest.py -> prismaquant/__init__.py', 'conftest.py -> prismaquant/owner.py']
+    assert {path: (root / path).read_text(encoding='utf-8') for path in sources} == sources
+
+
 def test_a_tool_named_by_path_brings_its_imports_and_a_named_test_does_not(tmp_path):
     root = write_tree(tmp_path, {
         'tests/test_runs_a_tool.py': 'TOOL = ROOT / "tools/fleet/runner.py"\n',
