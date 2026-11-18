@@ -5,6 +5,7 @@ The tiny runner is a unit-test double, never operational model evidence.
 """
 import copy
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -171,3 +172,97 @@ def test_invalid_single_file_header_is_not_complete_checkpoint_coverage(tmp_path
     (tmp_path / "model.safetensors").write_bytes(b"not a safetensors checkpoint")
     with pytest.raises(RuntimeError, match="header|safetensors|checkpoint"):
         cost_streaming_identity._local_checkpoint_shards(tmp_path)
+
+
+def _assert_streamed_identity_digest_outcomes():
+    consumer = sys.modules["prismaquant.streamed_model_identity"]
+    owner = sys.modules["prismaquant.digests"]
+    where = "compatibility fixture"
+    body = {
+        "config": {"model_type": "fixture"},
+        "weight_map": {"layer.weight": "fixture.safetensors"},
+        "shards": [{"path": "fixture.safetensors", "size": 8, "sha256": "b" * 64}],
+    }
+    good = {"schema": consumer.STREAMED_MODEL_IDENTITY_SCHEMA, **body,
+            "content_sha256": canonical_json_sha256(body, where=where)}
+    values = [None, 1, int("1" * 64), "a" * 63, "a" * 65, "A" * 64, "g" * 64, "a" * 64 + "\n"]
+    exact = "459745ebbe76cae9e9180dca5443516726434c38e13ef0c226ff4ba038e1b058"
+    mismatch = "c2c370868c61bfba7c050eb4080eeadabd956e365e1aef8e79cd0fa31fe9dbb4"
+    lacks = "5ef1f8d6c1ed024c5b4d2cab7141a39003401e1f652c4419e4c38a3245008b6a"
+    malformed = "3de69b17b3f9a81cc58593e72c790f01a708a36be3d465456778be6c38e065a6"
+    refusals = {
+        exact: "compatibility fixture requires exact model content_sha256",
+        mismatch: "compatibility fixture model content_sha256 does not match its source shard identity",
+        lacks: "compatibility fixture model shard 0 lacks content sha256",
+        malformed: "compatibility fixture model shard 0 is malformed",
+    }
+    for case, expected in (
+        ("valid", "febf379436d516cddd830c627ad8c0bee8958dd2630e27ad3cc13ff02c3b8e00"),
+        *((f"content{i}", digest) for i, digest in enumerate(
+            [exact, exact, mismatch, exact, exact, mismatch, exact, exact]
+        )),
+        *((f"shard{i}", digest) for i, digest in enumerate([
+            lacks, lacks, "25653e233105ee6babff840463180b0586491d1a0a5378d07353e41a0214c6b8",
+            lacks, lacks, "86205872cdb06870761b1a5df19829e6435234923dd68a6cc0ee1c3d088e9787",
+            lacks, lacks,
+        ])),
+        ("uppercase-content", "99433c0e94fac86e860eb90e794fc61be205dac969bd710354771062298da868"),
+        ("malformed-shard", malformed),
+    ):
+        identity = copy.deepcopy(good)
+        if case.startswith("content"):
+            identity["content_sha256"] = values[int(case[-1])]
+        elif case.startswith("shard"):
+            identity["shards"][0]["sha256"] = values[int(case[-1])]
+            identity["content_sha256"] = canonical_json_sha256(
+                {key: identity[key] for key in body}, where=where
+            )
+        elif case == "uppercase-content":
+            identity["content_sha256"] = good["content_sha256"].upper()
+        elif case == "malformed-shard":
+            identity["shards"] = [None]
+        try:
+            outcome = ("return", consumer.validate_streamed_model_identity(identity, where=where))
+        except Exception as error:
+            kind = type(error)
+            outcome = (f"{kind.__module__}.{kind.__qualname__}", str(error))
+        if expected in refusals:
+            assert outcome == ("builtins.RuntimeError", refusals[expected]), case
+        assert owner.bytes_sha256hex(repr(outcome).encode("utf-8")) == expected, case
+
+    contradictory = copy.deepcopy(good)
+    contradictory["checkpoint_weight_map"] = {"layer.weight": None}
+    contradictory["content_sha256"] = canonical_json_sha256(
+        {key: contradictory[key] for key in (*body, "checkpoint_weight_map")}, where=where
+    )
+    with pytest.raises(RuntimeError) as refusal:
+        consumer.validate_streamed_model_identity(contradictory, where=where)
+    assert type(refusal.value) is RuntimeError
+    assert str(refusal.value) == "compatibility fixture model checkpoint_weight_map is malformed"
+
+
+def test_streamed_identity_validation_preserves_digest_outcomes():
+    _assert_streamed_identity_digest_outcomes()
+
+
+def test_streamed_identity_validation_uses_shared_sha256_grammar(
+    single_file_source_checkpoint, tmp_path, monkeypatch
+):
+    _assert_streamed_identity_digest_outcomes()
+    consumer = sys.modules["prismaquant.streamed_model_identity"]
+    owner = sys.modules["prismaquant.digests"]
+    root, runner, _ = single_file_source_checkpoint
+    _, identity = _build_single_file_proof_fixture(root, runner, tmp_path)
+    real_is_sha256hex = owner.is_sha256hex
+    calls = []
+
+    def record(value):
+        calls.append(value)
+        return real_is_sha256hex(value)
+
+    monkeypatch.setattr(owner, "is_sha256hex", record, raising=False)
+    monkeypatch.setattr(consumer, "is_sha256hex", record, raising=False)
+    consumer.validate_streamed_model_identity(identity, where="single-file grammar fixture")
+    assert calls == [str(identity["content_sha256"]).lower(), *(
+        str(shard["sha256"]).lower() for shard in identity["shards"]
+    )]
