@@ -488,6 +488,26 @@ def test_census_loo_band_refuses_interpolated_cell_without_loo_record(record):
         drop_census_interpolated_within_loo(candidates, costs, loo)
 
 
+def test_census_filter_refuses_non_mapping_loo_without_changes():
+    import copy
+
+    from prismaquant.allocator_candidates import (
+        CensusLooBandError, drop_census_interpolated_within_loo,
+    )
+
+    for invalid in ([], "invalid", 1):
+        candidates, costs, _loo = _census_world()
+        report = {"keep": True}
+        before = copy.deepcopy((candidates, costs, invalid, report))
+        message = ("leave_one_anchor_out must be a mapping, got "
+                   f"{type(invalid).__name__}")
+        with pytest.raises(CensusLooBandError) as raised:
+            drop_census_interpolated_within_loo(
+                candidates, costs, invalid, report=report)
+        assert str(raised.value) == message
+        assert (candidates, costs, invalid, report) == before
+
+
 def test_census_loo_band_prints_its_own_report_line(capsys, monkeypatch):
     from prismaquant import allocator_candidates as ac
 
