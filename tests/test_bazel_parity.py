@@ -133,3 +133,28 @@ def test_receipt_parity_refuses_two_empty_node_inventories():
     assert str(refused.value) == 'empty node inventory'
     assert expected == {}
     assert actual == {}
+
+
+def test_zipped_bazel_receipts_keep_exact_nodes_and_leave_archives_unchanged(tmp_path):
+    import zipfile
+
+    a = {'tests/test_a.py::test_pass': 'passed', 'tests/test_a.py::test_skip': 'skipped'}
+    b = {'tests/test_b.py::test_fail': 'failed'}
+    for name, member, nodes in (
+        ('a', 'inventory.json', a),
+        ('b', 'inventory.json', b),
+        ('ignored', 'nested/inventory.json', {'tests/test_c.py::test_ignore': 'passed'}),
+    ):
+        outputs = tmp_path / name / 'test.outputs'
+        outputs.mkdir(parents=True)
+        with zipfile.ZipFile(outputs / 'outputs.zip', 'w') as archive:
+            archive.writestr(member, json.dumps({'nodes': nodes}))
+            if member == 'inventory.json':
+                archive.writestr('unrelated.txt', 'Not an inventory.')
+
+    before = {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()}
+    actual = bazel_parity.bazel_nodes(tmp_path)
+    expected = a | b
+    assert actual == expected
+    assert bazel_parity.compare_receipts(expected, actual) == {'nodes': 3, 'files': 2}
+    assert {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()} == before
