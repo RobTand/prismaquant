@@ -64,6 +64,18 @@ def identity_document():
     return doc, current
 
 
+def test_forward_recovery_refuses_a_batch_count_outside_the_bound_partition():
+    from prismaquant.joint_forward_resume import validate_forward_state, ForwardRecoveryRefused
+    doc, current = identity_document()
+    doc['n_batches'] = 4
+    saved_doc, saved_current = copy.deepcopy(doc), copy.deepcopy(current)
+    with pytest.raises(ForwardRecoveryRefused) as exc:
+        validate_forward_state(doc, bind_identity=current, campaign_identity=doc['campaign_identity'])
+    assert str(exc.value) == 'forward coverage geometry differs'
+    assert doc == saved_doc
+    assert current == saved_current
+
+
 @pytest.mark.parametrize('field,value', [('source_model', {'content': 'x'}),
     ('calibration_sha256', 'f' * 64), ('seed_base', 7001), ('n_probes', 3),
     ('temperature', 0.5), ('producer_source_sha256', 'f' * 64)])
