@@ -217,6 +217,19 @@ def test_missing_topk_declaration_refuses(model_dir: Path, profile):
         _report(model_dir, profile, config=config)
 
 
+def test_routing_refuses_more_active_experts_than_the_model_contains():
+    config = {"num_experts_per_tok": 5, "num_experts": 4}
+    observed = {"layer.experts": 4}
+    with pytest.raises(rt.ReadTrafficError) as caught:
+        rt.resolve_routing_factor(config, observed_expert_counts=observed, context="invalid-routing")
+    assert str(caught.value) == (
+        "[read_traffic] invalid-routing: config declares config.num_experts_per_tok=5 > "
+        "config.num_experts=4; a token cannot activate more experts than exist."
+    )
+    assert config == {"num_experts_per_tok": 5, "num_experts": 4}
+    assert observed == {"layer.experts": 4}
+
+
 def test_expert_count_disagreement_refuses(model_dir: Path, profile):
     config = json.loads((model_dir / "config.json").read_text())
     config["num_experts"] = N_EXPERTS + 1
