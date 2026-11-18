@@ -30,3 +30,19 @@ def test_estimate_scales_active_bytes_with_act_width():
     act_hidden = active_hidden - grad
     act_wide = active_wide - grad
     assert abs(act_wide / act_hidden - 21504 / 5376) < 0.01
+
+
+def test_cache_headroom_keeps_the_explicit_default_without_model_dimensions(tmp_path):
+    import json
+
+    assert A.pick_cache_headroom_gb(str(tmp_path), default=12.5) == (
+        12.5, {"reason": "no config.json", "headroom_gb": 12.5})
+    assert list(tmp_path.iterdir()) == []
+    path = tmp_path / "config.json"
+    for config in ({}, {"hidden_size": 64}, {"num_hidden_layers": 2}):
+        raw = json.dumps(config)
+        path.write_text(raw)
+        assert A.pick_cache_headroom_gb(str(tmp_path), default=12.5) == (
+            12.5, {"reason": "missing layer/hidden", "headroom_gb": 12.5})
+        assert path.read_text() == raw
+        assert set(tmp_path.iterdir()) == {path}
