@@ -10,9 +10,11 @@ on the boxes, against the real arms.
 
 from __future__ import annotations
 
+import gc
 import os
 import threading
 import time
+import weakref
 from pathlib import Path
 
 import pytest
@@ -165,6 +167,48 @@ def test_a_writer_failure_drops_what_was_queued_behind_it_unwritten():
             f"{written} landed after the failure")
     finally:
         release.set()
+        pub.close()
+
+
+def test_grouped_publication_failure_releases_child_traceback_owners():
+    class Owner:
+        pass
+
+    payload = bytearray(b"staged bytes")
+
+    def child_failure():
+        owner = Owner()
+        owner.payload = payload
+        try:
+            raise OSError("staged child failed")
+        except OSError as error:
+            return error, weakref.ref(owner)
+
+    child, owner_ref = child_failure()
+    group = ExceptionGroup("publication batch", [child])
+    assert child.__traceback__ is not None
+    assert owner_ref() is not None
+
+    def publish():
+        raise group
+
+    pub = _publisher()
+    try:
+        _stage(pub, PublicationJob(key="group", charged_bytes=12, publish=publish))
+        with pytest.raises(PublicationError) as caught:
+            pub.drain()
+        assert caught.value.__cause__ is group
+        assert pub.failure is group
+        assert group.message == "publication batch"
+        assert group.exceptions == (child,)
+        assert type(child) is OSError
+        assert str(child) == "staged child failed"
+        assert child.__traceback__ is None
+        assert pub.outstanding == 0
+        gc.collect()
+        assert owner_ref() is None
+        assert payload == b"staged bytes"
+    finally:
         pub.close()
 
 
