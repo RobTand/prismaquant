@@ -9966,6 +9966,17 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "tools/ci/record_durations",
+    srcs = [
+        "tools/ci/record_durations.py",
+    ],
+    data = [
+        "tools/ci/gate_durations.json",
+        "tools/ci/record_durations.py",
+    ],
+)
+
+pq_py_library(
     name = "archive/gridbook_lane_2026-09-02/prismaquant/dsv4_aura_cb_reprice",
     srcs = [
         "archive/gridbook_lane_2026-09-02/prismaquant/dsv4_aura_cb_reprice.py",

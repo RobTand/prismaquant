@@ -333,6 +333,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
+    shard_count = 2,
     timeout = "long",
 )
 
@@ -1011,6 +1012,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
+    shard_count = 2,
     timeout = "long",
 )
 
@@ -1773,7 +1775,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 3,
+    shard_count = 2,
     timeout = "moderate",
 )
 
@@ -4001,6 +4003,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
+    shard_count = 3,
     timeout = "long",
 )
 
@@ -10578,6 +10581,7 @@ pq_py_test(
         "tessera_serving_identity_snapshot.py",
         "tessera_withdrawn_v38.py",
     ],
+    shard_count = 2,
     timeout = "long",
 )
 
@@ -12034,6 +12038,7 @@ pq_py_test(
         "//:tools/ci/graph_impact_bazel.py",
         "//:tools/ci/graph_impact_imports.py",
         "//:tools/ci/graph_impact_pq.py",
+        "//:tools/ci/record_durations.py",
         "//:tools/ci/remote_gate.py",
         "//:tools/ci/static_checks.sh",
         "//:tools/ci/test_growth.py",
@@ -12411,7 +12416,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 6,
+    shard_count = 3,
     timeout = "long",
 )
 
@@ -14340,7 +14345,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 5,
+    shard_count = 6,
     timeout = "long",
 )
 
@@ -15053,7 +15058,6 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 2,
     timeout = "moderate",
 )
 
@@ -23876,7 +23880,7 @@ pq_py_test(
     data = [
         "//:files/prismaquant/serving_profile_specs",
     ],
-    shard_count = 8,
+    shard_count = 7,
     timeout = "long",
 )
 
@@ -25459,7 +25463,7 @@ pq_py_test(
         "tessera_serving_identity_snapshot.py",
         "tessera_withdrawn_v38.py",
     ],
-    shard_count = 2,
+    shard_count = 3,
     timeout = "long",
 )
 
@@ -30870,7 +30874,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 8,
+    shard_count = 4,
     timeout = "moderate",
 )
 
@@ -33254,7 +33258,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 3,
+    shard_count = 4,
     timeout = "long",
 )
 
@@ -34573,7 +34577,7 @@ pq_py_test(
     deps = [
         ":conftest",
     ],
-    shard_count = 2,
+    shard_count = 3,
     timeout = "moderate",
 )
 
@@ -40656,7 +40660,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 4,
+    shard_count = 5,
     timeout = "moderate",
 )
 
@@ -40797,6 +40801,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
+    shard_count = 2,
     timeout = "long",
 )
 
@@ -43473,7 +43478,6 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 2,
     timeout = "moderate",
 )
 
@@ -44307,7 +44311,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 3,
+    shard_count = 2,
     timeout = "moderate",
 )
 
@@ -46058,7 +46062,7 @@ pq_py_test(
     data = [
         "//:files/prismaquant/lane_specs",
     ],
-    shard_count = 6,
+    shard_count = 2,
     timeout = "moderate",
 )
 
@@ -46487,7 +46491,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 3,
+    shard_count = 2,
     timeout = "moderate",
 )
 
@@ -47901,7 +47905,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 7,
+    shard_count = 6,
     timeout = "moderate",
 )
 
@@ -48974,6 +48978,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
+    shard_count = 2,
     timeout = "long",
 )
 
@@ -52892,7 +52897,6 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 2,
     timeout = "moderate",
 )
 
@@ -53873,6 +53877,7 @@ pq_py_test(
         "//:tools/ci/graph_impact_bazel",
         "//:tools/ci/graph_impact_imports",
         "//:tools/ci/graph_impact_pq",
+        "//:tools/ci/record_durations",
         "//:tools/ci/remote_gate",
         "//:tools/ci/test_growth",
         "//:tools/collect_row_netdata",
@@ -57576,7 +57581,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
-    shard_count = 3,
+    shard_count = 4,
     timeout = "moderate",
 )
 
@@ -62263,6 +62268,7 @@ pq_py_library(
         "//:prismaquant/allocator_cycle",
         "//:prismaquant/staged_lease",
         "//:tools/__init__",
+        "//:tools/ci/record_durations",
         ":fixtures/pq3017/native-v2/native_probe",
         ":fixtures/pq3017/run2/native_probe",
         "@pq_pip//pillow",
@@ -62361,7 +62367,7 @@ pq_py_test(
     data = [
         "//:files/prismaquant/model_profiles/specs",
     ],
-    shard_count = 3,
+    shard_count = 2,
     timeout = "moderate",
 )
 
@@ -63192,6 +63198,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         ":conftest",
     ],
+    shard_count = 2,
     timeout = "long",
 )
 

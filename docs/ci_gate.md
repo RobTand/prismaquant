@@ -127,9 +127,10 @@ placements contribute maxima rather than successful runs alone. Slow tests keep
 measured exceptions. [Issue #3200](https://github.com/RobTand/prismaquant/issues/3200)
 owns reducing these costs; a higher measured limit does not make a test faster.
 The separate hang timeout remains 600 seconds per test. The budget file records
-its exact run evidence. Scheduling costs in `gate_durations.json` use 41285636094 attempts 1 and 2,
-and 41290209398 attempt 2. Each file and node uses its largest architecture
-median. The matrix applies cost factors of 1.0 for x64 and 0.625 for ARM. The paired
+its exact run evidence. File costs in `gate_durations.json` use amd64 Bazel executor
+seconds. Node costs use the largest architecture median from hosted runs 41285636094
+attempts 1 and 2, and 41290209398 attempt 2. The matrix applies cost factors of
+1.0 for x64 and 0.625 for ARM. The paired
 hosted median x64/ARM ratio across 135 files above five seconds is 1.716;
 1.6 is a conservative scheduling ratio. Each longest-first placement minimizes
 projected finish time on the actual runner. The recorded matrix carries the
