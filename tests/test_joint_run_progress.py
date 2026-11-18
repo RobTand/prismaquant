@@ -104,6 +104,23 @@ def test_an_unreadable_interval_is_refused_rather_than_replaced(monkeypatch):
     assert jrp.interval_seconds() == jrp.DEFAULT_INTERVAL_S
 
 
+def test_positive_environment_interval_controls_report_cadence(monkeypatch):
+    monkeypatch.setenv(jrp.INTERVAL_ENV, "7.5")
+    assert jrp.interval_seconds() == 7.5
+    clock, recorder = Clock(), Recorder()
+    progress = jrp.JointRunProgress(
+        layers=1, partitions=1, clock=clock, log=recorder.log, commit=recorder.commit)
+    progress.entry(layer=0, partition=0)
+    clock.advance(7.0)
+    progress.flush()
+    assert recorder.lines == []
+    assert recorder.records == []
+    clock.advance(0.5)
+    progress.flush()
+    assert len(recorder.lines) == 1
+    assert recorder.records == [("layer-0", 1)]
+
+
 # -- what the line says ----------------------------------------------------
 
 class FakeResolver:
