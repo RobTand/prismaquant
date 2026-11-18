@@ -249,3 +249,18 @@ def test_batched_direct_consumers_keep_their_contracts_charge_and_inputs(monkeyp
         assert all(torch.equal(now, before)
                    for now, before in zip((weight, inputs), batched.originals[name]))
     assert len(decoded) == len(batched.units) == len(scalar_decodes)
+
+
+def test_production_render_refuses_a_malformed_tessera_name():
+    from prismaquant.production_weight_cache import render_production_weight
+
+    weight = torch.arange(16, dtype=torch.float32).reshape(2, 8)
+    original = weight.view(torch.uint8).clone()
+    activations, levers = {}, {"tessera_weights_only": True}
+    with pytest.raises(ValueError) as error:
+        render_production_weight(weight, "TESSERA_BROKEN", qname="unit",
+                                 activations=activations, levers=levers)
+    assert str(error.value) == "'TESSERA_BROKEN' is not a Tessera format name"
+    assert torch.equal(weight.view(torch.uint8), original)
+    assert activations == {}
+    assert levers == {"tessera_weights_only": True}
