@@ -393,6 +393,18 @@ def test_pq_git_snapshot_identifies_changed_test_bodies(tmp_path, monkeypatch):
     assert before['contents']['tests/test_a.py'] != after['contents']['tests/test_a.py']
 
 
+def test_explicit_missing_graph_base_refuses_without_changing_the_repository(tmp_path, monkeypatch):
+    import subprocess
+    from tools.ci import graph_impact_pq as pq
+    for args in [('init', '-q'), ('commit', '--allow-empty', '-qm', 'base')]:
+        subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', *args], cwd=tmp_path, check=True)
+    monkeypatch.delenv('GATE_GRAPH_BASE_MODE', raising=False)
+    before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+    with pytest.raises(ValueError, match=r'\Acannot resolve requested base missing-ref\Z'):
+        pq.base_revision(tmp_path, 'missing-ref')
+    assert {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()} == before
+
+
 def test_bazel_adapter_uses_query_when_v42_omits_source_edges(tmp_path):
     from tools.ci import graph_impact_bazel as bazel
     (tmp_path / 'deps').write_text('{"//t:test": []}')
