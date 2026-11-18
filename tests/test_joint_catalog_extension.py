@@ -364,6 +364,23 @@ def test_a_null_scope_run_is_admitted_through_the_derived_scope_at_every_site(tm
     assert from_band['sha256'] == bound['sha256']
 
 
+def test_v3_extension_returns_an_independent_frozen_campaign_binding(tmp_path, campaign, probe):
+    from prismaquant.joint_catalog_extension import extension_campaign_identity
+    inputs, _, capture, identity, _ = _scoped_case(tmp_path, campaign, probe)
+    bound = create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'extension.json',
+                             campaign_identity=identity)
+    path = Path(bound['path'])
+    raw = path.read_bytes()
+    document = json.loads(raw)
+    before = copy.deepcopy(document)
+    result = extension_campaign_identity(document)
+    assert isinstance(result, dict)
+    assert result == identity
+    result['path'] = '/changed-by-caller'
+    assert document == before
+    assert path.read_bytes() == raw
+
+
 def test_a_derived_scope_that_is_not_the_parents_refuses_at_every_site(tmp_path, campaign, probe):
     """The parent annotates another campaign (here, another checkpoint digest):
     the derived scope is still this plan's, and it is not the parent's, so the
