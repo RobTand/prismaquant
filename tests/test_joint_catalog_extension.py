@@ -565,6 +565,21 @@ def test_a_sealed_scope_header_keeps_the_v2_document_and_its_identity(tmp_path, 
     assert check_adjoint_run_header(header, **args, catalog_extension=plain)
 
 
+def test_v1_extension_reads_its_bound_capture_and_keeps_the_sealed_identity(tmp_path, campaign, probe):
+    from prismaquant.joint_catalog_extension import SCHEMA_V1
+    inputs, receipt, capture = _pair(tmp_path, campaign, probe)
+    document = {'schema': SCHEMA_V1, 'inputs': inputs, 'adjoint_capture': capture,
+                'adjoint_receipt_sha256': canonical_json_sha256(receipt, where='original capture'),
+                'evidence': verify_catalog_pair(inputs)}
+    bound = _write(tmp_path, 'legacy-extension.json', document)
+    before = {path: path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()}
+    result = require_extension(bound, run_header=stage_a_run_header(receipt),
+                               plan_sha256=inputs['extended_plan']['sha256'],
+                               prepared_sha256=inputs['extended_prepared']['sha256'])
+    assert result == receipt['run_identity']
+    assert {path: path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()} == before
+
+
 def test_additive_catalog_binds_original_capture_without_relabelling(tmp_path, campaign, probe):
     inputs, receipt, capture = _pair(tmp_path, campaign, probe)
     original = Path(capture['path']).read_bytes()
