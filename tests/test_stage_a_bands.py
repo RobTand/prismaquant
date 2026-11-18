@@ -156,6 +156,22 @@ def test_band_slices_equal_the_complete_receipt_slices(runs, tmp_path):
     assert _band(runs, "r10", 2)["boundary_storage"]["forward_recovery"] == recovery
 
 
+def test_band_checkpoint_refuses_an_extra_manifest_field_without_changes(runs):
+    from prismaquant.joint_adjoint_band import read_sealed_checkpoint
+    from prismaquant.joint_adjoint_checkpoints import adjoint_space, checkpoint_directory, checkpoint_seal_sha256
+    space = adjoint_space(runs.root / "baseline")
+    path = checkpoint_directory(space, 2) / "checkpoint.json"
+    record = json.loads(path.read_text())
+    record["unexpected"] = True
+    record["cotangent_sha256"] = checkpoint_seal_sha256(record)
+    path.write_text(json.dumps(record))
+    before = {p: p.read_bytes() for p in runs.root.rglob("*") if p.is_file()}
+    with pytest.raises(BandRefused) as exc:
+        read_sealed_checkpoint(space, 2)
+    assert str(exc.value) == f'{path} carries fields a sealed checkpoint does not'
+    assert {p: p.read_bytes() for p in runs.root.rglob("*") if p.is_file()} == before
+
+
 def test_band_refusals(runs):
     band_tail = _band(runs, "r10", 2)
     # A band for the wrong boundary: layer 0 reads checkpoint 1, not 2.
