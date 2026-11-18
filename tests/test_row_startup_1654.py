@@ -199,6 +199,33 @@ def test_a_placeholder_unit_is_read_once_on_a_reader_and_installed(monkeypatch, 
     assert record["source_weight_reads"] == 2 and record["source_weight_read_seconds"] >= 0
 
 
+def test_row_reread_refuses_a_replaced_capture_file(monkeypatch, tmp_path):
+    _, _, state = stream_fixture(monkeypatch, tmp_path)
+    weights = _placeholders(set())
+    stream = _loading_stream(state, weights, None)
+    unit = UNITS[0]
+    try:
+        stream.plan([[unit], [UNITS[1]], [UNITS[2]], [unit]])
+        stream.admit(0)
+        stream.admit(1)
+        manifest = json.loads(state["manifest"].read_text())
+        artifact = state["manifest"].parent / manifest["entries"][unit]["path"]
+        replacement = artifact.with_suffix(".replacement")
+        replacement.write_bytes(artifact.read_bytes())
+        replacement.replace(artifact)
+        before = {path: path.read_bytes() for path in state["capture"].rglob("*") if path.is_file()}
+        stream.admit(2)
+        with pytest.raises(RuntimeError) as error:
+            stream.admit(3)
+        assert str(error.value) == (
+            f"{unit}: a second read of the capture entry disagrees with the first "
+            "read's receipts, so the unit's inputs changed during this run")
+        assert {path: path.read_bytes() for path in state["capture"].rglob("*") if path.is_file()} == before
+        assert all(torch.equal(weight, REAL[name]) for name, weight in weights.items())
+    finally:
+        stream.close()
+
+
 def test_placeholder_units_bind_the_receipts_of_the_snapshot_they_replace(monkeypatch, tmp_path):
     """The A/B at the row stream: one arm snapshots every weight, the other
     streams two of them; both bind the same bytes into the same receipts and
