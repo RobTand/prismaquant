@@ -10,7 +10,7 @@ It accepts string subclasses.
 Both caller-side `str(...).lower()` conversions stay.
 Every mapping, schema, shard, canonicalization and content-equality check
 stays.
-Callers: 13 files outside the module and `archive/`, for example
+Callers: 13 Python files outside the module, `tests/` and `archive/`, for example
 `prismaquant/aura_cost.py`, `prismaquant/joint_cost_stage_a.py`,
 `prismaquant/streaming_production_cache.py` and
 `tools/full_kl_teacher_payload.py`.
