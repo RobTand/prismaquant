@@ -8,8 +8,10 @@ import tarfile
 
 import pytest
 
+from prismaquant.native_row_admission import admit_native_rows, load_measured_runtime_table
+
 from prismaquant.measured_runtime_prices import (
-    RuntimePriceError, identity_sha256, load_measured_runtime_table,
+    RuntimePriceError, identity_sha256,
     parse_runtime_context,
 )
 
@@ -34,7 +36,7 @@ def test_relation_context_keeps_a_distinct_derivation_identity():
 
 from types import SimpleNamespace
 from prismaquant.runtime_provenance import (
-    ArtifactReader, admit_fixed_resources, admit_native_rows, load_runtime_relation,
+    ArtifactReader, admit_fixed_resources, load_runtime_relation,
 )
 from prismaquant.measured_runtime_prices import (
     RuntimeBinding, RuntimeResources, OperatorMeasurement, MeasuredRuntimeRow,

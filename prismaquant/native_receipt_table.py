@@ -13,8 +13,8 @@ or ``native_moe_panel.consume_moe_receipt``); nothing is restated from a
 producer summary, and nothing is defaulted where the evidence is absent.
 
 What this module does not do: it does not admit anything. The written table
-is handed to ``measured_runtime_prices.load_measured_runtime_table``, whose
-producer admission (``runtime_provenance.admit_runtime_provenance``) decides.
+is handed to ``native_row_admission.load_measured_runtime_table``, whose
+producer admission (``native_row_admission.admit_runtime_provenance``) decides.
 There are **two** admitting gates and they answer about different objects, so
 the emission report carries two verdicts and never one collapsed answer:
 ``admit_native_rows`` attests the per-row prices ``build_runtime_resources``
@@ -73,12 +73,13 @@ from typing import Any, Mapping
 from .measured_runtime_prices import (
     PROVENANCE_CONTEXT_SCHEMA, PROVENANCE_IDENTITY_KIND, PROVENANCE_TABLE_SCHEMA,
     RANK_RESOURCES_SCHEMA, RuntimeBinding, RuntimePriceError, _object, _string,
-    identity_sha256, load_measured_runtime_table, parse_runtime_context,
+    identity_sha256, parse_runtime_context,
 )
 from . import record_fields
 from .native_panel_kind import DENSE_PANEL_SCHEMA, MOE_PANEL_SCHEMA, panel_kind
 from .runtime_provenance import SCHEMA as RELATION_SCHEMA, recompute_fixed_resources
 from .digests import DIRECT_ASCII_SPACED_LAX, file_sha256hex
+from .native_row_admission import load_measured_runtime_table
 
 EMISSION_SCHEMA = "prismaquant.native_receipt_table_emission.v1"
 #: The CLI's three answers; see the module docstring for what each one means.
@@ -123,10 +124,9 @@ PHASES = ("prefill", "decode")
 #: Moving it loosens nothing, because the binding that matters is per row and
 #: already exists, twice over:
 #:
-#: * ``runtime_provenance.admit_native_rows`` requires each row's *whole*
+#: * ``native_row_admission.admit_native_rows`` requires each row's *whole*
 #:   runtime record, ``native_libraries`` included, to equal the raw record of
-#:   the run its own binding names (``runtime_provenance.py`` ``:771``), so a
-#:   row cannot claim a runtime it was not measured on.
+#:   the run its own binding names. A row cannot claim another runtime.
 #: * ``runtime_provenance._load_runtime_relation`` requires every production
 #:   library any native run loaded to exist in the full-engine run at the same
 #:   digest (``:432``), so an extension one route loads is either shown to be
@@ -348,7 +348,7 @@ def _bind_routed_receipt(*, spec_binding: dict, panel: Mapping, panel_ref: dict,
             f"receipts it was handed declare ranks {[entry['rank'] for entry in entries]}")
     resources = routed_owner_rank_resources(
         panel, [(entry["rank"], entry["receipt_json"], entry["observation"]) for entry in entries],
-        where=f"native owner row {where}")
+        world_size=kind.world_size(panel), where=f"native owner row {where}")
     measurements = {}
     for phase in PHASES:
         cited = entries[routed_slowest_rank(resources, phase)]

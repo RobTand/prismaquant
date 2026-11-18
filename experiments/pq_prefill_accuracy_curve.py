@@ -37,7 +37,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.measured_runtime_prices import (  # noqa: E402
     RuntimePriceError, bootstrap_sum, parse_measured_runtime_table, parse_runtime_context)
-from prismaquant.runtime_provenance import admit_fixed_resources, admit_native_rows, load_runtime_relation  # noqa: E402
+from prismaquant.runtime_provenance import admit_fixed_resources, load_runtime_relation  # noqa: E402
+from prismaquant.native_row_admission import admit_native_rows  # noqa: E402
 
 SCHEMA = "prismaquant.prefill_accuracy_curve.v1"
 

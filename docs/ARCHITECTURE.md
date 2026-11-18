@@ -15967,7 +15967,7 @@ and a library path present in more than one panel must carry the same bytes.
 What may now differ is only which shared objects a row's own route loaded.
 
 Nothing is loosened, because the binding that carries the kernel is per row and
-already existed. `runtime_provenance.admit_native_rows` (`:771`) requires each
+already existed. `native_row_admission.admit_native_rows` requires each
 row's *whole* runtime record, `native_libraries` included, to equal the raw
 record of the run its own binding names, and `_load_runtime_relation`
 (`:418-432`) requires every production library any native run loaded to exist in
@@ -16008,7 +16008,7 @@ field: the declared route itself, canonically ordered by the same
 hashes, so no second canonical form exists and key order is not part of the
 answer. Its four callers are the dense emitter
 (`native_receipt_table.bind_native_receipt`), the dense expectation
-(`runtime_provenance.admit_native_rows`), the frozen MoE panel binding
+(`native_row_admission.admit_native_rows`), the frozen MoE panel binding
 (`native_moe_panel`, which carried the same collapse) and
 `experiments/pq_runtime_relation.py`.
 
@@ -16129,13 +16129,13 @@ numbers coincide. No default, stage, format or lane changed.
 
 Re-stamped (2026-09-13, `claude/560-fixed-resource-admission-consumer`)
 because **producer admission is now two flags, not one** (RobTand/prismaquant#560).
-`admit_native_rows` and `admit_fixed_resources` attest different objects: the
+`native_row_admission.admit_native_rows` and `runtime_provenance.admit_fixed_resources` attest different objects: the
 first attests the per-row prices `build_runtime_resources` hands the DP, the
 second attests the whole-engine charge the allocator adds once outside it.
 They shared one `producer_admitted` flag inside one `try`, so the
 fixed-resource refusal that fires for every v2 table discarded the native
-attestation that had passed. `admit_runtime_provenance` now raises only on the
-native gate and *returns* the fixed-resource refusal; the loader sets
+attestation that had passed. `native_row_admission.admit_runtime_provenance` raises only on the
+native gate and returns the fixed-resource refusal. `native_row_admission.load_measured_runtime_table` sets
 `native_rows_admitted`, `fixed_resources_admitted` and
 `fixed_resources_refusal`. `build_runtime_resources` refuses on
 `native_rows_admitted` — it reads `row.resources` and never
