@@ -212,6 +212,51 @@ def test_grouped_publication_failure_releases_child_traceback_owners():
         pub.close()
 
 
+def test_publication_failure_cycle_keeps_other_group_children_released():
+    class Owner:
+        pass
+
+    payload = bytearray(b"staged bytes")
+
+    def failure(message):
+        owner = Owner()
+        owner.payload = payload
+        try:
+            raise OSError(message)
+        except OSError as error:
+            return error, weakref.ref(owner)
+
+    spare, spare_ref = failure("spare")
+    first, first_ref = failure("first")
+    second, second_ref = failure("second")
+    first.__cause__ = second
+    second.__cause__ = first
+    group = ExceptionGroup("publication cycle", [spare, first])
+
+    def publish():
+        raise group
+
+    pub = _publisher()
+    try:
+        _stage(pub, PublicationJob(key="cycle", charged_bytes=12, publish=publish))
+        with pytest.raises(PublicationError) as caught:
+            pub.drain()
+        assert caught.value.__cause__ is group
+        assert pub.failure is group
+        assert group.exceptions == (spare, first)
+        assert first.__cause__ is second
+        assert second.__cause__ is first
+        errors = (spare, first, second)
+        assert [str(error) for error in errors] == ["spare", "first", "second"]
+        assert all(error.__traceback__ is None for error in errors)
+        assert pub.outstanding == 0
+        gc.collect()
+        assert all(ref() is None for ref in (spare_ref, first_ref, second_ref))
+        assert payload == b"staged bytes"
+    finally:
+        pub.close()
+
+
 def test_what_landed_before_a_failure_is_still_reported_for_recovery():
     release = threading.Event()
     pub = _publisher()
