@@ -396,6 +396,21 @@ pq_py_test(
 )
 
 pq_py_library(
+    name = "test_concentration_shared_expert_wire_lib",
+    srcs = [
+        "test_concentration_shared_expert_wire.py",
+    ],
+    deps = [
+        "//:tools/__init__",
+        "//:tools/pq_block_concentration",
+        "@pq_pip//numpy",
+        "@pq_pip//safetensors",
+        "@pq_pip//tessera_quant",
+        "@pq_pip//torch",
+    ],
+)
+
+pq_py_library(
     name = "fixtures/pq3017/native-v2/bf16_oracle",
     srcs = [
         "fixtures/pq3017/native-v2/bf16_oracle.py",
@@ -55183,6 +55198,16 @@ pq_py_library(
         "@pq_pip//pytest",
         "@pq_pip//torch",
     ],
+)
+
+pq_py_test(
+    name = "test_concentration_shared_expert_wire",
+    path = "tests/test_concentration_shared_expert_wire.py",
+    library = ":test_concentration_shared_expert_wire_lib",
+    deps = [
+        ":conftest",
+    ],
+    timeout = "moderate",
 )
 
 pq_py_library(
