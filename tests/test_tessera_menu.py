@@ -310,6 +310,14 @@ def test_tp_degree_is_a_per_unit_legality_input_and_knows_the_direction():
     assert row_8, "TP=8 must not empty the menu on a shape that shards"
 
 
+def test_tp_shape_refuses_a_fractional_output_shard_without_changes():
+    shape = [15, 24]
+    with pytest.raises(tm.TesseraMenuError) as exc:
+        tm.shard_shape(shape, tp_degree=2, parallel_kind=tm.PARALLEL_COLUMN)
+    assert str(exc.value) == "shape (15, 24) is not divisible by tp_degree 2 on the column-parallel axis"
+    assert shape == [15, 24]
+
+
 def test_tp_gate_refuses_a_shard_that_does_not_divide():
     """An indivisible axis is a refusal with a named reason, not a silent pass."""
     family, rung = parse_tessera_format_name("TESSERA_E2M1_K2_R896")
