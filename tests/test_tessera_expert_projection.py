@@ -444,6 +444,15 @@ def test_bind_accepts_the_producers_whole_unpacked_units():
     assert (unit["rows"], unit["cols"]) == (4, 8)
 
 
+def test_projection_binding_refuses_a_non_object_producer_record():
+    declared = _declared()
+    for projection in (None, [], 17):
+        with pytest.raises(ExpertProjectionError) as error:
+            bind_expert_projection(projection, declared=declared)
+        assert str(error.value) == "producer projection is not an object"
+        assert declared == _declared()
+
+
 @pytest.mark.parametrize("mutate, expected", [
     (lambda p: p.update(schema="tessera.expert_projection.v0"), "schema"),
     (lambda p: p["stacks"][STACK].update(source_layout="out_first_chunked"),
