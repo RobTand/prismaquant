@@ -93,4 +93,24 @@ def test_tessera_only_transient_anchor_keeps_fused_static_identity(
     assert set(identities) == set(modules)
 
 
+def test_anchor_identity_refuses_duplicate_formats_without_changes():
+    from copy import deepcopy
+    import prismaquant.streaming_production_cache as streaming
+    records = {'linear': {'shape': [2, 2], 'sha256': 'a' * 64}}
+    identity = {
+        'schema': streaming.PRODUCTION_ANCHOR_RENDERER_IDENTITY_SCHEMA,
+        'source_weight_binding': 'complete_streamed_model_content_identity',
+        'source_model': _model_identity('duplicate-formats'),
+        'formats_by_qname': {'linear': ['FP8_E4M3']}, 'requested_entries': 1,
+        'source_weights': {'complete': True, 'scope': 'sparse_anchor_plan', 'records': records,
+                           'identity_sha256': streaming._canonical_json_sha256(records, where='test')}}
+    assert streaming.validate_completed_production_anchor_identity(identity, where='test') == identity
+    identity['formats_by_qname']['linear'].append('FP8_E4M3')
+    identity['requested_entries'] = 2
+    before = deepcopy(identity)
+    with pytest.raises(ValueError) as exc:
+        streaming.validate_completed_production_anchor_identity(identity, where='test')
+    assert str(exc.value) == 'test: invalid production-anchor plan'
+    assert identity == before
+
 from priced_model_screen import priced_model_screen  # noqa: F401  (module-scoped model screen)
