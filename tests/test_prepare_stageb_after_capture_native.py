@@ -65,6 +65,20 @@ def test_the_resources_are_a_native_cpu_profile():
     assert wrapper.RESOURCES.memory_gib <= 16
 
 
+def test_preparation_proof_files_refuse_unpaired_band_digests(tmp_path):
+    from tools.stage_b_preparation_submission import _proof_files
+    bands = [tmp_path / "first.json", tmp_path / "second.json"]
+    digests = ["a" * 64]
+    args = SimpleNamespace(adjoint_receipt=None, adjoint_receipt_sha256=None, adjoint_band=bands,
+                           adjoint_band_sha256=digests)
+    with pytest.raises(ValueError) as refusal:
+        _proof_files(args)
+    assert str(refusal.value) == "every --adjoint-band needs one --adjoint-band-sha256"
+    assert bands == [tmp_path / "first.json", tmp_path / "second.json"]
+    assert digests == ["a" * 64]
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_no_retired_submitter_or_progress_phase_remains():
     source = (ROOT / "tools" / "prepare_stageb_after_capture.py").read_text()
     assert re.search(r'--progress-(?:phase|grace-s)\b', source) is None
