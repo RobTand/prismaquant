@@ -365,6 +365,14 @@ def test_a_record_cannot_be_opened_for_a_lane_outside_the_vocabulary(tmp_path):
         open_lane_shipcard(model_dir, "nvfp4_cb")
 
 
+def test_open_lane_shipcard_refuses_missing_artifact_without_publication(tmp_path):
+    missing = tmp_path / "missing"
+    with pytest.raises(LaneShipcardError) as excinfo:
+        open_lane_shipcard(missing, "tessera", shipcard_path=tmp_path / "shipcard.json")
+    assert str(excinfo.value) == f"artifact directory does not exist: {missing}"
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize("lane", LANE_IDS)
 def test_every_lane_can_open_a_record(tmp_path, lane):
     """A lane in the vocabulary whose card cannot be opened cannot ship."""
