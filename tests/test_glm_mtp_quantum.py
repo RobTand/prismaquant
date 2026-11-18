@@ -294,6 +294,26 @@ def test_a_served_activation_policy_refuses(env):
         env.run()
 
 
+def test_mtp_probe_refuses_low_free_memory_before_hidden_reads():
+    layer = _layer()
+    model = glm_mtp.MtpCheckpointModel(layer)
+    ids, hidden, embed, head = _inputs(layer.config.hidden_size)
+    before = {name: parameter.detach().clone() for name, parameter in model.named_parameters()}
+    reads, reports = [], []
+
+    def read(index):
+        reads.append(index)
+        return hidden[index:index + 1]
+
+    with pytest.raises(RuntimeError) as error:
+        quantum.mtp_backward(model, embed, head, ids, read, seed=SEED_BASE, device="cpu",
+                             min_free_gib=2.0, free_gib=lambda: 1.0, report=reports.append)
+    assert str(error.value) == "MTP probe crossed the free memory floor"
+    assert reads == reports == []
+    assert all(torch.equal(parameter, before[name]) for name, parameter in model.named_parameters())
+    assert all(parameter.grad is None for parameter in model.parameters())
+
+
 def test_hidden_states_stream_once_then_replay():
     reads = []
 
