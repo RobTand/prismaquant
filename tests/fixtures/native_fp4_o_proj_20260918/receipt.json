@@ -280,6 +280,7 @@
         }
       }
     },
+    "reference_served_quantizer": {"backend": "prismaquant_model", "dequant_kernel": null, "image_content_sha256": null, "op": null, "platform": null, "schema": "prismaquant.served_quantizer_identity.v1", "torch": null, "torch_git": null, "vllm": null},
     "probe_identity_sha256": "4ada5d70504061bb543e7a9d24469513b2db542e3cf1c4fb21957ac408dd547c",
     "runtime": {
       "arithmetic": {
@@ -613,7 +614,7 @@
       }
     }
   },
-  "panel_sha256": "31e6fe329186c0cf7d87e3cf172aee01fd15caef6ed48289bae4ac2ff07fd8d2",
+  "panel_sha256": "3d08f48384500b64c00d6e8ece29e13efc6738c963ab0ea6b4b247ec1a4f5ac8",
   "phases": {
     "decode": {
       "input": {
