@@ -14,6 +14,8 @@ import sys
 
 import pytest
 
+from tools.ci.record_durations import record_durations
+
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('bazel_build_files', ROOT / 'tools/bazel/build_files.py')
 build_files = importlib.util.module_from_spec(SPEC)
@@ -439,9 +441,23 @@ def test_the_graph_record_names_edges_cycles_tests_and_uncertain_modules(tmp_pat
 
 def test_long_files_are_sharded_and_given_a_long_timeout_only_when_needed():
     slow = build_files.test_attributes('tests/test_slow.py', {'files': {'tests/test_slow.py': 170.2}})
-    assert slow['shard_count'] == 5 and slow['timeout'] == 'moderate'
+    assert slow['shard_count'] == 3 and slow['timeout'] == 'moderate'
     quick = build_files.test_attributes('tests/test_in.py', {'files': {'tests/test_in.py': 3.0}, 'slowest_shard': {'tests/test_in.py': 120.0}})
     assert 'shard_count' not in quick and quick['timeout'] == 'long'  # a measured shard ran 120 s somewhere
+
+
+def test_record_durations_sums_shard_times_and_keeps_the_largest_total(tmp_path):
+    table, first, second = (tmp_path / name for name in ('durations.json', 'first.log', 'second.log'))
+    table.write_text('{"files": {"tests/test_old.py": 3}, "nodes": {"tests/test_one.py::test_a": 1}}')
+    first.write_text('\x1b[32m//tests:test_two  PASSED\x1b[0m in 3.0s\n'
+                     '  Stats over 2 runs: max = 3.0s, min = 2.0s, avg = 2.5s, dev = 0.5s\n'
+                     '//tests:test_one  PASSED in 1.2s\n')
+    second.write_text('//tests:test_two  PASSED in 4.0s\n')
+    record_durations(table, [first, second])
+    result = json.loads(table.read_text())
+    assert 'first, second' in result.pop('source')
+    assert result == {'files': {'tests/test_one.py': 1.2, 'tests/test_two.py': 5.0},
+                      'nodes': {'tests/test_one.py::test_a': 1}}
 
 
 def test_a_test_importing_another_test_depends_on_its_library_not_its_test():
@@ -498,7 +514,7 @@ def test_generated_packages_hold_libraries_tests_and_shards(tmp_path):
     slow = tests[tests.index('name = "test_slow"'):].split('\n)\n', 1)[0]
     # Keep the conftest, the launched program, and the shards.
     assert '":conftest"' in slow and '"//:prismaquant/child"' in slow
-    assert 'shard_count = 3' in slow
+    assert 'shard_count = 2' in slow
     deep = tests[tests.index('name = "g3job/test_deep"'):].split('\n)\n', 1)[0]
     assert '":conftest"' in deep and '":g3job/conftest"' in deep
     held = tests[tests.index('name = "test_held"'):].split('\n)\n', 1)[0]

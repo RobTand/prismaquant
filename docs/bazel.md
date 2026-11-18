@@ -135,11 +135,12 @@ remain serial. The shard request cap remains 55 minutes and the controller's
 per-shard await deadline remains 58 minutes. Mergify's `checks_timeout` and merge
 conditions stay unchanged.
 
-Fallback shards balance the measured file times in `tools/ci/gate_durations.json`,
-mapped to Bazel test labels. These are hosted Python 3.12 JUnit totals, not remote
-scheduling measurements. Longest tests are placed first on the least-loaded
-shard, with the measured median used for untimed tests. Build-only targets are
-distributed by count. Without matching timings, all targets are balanced by count.
+`tools/ci/gate_durations.json` records the sum of executor seconds across test
+shards from amd64 post-merge records. The generator splits tests above 60 seconds
+into up to eight shards. Run `python tools/ci/record_durations.py LOG...` to update the file times.
+Fallback assigns the longest tests first to the shard with the lowest total time.
+It uses the median for untimed tests and distributes build-only targets by count.
+Without matching file times, fallback distributes all targets by count.
 
 Mergify's `max_parallel_checks: 1` and per-PR workflow concurrency
 bound gate overlap. There is no shared GitHub job concurrency group, because
