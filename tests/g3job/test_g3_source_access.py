@@ -1,4 +1,7 @@
 """Observe source payload/hash access and candidate installation on tiny CPU tensors."""
+import json
+import struct
+
 import pytest
 import torch
 
@@ -130,3 +133,15 @@ def test_consumed_original_retains_payload_read_and_own_digest_check(
         assert installer.hash.submitted == 1
     finally:
         installer.hash.close()
+
+
+def test_g3_header_refuses_tensor_extent_that_disagrees_with_shape(tmp_path):
+    header = json.dumps({"weight": {"dtype": "F32", "shape": [2], "data_offsets": [0, 4]}}).encode()
+    original = struct.pack("<Q", len(header)) + header + bytes(8)
+    shard = tmp_path / "model.safetensors"
+    shard.write_bytes(original)
+    with pytest.raises(ValueError) as caught:
+        readset.shard_header(shard)
+    assert str(caught.value) == f"{shard}: corrupt tensor extent weight"
+    assert list(tmp_path.iterdir()) == [shard]
+    assert shard.read_bytes() == original

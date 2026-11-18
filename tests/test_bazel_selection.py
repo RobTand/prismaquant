@@ -308,9 +308,13 @@ def test_wheel_repository_inventory_keeps_each_canonical_package_separate():
 
 @pytest.mark.parametrize('labels', [[], ['//tests:test_consumer'],
     ['@@rules_python++pip+pq_pip//numpy:pkg']])
-def test_missing_canonical_wheel_inventory_refuses_opaque_hub_selection(labels):
-    with pytest.raises(selection.SelectionError, match='wheel'):
-        selection.wheel_repositories(labels)
+def test_missing_canonical_wheel_inventory_refuses_opaque_hub_selection(tmp_path, labels):
+    # Only bazel-diff needs the wheels; a main-repository query for the direct path names none.
+    assert selection.wheel_repositories(labels) == []
+    population = {'wheel_repositories': selection.wheel_repositories(labels)}
+    with pytest.raises(selection.SelectionError, match='revision graph'):
+        selection.collect_revision(ROOT, tmp_path, 'amd64', java='java', jar=tmp_path / 'v42.jar',
+                                   runner=None, queried={'population': population, 'query': tmp_path / 'q'})
 
 
 def test_bazel_diff_impact_query_uses_both_private_graph_snapshots(tmp_path):
@@ -696,12 +700,13 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
         {'rule': {'name': '//tests:test_unrelated', 'ruleClass': 'py_test'}},
         {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg', 'ruleClass': 'py_library'}},
     ]
-    tools = []
+    tools, queries = [], []
 
     def planning_command(command, **kwargs):
         if command[0] == 'git':
             return subprocess.run(command, **kwargs)
         if command[1] == 'query':
+            queries.append(command[2])
             return SimpleNamespace(returncode=0, stdout='\n'.join(map(json.dumps, rows)))
         tools.append(command[3])
         if command[3] == 'generate-hashes':
@@ -718,8 +723,10 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
         assert found['selection'] == 'impacted'
         assert found['architectures']['amd64']['population'] == [
             '//prismaquant:gen', '//tests:test_consumer']
+        assert queries == [selection.MAIN_QUERY]  # the direct path fetches no external repository
     else:
         assert tools == ['generate-hashes', 'generate-hashes', 'get-impacted-targets']
+        assert queries == [selection.DEPS_QUERY] * 2  # an add, delete, BUILD or symlink change: bazel-diff
 
 
 @pytest.mark.parametrize('layout', ['file list', 'filegroup'])

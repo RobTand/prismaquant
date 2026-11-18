@@ -82,3 +82,17 @@ def test_already_canonical_caller_is_preserved(tmp_path):
     doc, args = fixture(tmp_path)
     doc['campaign_identity'] = copy.deepcopy(doc['published_campaign_identity'])
     assert resolve_forward_campaign(doc, **args) == doc['campaign_identity']
+
+
+def test_recovery_refuses_changed_original_campaign_digests_without_writes(tmp_path):
+    for field in ('plan_sha256', 'prepared_sha256', 'read_manifest_sha256'):
+        doc, args = fixture(tmp_path)
+        doc['campaign_identity'][field] = 'd' * 64
+        doc_before, args_before = copy.deepcopy(doc), copy.deepcopy(args)
+        files_before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+        with pytest.raises(RuntimeError) as refusal:
+            resolve_forward_campaign(doc, **args)
+        assert str(refusal.value) == 'forward recovery original campaign differs in ' + field
+        assert doc == doc_before
+        assert args == args_before
+        assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == files_before

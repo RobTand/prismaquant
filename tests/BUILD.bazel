@@ -3226,6 +3226,7 @@ pq_py_library(
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/file_identity",
+        "@pq_pip//pytest",
     ],
 )
 
@@ -29224,6 +29225,20 @@ pq_py_library(
         ":test_make_uniform_assignment_lib",
         "@pq_pip//pytest",
         "@pq_pip//torch",
+    ],
+)
+
+pq_py_library(
+    name = "test_package_json_publication_3879_split_lib",
+    srcs = [
+        "test_package_json_publication_3879_split.py",
+    ],
+    deps = [
+        "//:prismaquant/__init__",
+        "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/digests",
+        "//:prismaquant/stage_a_chain_split",
+        "@pq_pip//pytest",
     ],
 )
 
@@ -57879,6 +57894,35 @@ pq_py_test(
     name = "test_joint_aura_lease_lifetime",
     path = "tests/test_joint_aura_lease_lifetime.py",
     library = ":test_joint_aura_lease_lifetime_lib",
+    deps = [
+        "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
+        "//:pqtel/__init__",
+        "//:prismaquant/lane_shipcard",
+        "//:prismaquant/shipcard_cli",
+        "//:tools/build_streamed_full_kl_teacher",
+        "//:tools/dsv4_wikitext_inputs",
+        "//:tools/full_kl_teacher_payload",
+        "//:tools/g3job/g3_pq_policy/__init__",
+        "//:tools/gold_engine_options",
+        "//:tools/gold_measurement_fidelity",
+        "//:tools/measure_served_gold",
+        "//:tools/measure_vllm_full_kl",
+        "//:tools/measure_vllm_wikitext_ppl",
+        "//:tools/pq_profile_child",
+        "//:tools/prepare_dsv4_wikitext_inputs",
+        "//:tools/prismaquant_source_bootstrap",
+        "//:tools/spec_decode_guard",
+        "//:tools/tessera_campaign_container",
+        "//:tools/tessera_fleet/__init__",
+        ":conftest",
+    ],
+    timeout = "moderate",
+)
+
+pq_py_test(
+    name = "test_package_json_publication_3879_split",
+    path = "tests/test_package_json_publication_3879_split.py",
+    library = ":test_package_json_publication_3879_split_lib",
     deps = [
         "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
         "//:pqtel/__init__",

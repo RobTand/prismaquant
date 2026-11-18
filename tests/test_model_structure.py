@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from types import SimpleNamespace
 
 import pytest
@@ -391,6 +392,21 @@ def test_packed_expert_format_group_uses_declared_projection_splits():
         "model.layers.0.mlp.experts.9.w2"
     )
     assert split_group != packed_group
+
+
+def test_model_structure_refuses_non_list_name_rewrite_rules():
+    for field in ("live_to_recipe", "recipe_to_source", "recipe_to_vllm"):
+        for bad in ("invalid", {"pattern": "weight"}):
+            payload = {
+                "schema": "prismaquant.model_structure.v1",
+                "id": "invalid-rules",
+                "naming": {field: bad},
+            }
+            original = copy.deepcopy(payload)
+            with pytest.raises(ValueError) as excinfo:
+                ModelStructureSpec.from_dict(payload)
+            assert str(excinfo.value) == "name rewrite rules must be a list"
+            assert payload == original
 
 
 def test_qwen35_dense_profile_uses_dense_structure_spec():
