@@ -65,3 +65,17 @@ def test_the_caller_names_the_phase_and_can_decline_to_report(tmp_path, monkeypa
 # declared. That it passes ``head`` for a prepare and nothing for a COST run is
 # asserted where both commands are already driven:
 # ``tests/test_tessera_joint_aura.py::test_explicit_source_prefetch_reaches_streamed_builder``.
+
+
+def test_prepare_manifest_refuses_changed_wire_bytes_before_decode(tmp_path):
+    from prismaquant.digests import bytes_sha256hex
+    from prismaquant.joint_prewarm_phases import load_prepare_read_set
+
+    path = tmp_path / "manifest.json"
+    changed = b"changed invalid JSON"
+    path.write_bytes(changed)
+    with pytest.raises(RuntimeError) as exc:
+        load_prepare_read_set(str(path), bytes_sha256hex(b"original bytes"), "a" * 64)
+    assert str(exc.value) == "joint prepare data manifest changed after submission"
+    assert set(tmp_path.iterdir()) == {path}
+    assert path.read_bytes() == changed
