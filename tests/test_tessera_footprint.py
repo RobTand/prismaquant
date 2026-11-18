@@ -13,6 +13,7 @@ whatever depth the encoder spent, and every one of them is inverted below.
 The rung *is* a rate; the flat ladder was a bug in three places (tessera
 `a96064b`, `eec18ba`).
 """
+from copy import deepcopy
 from fractions import Fraction
 
 import pytest
@@ -628,6 +629,17 @@ def test_the_channel_row_field_is_per_output_channel_not_per_code_row():
     plane_delta = ((k2_lut["total_bytes"] - int(k2_lut["container_side_bytes"]))
                    - (k2["total_bytes"] - int(k2["container_side_bytes"])))
     assert plane_delta == rows * columns // 16 // 2 - rows * 2
+
+
+def test_footprint_reader_refuses_an_unknown_wire_body_without_changes():
+    payload = tessera_tensor_payload_breakdown(
+        SHAPE, family="TESSERA_E4M3_K1", body_rate_q256=1024)
+    payload["body_kind"] = "unknown"
+    before = deepcopy(payload)
+    with pytest.raises(TesseraFormatError) as error:
+        validate_tessera_tensor_payload_breakdown(payload)
+    assert str(error.value) == "unknown body 'unknown'; tcq or window"
+    assert payload == before
 
 
 def test_a_window_or_channel_footprint_revalidates_as_itself():
