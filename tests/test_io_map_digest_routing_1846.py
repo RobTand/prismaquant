@@ -95,3 +95,24 @@ def test_io_unsealed_buffer_routes_exactly_once_after_read(tmp_path, monkeypatch
     raw, receipt, _signature = io_engine.read_file(path, len(BUFFERS[1]))
     assert seen == [BUFFERS[1]] and seen[0] is raw
     assert receipt["sha256"] == hashlib.sha256(BUFFERS[1]).hexdigest()
+
+
+def test_sealed_empty_file_keeps_its_digest_and_source_bytes(tmp_path):
+    path = tmp_path / "empty.bin"
+    path.write_bytes(b"")
+    before = path.stat()
+    raw, receipt, signature = io_engine.read_file(path, 0, sealed=True)
+    try:
+        assert receipt == {
+            "path": str(path), "bytes": 0, "sha256": hashlib.sha256(b"").hexdigest(),
+        }
+        assert len(raw) == 0 and bytes(raw) == b""
+        raw.require_sealed()
+        with raw.readonly() as view:
+            assert view.read() == b""
+        assert signature == (
+            before.st_dev, before.st_ino, 0, before.st_mtime_ns, before.st_ctime_ns
+        )
+        assert path.read_bytes() == b""
+    finally:
+        raw.close()
