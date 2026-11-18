@@ -164,6 +164,27 @@ def test_a_gate_that_knows_no_substitute_is_not_a_gate():
         )
 
 
+def test_route_receipt_refuses_invalid_observation_counts_without_changes():
+    from prismaquant.tessera_route_receipt import (
+        TesseraRouteReceiptError,
+        check_route_receipt,
+    )
+
+    for count in (True, -1, 1.5, "1"):
+        records = [{"route": "TESSERA_NVFP4", "decoder": NATIVE, "count": count}]
+        before = json.dumps(records)
+        with pytest.raises(TesseraRouteReceiptError) as error:
+            check_route_receipt(
+                priced_routes=["TESSERA_NVFP4"],
+                route_records=records,
+                substitute_decoders=["substitute_test_decoder"],
+            )
+        assert str(error.value) == (
+            f"route records[0] carries count {count!r}, not a non-negative integer"
+        )
+        assert json.dumps(records) == before
+
+
 def test_malformed_records_are_refused_with_the_index():
     from prismaquant.tessera_route_receipt import parse_route_records
 
