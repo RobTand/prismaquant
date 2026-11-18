@@ -539,7 +539,6 @@ def test_two_targets_with_one_name_refuse_generation():
 
 
 def test_check_names_each_stale_build_file_and_the_fix(tmp_path, monkeypatch):
-    monkeypatch.setattr(build_files, 'CYCLE_TABLE_ENFORCED', True)
     (tmp_path / 'tests').mkdir()
     (tmp_path / 'tests/BUILD.bazel').write_text('old\n')
     monkeypatch.setattr(build_files, 'generate', lambda root, extra: extra.update({build_files.CYCLE_FILE: '{}\n'})
@@ -550,14 +549,6 @@ def test_check_names_each_stale_build_file_and_the_fix(tmp_path, monkeypatch):
     assert build_files.CYCLE_FILE in str(stopped.value)
     assert 'tools/bazel/generate.sh' in str(stopped.value)
     assert (tmp_path / 'tests/BUILD.bazel').read_text() == 'old\n'
-
-
-def test_check_ignores_a_stale_cycle_table_until_it_is_enforced(tmp_path, monkeypatch):
-    (tmp_path / 'tests').mkdir()
-    (tmp_path / 'tests/BUILD.bazel').write_text('new\n')
-    monkeypatch.setattr(build_files, 'generate', lambda root, extra: extra.update({build_files.CYCLE_FILE: '{}\n'})
-                        or {'tests': 'new\n'})
-    assert build_files.main(['--check', '--root', str(tmp_path)]) == 0
 
 
 def test_a_target_that_reads_every_test_file_takes_one_glob_and_targets_are_in_hash_order():
