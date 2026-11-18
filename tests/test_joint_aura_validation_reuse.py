@@ -115,3 +115,13 @@ def test_joint_quality_refuses_a_divisible_axis_rank_render(shape):
     row["joint_operator_identity_sha256"] = joint_aura_rows.joint_identity_sha256(operator)
     with pytest.raises(ValueError, match="render/source geometry differs"):
         joint_aura_rows.validate_joint_aura_entry(row)
+
+
+def test_joint_row_refuses_signed_samples_that_disagree_with_their_squares():
+    row = _row(UNIT_A, [1, 2, 3])
+    row["signed_per_probe"][0] = row["signed_components_per_probe"][0]["weight"] = row["signed_components_per_probe"][0]["total"] = 2
+    before = copy.deepcopy(row)
+    with pytest.raises(ValueError) as error:
+        joint_aura_rows.validate_joint_aura_entry(row)
+    assert str(error.value) == "joint AURA signed/squared sample mismatch"
+    assert row == before
