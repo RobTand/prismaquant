@@ -158,3 +158,34 @@ def test_run_dev_mode_records_actual_tree_without_reconstruction(tmp_path, monke
     }
     assert batches == [current, []]
     assert len(warnings) == 1 and digest in warnings[0]
+
+
+def test_actual_execution_records_clean_fixture_git_and_source_proof(tmp_path, monkeypatch):
+    import subprocess
+
+    module = import_module(MODULES[0])
+    package, label, current, original = _fixture(module, tmp_path, monkeypatch, b"owned-payload")
+    root = tmp_path / module.__package__
+    package.rename(root)
+    monkeypatch.setattr(module, "__file__", str(root / label))
+    monkeypatch.delenv("PRISMAQUANT_IDENTITY_GIT_COMMIT", raising=False)
+
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
+
+    git("init", "-q")
+    git("add", "-f", ".")
+    git("-c", "user.name=Source fixture", "-c", "user.email=source@example.invalid",
+        "commit", "-qm", "fixture")
+    commit = git("rev-parse", "HEAD")
+    assert git("status", "--porcelain", "--untracked-files=all") == ""
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    assert module._actual_execution() == {
+        "git_commit": commit,
+        "producer_source_sha256": _legacy(current),
+        "reconstructed_source_sha256": _legacy(original),
+        "transition_module_sha256": hashlib.sha256(before[root / label]).hexdigest(),
+    }
+    assert {path: path.read_bytes() for path in before} == before
+    assert git("status", "--porcelain", "--untracked-files=all") == ""
+    assert git("rev-parse", "HEAD") == commit
