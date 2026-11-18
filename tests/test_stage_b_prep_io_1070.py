@@ -324,6 +324,20 @@ def test_publish_files_without_a_publication_writes_as_before(tmp_path):
     assert not d.exists()
 
 
+def test_publication_refuses_different_bytes_from_a_competing_writer(tmp_path, monkeypatch):
+    path = tmp_path / "record.json"
+    real_link = os.link
+    def competing_link(source, destination):
+        Path(destination).write_bytes(b"competing")
+        return real_link(source, destination)
+    monkeypatch.setattr(os, "link", competing_link)
+    with pytest.raises(ValueError) as exc:
+        io.publish_files(None, "records", [(path, b"requested", "record")])
+    assert str(exc.value) == f"refusing to overwrite differing bytes at {path}: a re-seal is a new reviewed directory, never an edit"
+    assert path.read_bytes() == b"competing"
+    assert list(tmp_path.iterdir()) == [path]
+
+
 def test_only_the_flag_binds_a_publication(tmp_path):
     root = tmp_path / "m"
     action = {"FLUX_JOB_ID": "123"}
