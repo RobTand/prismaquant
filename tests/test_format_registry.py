@@ -342,3 +342,21 @@ def test_producer_format_list_filters_eligibility_and_family(monkeypatch):
     assert [spec.name for spec in fr.list_producer_formats()] == ["other", "low", "high"]
     assert [spec.name for spec in fr.list_producer_formats("a")] == ["low", "high"]
     assert fr.list_producer_formats("missing") == []
+
+
+def test_disabled_compile_keeps_grouped_fp4_activation_values_and_input(monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("The factory or quantizer called torch.compile.")
+
+    monkeypatch.setattr(torch, "compile", forbidden)
+    x = torch.tensor([[0.4] * 15 + [6.0] + [0.8] * 15 + [12.0]], dtype=torch.float32, device="cpu")
+    before = x.clone()
+    expected = torch.tensor([[0.5] * 15 + [6.0] + [1.0] * 15 + [12.0]], device="cpu")
+    for setting in ("1", "true", "yes", "on", " ON "):
+        monkeypatch.setenv("PRISMAQUANT_DISABLE_RTN_COMPILE", setting)
+        result = fr._make_rtn("fp4_e2m1", 16)(x)
+        assert torch.equal(result, expected)
+        assert result.dtype == x.dtype
+        assert result.shape == x.shape
+        assert result.data_ptr() != x.data_ptr()
+        assert torch.equal(x, before)
