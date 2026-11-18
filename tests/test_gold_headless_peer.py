@@ -158,3 +158,14 @@ def test_a_relative_root_override_refuses():
             gold_headless_peer.repository_root()
     finally:
         del os.environ[gold_headless_peer.ROOT_ENV]
+
+
+def test_absolute_peer_root_override_keeps_the_declared_checkout(tmp_path, monkeypatch):
+    checkout = tmp_path / "other checkout"
+    checkout.mkdir()
+    marker = checkout / "marker"
+    marker.write_bytes(b"declared checkout")
+    monkeypatch.setenv(gold_headless_peer.ROOT_ENV, str(checkout))
+    assert gold_headless_peer.repository_root() == checkout
+    assert list(checkout.iterdir()) == [marker]
+    assert marker.read_bytes() == b"declared checkout"
