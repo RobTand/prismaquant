@@ -37,6 +37,18 @@ def selected(result):
     return {row['path'] for row in result['selected']}
 
 
+def test_gate_estimate_refuses_invalid_duration_values():
+    for value in (True, False, -1.0, float('nan'), float('inf'), '1'):
+        files = ['tests/test_one.py']
+        durations = {'files': {'tests/test_one.py': value}}
+        before = repr(durations)
+        with pytest.raises(ValueError) as error:
+            select.estimate(files, durations)
+        assert str(error.value) == 'file durations must be finite nonnegative seconds'
+        assert files == ['tests/test_one.py']
+        assert repr(durations) == before
+
+
 def test_reverse_imports_relative_imports_and_helper_closure(tmp_path):
     result = plan(project(tmp_path), ['prismaquant/owner.py'])
     assert selected(result) == {'tests/test_direct.py', 'tests/test_indirect.py', 'tests/test_helper.py'}
