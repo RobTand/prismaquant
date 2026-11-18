@@ -173,6 +173,22 @@ class TestTieDetection:
         assert not lm_head_is_tied_alias(str(tmp_path / "vlhead"), profile=DefaultProfile())
 
 
+def test_source_keys_without_an_index_read_all_shards_and_ignore_other_files(tmp_path):
+    from prismaquant.tied_embeddings import _source_tensor_keys
+
+    save_file({"model.embed_tokens.weight": torch.tensor([[1.0]])},
+              str(tmp_path / "a.safetensors"))
+    save_file({"wrapper.lm_head.weight": torch.tensor([[2.0]])},
+              str(tmp_path / "b.safetensors"))
+    (tmp_path / "notes.txt").write_bytes(b"not a tensor shard")
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    assert _source_tensor_keys(str(tmp_path)) == {
+        "model.embed_tokens.weight", "wrapper.lm_head.weight"}
+    assert source_has_lm_head_tensor(str(tmp_path), "lm_head") is True
+    assert source_has_lm_head_tensor(str(tmp_path), "other_head") is False
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+
+
 # --------------------------------------------------------------------------
 # Materialization: the alias, resolved through transformers' accessors
 # --------------------------------------------------------------------------
