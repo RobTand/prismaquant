@@ -150,3 +150,12 @@ def test_unparseable_blob_falls_back_to_file_size(tmp_path):
         dtype_bytes=2,
     )
     assert per_layer_weight == int(4096 * 0.90)
+
+
+def test_float64_source_estimate_casts_floats_and_keeps_integer_bytes_verbatim(tmp_path):
+    path = _write_model(tmp_path, {'model.layers.0.proj.weight': torch.zeros(10, 10, dtype=torch.float64),
+                                  'model.layers.0.index': torch.zeros(20, dtype=torch.uint8)})
+    before = {item.name: item.read_bytes() for item in tmp_path.iterdir()}
+    assert A.estimate_per_layer_bytes(path, num_layers=2, hidden_size=10,
+        nsamples=1, seqlen=1, dtype_bytes=2, act_mult=1) == (99, 119)
+    assert {item.name: item.read_bytes() for item in tmp_path.iterdir()} == before
