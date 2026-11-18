@@ -39,6 +39,22 @@ def test_real_producer_v3_is_readable_but_does_not_certify_placement(tmp_path, r
     assert "CUDA allocation argument domains were not observed" in verdict.blocking
 
 
+def test_report_refuses_duplicate_storage_identity_with_a_valid_file_digest(tmp_path):
+    document = report()
+    storages = document["observations"]["checkpoints"][0]["storages"]
+    storages.append(copy.deepcopy(storages[0]))
+    saved_document = copy.deepcopy(document)
+    reference = seal(tmp_path, document)
+    path = tmp_path / reference["path"]
+    saved_bytes = path.read_bytes()
+    with pytest.raises(RuntimePriceError) as error:
+        consumer.read_full_engine_resource_report(reference, root=tmp_path)
+    assert str(error.value) == "report observations checkpoint: duplicate storage identity"
+    assert document == saved_document
+    assert path.read_bytes() == saved_bytes
+    assert {item.relative_to(tmp_path).as_posix() for item in tmp_path.rglob("*")} == {reference["path"]}
+
+
 @pytest.mark.parametrize("domains", [[], {}, "unobserved", False])
 def test_missing_argument_observer_is_null_not_an_arbitrary_value(tmp_path, domains):
     document = report()
