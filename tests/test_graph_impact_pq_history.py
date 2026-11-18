@@ -282,6 +282,24 @@ def test_duplication_shrink_and_return_without_fixture_edit(repo, capsys, remain
     assert (repo / fixture).read_text() == ceiling
 
 
+def test_formatted_path_keeps_all_sources_in_its_declared_directory(tmp_path):
+    sources = {
+        'tests/test_reads.py': 'from pathlib import Path\n'
+                               'ROOT = Path(__file__).resolve().parents[1]\n'
+                               'path = ROOT / "tools/dynamic/%s.py" % "a"\n',
+        'tools/dynamic/a.py': 'VALUE = 1\n',
+        'tools/dynamic/b.py': 'VALUE = 2\n',
+        'tools/other.py': 'VALUE = 3\n',
+    }
+    for path, text in sources.items():
+        put(tmp_path, path, text)
+    live = pq.load_snapshot(tmp_path, files=sorted(sources),
+                            population=['tests/test_reads.py'], legacy=False)
+    assert live['reach'] == {'tests/test_reads.py': ['tools/dynamic/a.py', 'tools/dynamic/b.py']}
+    assert live['dependents'] == {'tools/dynamic/a.py': 1, 'tools/dynamic/b.py': 1, 'tools/other.py': 0}
+    assert {path: (tmp_path / path).read_text() for path in sources} == sources
+
+
 def test_graph_snapshots_built_for_another_base_are_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(pq, 'base_revision', lambda *args, **kwargs: 'b' * 40)
     for name in ('base', 'head'):
