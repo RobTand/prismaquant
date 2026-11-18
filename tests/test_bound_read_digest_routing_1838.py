@@ -353,3 +353,21 @@ def test_explicit_bound_reaches_the_staged_reader_without_pool_stat(tmp_path, mo
                         lambda *_args: pytest.fail("an oversized staged entry must refuse before the pin"))
     with pytest.raises(ValueError, match="staged input exceeds its read bound"):
         inputs.read_bound(bound, "unit", max_bytes=len(raw) - 1)
+
+
+def test_producer_identity_refuses_a_tensor_without_a_hashed_file():
+    import copy
+
+    source = {
+        "config_sha256": "a" * 64,
+        "auxiliary_sha256": {},
+        "files": {"known.safetensors": "b" * 64},
+        "tensors": {"layer.weight": "missing.safetensors"},
+    }
+    before = copy.deepcopy(source)
+    with pytest.raises(inputs.ExpertProjectionError) as refused:
+        inputs.require_source_identity(source)
+    assert str(refused.value) == (
+        "producer projection source.tensors['layer.weight'] must name a hashed file"
+    )
+    assert source == before
