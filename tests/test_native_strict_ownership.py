@@ -17,6 +17,16 @@ from test_native_strict_reader_contract import _forbid_source, _shard
 pytestmark = pytest.mark.usefixtures('native_staged_state')
 
 
+def test_manifest_without_a_tier_policy_refuses_before_resolver_creation(tmp_path, monkeypatch):
+    (manifest := tmp_path / 'manifest.json').write_bytes(b'unread input')
+    monkeypatch.setenv(residency_map.ENV_VAR, str(manifest))
+    with pytest.raises(ManifestRefused) as raised: residency_map.residency_resolver()
+    assert str(raised.value) == 'a staged manifest requires the active staged-tier policy'
+    assert residency_map._RESOLVER is None
+    assert list(tmp_path.iterdir()) == [manifest]
+    assert manifest.read_bytes() == b'unread input'
+
+
 def test_retained_phase_cannot_adopt_an_object_outside_its_namespace(tmp_path, monkeypatch):
     source = tmp_path / 'declared'
     raw = b'known-owned-namespace-content'
