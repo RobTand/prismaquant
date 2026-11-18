@@ -47,7 +47,7 @@ jobs:
       run: |
         unset BUILDBUDDY_API_KEY
         python -m pip install -q packaging uv==0.10.10
-        python -m tools.ci.graph_impact_pq --base HEAD --write head --snapshots "$RUNNER_TEMP"
+        python tools/ci/graph_impact_pq.py --base HEAD --write head --snapshots "$RUNNER_TEMP"  # the gate's own command line: the interpreter state is in the key
         python tools/ci/bazel_generated.py
   tests:
     if: github.event_name == 'workflow_dispatch'
