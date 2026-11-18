@@ -58,6 +58,18 @@ def test_settlement_rejects_invalid_windows(indices):
         context({}).settle_prefetched_layers(indices)
 
 
+def test_capture_resource_plan_refuses_one_cache_slot_before_model_reads(tmp_path):
+    from prismaquant.autoscale import streamed_calibration_resources
+    shapes = {'unit': [2, 2]}
+    counts = {'unit': 1}
+    with pytest.raises(ValueError, match='^invalid streamed calibration resource dimensions$'):
+        streamed_calibration_resources(tmp_path, unit_shapes=shapes, counts=counts, nsamples=1,
+            seqlen=1, max_act_rows=1, cache_slots=1, prefetch_workers=1, headroom_gb=0)
+    assert shapes == {'unit': [2, 2]}
+    assert counts == {'unit': 1}
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_shared_plan_prices_full_device_prefix_and_each_independent_cpu_output(glm_checkpoint):
     from prismaquant.autoscale import streamed_calibration_resources
     from prismaquant.model_profiles.glm5_next import Glm5NextProfile
