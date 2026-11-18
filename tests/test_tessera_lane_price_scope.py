@@ -57,3 +57,11 @@ def test_a_missing_contract_is_a_lookup_refusal(monkeypatch):
     monkeypatch.setattr(runtime, "installed_runtime_snapshot", missing)
     with pytest.raises(LookupError, match="no installed Tessera runtime contract"):
         lane.allocation_shape_price_scope(TARGET, tensor_parallel=1)
+
+
+def test_shape_price_scope_refuses_a_missing_serving_target_before_contract_reads(monkeypatch):
+    reads = _counted(monkeypatch)
+    with pytest.raises(LookupError) as exc:
+        lane.allocation_shape_price_scope(None, tensor_parallel=1)
+    assert str(exc.value) == "a shape-time table is admitted only under an explicit serving target: pass --tessera-platform, --tessera-runtime-image, --tessera-execution-mode and --tessera-residency"
+    assert len(reads) == 0
