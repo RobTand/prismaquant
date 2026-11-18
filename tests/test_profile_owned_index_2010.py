@@ -47,3 +47,17 @@ def test_new_owned_index_invalidates_previous_namespace_evidence():
     assert profile.source_tensor_name('model.layers.0.w') == 'model.layers.0.w'
     profile._declare_checkpoint_index({'weight_map': {'model.language_model.layers.0.w': 'b.safetensors'}})
     assert profile.source_tensor_name('model.layers.0.w') == 'model.language_model.layers.0.w'
+
+
+def test_wrapper_profile_refuses_a_direct_checkpoint_namespace_without_changes():
+    profile = profile_from_config({'model_type': 'qwen3_5_moe',
+                                  'architectures': ['Qwen3_5MoeForConditionalGeneration']})
+    profile._declare_checkpoint_index({'weight_map': {'model.layers.0.w': 'a.safetensors'}})
+    with pytest.raises(RuntimeError) as exc:
+        profile.source_tensor_name('model.layers.0.w')
+    assert str(exc.value) == (
+        'Qwen MoE wrapper architecture has direct model.layers.* source tensors in '
+        '<declared checkpoint index>; refusing the inconsistent config/index layout'
+    )
+    assert profile._declared_checkpoint_index == {'weight_map': {'model.layers.0.w': 'a.safetensors'}}
+    assert profile._qwen_checkpoint_source_layout is None
