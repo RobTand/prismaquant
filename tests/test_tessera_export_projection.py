@@ -453,6 +453,25 @@ def test_scope_refuses_a_partly_selected_stack(case):
         _scope(case)
 
 
+def test_export_source_refuses_a_tensor_present_in_two_indexed_shards(case):
+    from prismaquant.model_profiles import detect_profile
+
+    (case.model / "other.safetensors").write_bytes((case.model / SHARD).read_bytes())
+    (case.model / "model.safetensors.index.json").write_text(json.dumps({
+        "weight_map": {DENSE + ".weight": SHARD, ROUTER + ".weight": "other.safetensors"},
+    }))
+    profile = detect_profile(str(case.model))
+    before = {p.relative_to(case.model.parent): p.read_bytes()
+              for p in case.model.parent.rglob("*") if p.is_file()}
+    with pytest.raises(export.TesseraExportLaneError) as exc:
+        export._source_unit_shapes(case.model, profile)
+    assert str(exc.value) == (
+        "source checkpoint tensor 'model.layers.0.self_attn.out_proj.weight' occurs in multiple shards"
+    )
+    assert {p.relative_to(case.model.parent): p.read_bytes()
+            for p in case.model.parent.rglob("*") if p.is_file()} == before
+
+
 def test_scope_refuses_a_source_shard_the_producer_did_not_hash(case):
     tensor = f"{STACK}.0.w1.weight"
     source = _meta(case)[PROJECTION_KEY]["producer"]["source"]
