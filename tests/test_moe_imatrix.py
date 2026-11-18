@@ -217,6 +217,22 @@ def test_respects_existing_entries(ckpt):
     assert torch.equal(cw["model.layers.0.mlp.experts.down_proj"], pre)
 
 
+def test_expert_imatrix_refuses_a_checkpoint_without_weight_files(ckpt):
+    model_dir, act_dir = ckpt
+    (model_dir / "model.safetensors").unlink()
+    before = {p: p.read_bytes() for p in model_dir.parent.rglob("*") if p.is_file()}
+    cw: dict = {}
+    samples: dict = {}
+    with pytest.raises(FileNotFoundError) as exc:
+        synthesize_packed_expert_col_weights(
+            model_dir, act_dir, cw, profile=_IdentityProfile(), device="cpu",
+            activation_samples=samples)
+    assert str(exc.value) == f"no safetensors index under {model_dir}"
+    assert cw == {}
+    assert samples == {}
+    assert {p: p.read_bytes() for p in model_dir.parent.rglob("*") if p.is_file()} == before
+
+
 def test_missing_router_is_loud(ckpt, tmp_path):
     model_dir, act_dir = ckpt
     # Rebuild the checkpoint without the router weight.
