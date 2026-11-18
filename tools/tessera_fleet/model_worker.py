@@ -19,11 +19,13 @@ import runpy
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 
 RESULT_PREFIX = 'PB_TESSERA_RESULT='
 #: Unchanged by the move: it names records already written beside exports.
 SCHEMA = 'prismabuild.tessera-model.v1'
+SMALL_FILE_BYTES = 1024 * 1024
 
 
 def prepared_path(spec, host):
@@ -74,9 +76,16 @@ def producer_parts(root):
 
 
 
-def stamp(path):
-    info = Path(path).stat()
-    return [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+def stamp(path, *, check_content=None):
+    path = Path(path)
+    info = path.stat()
+    if check_content is None:
+        check_content = (info.st_size <= SMALL_FILE_BYTES or
+                         max(info.st_mtime_ns, info.st_ctime_ns) >= time.time_ns() - 1_000_000_000)
+    content = None
+    if check_content:
+        content = digest_json(path.read_bytes().hex()) if info.st_size <= SMALL_FILE_BYTES else digest_file(path)
+    return [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns, content]
 
 
 def verified_inputs(source, identity, cache_root):
@@ -109,7 +118,7 @@ def verified_inputs(source, identity, cache_root):
             path = source / name
             before = stamp(path)
             if cached.get(name) != {'stamp': before, 'sha256': digest}:
-                if digest_file(path) != digest or stamp(path) != before:
+                if digest_file(path) != digest or stamp(path, check_content=before[5] is not None) != before:
                     raise ValueError(f'source changed: {name}')
             snapshots[name] = {'stamp': before, 'sha256': digest}
         atomic_json(cache_path, snapshots)
@@ -118,7 +127,12 @@ def verified_inputs(source, identity, cache_root):
 
 def check_stamps(source, snapshots):
     for name, record in snapshots.items():
-        if stamp(Path(source) / name) != record['stamp']:
+        path = Path(source) / name
+        before = record['stamp']
+        current = stamp(path, check_content=len(before) > 5 and before[5] is not None)
+        if (current[:5] != before[:5] or
+                (len(before) > 5 and current != before) or
+                (len(before) == 5 and digest_file(path) != record['sha256'])):
             raise ValueError(f'source changed during export: {name}')
 
 
@@ -154,8 +168,10 @@ def inside(spec, mode, index, destination):
         path = Path(path)
         if path.parent.resolve() == source.resolve() and path.name in snapshots:
             record = snapshots[path.name]
-            if stamp(path) != record['stamp']:
-                raise ValueError(f'source changed: {path.name}')
+            try:
+                check_stamps(source, {path.name: record})
+            except ValueError:
+                raise ValueError(f'source changed: {path.name}') from None
             return record['sha256']
         return original_hash(path)
     parts.sha256_file = memoized_hash
@@ -266,9 +282,14 @@ def main(argv=None):
         verify_image(spec['image'])
         parts = producer_parts('encoder')
         source = Path(spec['source'])
-        before = {p.name: stamp(p) for p in source.iterdir() if p.is_file()}
+        before = {p.name: stamp(p, check_content=False) for p in source.iterdir() if p.is_file()}
+        cutoff = time.time_ns() - 1_000_000_000
+        checks = {name: value[2] <= SMALL_FILE_BYTES or max(value[3:5]) >= cutoff
+                  for name, value in before.items()}
+        before = {name: stamp(source / name, check_content=checks[name]) for name in before}
         identity = parts.source_identity(source)
-        after = {p.name: stamp(p) for p in source.iterdir() if p.is_file()}
+        after = {p.name: stamp(p, check_content=checks.get(p.name, True))
+                 for p in source.iterdir() if p.is_file()}
         if before != after:
             raise ValueError('source changed during preparation')
         result = {'source_identity': identity,
