@@ -69,6 +69,30 @@ def test_missing_refiner_is_explicit_and_zero_cap_does_not_claim_done():
     assert result['next_dependency'] == 'measurement_budget'
 
 
+def test_exhausted_acquisition_keeps_complete_and_unmeasured_domains_distinct():
+    domain = RateDomain('f', (256, 512, 768), ())
+    for measured, expected, missing, dependency in [
+        ([768, 256, 512], [256, 512, 768], 0, None),
+        ([768, 256], [256, 768], 1, 'selection_validation_or_new_refinement_policy')]:
+        before = list(measured)
+        result = propose_full_domain_acquisition(domain, measured, max_new_points=2,
+            refine=lambda cap: ())
+        assert result == {
+            'schema': 'prismaquant.tessera_full_domain_acquisition.v1', 'family': 'f',
+            'legal_q256': [256, 512, 768], 'legal_rate_count': 3,
+            'all_legal_rates_retained': True, 'measured_q256': expected,
+            'measured_envelope_q256': [256, 768], 'missing_legal_rate_count': missing,
+            'required_boundary_q256': [256, 768], 'missing_boundary_q256': [],
+            'boundary_policy': 'seed', 'deferred_boundary_q256': [],
+            'proposed_q256': [], 'proposal_reasons': {}, 'max_new_points': 2,
+            'next_dependency': dependency, 'full_domain_measured': missing == 0,
+            'adaptive_converged': None, 'full_grid_measurement_required_for_proposal': False,
+            'prices': None, 'interpolation_error_bound': None, 'allocator_payload': False,
+            'research_only': True, 'production_qualified': False}
+        assert measured == before
+        assert domain == RateDomain('f', (256, 512, 768), ())
+
+
 def test_full_domain_bridge_calls_the_actual_adaptive_refiner():
     from prismaquant.tessera_allocator import build_tessera_allocator_candidate
     from prismaquant.tessera_full_domain_acquisition import adaptive_acquisition_from_records
