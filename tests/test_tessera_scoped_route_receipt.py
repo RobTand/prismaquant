@@ -352,6 +352,19 @@ def test_legacy_flat_parser_never_discards_explicit_runtime_context():
                                       "runtime_image": IMAGE, "execution_mode": "eager"}])
 
 
+def test_scoped_shipcard_refuses_a_legacy_flat_census_without_changes(tmp_path, monkeypatch):
+    _, binding, build, model_dir, _ = fixture(tmp_path, monkeypatch)
+    records = [{"route": "TESSERA_FP8", "decoder": "native"}]
+    before = deepcopy((records, binding, build))
+    files = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    with pytest.raises(receipt.TesseraRouteReceiptError) as error:
+        tessera_shipcard.make_route_census_record(tool="test", model_sha="fixture",
+            route_records=records, build=build, model_dir=model_dir)
+    assert str(error.value) == "scoped artifact cannot fill route.census from an unbound legacy flat list"
+    assert (records, binding, build) == before
+    assert {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == files
+
+
 def test_scoped_card_cannot_replay_flat_legacy_receipt(tmp_path, monkeypatch):
     data = fixture(tmp_path, monkeypatch)
     # A historical flat receipt: filled where no current scoped table existed
