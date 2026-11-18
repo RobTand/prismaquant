@@ -3253,9 +3253,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             ),
         ),
     }
-    applicability_report_path.write_text(
-        DIRECT_ASCII_INDENT2_LAX.text(applicability_payload) + "\n"
-    )
+    applicability_report_path.write_text(DIRECT_ASCII_INDENT2_LAX.text(applicability_payload) + "\n")
     print(f"[alloc] format applicability → {applicability_report_path}")
 
     assignment_space = AssignmentSpace(
@@ -5490,8 +5488,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     "rejected_assignments": serve_rejections,
                 },
             })
-            sel_path.write_text(
-                DIRECT_ASCII_INDENT2_LAX.text(selection) + "\n")
+            sel_path.write_text(DIRECT_ASCII_INDENT2_LAX.text(selection) + "\n")
             raise SystemExit(
                 "[alloc] every allocation that fits the "
                 f"{args.target_disk_gb:.3f}GB card misses a hard serving "
