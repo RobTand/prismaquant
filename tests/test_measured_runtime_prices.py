@@ -107,6 +107,19 @@ def test_roundtrip_order_and_immutability(payload):
         table.rows[0].binding.member_formats["layer"] = "BF16"
 
 
+def test_runtime_reconciliation_keeps_rows_outside_the_current_menu(payload):
+    from prismaquant.measured_runtime_prices import reconcile_serving_unit_rows
+    table = parse(payload)
+    saved = copy.deepcopy(payload)
+    assert reconcile_serving_unit_rows(table, menu_members={}) is table
+    menu = {("other", "W4A4"): {"other": "W4A4"}}
+    result = reconcile_serving_unit_rows(table, menu_members=menu)
+    assert result == table and result.rows == table.rows
+    assert all(left is right for left, right in zip(result.rows, table.rows))
+    assert menu == {("other", "W4A4"): {"other": "W4A4"}}
+    assert payload == saved
+
+
 @pytest.mark.parametrize("field,value", [
     ("runtime_sha256", "b" * 64), ("source_sha256", "b" * 64),
     ("calibration_sha256", "b" * 64), ("gpu_identity", "different-gpu"),
