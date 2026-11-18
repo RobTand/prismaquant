@@ -59,3 +59,24 @@ def test_actual_materialized_model_walk_dtype(checkpoint, tmp_path, dtype, wante
     parameters = [node for node in report["walk"]["nodes"] if node["kind"] == "parameter"]
     assert parameters
     assert all(node["dtype"] == wanted for node in parameters)
+
+
+def test_real_walk_refuses_meta_weights_before_forward():
+    from prismaquant.model_walk import walk_model
+
+    model = torch.nn.Linear(4, 2, device="meta")
+    before = dict(model.named_parameters())
+    calls = []
+    model.register_forward_pre_hook(lambda *args: calls.append("forward"))
+    with pytest.raises(ValueError) as error:
+        walk_model(model, torch.zeros(1, 4, device="meta"), execution="real", strict=False)
+    assert str(error.value) == (
+        "execution='real' needs materialized weights; this model is on "
+        "the meta device. Use execution='fake', or load real weights."
+    )
+    assert calls == []
+    after = dict(model.named_parameters())
+    assert after.keys() == before.keys()
+    for name, parameter in after.items():
+        assert parameter is before[name]
+        assert parameter.device.type == "meta"
