@@ -17,6 +17,15 @@ from test_tessera_joint_allocation import fixture
 PRIMARY = ['TESSERA_E4M3_K1', 'TESSERA_BF16_K1']
 
 
+def test_sampled_panel_refuses_a_size_outside_the_strict_subset():
+    ids = torch.arange(16, dtype=torch.int64).reshape(4, 4)
+    original = ids.clone()
+    for size in (0, 4, 5):
+        with pytest.raises(ValueError, match='^joint evaluation needs a strict positive subset and integer seed$'):
+            make_panel(ids, artifact_sha256='a'*64, seed=1, size=size)
+        assert torch.equal(ids, original)
+
+
 class AtomicProfile:
     def packed_expert_format_group(self, name):
         return STACK if name.startswith(STACK + '.') else None
