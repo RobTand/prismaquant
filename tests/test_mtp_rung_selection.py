@@ -146,6 +146,21 @@ def test_selector_uses_numeric_calibration_from_memory_excluded_rung():
     assert numeric.provenance["fit"]["points"][0]["E"] == menu[1].E
 
 
+def test_selector_records_acceptance_clamping_for_an_unmeasured_passing_rung():
+    menu = [RungPoint("exact", 4.0, 100, 0.0),
+            RungPoint("mid", 3.0, 80, 1.0), RungPoint("low", 2.0, 60, 4.0)]
+    points = [AcceptancePoint(0.9, rung_name="mid"), AcceptancePoint(0.1, rung_name="low")]
+    before = repr((menu, points))
+    result = select_rung(menu, ServeConstants(100.0, 1.0, 0.0), points, 100, k=1)
+    assert result.rung == menu[0]
+    assert result.regime == "degenerate"
+    assert result.provenance["a_clamped"] is True
+    assert result.provenance["fit"]["a_inf"] == pytest.approx(1.7)
+    assert result.provenance["fit"]["beta"] == pytest.approx(0.8)
+    assert result.per_rung_T["exact"] == pytest.approx(2.0 / 101.0)
+    assert repr((menu, points)) == before
+
+
 # --------------------------------------------------------------------------- #
 # Interior argmax matches an independent brute force
 # --------------------------------------------------------------------------- #
