@@ -379,6 +379,17 @@ def test_qwen3_explicit_config_beats_declared_config():
     assert cohort["global_original_tokens"] == 111
 
 
+def test_qwen_cohort_reads_the_nested_prefix_alias_without_changing_inputs():
+    profile = _qwen3_declared_profile()
+    explicit = {"text_config": {"serving_prefix_ids": [3, 5]}}
+    expected = pact_cohort_from_profile(profile)
+    result = pact_cohort_from_profile(profile, explicit)
+    assert result == {**expected, "prefix_ids": [3, 5]}
+    result["prefix_ids"].append(7)
+    assert explicit == {"text_config": {"serving_prefix_ids": [3, 5]}}
+    assert pact_cohort_from_profile(profile) == expected
+
+
 def test_qwen3_declared_nested_text_config_and_prefix_alias():
     from prismaquant.model_profiles import profile_from_config
 
