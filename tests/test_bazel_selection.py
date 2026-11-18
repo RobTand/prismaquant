@@ -566,7 +566,7 @@ def test_impacted_quarantined_rule_is_excluded_but_hosted_and_unknown_routes_are
 
 @pytest.fixture
 def planning_history(tmp_path, request):
-    """Head modifies prismaquant/core.py; a parameter adds one change of graph structure."""
+    """Make base and head revisions for the planner."""
     extra = getattr(request, 'param', None)
     root = tmp_path / 'repo'
     def git(*args):
@@ -576,18 +576,40 @@ def planning_history(tmp_path, request):
     source.parent.mkdir(parents=True)
     git('init', '--quiet')
     (root / 'BUILD.bazel').write_text('base\n')
+    (root / 'prismaquant/BUILD.bazel').write_text('base\n')
+    (root / 'tests').mkdir()
+    (root / 'tests/BUILD.bazel').write_text('base\n')
     (root / 'old.txt').write_text('old\n')
     if extra == 'symlink':
         (root / 'link.py').symlink_to('prismaquant/core.py')
+    durations = root / selection.DURATIONS_PATH
+    if extra == 'test_shards':
+        durations.parent.mkdir(parents=True)
     revisions = []
     for content in ('base\n', 'head\n'):
-        source.write_text(content)
-        if content == 'head\n' and extra == 'build':
-            (root / 'BUILD.bazel').write_text('head\n')
-        elif content == 'head\n' and extra == 'add':
-            (root / 'new.txt').write_text('new\n')
+        source.write_text('base\n' if extra == 'test_shards' else content)
+        if extra == 'test_shards':
+            shards = '    shard_count = 8,\n' if content == 'base\n' else ''
+            (root / 'tests/BUILD.bazel').write_text(
+                'pq_py_test(\n    name = "test_unrelated",\n'
+                '    path = "tests/test_unrelated.py",\n    library = ":test_unrelated_lib",\n'
+                f'{shards}    timeout = "moderate",\n)\n')
+            seconds = 481.9 if content == 'base\n' else 30
+            durations.write_text(json.dumps({'files': {'tests/test_unrelated.py': seconds}}))
+        elif content == 'head\n' and extra == 'build':
+            (root / 'prismaquant/BUILD.bazel').write_text('head\n')
+        elif content == 'head\n' and extra == 'added_test':
+            (root / 'BUILD.bazel').write_text('base\nfilegroup(\n    name = "added",\n)\n')
+            (root / 'tests/BUILD.bazel').write_text('base\npq_py_test(\n    name = "test_new",\n    path = "tests/test_new.py",\n)\n')
+            (root / 'tests/test_new.py').write_text('def test_new():\n    assert True\n')
+        elif content == 'head\n' and extra == 'build_header':
+            (root / 'tests/BUILD.bazel').write_text('head\n')
         elif content == 'head\n' and extra == 'delete':
             (root / 'old.txt').unlink()
+        elif content == 'head\n' and extra == 'rename':
+            (root / 'old.txt').rename(root / 'new.txt')
+        elif content == 'head\n' and extra == 'fallback':
+            (root / 'MODULE.bazel').write_text('head\n')
         git('add', '--all')
         git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
             'commit', '--quiet', '-m', content.strip())
@@ -682,10 +704,8 @@ def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
         assert not any(command[0] == 'java' for command in calls)
 
 
-@pytest.mark.parametrize('planning_history', [None, 'build', 'add', 'delete', 'symlink'],
-                         indirect=True)
-def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
-        tmp_path, planning_history, request, monkeypatch):
+@pytest.fixture
+def revision_plan(tmp_path, planning_history):
     root, (base, head) = planning_history
     rows = [
         {'sourceFile': {'name': '//prismaquant:core.py'}},
@@ -700,6 +720,10 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
         {'rule': {'name': '//tests:test_unrelated', 'ruleClass': 'py_test'}},
         {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg', 'ruleClass': 'py_library'}},
     ]
+    for build, reader in (('//:BUILD.bazel', 'test_root_build'), ('//tests:BUILD.bazel', 'test_package_build')):
+        rows.extend([{'sourceFile': {'name': build}},
+                     {'rule': {'name': f'//tests:{reader}', 'ruleClass': 'py_test', 'ruleInput': [build]}}])
+    new_test = root / 'tests/test_new.py'
     tools, queries = [], []
 
     def planning_command(command, **kwargs):
@@ -707,7 +731,12 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
             return subprocess.run(command, **kwargs)
         if command[1] == 'query':
             queries.append(command[2])
-            return SimpleNamespace(returncode=0, stdout='\n'.join(map(json.dumps, rows)))
+            targets = rows
+            if new_test.is_file():
+                targets = rows + [{'sourceFile': {'name': '//tests:test_new.py'}},
+                                  {'rule': {'name': '//tests:test_new', 'ruleClass': 'py_test',
+                                            'ruleInput': ['//tests:test_new.py']}}]
+            return SimpleNamespace(returncode=0, stdout='\n'.join(map(json.dumps, targets)))
         tools.append(command[3])
         if command[3] == 'generate-hashes':
             Path(command[-1]).write_text('{"hashes": {"//tests:test_consumer": "Rule#hash"}}')
@@ -719,20 +748,74 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
     table = root / selection.CYCLE_PATH
     table.parent.mkdir(parents=True, exist_ok=True)
     table.write_text(json.dumps({'members': {'prismaquant/core.py': {
-        'target': '//prismaquant:gen', 'whole': None, 'importers': []}}}))
+        'target': '//prismaquant:gen', 'whole': None,
+        'importers': ['//tests:test_consumer'] if new_test.is_file() else []}}}))
     found = selection.plan_revisions(root, tmp_path / 'private', base=base, head=head,
         mode='pr', java='java', jar=tmp_path / 'v42.jar', runner=planning_command)
-    if request.node.callspec.params['planning_history'] is None:
-        assert not tools
-        assert found['selection'] == 'impacted'
-        assert found['architectures']['amd64']['population'] == [
-            '//prismaquant:gen', '//tests:test_consumer']
-        assert found['rules'] == {'prismaquant/core.py': 'whole target (no test within two imports): 1 tests'}
-        assert found['shadow_v1'] == ['//tests:test_consumer']
-        assert queries == [selection.MAIN_QUERY]  # the direct path fetches no external repository
-    else:
-        assert tools == ['generate-hashes', 'generate-hashes', 'get-impacted-targets']
-        assert queries == [selection.DEPS_QUERY] * 2  # an add, delete, BUILD or symlink change: bazel-diff
+    return found, tools, queries
+
+
+def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(revision_plan):
+    found, tools, queries = revision_plan
+    assert not tools
+    assert found['selection'] == 'impacted'
+    assert found['architectures']['amd64']['population'] == ['//prismaquant:gen', '//tests:test_consumer']
+    assert found['rules'] == {'prismaquant/core.py': 'whole target (no test within two imports): 1 tests'}
+    assert found['shadow_v1'] == ['//tests:test_consumer']
+    assert queries == [selection.MAIN_QUERY]
+
+
+@pytest.mark.parametrize('planning_history', ['added_test'], indirect=True)
+def test_direct_path_selects_the_added_test_file(revision_plan):
+    found, _, queries = revision_plan
+    assert '//tests:test_new' in found['architectures']['amd64']['tests'], (
+        'an added test that the gate does not run is a hole in the gate')
+    assert found['selection'] == 'impacted'
+    assert queries == [selection.MAIN_QUERY]
+
+
+@pytest.mark.parametrize('planning_history', ['added_test'], indirect=True)
+def test_direct_path_selects_generated_build_readers_and_uses_cycle_table(revision_plan):
+    found, tools, queries = revision_plan
+    assert queries == [selection.MAIN_QUERY]
+    assert not tools
+    assert found['architectures']['amd64']['tests'] == [
+        '//tests:test_consumer', '//tests:test_new', '//tests:test_package_build', '//tests:test_root_build']
+    assert found['rules'] == {'prismaquant/core.py': 'module-level, cycle member: 1 tests'}
+
+
+@pytest.mark.parametrize('planning_history', ['test_shards'], indirect=True)
+def test_direct_path_selects_test_with_changed_shard_count(revision_plan):
+    found, tools, queries = revision_plan
+    assert queries == [selection.MAIN_QUERY]
+    assert not tools
+    assert found['selection'] == 'impacted'
+    assert found['architectures']['amd64']['tests'] == [
+        '//tests:test_package_build', '//tests:test_unrelated'
+    ], 'A shard_count change must select the test and the BUILD file reader.'
+
+
+@pytest.mark.parametrize('planning_history', ['build_header'], indirect=True)
+def test_generated_build_change_outside_rule_blocks_selects_the_full_suite(revision_plan):
+    found, tools, _ = revision_plan
+    assert not tools
+    assert found['selection'] == 'fallback', 'a BUILD change that no rule block shows must not shrink the gate'
+
+
+@pytest.mark.parametrize('planning_history', ['build', 'delete', 'rename', 'symlink'], indirect=True)
+def test_other_graph_changes_use_bazel_diff(revision_plan):
+    _, tools, queries = revision_plan
+    assert tools == ['generate-hashes', 'generate-hashes', 'get-impacted-targets']
+    assert queries == [selection.DEPS_QUERY] * 2
+
+
+@pytest.mark.parametrize('planning_history', ['fallback'], indirect=True)
+def test_added_fallback_file_still_selects_the_full_suite(revision_plan):
+    found, tools, queries = revision_plan
+    assert queries == [selection.DEPS_QUERY]
+    assert not tools
+    assert found['selection'] == 'fallback'
+    assert found['reason'] == ['MODULE.bazel']
 
 
 @pytest.mark.parametrize('layout', ['file list', 'filegroup'])

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+import ast
 import contextlib
 import json
 import os
@@ -32,6 +33,7 @@ BAZEL_DIFF_SHA256 = '0170b70fe2f24477ab056c11f5c3240d8b45a1dca5ab73ad252c096679c
 DURATIONS_PATH = 'tools/ci/gate_durations.json'
 CYCLE_PATH = 'tools/ci/cycle_members.json'  # tools/bazel/build_files.py writes it
 BUILD_LANGUAGE = {'BUILD', 'REPO', 'WORKSPACE'}  # with or without the .bazel suffix
+GENERATED_BUILD_FILES = {'BUILD.bazel', 'tests/BUILD.bazel'}
 # The direct path reads every main-repository target (rules and files); deps(//...) also fetches every external
 # repository, which only the bazel-diff hashes need (#4228: a cold plan 146 s -> 22 s, the same selections).
 MAIN_QUERY, DEPS_QUERY = '//...:all-targets union buildfiles(//...)', 'deps(//...) union buildfiles(//...)'
@@ -238,9 +240,7 @@ def compare_graphs(base_graph, head_graph, changed, deleted, directory, *,
 
 
 def reverse_closure(consumers, modified, through=lambda node: True):
-    """Rules that reach a modified source file, walking up only from nodes `through` admits. When a diff only
-    modifies contents (no add, delete, BUILD file or symlink), base and head share one graph, so bazel-diff
-    impacts these."""
+    """Find rules that depend on the input nodes. Follow edges from nodes that `through` accepts."""
     found, frontier = set(), set(modified)
     while frontier:
         frontier = set().union(*(consumers.get(node, ()) for node in frontier if through(node))) - found
@@ -358,6 +358,32 @@ def collect_revision(root, directory, architecture, *, java, jar, bazel='bazel',
         raise SelectionError('revision graph is incomplete or unavailable') from None
 
 
+RULE_BLOCK = re.compile(r'(?ms)^\w+\(\n    name = "([^"]+)",\n.*?^\)$')
+
+
+def rule_changes(population, changed, builds):
+    """The direct path's inputs: the changed files, plus the sources of each generated rule block that differs
+    between base and head (`builds` maps a BUILD path to its two texts), and the changed test rules themselves."""
+    consumers, tests = population['consumers'], set(population['tests'])
+    inputs, rule_tests = set(changed), set()
+    for path, (old, new) in builds.items():
+        if RULE_BLOCK.sub('', old).split() != RULE_BLOCK.sub('', new).split():
+            raise SelectionError(f'{path} changes outside its rule blocks')
+        before, after = ({m[1]: m[0] for m in RULE_BLOCK.finditer(build)} for build in (old, new))
+        for name in before.keys() | after.keys():
+            block = after.get(name, '')
+            if block == before.get(name):
+                continue
+            label = f'//{path.rpartition("/")[0]}:{name}'
+            if label in tests:
+                rule_tests.add(label)
+            elif label in population['filegroups']:
+                inputs.update(src for src in population['used_sources'] if label in consumers.get(src, ()))
+            elif srcs := re.search(r'(?ms)^    srcs = (\[.*?\]),$', block):
+                inputs.update((Path(path).parent / src).as_posix() for src in ast.literal_eval(srcs[1]))
+    return inputs, rule_tests
+
+
 def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
                    bazel='bazel', runner=subprocess.run):
     """Plan in the Remote Bazel runner from immutable Git and private graph inputs."""
@@ -388,8 +414,9 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
             pass
     changed = {path for path, letter in (status or {}).items() if letter != 'D'}
     deleted = set(status or {}) - changed
-    direct = (bool(status) and set(status.values()) == {'M'} and not fallback_files(changed)
-              and not any(Path(path).name.removesuffix('.bazel') in BUILD_LANGUAGE for path in changed)
+    direct = (bool(status) and set(status.values()) <= {'M', 'A'} and not fallback_files(changed)
+              and not any(Path(path).name.removesuffix('.bazel') in BUILD_LANGUAGE
+                          for path in changed - GENERATED_BUILD_FILES)
               and not any(row.startswith('120000 ') for row in git('ls-files', '-s').splitlines()))
     # Query failure is fatal. A missing population can never become empty success.
     head_query = query_revision(root, directory / 'head', 'amd64', bazel=bazel, runner=runner,
@@ -406,15 +433,20 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
             if fallback_files(changed | deleted):
                 decision = everything(fallback_files(changed | deleted), population['tests'])
             elif direct:
-                closure = reverse_closure(population['consumers'], changed)
+                consumers = population['consumers']
+                used_sources, tests = set(population['used_sources']), set(population['tests'])
+                inputs, rule_tests = rule_changes(population, changed, {
+                    path: (git('show', f'{base}:{path}') if status[path] == 'M' else '', git('show', f'{head}:{path}'))
+                    for path in changed & GENERATED_BUILD_FILES})
+                closure = reverse_closure(consumers, inputs) | rule_tests
                 members = json.loads((root / CYCLE_PATH).read_text())['members']
-                impacted, shadow, rules = direct_impact(population, changed, members) if DIRECT else (closure, closure, {})
-                whole = closure & (set(population['hosted']) | CLOSURE_TESTS)
-                tests = set(population['tests']) - set(population['excluded'])
-                decision = {**gate_decision(changed, deleted, (impacted | whole) - set(population['excluded']),
-                                            set(population['used_sources']), set(population['tests'])),
-                            'closure': sorted(closure & tests),
-                            **({'rules': rules, 'shadow_v1': sorted((shadow | whole) & tests)} if rules else {})}
+                impacted, shadow, rules = direct_impact(population, inputs, members) if DIRECT else (closure, closure, {})
+                required = rule_tests | (closure & (set(population['hosted']) | CLOSURE_TESTS))
+                excluded = set(population['excluded'])
+                eligible = tests - excluded
+                decision = {**gate_decision(changed, deleted, (impacted | required) - excluded, used_sources, tests),
+                            'closure': sorted(closure & eligible),
+                            **({'rules': rules, 'shadow_v1': sorted((shadow | required) & eligible)} if rules else {})}
             else:
                 if jar is None:
                     jar = bazel_diff_jar(directory)
