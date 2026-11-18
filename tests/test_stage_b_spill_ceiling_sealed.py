@@ -242,6 +242,16 @@ def test_capture_batch_tokens_group_as_the_quantum_does():
         5, 3, probe_microbatch=2, capture_batch=2) == [12, 3]
 
 
+def test_spill_bound_refuses_a_foreign_schema_without_changing_the_seal():
+    bound = _sealed_bound()
+    bound["schema"] = "foreign.spill.v1"
+    before = json.loads(json.dumps(bound))
+    with pytest.raises(spill_mod.SpillBoundRefused) as refused:
+        spill_mod.check_spill_bound(bound)
+    assert str(refused.value) == "a spill bound has a foreign schema 'foreign.spill.v1'"
+    assert bound == before
+
+
 def test_a_sealed_bound_refuses_edits_and_foreign_launches():
     geometry = _layer44_geometry()
     bound = _sealed_bound()
