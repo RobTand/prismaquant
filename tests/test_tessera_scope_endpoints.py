@@ -142,6 +142,16 @@ def test_ambiguous_or_conflicting_unit_topology_is_not_guessed(name, row):
             scope.serving_target_from_args(_args()), {name: row}, _profile())
 
 
+def test_scope_refuses_packed_topology_without_an_expert_count():
+    scope = _scope()
+    stats = {EXPERT: dict(_packed_experts_module="model.layers.0.mlp.experts")}
+    before = json.dumps(stats, sort_keys=True)
+    with pytest.raises(ValueError) as error:
+        scope.context_by_unit_from_stats(scope.serving_target_from_args(_args()), stats, _profile())
+    assert str(error.value) == f"{EXPERT}: ambiguous packed expert topology; need _packed_experts_module and positive num_experts"
+    assert json.dumps(stats, sort_keys=True) == before
+
+
 def test_unscoped_legacy_call_does_not_require_new_topology_fields():
     assert _scope().context_by_unit_from_stats(None, {"old.row": {}}, None) is None
 

@@ -36,6 +36,14 @@ NVFP4_CB_SCOPE_CASES = (
 ALL_FORMAT_NAMES = tuple(sorted(set(fr.REGISTRY) | set(fr.FORMAT_ALIASES)))
 
 
+def test_serving_profile_refuses_an_unknown_schema_without_changes():
+    payload = {"id": "future", "schema": "prismaquant.serving_profile.v999"}
+    with pytest.raises(ValueError) as exc_info:
+        ServingProfile.from_dict(payload)
+    assert str(exc_info.value) == "unsupported serving-profile schema: 'prismaquant.serving_profile.v999'"
+    assert payload == {"id": "future", "schema": "prismaquant.serving_profile.v999"}
+
+
 def test_serving_profile_names_are_config_discovered():
     assert "research" in serving_profile_names()
     assert VLLM_PROFILE in serving_profile_names()
