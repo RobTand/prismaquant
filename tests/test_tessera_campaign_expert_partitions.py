@@ -49,6 +49,18 @@ def test_versioned_partition_loads_and_prices_only_complete_expert_chunk(tmp_pat
     assert not audit and not pi
 
 
+def test_selection_refuses_audited_units_without_a_sample_without_changes(tmp_path):
+    path = tmp_path / "units.json"
+    path.write_text(json.dumps({"schema": campaign_selection.UNITS_SCHEMA_V2,
+                               "groups": [{"key": "group", "members": ["unit"], "audit": ["unit"]}]}))
+    original = path.read_bytes()
+    with pytest.raises(RuntimeError) as error:
+        campaign_selection.load_unit_selection(path)
+    assert str(error.value) == f"--units {path}: group 'group' audits without sampling"
+    assert list(tmp_path.iterdir()) == [path]
+    assert path.read_bytes() == original
+
+
 @pytest.mark.parametrize("overrides", [dict(rate_band="768,896"), dict(rate_band=None),
                                      dict(max_rounds=2), dict(seeded=True)])
 def test_adaptive_or_seeded_partition_refuses(overrides):
