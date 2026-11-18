@@ -68,3 +68,18 @@ def test_scalar_price_refuses_missing_and_failed_cost_rows_without_changes():
         assert exc.value.args == ("model.layers.0.weight: missing cost for NVFP4",)
         assert costs == expected_costs
         assert stats == {"n_params": 256, "h_trace": 1.0}
+
+
+def test_recorded_pricing_fallbacks_keep_the_weight_only_row_price():
+    from prismaquant.activation_fair_pricing import REASON_KILL_SWITCH
+
+    cases = (("NVFP4A16", _P5A),
+             ("NVFP4", {**_P5A, "reason": REASON_KILL_SWITCH}),
+             ("NVFP4", {**_P5A, "families": {}}))
+    stats = {"n_params": 256, "h_trace": 1.0}
+    for format_name, pricing in cases:
+        costs = {format_name: {"predicted_dloss": 2.0, "output_mse_measured": False}}
+        saved = deepcopy((stats, costs, pricing))
+        assert price_row("model.proj", format_name, stats, costs,
+                         activation_pricing=pricing) == 2.0
+        assert (stats, costs, pricing) == saved
