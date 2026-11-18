@@ -20,6 +20,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from prismaquant.digests import (
+    DIRECT_ASCII_INDENT2_LAX, DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex)
 from prismaquant.source_read_plan import read_safetensors_header
 
 
@@ -443,7 +445,6 @@ def held_out_calibration_skip(
         raise ValueError("held-out skip must be nonnegative")
     if not enforce or requested_skip == 0:
         return max(count for count, _length, _seed in draws) if requested_skip is None else requested_skip
-    from prismaquant.digests import file_sha256hex
     from prismaquant.calibration_data import load_calibration
 
     if not Path(source).is_file() or not Path(validation_source).is_file():
@@ -498,7 +499,6 @@ def assignment_kl_measurement(
     *, draw_digest: str | None, cache_path: str | Path, record: bool = False,
 ) -> tuple[float, float] | None:
     """Read only a measurement bound to these assignment, draw and result bytes."""
-    from prismaquant.digests import bytes_sha256hex, file_sha256hex
     from prismaquant.footprint import assignment_serialization_sha256
     from prismaquant.layer_config import canonicalize_assignment
     from prismaquant.schemas import validate_layer_config_payload
@@ -554,7 +554,6 @@ def assignment_kl_measurement(
 
 def frontier_request_digest(base: str | Path, candidate: str | Path, corpus: str | Path) -> str:
     """Bind canonical assignments and corpus bytes; stage keys own draw geometry."""
-    from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
     from prismaquant.footprint import assignment_serialization_sha256
     from prismaquant.layer_config import load_assignment
 
@@ -1964,7 +1963,7 @@ def main(argv: list[str] | None = None) -> int:
         write_pipeline_spec(spec, args.write_default_production)
         print(f"[pipeline-spec] wrote {args.write_default_production}")
     elif not args.input:
-        print(json.dumps(spec.to_dict(), indent=2, sort_keys=True))
+        print(DIRECT_ASCII_INDENT2_LAX.text(spec.to_dict()))
     elif validation.ok:
         print(f"[pipeline-spec] valid: {args.input}")
     return 0
