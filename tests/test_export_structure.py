@@ -220,6 +220,26 @@ def test_detects_changed_shard(tmp_path, monkeypatch):
         verify_export_structure(tmp_path)
 
 
+def test_metadata_refuses_a_file_replaced_between_stat_and_open(tmp_path, monkeypatch):
+    from prismaquant import export_structure
+    shard = _shard(tmp_path, "model.safetensors", {"a": 3})
+    replacement = tmp_path / "replacement.tmp"
+    new_bytes = shard.read_bytes()[:-1] + b"\x01"
+    replacement.write_bytes(new_bytes)
+    real_stat = export_structure._regular_stat
+
+    def stat_then_replace(path):
+        info = real_stat(path)
+        replacement.replace(shard)
+        return info
+
+    monkeypatch.setattr(export_structure, "_regular_stat", stat_then_replace)
+    with pytest.raises(ValueError) as caught:
+        verify_export_structure(tmp_path)
+    assert str(caught.value) == f"{shard}: changed before metadata read"
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {shard.name: new_bytes}
+
+
 def test_malformed_dtype_is_clean_cli_failure(tmp_path, capsys):
     raw = json.dumps({"a": {"dtype": [], "shape": [1],
                             "data_offsets": [0, 1]}}).encode()

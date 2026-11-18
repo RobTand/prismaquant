@@ -238,3 +238,13 @@ def test_no_container_yields_no_admission_reference():
 def test_a_malformed_container_refuses_rather_than_declines():
     with pytest.raises(RuntimeError):
         container_spec.admission_image_reference({"container": {"mounts": []}})
+
+
+def test_container_spec_refuses_duplicate_mount_destinations():
+    mounts = [{"source": "/input-a", "target": "/data", "readonly": True},
+              {"source": "/input-b", "target": "/data", "readonly": True}]
+    spec = {"container": {"image": IMAGE, "mounts": mounts}}
+    before = json.dumps(spec, sort_keys=True)
+    with pytest.raises(RuntimeError, match=r"\Aduplicate container mount target: /data\Z"):
+        container_spec.validate_container(spec)
+    assert json.dumps(spec, sort_keys=True) == before
