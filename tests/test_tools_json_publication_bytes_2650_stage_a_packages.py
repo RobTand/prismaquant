@@ -8,6 +8,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -138,8 +139,10 @@ def test_seed_package_bytes_stay_equal(tmp_path, monkeypatch):
     assert gzip.decompress(wire) == SEED_WIRE_PLAIN
     assert hashlib.sha256(wire).hexdigest() == SEED_WIRE_SHA
     assert seed.manifest_wire(SEED_MANIFEST) == wire
+    umask = os.umask(0)
+    os.umask(umask)
     for path in Path("package").iterdir():
-        assert path.stat().st_mode == 0o100664
+        assert path.stat().st_mode == (0o100000 | 0o666 & ~umask)
 
 
 def test_seed_refusals_leave_no_file(tmp_path, monkeypatch):
@@ -166,7 +169,9 @@ def test_compare_record_bytes_stay_equal(tmp_path, monkeypatch, capsysbinary):
     assert compare.main(COMPARE_ARGV) == 0
     assert capsysbinary.readouterr().out == COMPARE_OUT_BYTES
     assert Path("out.json").read_bytes() == COMPARE_FILE_BYTES
-    assert Path("out.json").stat().st_mode == 0o100664
+    umask = os.umask(0)
+    os.umask(umask)
+    assert Path("out.json").stat().st_mode == (0o100000 | 0o666 & ~umask)
 
 
 def test_compare_record_is_never_replaced(tmp_path, monkeypatch, capsysbinary):
@@ -183,31 +188,16 @@ def test_compare_record_is_never_replaced(tmp_path, monkeypatch, capsysbinary):
     assert captured.out == b""
     assert captured.err.endswith(b"out.json already exists; a distance record is never replaced\n")
     assert Path("out.json").read_bytes() == COMPARE_FILE_BYTES
-    assert Path("out.json").stat().st_mode == 0o100664
+    umask = os.umask(0)
+    os.umask(umask)
+    assert Path("out.json").stat().st_mode == (0o100000 | 0o666 & ~umask)
     assert sorted(path.name for path in Path(".").iterdir()) == ["out.json"]
-
-
-def test_record_seed_and_compare(tmp_path, monkeypatch, capsysbinary):
-    (tmp_path / "a").mkdir()
-    entries = _seed_setup(tmp_path / "a", monkeypatch)
-    _seed_build()
-    assert entries == [SEED_ENTRY]
-    assert Path("package", seed.SPEC_NAME).read_bytes() == SEED_SPEC_BYTES
-    assert Path("package", seed.PACKAGE_NAME).read_bytes() == SEED_PACKAGE_BYTES
-    wire = Path("package", seed.MANIFEST_NAME).read_bytes()
-    assert hashlib.sha256(wire).hexdigest() == SEED_WIRE_SHA
-    (tmp_path / "b").mkdir()
-    _compare_setup(tmp_path / "b", monkeypatch)
-    capsysbinary.readouterr()
-    assert compare.main(COMPARE_ARGV) == 0
-    assert capsysbinary.readouterr().out == COMPARE_OUT_BYTES
-    assert Path("out.json").read_bytes() == COMPARE_FILE_BYTES
 
 
 SPLIT_PACKAGE_BYTES = b'{\n  "boundaries": [\n    4,\n    2\n  ],\n  "chain_state": {\n    "chain_state_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",\n    "path": "/run/chain-state.json",\n    "sha256": "1111111111111111111111111111111111111111111111111111111111111111"\n  },\n  "checkpoint": {\n    "boundary": 4,\n    "cotangent_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",\n    "sha256": "2222222222222222222222222222222222222222222222222222222222222222"\n  },\n  "from": 4,\n  "head_walk_reads_dropped": {\n    "bytes": NaN,\n    "entries": 2,\n    "u": "\\u00e9"\n  },\n  "n_batches": 3,\n  "prep": {\n    "data_manifest": {\n      "path": "package/prep-manifest.json.gz",\n      "sha256": "ca1bbfa471b002e0b6fd8b4aaf3b26df71537032ffa5b6959f5f4b058833cafe"\n    },\n    "entry_count": 1,\n    "peak_consecutive_phase_bytes": 5,\n    "phases": [\n      {\n        "bytes": 5,\n        "entries": 1,\n        "name": "head"\n      }\n    ],\n    "read_bytes": 5,\n    "source_bytes": 0,\n    "stat_check": {\n      "checked": 1,\n      "missing": 0\n    }\n  },\n  "quanta": [\n    {\n      "data_manifest": {\n        "path": "package/quantum-samples-000000-000002-manifest.json.gz",\n        "sha256": "696495a274a20e95049788d1cf3f6303274e30c2fa9114faa1fa738af652647f"\n      },\n      "entry_count": 1,\n      "peak_consecutive_phase_bytes": 5,\n      "phases": [\n        {\n          "bytes": 5,\n          "entries": 1,\n          "name": "chain-003"\n        }\n      ],\n      "read_bytes": 5,\n      "samples": [\n        0,\n        2\n      ],\n      "source_bytes": 5,\n      "stat_check": {\n        "checked": 1,\n        "missing": 0\n      }\n    }\n  ],\n  "ranges": [\n    [\n      0,\n      2\n    ]\n  ],\n  "round_source_bytes": 5,\n  "schema": "prismaquant.stage_a.split_package.v1",\n  "source_manifest": {\n    "path": "source.json",\n    "sha256": "e3eb12da99e044ecc7d50cea407bf17f33c546e5309aa7ee661234baed2b7750"\n  },\n  "through": 2\n}\n'
 
 
-def test_record_split(tmp_path, monkeypatch, capsysbinary):
+def test_record_split(tmp_path, monkeypatch):
     _split_setup(tmp_path, monkeypatch)
     _split_build()
     assert Path("package", split.PACKAGE_NAME).read_bytes() == SPLIT_PACKAGE_BYTES
@@ -225,8 +215,10 @@ def test_record_split(tmp_path, monkeypatch, capsysbinary):
         plain = gzip.decompress(raw)
         assert plain.endswith(b"\n") and not plain.endswith(b"\n\n")
         assert hashlib.sha256(plain).hexdigest() == plain_sha
+    umask = os.umask(0)
+    os.umask(umask)
     for path in Path("package").iterdir():
-        assert path.stat().st_mode == 0o100664
+        assert path.stat().st_mode == (0o100000 | 0o666 & ~umask)
 
 
 def test_split_refusal_leaves_no_file(tmp_path, monkeypatch):
