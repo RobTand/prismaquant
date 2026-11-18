@@ -83,8 +83,8 @@ GLOB_EXCLUDE = ['**/BUILD.bazel', 'bazel-*/**', '*bazel-remote-grpc.log', '*exec
 PIP_HUB = 'pq_pip'
 PIP_MODULES = 'tools/bazel/pip_modules.json'
 STDLIB = frozenset(sys.stdlib_module_names)
-# Files longer than this on hosted runners are split across Bazel test shards.
-SHARD_SECONDS = 40.0
+# Split tests with an amd64 record total above this many executor seconds.
+SHARD_SECONDS = 60.0
 MAX_SHARDS = 8
 
 LAUNCH_NOT_FOLLOWED = 'launch arguments not followed'
@@ -1082,7 +1082,7 @@ def hosted_plan(root, files, gate_select=None):
 
 
 def test_attributes(path, durations):
-    """Shard by hosted file time; time out at 3x the slowest shard measured on any architecture."""
+    """Use amd64 record executor seconds for shards. Use shard estimates and measurements for timeouts."""
     attributes = {}
     seconds = durations['files'].get(path) or 0
     if seconds > SHARD_SECONDS:
