@@ -41,6 +41,23 @@ def test_per_row_error_exactly_decomposes_full_output_error(
     assert_error_decomposition(X, W, W_hat, errors, rtol=1e-13, atol=1e-14)
 
 
+def test_exact_low_precision_weights_have_zero_error_and_dispersion():
+    for dtype in (torch.float16, torch.bfloat16):
+        activations = torch.tensor([[1, 2], [3, 4]], dtype=dtype)
+        weights = torch.tensor([[2, 1], [4, 3], [1, 1]], dtype=dtype)
+        saved_activations, saved_weights = activations.clone(), weights.clone()
+        errors = per_row_error(activations, weights, weights)
+
+        assert errors.dtype == torch.float64
+        assert errors.tolist() == [0.0, 0.0, 0.0]
+        assert tail_metrics(errors) == dict(
+            p50=0.0, p90=0.0, p99=0.0, max=0.0, mean=0.0,
+            ratio_p99_over_p50=1.0, coefficient_of_variation=0.0, gini=0.0,
+        )
+        assert torch.equal(activations, saved_activations)
+        assert torch.equal(weights, saved_weights)
+
+
 def test_tail_metrics_uniform_distribution_has_no_dispersion():
     metrics = tail_metrics(torch.full((16,), 3.0))
     assert metrics["p50"] == 3.0
