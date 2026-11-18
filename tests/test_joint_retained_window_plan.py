@@ -1,10 +1,12 @@
 """Combined COST owner accounting, without allocating a model or matrices."""
+from copy import deepcopy
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
 from prismaquant.joint_retained_window_plan import (
+    EXECUTION_SCHEMA, normalize_retained_execution,
     RetainedTarget, RetainedWindowBudget, plan_retained_targets,
     targets_from_statistics_plan,
 )
@@ -86,6 +88,18 @@ def test_selected_archive_cost_join_rejects_aliases_and_unrelated_footprints():
     with pytest.raises(ValueError, match='empty PWC baseline'):
         targets_from_statistics_plan(plan, {'a': (('a', 'fmt'),)},
             {('a', 'fmt'): {'incoming_storage_bytes': 0, 'serialized_bytes': 0}})
+
+
+def test_retained_cost_refuses_batch_major_capture_without_changes():
+    policy = dict(schema=EXECUTION_SCHEMA, budget=budget().as_dict(),
+        source_reserve_bytes=100, source_loading_reserve_bytes=100)
+    operator_windows = dict(max_statistics_bytes=1000, max_candidate_bytes=100, max_load_buffer_bytes=100)
+    boundary_storage = dict(capture_order='batch_major', max_resident_bytes=20, max_auxiliary_bytes=20)
+    before = deepcopy((policy, operator_windows, boundary_storage))
+    with pytest.raises(ValueError) as exc:
+        normalize_retained_execution(policy, operator_windows=operator_windows, boundary_storage=boundary_storage)
+    assert str(exc.value) == 'retained COST requires layer-major source capture'
+    assert (policy, operator_windows, boundary_storage) == before
 
 
 def test_bool_and_nonfinite_budget_coordinates_refuse():
