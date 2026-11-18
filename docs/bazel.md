@@ -10,6 +10,9 @@ Local runs use `git merge-base origin/main HEAD`. Before diffing, Git's `-M`
 rename records align base paths for unambiguous same-basename moves, including
 moves with content edits. A basename change remains a deletion and addition.
 
+Set `GRAPH_IMPACT_CACHE` to share per-file results between Graph impact and the Bazel generator.
+Each entry uses the relative file path, file bytes, and a hash of the graph tool and its repository imports.
+
 The check reports the expected fraction of tests selected by a uniformly
 chosen source-file change, U, and a LOC-weighted U. It also reports source
 fanout, the largest SCC and its members, and median/p90/maximum test reach.

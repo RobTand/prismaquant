@@ -53,6 +53,73 @@ def freeze(root, mode='strict'):
     return commit(root, 'record numeric limits')
 
 
+def test_warm_cache_matches_uncached_snapshot(repo, monkeypatch):
+    source = ('import hashlib\n'
+              'def digest_parts(parts):\n'
+              '    result = []\n'
+              '    for part in parts:\n'
+              '        digest = hashlib.sha256(part)\n'
+              '        if digest is not None:\n'
+              '            result.append(digest.hexdigest())\n'
+              '    return tuple(result)\n')
+    put(repo, 'prismaquant/owner.py', source)
+    put(repo, 'prismaquant/peer.py', source)
+    git(repo, 'add', '.')
+    monkeypatch.delenv('GRAPH_IMPACT_CACHE', raising=False)
+    expected = pq.load_snapshot(repo)
+    assert expected['duplication']['near_duplicates'] == [
+        ['prismaquant/owner.py::digest_parts', 'prismaquant/peer.py::digest_parts']]
+    monkeypatch.setenv('GRAPH_IMPACT_CACHE', str(repo / '.cache'))
+    assert pq.load_snapshot(repo) == expected
+
+    def refuse_recompute(path, *args, **kwargs):
+        pytest.fail(f'Recomputed cache entry for {path}')
+
+    monkeypatch.setattr(pq.build, 'source_facts', refuse_recompute)
+    monkeypatch.setattr(pq.duplication_inventory, 'file_inventory', refuse_recompute)
+    assert pq.load_snapshot(repo) == expected
+
+
+def test_tool_source_change_invalidates_cached_file_facts(repo, monkeypatch):
+    tools = repo / 'tool-copy'
+    for path, source in pq.build.tool_sources(ROOT).items():
+        target = tools / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source)
+    monkeypatch.setattr(pq.build, 'ROOT', tools)
+    monkeypatch.setenv('GRAPH_IMPACT_CACHE', str(repo / '.cache'))
+    expected = pq.load_snapshot(repo)
+    inputs = pq.build.tool_sources(tools)
+    helper = next(path for path in inputs if Path(path).name == 'gate_paths.py')
+    old_hash = pq.build.tool_hash(tools)
+    (tools / helper).write_bytes(inputs[helper] + b'\n# Change the tool source.\n')
+    assert pq.build.tool_hash(tools) != old_hash
+
+    collected = set()
+    collect = pq.build.source_facts
+
+    def record_source_facts(path, source, gate_paths):
+        collected.add(path)
+        return collect(path, source, gate_paths)
+
+    monkeypatch.setattr(pq.build, 'source_facts', record_source_facts)
+    assert pq.load_snapshot(repo) == expected
+    assert 'prismaquant/owner.py' in collected
+
+
+def test_changed_source_bytes_invalidate_cached_file_facts(repo, monkeypatch):
+    monkeypatch.setenv('GRAPH_IMPACT_CACHE', str(repo / '.cache'))
+    before = pq.load_snapshot(repo)
+    assert 'prismaquant/owner.py' in before['reach']['tests/test_a.py']
+    assert before['duplication']['primitive_digest_sites'] == []
+
+    put(repo, 'tests/test_a.py', 'def test_sample():\n    assert True\n')
+    put(repo, 'prismaquant/owner.py', 'import hashlib\nVALUE = hashlib.sha256(b"data")\n')
+    after = pq.load_snapshot(repo)
+    assert 'prismaquant/owner.py' not in after['reach']['tests/test_a.py']
+    assert after['duplication']['primitive_digest_sites'] == ['hashlib:prismaquant/owner.py::<module>']
+
+
 def check(root, base, capsys, *args):
     result = pq.main(['--root', str(root), '--base', base, *args])
     output = capsys.readouterr()
