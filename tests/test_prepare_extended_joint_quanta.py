@@ -335,3 +335,25 @@ def test_control_closure_reads_every_source_of_a_v2_catalog(tmp_path):
     assert {'cost-a.pkl', 'cost-b.pkl', 'proof-a.json', 'proof-a.fixture.json', 'proof-a.arm.json'} <= names
     assert not any(name.startswith('proof-b') for name in names)
     assert 'cost.pkl' not in names
+
+
+def test_v3_control_closure_binds_the_frozen_campaign_identity_without_writes(tmp_path):
+    import hashlib
+    from prismaquant.joint_catalog_extension import SCHEMA_V3
+    from tools.prepare_extended_joint_quanta import control_digests
+
+    def catalog(root):
+        return {'schema': 'prismaquant.t4_adopted_catalog.v1', 'format': 'TESSERA_E2M1_K2_R896',
+                'cost': _file(root, 'cost.pkl', b'cost'), 'reseal_proof': _reseal_proof(root, 'proof')}
+    inputs, plan, prepared = _closure_case(tmp_path, catalog)
+    identity = _file(tmp_path, 'campaign-identity.json', {'campaign': 'frozen'})
+    extension = _file(tmp_path, 'extension.json', {'schema': SCHEMA_V3,
+        'original_campaign_scope': {'derived_from': {'campaign_identity': identity}}})
+    before = {path: path.read_bytes() for path in tmp_path.iterdir()}
+    arguments = copy.deepcopy((inputs, plan, prepared, extension))
+    expected = {str(path): hashlib.sha256(data).hexdigest() for path, data in before.items()}
+    expected[str(tmp_path / 'proof.fixture.json')] = None
+    expected[str(tmp_path / 'proof.arm.json')] = None
+    assert control_digests(inputs, plan, prepared, extension) == expected
+    assert (inputs, plan, prepared, extension) == arguments
+    assert {path: path.read_bytes() for path in tmp_path.iterdir()} == before
