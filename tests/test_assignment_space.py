@@ -83,6 +83,19 @@ def test_exact_payload_uses_the_requested_parameter_scope():
     assert owner.bits_total({'body': 'BF16'}) == body['bits_total']
 
 
+def test_plain_nvfp4_payload_includes_global_scale_sidecars():
+    assignment = {'body': 'NVFP4'}
+    for weight_only, bits in ((False, 2368), (True, 2336)):
+        entry = {'n_params': 512, 'weight_shape': (16, 32),
+                 '_nvfp4_weight_only': weight_only}
+        stats = {'body': dict(entry)}
+        result = space(stats=stats).payload(assignment, require_all_stats=True)
+        assert result == {'bits_total': bits, 'quantizable_params': 512,
+                          'bits_per_param': bits / 512, 'missing_stats_names': []}
+        assert stats == {'body': entry}
+        assert assignment == {'body': 'NVFP4'}
+
+
 def test_missing_payload_stats_refuse_or_remain_explicit():
     owner = space()
     with pytest.raises(AssertionError, match='no shape/stats'):
