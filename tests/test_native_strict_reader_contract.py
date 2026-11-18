@@ -145,6 +145,15 @@ def test_nonzero_source_ranges_and_exact_scientific_contract(tmp_path, monkeypat
     assert await_staged_spans(resolver, [(source, 0, start, len(raw))]) == 'undeclared'
 
 
+def test_scientific_read_contract_refuses_repeated_and_overlapping_ranges():
+    for second_offset in (0, 4):
+        document = {'schema': 'prismaquant.read_contract.v1', 'entries': [
+            {'path': '/source/weights', 'offset': offset, 'bytes': 8, 'sha256': '0' * 64}
+            for offset in (0, second_offset)]}
+        with pytest.raises(ValueError, match=r'\Ascientific read contract repeats or overlaps ranges\Z'):
+            staged_launch.read_contract_document(json.dumps(document).encode())
+
+
 def test_scientific_contract_must_match_the_materialized_ranges(tmp_path):
     source = tmp_path / 'source'
     source.write_bytes(b'known bytes')
