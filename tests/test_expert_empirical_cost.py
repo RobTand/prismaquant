@@ -43,6 +43,14 @@ EXPERT_NAMES = {
 }
 
 
+def test_expert_resume_refuses_a_missing_checkpoint_directory_before_output(tmp_path):
+    from prismaquant.expert_empirical_cost import main
+    with pytest.raises(SystemExit) as refusal:
+        main(["--model", str(tmp_path), "--output", str(tmp_path), "--resume"])
+    assert refusal.value.code == "--resume requires --checkpoint-dir"
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_measure_unit_costs_on_tiny_packed_moe():
     torch.manual_seed(7)
     model = TinyCausal().eval()
