@@ -151,6 +151,20 @@ def test_a_drifted_dev_mode_run_bands_from_its_chain_state(drifted, tmp_path):
         "path": str(state), "sha256": hashlib.sha256(state.read_bytes()).hexdigest()}
 
 
+def test_band_set_refuses_two_receipts_for_one_checkpoint(drifted, tmp_path):
+    from prismaquant.joint_adjoint_checkpoints import AdjointSliceRefused, band_set
+    bands = [band_from_request(_request(tmp_path / name, run=drifted), boundary=2)
+             for name in ("request-a.json", "request-b.json")]
+    before = json.dumps(bands, sort_keys=True)
+    files = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert band_set([bands[0], bands[0]]) == {2: bands[0]}
+    with pytest.raises(AdjointSliceRefused) as refused:
+        band_set(bands)
+    assert str(refused.value) == "two different bands claim checkpoint 2"
+    assert json.dumps(bands, sort_keys=True) == before
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == files
+
+
 def test_without_a_chain_state_the_band_stamps_bf16_from_the_request(
         tmp_path, monkeypatch, calibration):
     """The fallback path: the request's sealed environment carries the #1028 stamp."""
