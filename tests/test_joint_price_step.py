@@ -42,6 +42,24 @@ def _completed():
     return step, step.complete_unit(UNIT_A)
 
 
+def test_price_resume_refuses_invalid_gradient_trace_without_changes(tmp_path):
+    _old_step, state = _completed()
+    state["g_trace"] = "invalid"
+    first = journal.AuraCheckpointJournal.open(tmp_path, resume=False, identity={"fixture": "invalid-trace"}, names=[UNIT_A])
+    first.publish_state(UNIT_A, state)
+    resumed = journal.AuraCheckpointJournal.open(tmp_path, resume=True, identity={"fixture": "invalid-trace"}, names=[UNIT_A])
+    price, _row_value = _step()
+    measurements = copy.deepcopy(vars(price.measurements))
+    files = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    with pytest.raises(RuntimeError) as error:
+        resumed.resume_units(price)
+    assert str(error.value) == "AURA unit checkpoint state for model.layers.0.mlp.down_proj has invalid g_trace; refusing reuse or recompute"
+    assert vars(price.measurements) == measurements
+    assert resumed.completed == set()
+    assert price.rows == {}
+    assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == files
+
+
 def test_real_price_accumulation_preserves_multiply_samples_and_completed_state():
     step, state = _completed()
     expected = [value * value for value in RECORDED]
