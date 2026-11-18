@@ -9904,6 +9904,8 @@ pq_py_library(
         ".bazelversion",
         ".github/workflows/bazel-hosted.yml",
         ".github/workflows/gate.yml",
+        "//tests:BUILD.bazel",
+        "BUILD.bazel",
         "MODULE.bazel",
         "MODULE.bazel.lock",
         "tools/ci/bazel_artifacts.py",
@@ -9960,6 +9962,17 @@ pq_py_library(
     deps = [
         ":prismaquant/activation_fair_pricing_cycle",
         ":tools/__init__",
+    ],
+)
+
+pq_py_library(
+    name = "tools/ci/record_durations",
+    srcs = [
+        "tools/ci/record_durations.py",
+    ],
+    data = [
+        "tools/ci/gate_durations.json",
+        "tools/ci/record_durations.py",
     ],
 )
 

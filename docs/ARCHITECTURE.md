@@ -988,11 +988,14 @@ shard carries more than a fallback shard. The 55-minute shard request cap, the
 As of: 2026-11-06, Remote Bazel PR fallback sharding, PQ #3335.
 Source: `tools/ci/bazel_selection.py`, `tools/ci/bazel_gate.py` and
 `tools/ci/remote_gate.py`, based on main `ef817b9d`.
-PR fallback uses four concurrent shards balanced by the recorded hosted test-file
-times, or by count without matching timings. The 55-minute shard request cap
-and 58-minute await deadline are unchanged. See `docs/bazel.md` for the timing
-source and scope. Known excluded manual rules are removed from impacts before
-manifest validation; hosted routing and unknown-target refusal remain enforced.
+At that revision, PR fallback used four concurrent shards and balanced them by
+hosted file time, or by count without matching file times. The shard request cap
+was 55 minutes. The await deadline was 58 minutes. The planner removed excluded
+manual rules before manifest validation. It checked hosted routing and refused unknown targets.
+
+As of 2026-11-18, the Bazel generator uses amd64 post-merge record times, PQ #4666.
+It splits tests above 60 executor seconds into up to eight shards. PR fallback
+uses the same file times. See [Bazel CI](bazel.md) for the timing source.
 
 As of: 2026-11-16, fail-fast PR and queue gates, PQ #3777. Source: `tools/ci/bazel_gate.py`,
 `tools/ci/remote_gate.py`. A PR or queue shard stops at its first failed test, and the first red shard
