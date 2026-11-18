@@ -90,6 +90,17 @@ def test_actual_zero_and_legitimate_padded_wires_keep_exact_byte_totals(
     assert summary["claims"]["native_reader_qualified"] is False
 
 
+def test_schedule_selection_refuses_non_integer_parent_tags(tmp_path, schedule):
+    path = tmp_path / "selection.npy"
+    for tags in (np.array([0.0, 1.0]), np.array([False, True])):
+        np.save(path, tags)
+        saved = path.read_bytes()
+        with pytest.raises(ValueError) as exc:
+            schedule.load_selection(path)
+        assert str(exc.value) == f"selection {path} must hold integer parent tags"
+        assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {path.name: saved}
+
+
 def test_actual_packer_already_refuses_a_budget_smaller_than_its_content(encoded):
     parents, _entries, tags, (blob, _breakdown), _padded = encoded
     with pytest.raises(wire.BlockWireFormatError, match="overflow"):
