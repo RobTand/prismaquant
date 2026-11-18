@@ -22,6 +22,21 @@ def _forget_state(native_staged_state):
     yield
 
 
+def test_native_staged_launch_refuses_missing_bindings_before_activation(tmp_path, monkeypatch):
+    from prismaquant import staged_tier_policy as policy
+
+    monkeypatch.setenv('PRISMAQUANT_STAGED_ALLOWED_TIERS', 'ssd')
+    monkeypatch.setenv(policy.PATH_ENV, str(tmp_path / 'manifest.json'))
+    monkeypatch.delenv(policy.SHA_ENV, raising=False)
+    monkeypatch.delenv(policy.READ_ENV, raising=False)
+    before = policy.active_policy()
+    with pytest.raises(ValueError) as exc:
+        policy._activate_native_launch()
+    assert str(exc.value) == 'incomplete explicit native staged-reader configuration'
+    assert policy.active_policy() == before
+    assert list(tmp_path.iterdir()) == []
+
+
 def _artifact(tmp_path, *, n_samples=4, seqlen=8):
     ids = torch.arange(n_samples * seqlen).reshape(n_samples, seqlen)
     provenance = {"source": "fixture", "fit_tokens": ids.numel(),
