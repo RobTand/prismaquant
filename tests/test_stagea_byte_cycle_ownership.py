@@ -74,3 +74,22 @@ def test_actual_byte_caller_refuses_before_foreign_mkdir(tmp_path, monkeypatch, 
         assert publication._groups=={}
         assert not (record/'produced'/'index.json').exists()
         assert not any(p.name.startswith('.copy-') for p in tmp_path.rglob('*'))
+
+
+def test_byte_cycle_refuses_missing_spool_before_output(tmp_path, monkeypatch):
+    state = publish_document(tmp_path / 'state.json', {'original_bind_identity': {'fixture': 'private bytes'}})
+    declaration = build_boundary_template(output_prefix=tmp_path / 'output', artifact_max_bytes=1 << 20,
+        group_size=2, max_entry_tensor_bytes=128, spool=None, inputs={'forward_state': state})
+    binding = publish_document(tmp_path / 'declaration.json', declaration)
+    producer = {'schema': 'prismaquant.flux_result_producer.v1', 'job_id': '123',
+        'record_dir': str(tmp_path / 'record'), 'launch_sha256': 'a' * 64,
+        'argv': ['fixture', '--produced-declaration', binding['path'],
+            '--produced-declaration-sha256', binding['sha256']]}
+    publication = BoundaryProducedPublication(declaration=declaration, binding=binding, producer=producer)
+    monkeypatch.setattr(BoundaryProducedPublication, 'bind_from_admitted_owner', classmethod(lambda cls: publication))
+    before = roster(tmp_path)
+    with pytest.raises(RuntimeError) as error:
+        tool.main([])
+    assert str(error.value) == 'byte fixture requires explicit same-box scratch spool'
+    assert roster(tmp_path) == before
+    assert publication._groups == {}
