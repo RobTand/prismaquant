@@ -101,6 +101,20 @@ def test_incomplete_group_cannot_be_awaited_or_release_its_sources(tmp_path):
     assert not spool.released('known') and not Path(ref.path).exists()
 
 
+def test_repeat_spool_reservation_keeps_the_live_group_and_its_bytes(tmp_path):
+    pub, spool = _spool(tmp_path, window=18)
+    ref, local = raw_group(pub, spool)
+    before = spool.report()
+    identity = (local.stat().st_ino, local.stat().st_size)
+    assert spool.reserve('known', 18, wait=False) == local.parent
+    assert spool.report() == before
+    assert (local.stat().st_ino, local.stat().st_size) == identity
+    assert local.read_bytes() == b'\x00independent\xffbytes'
+    assert set(local.parent.iterdir()) == {local}
+    assert not Path(ref.path).exists()
+    assert not pub._groups
+
+
 def test_capacity_release_rematerializes_exact_same_publication(tmp_path):
     pub, spool = _spool(tmp_path, window=32)
     first, local = raw_group(pub, spool, 'first', b'independent-first')
