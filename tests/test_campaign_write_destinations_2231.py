@@ -46,6 +46,17 @@ def assert_no_files(tmp_path):
     assert not [path for path in tmp_path.rglob("*") if path.is_file()]
 
 
+def test_seed_link_refuses_a_missing_priced_wire_without_writes(tmp_path):
+    seed, destination = tmp_path / "seed", tmp_path / "destination"
+    seed.mkdir()
+    destination.mkdir()
+    filename = campaign_wire.wire_path(seed, "layer.weight", FORMAT).name
+    with pytest.raises(RuntimeError) as error:
+        campaign_wire.link_seed_wire(seed, destination, filename, qname="layer.weight", format_name=FORMAT)
+    assert str(error.value) == f"seed checkpoint has no priced wire at {seed / filename}"
+    assert list(seed.iterdir()) == list(destination.iterdir()) == []
+
+
 @pytest.mark.parametrize("first,second,filename", [
     ("layer.a", "layer_a", f"layer_a__{FORMAT}.pt"),
     ("layer.a", "layer__a", f"layer__a__{FORMAT}.tessera"),
