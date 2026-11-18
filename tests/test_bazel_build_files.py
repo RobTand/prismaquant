@@ -512,20 +512,52 @@ def test_an_import_cycle_across_packages_refuses_generation(tmp_path):
         build_files.generate(tmp_path, write(tmp_path, sources))
 
 
+def test_the_cycle_table_names_each_members_importers_and_why_a_member_selects_its_target(tmp_path):
+    sources = dict(SMALL, **{'prismaquant/a.py': 'from prismaquant import b, c\ndef later():\n    register_late()\n',
+                             'prismaquant/b.py': 'from prismaquant import a\nfor kind in (1,):\n    REGISTRY.register(kind)\n',
+                             'prismaquant/c.py': 'from prismaquant import a, d\nimport os\nos.environ.setdefault("K", "v")\n'
+                                                 "if __name__ == '__main__':\n    main()\n",
+                             'prismaquant/d.py': 'from prismaquant import a\nif True:\n    import prismaquant.c\n',
+                             'tests/test_a.py': 'from prismaquant import a\n',
+                             'tests/test_names.py': ("import importlib\nNAMES = ('prismaquant.b',)\n"
+                                                     'MODULES = [importlib.import_module(name) for name in NAMES]\n')})
+    extra = {}
+    build_files.generate(tmp_path, write(tmp_path, sources), extra=extra)
+    assert json.loads(extra[build_files.CYCLE_FILE])['members'] == {
+        'prismaquant/a.py': {'target': '//:prismaquant/a_cycle', 'whole': None,
+                             'importers': ['//tests:test_a_lib', 'prismaquant/b.py', 'prismaquant/c.py', 'prismaquant/d.py']},
+        'prismaquant/b.py': {'target': '//:prismaquant/a_cycle', 'whole': 'a call statement at import; a register call at import',
+                             'importers': ['//tests:test_names', 'prismaquant/a.py']},
+        'prismaquant/c.py': {'target': '//:prismaquant/a_cycle', 'whole': 'a call statement at import',
+                             'importers': ['prismaquant/a.py', 'prismaquant/d.py']},
+        'prismaquant/d.py': {'target': '//:prismaquant/a_cycle', 'whole': None, 'importers': ['prismaquant/c.py']}}
+
+
 def test_two_targets_with_one_name_refuse_generation():
     with pytest.raises(build_files.GenerationError, match='x_lib'):
         build_files.render_package('tests', [('x_lib', 'pq_py_library', {}), ('x_lib', 'pq_py_library', {})])
 
 
 def test_check_names_each_stale_build_file_and_the_fix(tmp_path, monkeypatch):
+    monkeypatch.setattr(build_files, 'CYCLE_TABLE_ENFORCED', True)
     (tmp_path / 'tests').mkdir()
     (tmp_path / 'tests/BUILD.bazel').write_text('old\n')
-    monkeypatch.setattr(build_files, 'generate', lambda root: {'tests': 'new\n', '': 'root\n'})
+    monkeypatch.setattr(build_files, 'generate', lambda root, extra: extra.update({build_files.CYCLE_FILE: '{}\n'})
+                        or {'tests': 'new\n', '': 'root\n'})
     with pytest.raises(SystemExit) as stopped:
         build_files.main(['--check', '--root', str(tmp_path)])
     assert 'BUILD.bazel' in str(stopped.value) and 'tests/BUILD.bazel' in str(stopped.value)
+    assert build_files.CYCLE_FILE in str(stopped.value)
     assert 'tools/bazel/generate.sh' in str(stopped.value)
     assert (tmp_path / 'tests/BUILD.bazel').read_text() == 'old\n'
+
+
+def test_check_ignores_a_stale_cycle_table_until_it_is_enforced(tmp_path, monkeypatch):
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / 'tests/BUILD.bazel').write_text('new\n')
+    monkeypatch.setattr(build_files, 'generate', lambda root, extra: extra.update({build_files.CYCLE_FILE: '{}\n'})
+                        or {'tests': 'new\n'})
+    assert build_files.main(['--check', '--root', str(tmp_path)]) == 0
 
 
 def test_a_target_that_reads_every_test_file_takes_one_glob_and_targets_are_in_hash_order():

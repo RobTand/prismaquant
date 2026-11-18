@@ -943,6 +943,18 @@ adds more than 250 net lines to `tests/*.py` unless one of its commits has a
 250 is the PQ+T lead's number: 17 of 250 merges of 30 days were above it and held
 77 % of the net test growth.
 
+As of: 2026-11-17, gate cycle-member selection, PQ #3996.
+Source: `tools/ci/bazel_selection.py` and `tools/bazel/build_files.py`, based on
+main `c1863eb7`. Step A writes the table only: `MODULE_LEVEL` and
+`CYCLE_TABLE_ENFORCED` are False until step B. Then, for a modified member of an
+import-cycle target, the direct rule reads `tools/ci/cycle_members.json` (generated, held by `--check`): the
+member's importers and readers and theirs, by module, not the importers of the
+whole target. A package `__init__.py`, a module that the generator lists as
+uncertain and a module that runs a call statement or a `register` call at import
+keep the whole target (14 of the 143 members of the largest cycle). The gate summary prints each member's rule and test count; the manifest
+field `shadow_v1` holds the selection with one step. Details: docs/bazel.md,
+"Selection".
+
 As of: 2026-11-17, gate direct selection, PQ #3940.
 Source: `tools/ci/bazel_selection.py`, based on main `a8cf69c5`. A modified-only PR
 diff selects, for each modified file, the rules that list it (through

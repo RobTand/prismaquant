@@ -9865,6 +9865,7 @@ pq_py_library(
         "tools/ci/bazel_gate.py",
         "tools/ci/bazel_selection.py",
         "tools/ci/check_no_secret_leak.py",
+        "tools/ci/cycle_members.json",
         "tools/ci/gate_durations.json",
         "tools/ci/remote_gate.py",
     ],
