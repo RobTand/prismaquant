@@ -134,6 +134,40 @@ def test_candidate_matches_control_seeds_cap_and_reports_relative_counts(monkeyp
     assert "passed" not in comparison
 
 
+def test_raw_boundary_measurement_keeps_prompt_seed_order_and_exact_receipt(monkeypatch):
+    api = _api()
+    contract = {**_contract(), "prompts": [{"text": "first", "stratum": "a"},
+                                         {"text": "second", "stratum": "b"}]}
+    before = copy.deepcopy(contract)
+    requests = []
+    def post(url, body):
+        requests.append((url, copy.deepcopy(body)))
+        text, finish = ("<think>work</think> answer", "stop") if body.get("seed") == 31 else (
+            "unfinished", "length")
+        return {"choices": [{"text": text, "finish_reason": finish}],
+                "usage": {"completion_tokens": 3}}
+    monkeypatch.setattr(api.vqm, "_post_json", post)
+    result = api.measure_step("http://server/v1", "model", contract, 8, raw=True)
+    assert requests == [
+        ("http://server/v1/completions", {"model": "model", "max_tokens": 8,
+         "temperature": 1.0, "seed": seed, "top_p": 1.0, "skip_special_tokens": False,
+         "prompt": prompt}) for prompt in ("first", "second") for seed in (31, 47)
+    ]
+    outcomes = [
+        {"prompt_index": index, "seed": seed, "text": text, "response_mode": "raw_completion",
+         "finish_reason": finish, "completion_tokens": 3,
+         "score": {"think_tag_count": count, "defects": defects}}
+        for index in (0, 1) for seed, text, finish, count, defects in (
+            (31, "<think>work</think> answer", "stop", 1, []),
+            (47, "unfinished", "length", 0, ["zero_tag", "cap_truncation"]),
+        )
+    ]
+    assert result == {"max_tokens": 8, "endpoint": "/v1/completions", "outcomes": outcomes,
+                      "n_generations": 4, "n_defects": 2,
+                      "defects_by_kind": {"zero_tag": 2, "think_stutter": 0, "cap_truncation": 2}}
+    assert contract == before
+
+
 @pytest.mark.parametrize("field,value", [
     ("campaign_id", "other-campaign"), ("host_boot_id", "other-boot"),
     ("serve_fingerprint", "b" * 64), ("prompt_tokens", [7]),
