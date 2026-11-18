@@ -380,6 +380,25 @@ def test_read_mtp_source_state_dict_strips_the_prefix(tmp_path):
     assert set(raw) == {"fc.weight"}
 
 
+def test_mtp_reader_skips_body_tensors_that_share_the_mtp_shard(tmp_path):
+    import json
+    import torch
+    from safetensors.torch import save_file
+    from prismaquant.model_profiles.qwen3_5 import Qwen3_5Profile
+    path = tmp_path / "shared.safetensors"
+    save_file({"mtp.fc.weight": torch.tensor([[1., 2.], [3., 4.]]),
+               "model.layers.0.proj.weight": torch.tensor([[9., 8.]])}, str(path))
+    index = tmp_path / "model.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": {"mtp.fc.weight": path.name,
+                                   "model.layers.0.proj.weight": path.name}}))
+    before = {p: p.read_bytes() for p in tmp_path.iterdir()}
+    result = Qwen3_5Profile().read_mtp_source_state_dict(str(tmp_path))
+    assert set(result) == {"fc.weight"}
+    assert result["fc.weight"].tolist() == [[1., 2.], [3., 4.]]
+    assert result["fc.weight"].dtype == torch.float32
+    assert {p: p.read_bytes() for p in tmp_path.iterdir()} == before
+
+
 def test_read_mtp_source_state_dict_empty_when_finetune_stripped_mtp(tmp_path):
     """Finetunes that inherit num_nextn_predict_layers but drop the
     weights must yield {} rather than raise — the probe writes an empty
