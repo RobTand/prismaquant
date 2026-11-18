@@ -47,7 +47,11 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.joint_quantum_row import (adjoint_chain_phase_name)  # noqa: E402
-from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+from prismaquant.digests import (
+    DIRECT_ASCII_INDENT2_LAX,
+    DIRECT_ASCII_LAX,
+    DIRECT_ASCII_SPACED_LAX,
+)
 from prismaquant.joint_adjoint_slices import checkpoint_manifest_entry  # noqa: E402
 from prismaquant.stage_a_head import drop_source_head_walk_reads  # noqa: E402
 from prismaquant.stage_a_chain_seed import (  # noqa: E402
@@ -179,8 +183,7 @@ def assemble_phases(manifest, by_name, names, added) -> dict:
 
 def manifest_wire(manifest) -> bytes:
     """The manifest's sealed bytes: sorted compact JSON, gzip without a timestamp."""
-    return gzip.compress((json.dumps(manifest, sort_keys=True, separators=(",", ":"))
-                          + "\n").encode(), mtime=0)
+    return gzip.compress((DIRECT_ASCII_LAX.text(manifest) + "\n").encode(), mtime=0)
 
 
 def _pin(path, sha256, what) -> dict:
@@ -215,7 +218,7 @@ def build(*, original_manifest, original_manifest_sha256, plan, checkpoint, caps
     record = load_pinned_checkpoint(spec["checkpoint"], "checkpoint")
     reference = (None if spec["compare"] is None
                  else load_pinned_checkpoint(spec["compare"], "compare checkpoint"))
-    spec_bytes = (json.dumps(spec, indent=2, sort_keys=True) + "\n").encode()
+    spec_bytes = (DIRECT_ASCII_INDENT2_LAX.text(spec) + "\n").encode()
     root = Path(output)
     spec_entry = _entry(root / SPEC_NAME, len(spec_bytes),
                         hashlib.sha256(spec_bytes).hexdigest())
@@ -241,7 +244,7 @@ def build(*, original_manifest, original_manifest_sha256, plan, checkpoint, caps
     root.mkdir(parents=True, exist_ok=False)
     (root / SPEC_NAME).write_bytes(spec_bytes)
     (root / MANIFEST_NAME).write_bytes(manifest_bytes)
-    (root / PACKAGE_NAME).write_text(json.dumps(package, indent=2, sort_keys=True) + "\n")
+    (root / PACKAGE_NAME).write_text(DIRECT_ASCII_INDENT2_LAX.text(package) + "\n")
     return package
 
 
