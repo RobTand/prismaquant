@@ -590,6 +590,21 @@ def test_stripe_plan_coverage_rejects_tampered_qname_file(tmp_path):
         union.load_stripe_plan_coverage(plan_path)
 
 
+def test_stripe_plan_refuses_a_parent_path_even_when_its_digest_matches(tmp_path):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    plan_path = _write_stripe_plan(bundle, [["model.a"]])
+    (tmp_path / "outside.txt").write_bytes((bundle / "stripe-00.qnames.txt").read_bytes())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["stripes"][0]["path"] = "../outside.txt"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError) as error:
+        union.load_stripe_plan_coverage(plan_path)
+    assert str(error.value) == "stripe 0 qname path is not a safe bundle-relative path: '../outside.txt'"
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
 def test_campaign_scale_coverage_is_exactly_505_by_two():
     coverage = union.format_menu_coverage(
         [f"model.linear.{index}" for index in range(505)],
