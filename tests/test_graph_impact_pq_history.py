@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import pickle
 import subprocess
+from types import SimpleNamespace
 import warnings
 
 import pytest
@@ -54,7 +55,15 @@ def freeze(root, mode='strict'):
     return commit(root, 'record numeric limits')
 
 
-def test_warm_cache_matches_uncached_snapshot(repo, monkeypatch):
+@pytest.fixture
+def cache_flags(monkeypatch):
+    sys_view = SimpleNamespace(**vars(pq.build.sys))
+    sys_view.flags = SimpleNamespace(safe_path=True)
+    monkeypatch.setattr(pq.build, 'sys', sys_view)
+    return sys_view.flags
+
+
+def test_warm_cache_matches_uncached_snapshot(repo, monkeypatch, cache_flags):
     source = ('import hashlib\n'
               'def digest_parts(parts):\n'
               '    result = []\n'
@@ -81,7 +90,7 @@ def test_warm_cache_matches_uncached_snapshot(repo, monkeypatch):
     assert pq.load_snapshot(repo) == expected
 
 
-def test_warm_cache_preserves_surrogate_code_points(repo, monkeypatch):
+def test_warm_cache_preserves_surrogate_code_points(repo, monkeypatch, cache_flags):
     source = 'tests/test_a.py'
     target = 'tests/test_\U0001f600.py'
     surrogates = 'tests/test_\ud83d\ude00.py'
@@ -97,12 +106,28 @@ def test_warm_cache_preserves_surrogate_code_points(repo, monkeypatch):
     assert warm.of(source) == cold.of(source)
 
 
-def test_warning_filter_changes_interpreter_hash():
+def test_warning_filter_change_invalidates_source_cache(tmp_path, cache_flags):
+    put(tmp_path, 'source.py', 'pass\n')
+
+    def collect(path, source):
+        warnings.warn('The collector read the source.', UserWarning, stacklevel=2)
+        return source
+
+    def read():
+        return pq.build.SourceCache(tmp_path / 'cache').read('evidence', tmp_path, 'source.py', collect)
+
     with warnings.catch_warnings():
-        warnings.simplefilter('default', SyntaxWarning)
-        default = pq.build.interpreter_hash()
-        warnings.simplefilter('error', SyntaxWarning)
-        assert pq.build.interpreter_hash() != default
+        warnings.simplefilter('ignore', UserWarning)
+        assert read() == 'pass\n'
+        warnings.simplefilter('error', UserWarning)
+        with pytest.raises(UserWarning, match='The collector read the source'):
+            read()
+
+
+def test_source_cache_requires_safe_path(tmp_path, cache_flags):
+    cache_flags.safe_path = False
+    with pytest.raises(ValueError, match='PYTHONSAFEPATH'):
+        pq.build.SourceCache(tmp_path / 'cache')
 
 
 @pytest.mark.parametrize('source', [
@@ -121,7 +146,7 @@ def test_tool_hash_rejects_computed_imports(tmp_path, source):
         pq.build.tool_hash(tmp_path)
 
 
-def test_tool_source_change_invalidates_cached_file_facts(repo, monkeypatch):
+def test_tool_source_change_invalidates_cached_file_facts(repo, monkeypatch, cache_flags):
     tools = repo / 'tool-copy'
     for path, source in pq.build.tool_sources(ROOT).items():
         target = tools / path
@@ -154,7 +179,7 @@ def test_tool_source_change_invalidates_cached_file_facts(repo, monkeypatch):
     assert collected == {'source_facts', 'file_inventory'}
 
 
-def test_changed_source_bytes_invalidate_cached_file_facts(repo, monkeypatch):
+def test_changed_source_bytes_invalidate_cached_file_facts(repo, monkeypatch, cache_flags):
     monkeypatch.setenv('GRAPH_IMPACT_CACHE', str(repo / '.cache'))
     before = pq.load_snapshot(repo)
     assert 'prismaquant/owner.py' in before['reach']['tests/test_a.py']

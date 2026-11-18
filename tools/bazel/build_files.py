@@ -583,6 +583,8 @@ class SourceCache:
     def __init__(self, directory):
         self.directory = Path(directory) if directory else None
         if self.directory is not None:
+            if not sys.flags.safe_path:
+                raise ValueError('The graph impact cache requires PYTHONSAFEPATH or -P.')
             self.directory.mkdir(parents=True, exist_ok=True)
             self.tool_hash = tool_hash(ROOT)
             self.interpreter_hash = interpreter_hash()
