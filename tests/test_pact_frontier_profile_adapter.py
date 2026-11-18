@@ -296,6 +296,22 @@ def test_glm_nested_invalid_layer_counts_refuse():
             num_layers_from_profile(profile, {"text_config": {"num_hidden_layers": bad}})
 
 
+def test_glm_layer_count_refuses_when_both_configs_omit_count():
+    from prismaquant.model_profiles import profile_from_config
+
+    declared = {"model_type": "glm5_next", "text_config": {"hidden_size": 4096}}
+    profile = profile_from_config(declared)
+    explicit = {"hidden_size": 4096}
+    with pytest.raises(ValueError) as excinfo:
+        num_layers_from_profile(profile, explicit)
+    assert str(excinfo.value) == (
+        "glm5_next: no config states num_hidden_layers; "
+        "the PACT layer count cannot be derived"
+    )
+    assert declared == {"model_type": "glm5_next", "text_config": {"hidden_size": 4096}}
+    assert explicit == {"hidden_size": 4096}
+
+
 def _qwen3_declared_profile():
     from prismaquant.model_profiles import profile_from_config
 
