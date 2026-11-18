@@ -459,6 +459,27 @@ def test_one_workspace_identity_is_charged_once_inside_the_fold():
         "one identity is one allocation per rank, not one per row that views it")
 
 
+def test_scalar_tail_keeps_the_existing_one_rank_workspace_charge():
+    from prismaquant.allocator_solver import Candidate, solve_runtime_frontier
+    first, tail = Candidate("RANKED", 4.0, 1000, 1.0), Candidate("SCALAR", 4.0, 1000, 2.0)
+    candidates = {"a": [first], "b": [tail]}
+    resources = {("a", "RANKED"): _workspace_row(1.0, [10], [("a" * 64, 70)], world=1),
+        ("b", "SCALAR"): RuntimeResources(prefill_ms=2.0, decode_ms=None,
+            serialized_bytes=1000, resident_bytes=20, peak_scratch_bytes=0, activation_bytes=0)}
+    before = (copy.deepcopy(candidates), dict(resources),
+              {key: resource.as_dict() for key, resource in resources.items()})
+    result = solve_runtime_frontier(candidates, resources, max_memory_bytes=2000,
+        max_prefill_ms=3.0, rank_devices=_admitted_bounds([105], [5]))
+    assert len(result) == 1
+    row = result[0]
+    assert row.assignment == {"a": "RANKED", "b": "SCALAR"} and row.chosen_candidates == {"a": first, "b": tail}
+    assert (row.memory_bytes, row.predicted_dloss, row.prefill_ms, row.decode_ms) == (2000, 3.0, 3.0, None)
+    assert row.rank_workspace_bytes == (70,) and row.device_bytes is None
+    assert solve_runtime_frontier(candidates, resources, max_memory_bytes=2000,
+        max_prefill_ms=3.0, rank_devices=_admitted_bounds([104], [5])) == []
+    assert (candidates, resources, {key: resource.as_dict() for key, resource in resources.items()}) == before
+
+
 def test_one_workspace_identity_at_two_sizes_refuses_inside_the_fold():
     from prismaquant.allocator_solver import Candidate, solve_runtime_frontier
 
