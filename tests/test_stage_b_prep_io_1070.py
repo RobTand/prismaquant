@@ -230,6 +230,25 @@ def test_read_entries_keep_one_row_per_path_and_offset(tmp_path):
         io.preparation_read_entries(head=[], files=[empty])
 
 
+def test_whole_preparation_read_replaces_the_short_head_digest_without_reordering(tmp_path):
+    path = tmp_path / "source.bin"
+    path.write_bytes(b"abcdef")
+    head = [{"path": str(path), "offset": 0, "bytes": 2,
+             "sha256": hashlib.sha256(b"ab").hexdigest()},
+            {"path": str(path), "offset": 4, "bytes": 2,
+             "sha256": hashlib.sha256(b"ef").hexdigest()}]
+    before = [row.copy() for row in head]
+    entries = io.preparation_read_entries(head=head, files=[path])
+    assert entries == [
+        {"path": str(path), "offset": 0, "bytes": 6,
+         "sha256": hashlib.sha256(b"abcdef").hexdigest()},
+        before[1],
+    ]
+    entries[1]["bytes"] = 99
+    assert head == before
+    assert path.read_bytes() == b"abcdef"
+
+
 def test_the_read_manifest_keeps_one_phase_without_widening_native_read_gates(tmp_path):
 
     rows = [{"path": f"/mnt/shared/fixture/{name}", "offset": 0, "bytes": size,
