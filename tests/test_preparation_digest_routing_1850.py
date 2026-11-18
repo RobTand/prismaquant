@@ -135,6 +135,19 @@ def test_missing_stage_never_reads_the_pool(monkeypatch):
     assert refused.value.__cause__ is None
 
 
+def test_owned_preparation_outputs_read_exact_bytes_with_and_without_a_bound(tmp_path):
+    raw = b"own-output\x00\xff"
+    path = tmp_path / "output.bin"
+    path.write_bytes(raw)
+    reader = prep.StagedPreparationReads(object(), manifest_sha256="m" * 64, own_outputs=[tmp_path])
+    roots = reader.own_outputs
+    for limit in (None, len(raw)):
+        assert reader.whole(path, where="own control", max_bytes=limit) == raw
+        assert path.read_bytes() == raw
+        assert reader.own_outputs == roots
+    assert set(tmp_path.iterdir()) == {path}
+
+
 @pytest.mark.parametrize("created", [[], [("empty.bin", b"")], [
     ("é.bin", b"\xc3\xa9\x00"), ("binary.bin", b"\xff\r\n"),
 ]])
