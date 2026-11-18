@@ -114,3 +114,17 @@ def test_invalid_mode_is_rejected():
     before, after = sibling_graphs()
     with pytest.raises(ValueError, match='strict.*reach'):
         core.compare(before, after, policy(before, 'ignore'))
+
+
+def test_dependency_graph_refuses_a_missing_test_target(tmp_path):
+    path = tmp_path / 'deps.json'
+    raw = json.dumps({'//tests:present': ['//pkg:source.py']}).encode()
+    path.write_bytes(raw)
+    population, sources = {'//tests:missing'}, {'//pkg:source.py'}
+    with pytest.raises(ValueError) as exc:
+        core.read_deps(path, population, sources)
+    assert str(exc.value) == 'test target missing from dependency graph: //tests:missing'
+    assert path.read_bytes() == raw
+    assert population == {'//tests:missing'}
+    assert sources == {'//pkg:source.py'}
+    assert list(tmp_path.iterdir()) == [path]
