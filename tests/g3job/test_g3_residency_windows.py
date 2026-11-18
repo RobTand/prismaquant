@@ -135,6 +135,18 @@ def test_an_undeclared_path_reads_its_declared_origin(staged, tmp_path):
     assert reader.stats["staged_reads"] == 0
 
 
+def test_teacher_input_refuses_a_file_shorter_than_its_declared_size(tmp_path, monkeypatch):
+    monkeypatch.delenv(R.PATH_ENV, raising=False)
+    path = tmp_path / "teacher.npy"
+    path.write_bytes(b"short")
+    before = R.receipt()
+    with pytest.raises(OSError) as error:
+        R.read_g3_input(path, size=8)
+    assert str(error.value) == f"{path}: truncated file, expected 8 bytes"
+    assert R.receipt() == before
+    assert list(tmp_path.iterdir()) == [path] and path.read_bytes() == b"short"
+
+
 def test_repeated_phase_use_acquires_each_phase_once_and_releases_it(staged):
     files, _ = staged
     reader = new_reader()
