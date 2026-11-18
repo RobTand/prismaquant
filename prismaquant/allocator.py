@@ -2559,7 +2559,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # We bucket formats by exact serialized rate rounded to 0.25 and warn when a
     # bucket has more than one member. If --enforce-family-coherence is
     # set we error instead.
-    from collections import Counter as _Counter
     buckets: dict[float, list[str]] = {}
     for s in specs_sorted:
         key = round(serialized_rates[s.name] * 4) / 4
