@@ -503,6 +503,35 @@ def test_indexed_lookup_needs_all_three_facts(tmp_path: Path):
     assert not rt.is_indexed_lookup("I64", (VOCAB, 2), VOCAB, name="x.tid2eid")
 
 
+def test_regex_quantization_target_keeps_integer_weights_in_full_read_traffic(tmp_path: Path):
+    root = tmp_path / "regex-targets"
+    root.mkdir()
+    tensors = dict.fromkeys(
+        ("model.declared_proj.cb_qweight", "model.other_proj.cb_qweight"), (VOCAB, 4)
+    )
+    _write_safetensors(root / "model.safetensors", {**_TENSORS, **tensors}, dict.fromkeys(tensors, "U8"))
+    (root / "config.json").write_text(json.dumps({
+        "model_type": "qwen3_moe",
+        "architectures": ["Qwen3MoeForCausalLM"],
+        "hidden_size": HIDDEN,
+        "num_hidden_layers": 1,
+        "num_experts": N_EXPERTS,
+        "num_experts_per_tok": TOPK,
+        "vocab_size": VOCAB,
+    }))
+    (root / "quant_config.json").write_text(json.dumps({
+        "config_groups": {"group_0": {"targets": ["re:model[.]declared_.*"]}},
+    }))
+    before = {path: path.read_bytes() for path in root.iterdir()}
+    profile = detect_profile_with_warning(str(root), entrypoint="test")
+    result = rt.exported_checkpoint_read_traffic(str(root), profile=profile)
+    assert result["classes"]["excluded_indexed_lookup"]["n_tensors"] == 1
+    assert result["excluded"]["indexed_lookup_bytes"] == VOCAB * 4
+    assert result["indexed_lookups"]["integer_bytes_read_in_full"] == VOCAB * 4
+    assert result["classes"]["held_fixed"]["stored_bytes"] == 464 + VOCAB * 4
+    assert {path: path.read_bytes() for path in root.iterdir()} == before
+
+
 def test_untied_declaration_without_an_lm_head_refuses(tmp_path: Path):
     """Nothing would carry the logits traffic; that is a contradiction."""
     root = _tied_model_dir(tmp_path, tie_flag=False)
