@@ -5,14 +5,13 @@ import argparse
 import json
 from pathlib import Path
 import random
-import re
 
 from .calibration_data import load_calibration_input
 from .cluster_campaign import _atomic_write_new_bytes
 from .dev_mode import seal_check
 
 from .joint_eval_observation import STATUS, observation_status  # noqa: F401  (re-exported)
-from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex, is_sha256hex
 
 SCHEMA = 'prismaquant.tessera_joint_eval_panel.v1'
 DRAW_SCHEMA = 'prismaquant.tessera_joint_eval_draw.v1'
@@ -55,8 +54,7 @@ def validate_panel_descriptor(panel, *, n_samples, seqlen, artifact_sha256):
         raise ValueError('joint evaluation requires an exact permutation-prefix selection')
     indices = _indices(n_samples, selection['seed'], selection['size'])
     if (selection['indices'] != indices or panel['shape'] != [selection['size'], seqlen]
-            or not isinstance(panel['eval_ids_sha256'], str)
-            or re.fullmatch('[0-9a-f]{64}', panel['eval_ids_sha256']) is None):
+            or not is_sha256hex(panel['eval_ids_sha256'])):
         raise ValueError("joint evaluation indices, shape or hash descriptor differ")
     seal_check("panel encoding calibration binding", artifact_sha256,
                panel["calibration_input_sha256"], where="joint evaluation panel")
@@ -78,7 +76,7 @@ def select_panel(ids, calibration, panel):
 
 
 def _draw_sha256(value, where):
-    if not isinstance(value, str) or re.fullmatch('[0-9a-f]{64}', value) is None:
+    if not is_sha256hex(value):
         raise ValueError(f'joint evaluation draw {where} requires a SHA256 digest')
     return value
 
