@@ -566,7 +566,7 @@ def test_impacted_quarantined_rule_is_excluded_but_hosted_and_unknown_routes_are
 
 @pytest.fixture
 def planning_history(tmp_path, request):
-    """Head modifies prismaquant/core.py; a parameter adds one change of graph structure."""
+    """Make base and head revisions for the planner."""
     extra = getattr(request, 'param', None)
     root = tmp_path / 'repo'
     def git(*args):
@@ -582,15 +582,28 @@ def planning_history(tmp_path, request):
     (root / 'old.txt').write_text('old\n')
     if extra == 'symlink':
         (root / 'link.py').symlink_to('prismaquant/core.py')
+    durations = root / selection.DURATIONS_PATH
+    if extra == 'test_shards':
+        durations.parent.mkdir(parents=True)
     revisions = []
     for content in ('base\n', 'head\n'):
-        source.write_text(content)
-        if content == 'head\n' and extra == 'build':
+        source.write_text('base\n' if extra == 'test_shards' else content)
+        if extra == 'test_shards':
+            shards = '    shard_count = 8,\n' if content == 'base\n' else ''
+            (root / 'tests/BUILD.bazel').write_text(
+                'pq_py_test(\n    name = "test_unrelated",\n'
+                '    path = "tests/test_unrelated.py",\n    library = ":test_unrelated_lib",\n'
+                f'{shards}    timeout = "moderate",\n)\n')
+            seconds = 481.9 if content == 'base\n' else 30
+            durations.write_text(json.dumps({'files': {'tests/test_unrelated.py': seconds}}))
+        elif content == 'head\n' and extra == 'build':
             (root / 'prismaquant/BUILD.bazel').write_text('head\n')
         elif content == 'head\n' and extra == 'added_test':
-            (root / 'BUILD.bazel').write_text('head\n')
-            (root / 'tests/BUILD.bazel').write_text('head\n')
+            (root / 'BUILD.bazel').write_text('base\nfilegroup(\n    name = "added",\n)\n')
+            (root / 'tests/BUILD.bazel').write_text('base\npq_py_test(\n    name = "test_new",\n    path = "tests/test_new.py",\n)\n')
             (root / 'tests/test_new.py').write_text('def test_new():\n    assert True\n')
+        elif content == 'head\n' and extra == 'build_header':
+            (root / 'tests/BUILD.bazel').write_text('head\n')
         elif content == 'head\n' and extra == 'delete':
             (root / 'old.txt').unlink()
         elif content == 'head\n' and extra == 'rename':
@@ -769,6 +782,24 @@ def test_direct_path_selects_generated_build_readers_and_uses_cycle_table(revisi
     assert found['architectures']['amd64']['tests'] == [
         '//tests:test_consumer', '//tests:test_new', '//tests:test_package_build', '//tests:test_root_build']
     assert found['rules'] == {'prismaquant/core.py': 'module-level, cycle member: 1 tests'}
+
+
+@pytest.mark.parametrize('planning_history', ['test_shards'], indirect=True)
+def test_direct_path_selects_test_with_changed_shard_count(revision_plan):
+    found, tools, queries = revision_plan
+    assert queries == [selection.MAIN_QUERY]
+    assert not tools
+    assert found['selection'] == 'impacted'
+    assert found['architectures']['amd64']['tests'] == [
+        '//tests:test_package_build', '//tests:test_unrelated'
+    ], 'A shard_count change must select the test and the BUILD file reader.'
+
+
+@pytest.mark.parametrize('planning_history', ['build_header'], indirect=True)
+def test_generated_build_change_outside_rule_blocks_selects_the_full_suite(revision_plan):
+    found, tools, _ = revision_plan
+    assert not tools
+    assert found['selection'] == 'fallback', 'a BUILD change that no rule block shows must not shrink the gate'
 
 
 @pytest.mark.parametrize('planning_history', ['build', 'delete', 'rename', 'symlink'], indirect=True)
