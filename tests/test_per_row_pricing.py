@@ -83,3 +83,14 @@ def test_recorded_pricing_fallbacks_keep_the_weight_only_row_price():
         assert price_row("model.proj", format_name, stats, costs,
                          activation_pricing=pricing) == 2.0
         assert (stats, costs, pricing) == saved
+
+
+def test_missing_mxfp4_source_cost_keeps_its_exact_zero_price_and_inputs():
+    stats = {"n_params": 256, "h_trace": 3.0, "in_features": 16, "out_features": 16}
+    gains = {"MXFP4_SOURCE": 11.0}
+    for costs in ({}, {"NVFP4": {"predicted_dloss": 17.0, "output_mse_measured": False}}):
+        pricing = deepcopy(_P5A)
+        before = deepcopy((stats, costs, gains, pricing))
+        assert price_row("model.proj", "MXFP4_SOURCE", stats, costs,
+                         activation_pricing=pricing, calibrated_gains=gains) == 0.0
+        assert (stats, costs, gains, pricing) == before
