@@ -782,6 +782,18 @@ def test_reader_threads_resolve_from_the_admitted_cpus(monkeypatch):
             resolve_identity_threads(bad)
 
 
+def test_identity_threads_use_cpu_count_when_affinity_is_unavailable(monkeypatch):
+    import os
+    from unittest.mock import Mock
+    from prismaquant.tessera_row_stream import resolve_identity_threads
+    monkeypatch.setattr(os, "sched_getaffinity", Mock(side_effect=OSError), raising=False)
+    requests = [None, 7]
+    for count, expected in ((3, 3), (None, 1)):
+        monkeypatch.setattr(os, "cpu_count", lambda: count)
+        assert [resolve_identity_threads(request) for request in requests] == [expected, 7]
+    assert requests == [None, 7]
+
+
 def test_a_reference_stand_in_without_a_receipt_refuses(handoff):  # noqa: F811
     from prismaquant import tessera_calibration_cache as cc
     f = handoff
