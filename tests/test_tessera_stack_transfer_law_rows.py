@@ -213,6 +213,34 @@ def test_a_predicted_rung_carries_no_sampling_estimator(payload, rung):
     assert set(block["inclusion_prob"]) == set(range(EXPERTS))
 
 
+@pytest.mark.parametrize("extra_module", [MODULE_A, MODULE_B], ids=["predicted", "peer"])
+def test_incomplete_rung_keeps_transfer_law_after_extra_expert(extra_module):
+    anchors = {}
+    samples = {}
+    for index, module in enumerate((MODULE_A, MODULE_B)):
+        sample, reference = _stack(module, offset=1.4 * index, anchors=anchors)
+        samples[sample.packed_qname] = sample
+        if module == extra_module:
+            for role, (slope, intercept) in PLANTED[832].items():
+                qname = f"{module}.1.{role}"
+                value = 2.0 ** (intercept + slope * math.log2(reference[1, role]))
+                anchors[qname]["TESSERA_E2M1_K1"].append(_anchor(qname, 832, value))
+    built = campaign.campaign_cost_payload(
+        anchors, {}, loo={},
+        provenance={"provenance": {"hessian": {"supplied": True}}},
+        stack_samples=samples)
+    row = _rows(built, MODULE_A).get("TESSERA_E2M1_K1_R832")
+    assert row is not None
+    assert row["cost_source"] == "tessera_campaign_interpolated"
+    law = row["transfer_law"]
+    assert law["sample_experts"] == list(LAW_EXPERTS)
+    assert law["pooled_stacks"] == [f"{MODULE_B}.gate_up_proj"]
+    assert law["pooled_rows"]["832"] == len(LAW_EXPERTS)
+    for field in ("estimator", "variance_estimator", "dloss_stderr", "dloss_stderr_currency"):
+        assert field not in row
+        assert field not in row["sampled_experts"]
+
+
 def test_the_interpolated_surface_row_also_carries_no_estimator():
     """The pre-existing stack interpolation path had the same leak.
 
