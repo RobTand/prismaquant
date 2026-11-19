@@ -1308,7 +1308,22 @@ def production_stack_transfer_regret_gate(
                       max_regret_pct_observed=ordered[-1])
     else:
         result['status'] = 'infeasible'
-    if not result['passes']:
+    if result['passes']:
+        missing = []
+        for unit, fmt in selected.assignment.items():
+            rate = changed.get(unit, {}).get(fmt)
+            if rate is None:
+                continue
+            for stack, expert, projection in population[unit]:
+                sample = samples[stack]
+                measured = sample.reference_mse if rate == reference else sample.sampled_mse[rate]
+                if projection not in measured.get(expert, {}):
+                    missing.append((stack, expert, projection, rate))
+        result['winner_completion'] = [
+            dict(stack=stack, expert=expert, projection=projection, rate_q256=rate)
+            for stack, expert, projection, rate in sorted(missing)
+        ]
+    else:
         result['fallback'] = dict(mode='full_missing_band', scope='global', rows=[
             dict(stack=name, expert=expert, rate_q256=rate)
             for name in sorted(eligible) for expert in sorted(samples[name].experts)

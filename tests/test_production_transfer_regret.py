@@ -374,6 +374,42 @@ def test_packed_gate_matches_cli_and_exhaustive_oracle(monkeypatch, tmp_path):
         assert result["regrets_pct"] == [0.0] * 50
 
 
+def test_packed_winner_completion_requests_only_missing_projections():
+    packed = _FIXTURE["packed"]
+    members, dense = packed["members"], packed["dense"]
+
+    class PackedProfile(DefaultProfile):
+        def packed_expert_format_group(self, name):
+            return packed["group_key"] if name in members else None
+
+    names = [*members, dense]
+    stats = {n: _stats(packed["shape"], packed["h_trace"]) for n in names}
+    costs = _costs(names, [packed["member_losses"]] * 2 + [packed["dense_losses"]])
+    records = _scalar_records(((5, 5, 5), (5, 5, 5)), missing=True)
+    projections = ("down_proj", "up_proj")
+    records = {name: replace(
+        record, projections=projections,
+        reference_mse={e: dict.fromkeys(projections, row["down_proj"])
+                       for e, row in record.reference_mse.items()},
+        sampled_mse={832: {e: dict.fromkeys(projections, row["down_proj"])
+                           for e, row in record.sampled_mse[832].items()}},
+    ) for name, record in records.items()}
+    records["a"].sampled_mse[832][3] = {"down_proj": 5 * records["a"].reference_mse[3]["down_proj"]}
+    args = _gate_args(records, _problem(stats, costs, profile=PackedProfile()), cap=35344)
+    args["population"] = {n: tuple(("a", e, p) for p in projections)
+                          for n, e in zip(members, (2, 3))}
+    tight = surface.production_stack_transfer_regret_gate(records, **args)
+    assert tight["status"] == "pass"
+    assert tight["predicted_assignment"] == {**dict.fromkeys(members, "NVFP4"), dense: "FP8_E4M3"}
+    assert tight.get("winner_completion") == [
+        {"stack": "a", "expert": 3, "projection": "up_proj", "rate_q256": 832},
+    ]
+    full = surface.production_stack_transfer_regret_gate(records, **{**args, "byte_budget": 50688})
+    assert full["status"] == "pass"
+    assert full["predicted_assignment"] == dict.fromkeys(names, "FP8_E4M3")
+    assert full.get("winner_completion") == []
+
+
 def test_campaign_transfer_scores_rebuild_tessera_frontiers(monkeypatch):
     from types import SimpleNamespace
 
