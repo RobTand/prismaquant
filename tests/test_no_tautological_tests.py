@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from prismaquant.tautology import scan_tautologies
+from prismaquant.vendored.tautology import scan
 
 
 def test_no_tautological_tests():
     root = Path(__file__).resolve().parents[1]
-    findings = scan_tautologies(root)
+    findings = scan(root)
     if findings:
         raise AssertionError("\n".join(
             f"{finding.path}:{finding.line}: {finding.test}: {finding.rule}"
