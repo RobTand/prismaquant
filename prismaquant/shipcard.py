@@ -1540,7 +1540,7 @@ def _validate_build_bpp(build: Mapping[str, Any]) -> None:
 def _resolved_build(
     root: Path, build: Mapping[str, Any] | None, lane: str | None,
 ) -> tuple[dict[str, Any], str | None]:
-    """The build block with its recipe's replay claim, and the one lane it names."""
+    """Return the build block with its recipe claims and lane."""
     build_payload = dict(build or {})
     _validate_build_bpp(build_payload)
     from .layer_config import prefill_frontier_replay_claim, read_layer_config_metadata
@@ -1550,7 +1550,10 @@ def _resolved_build(
     prefill_frontier_replay_claim(build_payload)
     recipe = build_payload.get("layer_config")
     if recipe and Path(recipe).is_file():
-        claim = prefill_frontier_replay_claim(read_layer_config_metadata(recipe))
+        metadata = read_layer_config_metadata(recipe)
+        claim = prefill_frontier_replay_claim(metadata)
+        if "quantizable_population" in metadata:
+            build_payload["quantizable_population"] = metadata["quantizable_population"]
         if claim:
             for key, value in claim.items():
                 if key in build_payload and build_payload[key] != value:
@@ -2768,7 +2771,7 @@ def _allocator_achieved_bpp_claim(
             "value": _claimed_bpp(value, where="layer_config.json:selected_achieved_bits"),
             "source": f"layer_config.json:{selected_by}",
             "selected_label": meta.get("selected_label"),
-            "scope": meta.get("achieved_bits_scope"),
+            "scope": meta.get("selected_achieved_bits_scope", meta.get("achieved_bits_scope")),
             "note": (
                 "the bpp of the assignment this recipe actually holds, stamped "
                 "by the stage that selected it; it describes the recipe, not "

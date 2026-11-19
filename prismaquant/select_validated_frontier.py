@@ -1328,6 +1328,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     carried.pop("cb_serialized_payload", None)
     carried.pop("cb_render_identity", None)
     carried.pop("whole_artifact_budget", None)
+    carried.pop("quantizable_population", None)
+    carried.pop("assignment_sha256", None)
+    carried.pop("selected_achieved_bits_scope", None)
+    population = selected_payload.get("quantizable_population")
+    population_metadata = {
+        "quantizable_population": population,
+        "assignment_sha256": assignment_serialization_sha256(assignment),
+    } if population is not None else {}
+    if population_metadata:
+        carried.update(population_metadata)
+        carried["lm_head_mode"] = population["head"]["mode"]
     if uniform_control_status is not None:
         carried["uniform_control"] = uniform_control_status
     if (
@@ -1337,6 +1348,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         carried["selected_by"] = f"validated_frontier:{args.mode}"
         carried["selected_label"] = selected.get("label")
         carried["selected_achieved_bits"] = selected.get("bpp")
+        if population is not None:
+            carried["selected_achieved_bits_scope"] = "body_assignment_tensor_payload"
         if selected_budget is not None:
             carried["whole_artifact_budget"] = dict(selected_budget)
         layer_config[LAYER_CONFIG_META_KEY] = carried
@@ -1348,6 +1361,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "selection_mode": args.mode,
         "selected": selected,
         "assignment": dict(sorted(assignment.items())),
+        **population_metadata,
         **({
             "whole_artifact_budget": dict(selected_budget),
         } if selected_budget is not None else {}),
