@@ -282,6 +282,13 @@ def test_refuses_an_empty_manifest(emitted):
         emitter.main(_argv(emitted))
 
 
+def test_receipt_manifest_refuses_mapping_bindings(tmp_path):
+    manifest = tmp_path / "receipts.json"
+    manifest.write_text('{"bindings": {}}')
+    with pytest.raises(RuntimePriceError, match="receipt manifest must be a list of native receipt bindings"):
+        emitter.load_receipt_manifest(manifest)
+
+
 def _second_native_run(emitted, extension, digest):
     """Clone the relation's native run into one that loaded a second kernel.
 
