@@ -16,10 +16,7 @@ stops being true. That is why the resumed path sealed no phases at all
 (RobTand/prismaquant#607): reporting nothing is honest, but it leaves the
 storage role charging the whole manifest against the ARC budget.
 
-This module is the one definition of the resumed order, and therefore of what
-may be sealed. It is deliberately free of torch, of the format registry and
-of any PrismaQuant import, because the preparing action needs it.
-The action walks the order and reports each transition after all preceding reads complete.
+This module defines the resumed read order without a dependency on torch.
 
 The roster and its read order are bound to the *journal identity* that was on
 disk when the action was sealed. A journal, checkpoint or unit set that
@@ -33,6 +30,15 @@ from __future__ import annotations
 import hashlib
 import json
 from typing import Iterable, Mapping, Sequence
+
+if __package__:
+    from .digests import length_framed_bytes_sha256 as _length_framed_bytes_sha256
+else:
+    from pathlib import Path
+    from runpy import run_path
+
+    _length_framed_bytes_sha256 = run_path(str(Path(__file__).with_name("digests.py")))[
+        "length_framed_bytes_sha256"]
 
 
 #: The qualification journal's stage string. Held against
@@ -121,14 +127,10 @@ def replay_read_items(
 
 
 def _framed(items: Sequence[tuple[str, str, str | None]]) -> bytes:
-    """Length-framed items, so adjacent rows cannot be read two ways."""
-    digest = hashlib.sha256(b"prismaquant.joint_prepare.replay_read_order.v1\n")
-    for kind, name, fmt in items:
-        row = json.dumps((kind, name, fmt), ensure_ascii=False,
-                         separators=(",", ":")).encode("utf-8")
-        digest.update(len(row).to_bytes(8, "big"))
-        digest.update(row)
-    return digest.digest()
+    rows = (json.dumps((kind, name, fmt), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            for kind, name, fmt in items)
+    return bytes.fromhex(_length_framed_bytes_sha256(
+        rows, prefix=b"prismaquant.joint_prepare.replay_read_order.v1\n"))
 
 
 def roster_sha256(roster: Iterable[str]) -> str:

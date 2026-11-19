@@ -3372,6 +3372,14 @@ pq_py_library(
     srcs = [
         "prismaquant/joint_replay_frontier.py",
     ],
+    data = [
+        "prismaquant/digests.py",
+        "prismaquant/joint_replay_frontier.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
+    ],
 )
 
 pq_py_library(
