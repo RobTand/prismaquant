@@ -18,6 +18,8 @@
   `ReadStream.paused()` no longer returns while a worker still holds that value.
 
 ### Added
+- Catalog extension v4 binds fresh attention units to the body Stage A capture (#2580).
+  Each quantum keeps its attention roster digest and the original body slice digest.
 - The transfer regret gate uses the production scalar solver (#4663).
   It checks exact assignment bytes. It reports global fallback work.
   The greedy research diagnostic remains available.
