@@ -104,3 +104,18 @@ def test_a_host_without_meminfo_is_unreadable(tmp_path, proc):
     with pytest.raises(OSError):
         io_spans.host_memory()[0]
     assert mm._host_memory_info() is None
+
+
+def test_host_memory_refuses_missing_required_meminfo_fields(proc):
+    meminfo, zoneinfo = proc
+    _zoneinfo(zoneinfo, GiB)
+    zone_before = zoneinfo.read_bytes()
+    for data in (b"MemTotal: 1024 kB\n", b"MemAvailable: 512 kB\n", b"MemFree: 256 kB\n"):
+        meminfo.write_bytes(data)
+        with pytest.raises(RuntimeError) as error:
+            io_spans.host_memory()
+        assert str(error.value) == (
+            os.path.join("/", "proc", "meminfo") + " has no MemAvailable or MemTotal"
+        )
+        assert meminfo.read_bytes() == data
+        assert zoneinfo.read_bytes() == zone_before
