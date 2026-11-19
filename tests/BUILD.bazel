@@ -43705,6 +43705,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/dev_mode",
+        "//:prismaquant/digests",
         "@pq_pip//pytest",
     ],
 )
