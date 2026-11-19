@@ -53,6 +53,14 @@ def test_each_kind_preserves_the_raw_receipt_and_rejects_measured_changes(final_
         bind_execution_receipt(raw, changed)
 
 
+@pytest.mark.parametrize("final_panel", [DENSE_PANEL_SCHEMA], indirect=True)
+def test_dense_execution_projection_refuses_a_stale_joint_digest(final_panel):
+    assert execution_panel_from_joint(final_panel)["operator_identity"]["qname"] == "q"
+    final_panel["joint_operator_identity"]["rendered_weight"]["sha"] = "different"
+    with pytest.raises(ValueError, match="final joint operator digest differs"):
+        execution_panel_from_joint(final_panel)
+
+
 def test_each_kind_returns_independent_row_binding_and_validates_the_world(final_panel):
     kind = panel_kind(final_panel)
     before = copy.deepcopy(final_panel)
