@@ -1,0 +1,16 @@
+{
+  "config_json": "{\"model.layers.0.mlp.up_proj\":\"BF16\",\"model.layers.0.mlp.down_proj\":\"BF16\"}",
+  "assignment_digest_input": "{\"model.layers.0.mlp.down_proj\":\"BF16\",\"model.layers.0.mlp.up_proj\":\"BF16\"}",
+  "assignment_sha256": "4fbde808e2f190a06f2d7994e4dcebff5cfebd90393710ed76b43d0f3c1ecf74",
+  "artifact_sha256": "f4f34507822ff245f9bb0bf322d1e475dd181d71e548169944b1f2e1e5a9cdc7",
+  "capture": {
+    "test": "tests/test_export_output_safety.py::test_gguf_assignment_identity_matches_original_bytes",
+    "gguf_version": "0.19.0",
+    "leaf_base_sha256": {
+      "prismaquant/export_gguf.py": "a4a452d55b2eef135163d189b311f03b44f1771b0cab74b3154304ee91f4a25b",
+      "prismaquant/layer_config.py": "edae73cb69d9d0d5f7d1b0004eb7e9a0aa296cbdf9106003570b90e8aaa3e31f",
+      "prismaquant/digests.py": "e8ab9ab2d8afd9fcbc3bc6fd57401247405bd17ec850fefb71e4694edb2dbb99"
+    },
+    "method": "Capture the bytes at the original exporter's assignment hash. Read the digest from published GGUF metadata. Hash the complete published artifact. Fix the commit field to fixture. Do not use the owner recipe to capture these values."
+  }
+}

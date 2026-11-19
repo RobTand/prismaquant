@@ -174,6 +174,54 @@ def test_gguf_export_guard_runs_before_reader_or_writer(tmp_path):
     assert skeleton.read_bytes() == b"not parsed because path guard runs first"
 
 
+def test_gguf_assignment_identity_matches_original_bytes(tmp_path, monkeypatch):
+    import hashlib
+    import json
+    from types import SimpleNamespace
+
+    fixture = Path(__file__).parent / "fixtures/gguf_assignment_identity_2541.json"
+    assert fixture.is_file(), "The original GGUF assignment record is missing."
+
+    import gguf
+    import numpy as np
+
+    from prismaquant import export_gguf as module
+    from prismaquant.digests import DIRECT_ASCII_LAX, bytes_sha256hex, file_sha256hex
+
+    original = json.loads(fixture.read_text(encoding="utf-8"))
+    expected_bytes = original["assignment_digest_input"].encode("ascii")
+    skeleton = tmp_path / "skeleton.gguf"
+    writer = gguf.GGUFWriter(skeleton, "llama")
+    writer.add_block_count(1)
+    writer.add_tensor("blk.0.ffn_up.weight", np.array([[1, 2]], dtype=np.float32))
+    writer.add_tensor("blk.0.ffn_down.weight", np.array([[3, 4]], dtype=np.float32))
+    writer.add_tensor("output.weight", np.array([[5, 6]], dtype=np.float32))
+    writer.write_header_to_file()
+    writer.write_kv_data_to_file()
+    writer.write_tensors_to_file()
+    writer.close()
+    config = tmp_path / "assignment.json"
+    config.write_text(original["config_json"], encoding="utf-8")
+    output = tmp_path / "artifact.gguf"
+    inputs = []
+
+    def capture_sha256(payload):
+        inputs.append(payload)
+        return hashlib.sha256(payload)
+
+    monkeypatch.setattr(module, "hashlib", SimpleNamespace(sha256=capture_sha256))
+    monkeypatch.setattr(module, "_git_commit", lambda: "fixture")
+    module.export_gguf(skeleton, config, output, device="cpu")
+    identity = gguf.GGUFReader(output).fields["prismaquant.assignment_sha256"].contents()
+    assert inputs == [expected_bytes]
+    assert identity == original["assignment_sha256"]
+    assert file_sha256hex(output) == original["artifact_sha256"]
+
+    owner_bytes = DIRECT_ASCII_LAX.encoded(module.load_assignment(config))
+    assert owner_bytes == expected_bytes
+    assert bytes_sha256hex(owner_bytes) == original["assignment_sha256"]
+
+
 def _transaction_temps(output: Path) -> list[Path]:
     return sorted(output.parent.glob(f".{output.name}.tmp-*"))
 

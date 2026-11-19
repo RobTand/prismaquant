@@ -1308,11 +1308,18 @@ pq_py_library(
     srcs = [
         "test_export_output_safety.py",
     ],
+    data = [
+        "fixtures/gguf_assignment_identity_2541.json",
+        "test_export_output_safety.py",
+    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/digests",
         "//:prismaquant/export_gguf",
         "//:prismaquant/export_output_safety",
+        "@pq_pip//gguf",
+        "@pq_pip//numpy",
         "@pq_pip//pytest",
     ],
 )

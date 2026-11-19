@@ -21,6 +21,9 @@
   `ReadStream.paused()` no longer returns while a worker still holds that value.
 
 ### Added
+- Record GGUF assignment identity parity (#2541). Check the owner against the
+  original assignment bytes and digest. Check the published artifact against
+  the original artifact hash. Leave the deprecated exporter unchanged.
 - Catalog extension v4 binds fresh attention units to the body Stage A capture (#2580).
   Each quantum keeps its attention roster digest and the original body slice digest.
 - The transfer regret gate uses the production scalar solver (#4663).
