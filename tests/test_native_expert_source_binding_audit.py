@@ -100,3 +100,43 @@ def test_actual_expert_main_refuses_unbound_journal_before_measurement(
     monkeypatch.setattr(journal, 'prepare_journal', resume)
     with pytest.raises(RuntimeError, match='identity'):
         expert.main(args + ['--resume'])
+
+
+def test_expert_collection_does_not_enter_glm_import_path():
+    import os
+    import subprocess
+    import sys
+
+    probe = '''
+import sys
+
+import pytest
+
+attempts = []
+glm_model = 'transformers.models.glm5_next'
+
+class WatchGLM:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.removeprefix('tests.') in {
+                'test_glm5_next_streamed_forward_parity', 'test_glm_campaign_streaming', glm_model}:
+            attempts.append(fullname)
+
+importorskip = pytest.importorskip
+
+def watch_skip(name, *args, **kwargs):
+    if name == glm_model:
+        attempts.append(name)
+    return importorskip(name, *args, **kwargs)
+
+sys.meta_path.insert(0, WatchGLM())
+pytest.importorskip = watch_skip
+result = pytest.main(['--collect-only', '-q', sys.argv[1]])
+assert not attempts, attempts
+sys.exit(result)
+'''
+    node = f'{__file__}::test_actual_expert_main_binds_only_fresh_rows'
+    result = subprocess.run(
+        [sys.executable, '-c', probe, node],
+        env=dict(os.environ, PYTEST_ADDOPTS='', PYTEST_PLUGINS='', PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'),
+        capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
