@@ -6,8 +6,9 @@ import textwrap
 
 import pytest
 
-from prismaquant.vendored.tautology import Finding, main, scan
 from tests import test_no_tautological_tests as guard
+
+Finding, main, scan = (guard.tautology[name] for name in ("Finding", "main", "scan"))
 
 
 @pytest.mark.parametrize(
@@ -84,7 +85,7 @@ def test_cli_reports_every_finding_and_clean_exit(tmp_path, capsys):
 
 
 def test_vendored_guard_runs_with_isolated_standard_library_python(tmp_path):
-    detector = Path(__file__).resolve().parents[1] / "prismaquant" / "vendored" / "tautology.py"
+    detector = Path(__file__).resolve().parents[1] / "prismaquant/vendored/tautology.py"
     (tmp_path / "test_sample.py").write_text(
         "def test_sample():\n    self.assertEqual(actual, actual)\n", encoding="utf-8"
     )
