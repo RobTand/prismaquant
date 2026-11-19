@@ -515,6 +515,7 @@ def compute_aura_cost_streamed(
     progress_base: int = 0,
     profile=None,
     sequence_attribution: Mapping[str, object] | None = None,
+    head_weight_delta: torch.Tensor | None = None,
 ) -> dict:
     """Layer-streamed KL-adjoint with identity-bound per-Linear shards.
 
@@ -535,6 +536,9 @@ def compute_aura_cost_streamed(
     Both preserve scalar projection arithmetic; candidate/gradient bounds
     remain separate admission requirements. Checkpoints bind the execution partition
     because floating-point kernels may round differently with batch shape.
+
+    Supply ``head_weight_delta = Wq - W`` to score a plain Linear head in joint
+    AURA. The result gives ``head_signed_weight_per_probe`` at the source head.
     """
     from prismaquant.joint_statistics_replay import (
         normalize_operator_windows, operator_window_guard, resident_candidates,
@@ -609,6 +613,18 @@ def compute_aura_cost_streamed(
         raise ValueError("joint_projection_backend requires joint_activation")
     if probe_microbatch and not joint_activation:
         raise ValueError("streamed probe_microbatch currently requires joint_activation")
+    head = None
+    if head_weight_delta is not None:
+        if not joint_activation:
+            raise ValueError("Use joint AURA to score a head delta.")
+        head = runner._head()
+        if type(head) is not nn.Linear:
+            raise ValueError("Use a plain Linear head to score a head delta.")
+        if head_weight_delta.shape != head.weight.shape or not head_weight_delta.is_floating_point():
+            raise ValueError("Supply a floating-point delta with the same shape as the head weight.")
+        head_weight_delta = head_weight_delta.detach()
+        score_dtype = torch.promote_types(torch.float32, torch.promote_types(
+            head.weight.dtype, head_weight_delta.dtype))
     from prismaquant.joint_aura import (
         normalize_sequence_attribution, sequence_attribution_candidates)
     attribution_config = normalize_sequence_attribution(sequence_attribution)
@@ -1339,9 +1355,12 @@ def compute_aura_cost_streamed(
                 ),
                 "weight_mse_diagnostic_is_cost_input": False,
             })
+        if head is not None:
+            payload["head_signed_weight_per_probe"] = head_signed.tolist()
         return payload
 
-    if completed_checkpoint_units == set(names):
+    # Body checkpoints do not contain head scores.
+    if head is None and completed_checkpoint_units == set(names):
         _log(f"checkpoint resume: validated all {len(names)} streamed units; "
              "skip forward/reverse")
         return _finish_streamed_payload()
@@ -1477,12 +1496,20 @@ def compute_aura_cost_streamed(
     if retained_budget is not None:
         retained_source_phase('tail', runner.num_layers,
             boundary_storage.actual_auxiliary_bytes(batches, cotangents=cotangents))
+    if head is not None:
+        head_signed = torch.zeros(n_probes, device=device, dtype=score_dtype)
     with prefetched_boundary_batches(boundary_storage, batches, runner.num_layers) as tail_batches:
         for batch_index, batch, tail_cpu, _unused in tail_batches:
             try:
                 for probe_index in range(n_probes):
                     tail = tail_cpu.to(device=device, dtype=dtype).detach().requires_grad_(True)
-                    logits = runner.tail_logits(batch, tail)
+                    if head is None:
+                        logits = runner.tail_logits(batch, tail)
+                    else:
+                        head_input = runner.tail_head_input(tail)
+                        with torch.no_grad():
+                            logits = head(head_input)
+                        logits.requires_grad_(True)
                     if probe_layout is not None and list(logits.shape) != [
                         len(batch.input_ids), int(calib_ids.shape[1]), probe_layout["vocab_size"]
                     ]:
@@ -1494,7 +1521,23 @@ def compute_aura_cost_streamed(
                             "global_row_offset": row_offsets[batch_index]}
                            if probe_layout is not None else {}),
                     )
-                    probe.backward()
+                    if head is None:
+                        probe.backward()
+                    else:
+                        logit_grad, = torch.autograd.grad(probe, logits)
+                        with torch.no_grad():
+                            score_input = head_input.to(dtype=score_dtype)
+                            for start in range(0, head.out_features, 1024):
+                                rows = slice(start, start + 1024)
+                                delta = head_weight_delta[rows].to(device=device, dtype=score_dtype)
+                                change = score_input @ delta.T
+                                head_signed[probe_index] += (
+                                    logit_grad[..., rows].to(dtype=score_dtype) * change
+                                ).sum()
+                                del delta, change
+                            head_input_grad = logit_grad.flatten(0, -2) @ head.weight
+                        head_input.backward(head_input_grad.view_as(head_input))
+                        del head_input, score_input, logit_grad, head_input_grad
                     if tail.grad is None:
                         raise RuntimeError("streamed AURA tail produced no cotangent")
                     grad_outs[probe_index].append(tail.grad.detach().to("cpu") if boundary_storage is None
