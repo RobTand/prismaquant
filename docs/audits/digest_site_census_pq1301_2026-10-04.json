@@ -138521,5 +138521,36 @@
       "change": "None. The removed helper scope is already absent; the retained descriptor scope remains."
     },
     "admission": "Pending independent review of this reconciliation; no native issue closure or root completion is inferred."
+  },
+  "replay_read_order_2541": {
+    "owner": "prismaquant#2648",
+    "parent": "prismaquant#2541",
+    "scope": "Replay read order only. The historical #2542 records remain unchanged. The roster uses a different tag and name frames and is outside this leaf.",
+    "calls": [
+      {
+        "historical_id": "hashlib:prismaquant/joint_replay_frontier.py::_framed@129:13",
+        "disposition": "Use the existing length_framed_bytes_sha256 recipe at _framed@132:25. Convert its hex string to raw bytes.",
+        "owner_route": "prismaquant.digests.length_framed_bytes_sha256"
+      },
+      {
+        "historical_id": "supplemental-json:prismaquant/joint_replay_frontier.py::_framed@131:14",
+        "disposition": "Keep compact UTF-8 tuple encoding at _framed@130:12. The encoder does not change."
+      }
+    ],
+    "original_fixture": "tests/fixtures/joint_replay_read_order_2541.json",
+    "comparison": "tests/test_joint_replay_frontier_607.py::test_read_order_routes_original_frames_through_the_byte_owner",
+    "baseline": {
+      "path": "tests/fixtures/duplication_baseline.json",
+      "removed_live_scope": "hashlib:prismaquant/joint_replay_frontier.py::_framed",
+      "remaining_live_scope": "hashlib:prismaquant/joint_replay_frontier.py::roster_sha256",
+      "supplemental_json_row_delta": 0,
+      "change": "Keep the existing ceiling. The current inventory has one fewer replay scope and no new replay scopes."
+    },
+    "local_checks": {
+      "tests/test_joint_replay_frontier_607.py": "Pass (12 tests).",
+      "tests/test_framed_digest_owner_1301.py": "Pass (3 tests).",
+      "tests/test_duplication_baseline.py": "Pass (20 tests).",
+      "isolated_file_load": "Pass. The module returns 32 raw bytes without loading the prismaquant package."
+    }
   }
 }

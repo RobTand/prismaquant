@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Use the shared byte framing recipe for the joint replay read order (#2541, #2648).
+  Keep the domain tag, row order, and raw digest bytes unchanged.
+
 ### Token digest owner integration (#2638/#3012)
 
 - Add exactly one tensor-owner recipe, `token_ids_int32_sha256`, and route
