@@ -440,7 +440,14 @@ class ModelProfile(ABC):
         spec = self.structure_spec()
         if spec is None or not spec.pact.declared:
             return None
-        return spec.pact.tp_splits_for_role(role)
+        count = spec.pact.tp_splits_for_role(role)
+        if count is not None:
+            return count
+        if role == "down_proj":
+            raise ValueError(
+                f"profile {getattr(self, 'name', 'unknown')} declares no TP split for {role}"
+            )
+        return 1
 
     def pact_dimension_value(self, key, config=None):
         """One dimension value. Explicit config wins, declared next."""

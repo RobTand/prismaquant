@@ -1,5 +1,7 @@
 """Adapter tests: shared contract drives GLM and non-GLM resolution."""
 
+from dataclasses import replace
+
 import pytest
 
 from prismaquant.pact_frontier_profile import (
@@ -493,6 +495,16 @@ def test_role_dependent_tp_dimensions():
     qwen = _qwen3_declared_profile()
     assert tp_splits_for_role("down_proj", qwen) == 2
     assert tp_splits_for_role("w2", qwen) == 1
+    spec = qwen.structure_spec()
+    qwen._structure_spec = replace(spec, pact=replace(spec.pact, tp_splits=()))
+    with pytest.raises(ValueError) as exc:
+        tp_splits_for_role("down_proj", qwen)
+    assert str(exc.value) == "profile qwen3 declares no TP split for down_proj"
+
+
+def test_profile_supplies_default_tp_split():
+    assert _glm_profile().pact_tp_splits_for_role("gate_proj") == 1
+
 
 def test_explicit_prefix_ids_beat_declared_prefix_ids():
     from prismaquant.model_profiles import profile_from_config
