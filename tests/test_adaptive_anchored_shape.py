@@ -180,6 +180,15 @@ def test_invalid_measurement_and_extrapolation_are_refused():
         curve.record_measurement(3, 80.0)
 
 
+def test_adaptive_curve_refuses_boolean_coordinates():
+    endpoints = {0: 4.0, 2: 1.0}
+    options = {"relative_tolerance": 0.0, "max_measurements": 3}
+    curve = AdaptiveAnchoredCurve.start((0, 1, 2), endpoints, **options)
+    assert curve.predict(1) == 2.0
+    with pytest.raises(AnchoredShapeError, match="candidate coordinates must be integers"):
+        AdaptiveAnchoredCurve.start((0, True, 2), endpoints, **options)
+
+
 def test_opt_in_allows_flat_and_increasing_measurements_without_changing_refinement():
     flat = AdaptiveAnchoredCurve.start(
         (0, 2, 4), {0: 5.0, 4: 5.0}, mode="value",
