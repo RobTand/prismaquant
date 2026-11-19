@@ -344,7 +344,7 @@ def prepare_native_inputs(cache, source_weight, activation_rows, *, unit, format
             phases[phase] = {"m": count, **{name: _cb_cache_tensor_identity(tensors[f"{phase}.{name}"])
                 for name in ("input", "reference_qdq", "reference_output")}}
     numerics, derivation = derive_gemm_numerics(magnitude, k=source_weight.shape[1])
-    return {
+    inputs = {
         "schema": INPUT_SCHEMA, "unit": unit, "format": format_name,
         "shape": list(source_weight.shape), "source_weight": _cb_cache_tensor_identity(source_weight),
         "rendered_weight": _cb_cache_tensor_identity(rendered), "activation": activation,
@@ -355,7 +355,12 @@ def prepare_native_inputs(cache, source_weight, activation_rows, *, unit, format
         "activation_quantizer_attestation": attestation,
         "execution": dict(EXECUTION),
         "phases": phases, "prefetch": prefetch,
-    }, tensors
+    }
+    if (activation["static_contract"] or {}).get("measured_as_served"):
+        from .nvfp4_activation_contract import effective_served_quantizer_identity
+        inputs["reference_served_quantizer"] = effective_served_quantizer_identity(
+            spec.static_activation_contract).as_record()
+    return inputs, tensors
 
 
 def require_native_execution(inputs, preflight):
@@ -518,6 +523,8 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
     _equal(receipt["runtime_sha256"], joint_identity_sha256(expected_panel["runtime"]), "receipt runtime digest")
     operator = receipt["operator"]
     joint = expected_panel["joint_operator_identity"]
+    from .native_execution_binding import require_reference_quantizer
+    require_reference_quantizer(expected_panel, joint["activation"], joint)
     for key in ("source_weight", "rendered_weight"):
         _equal(operator[key], joint[key], f"receipt {key}")
     _equal(operator["input_global_scale"], joint["activation"]["input_global_scale"], "receipt activation scale")
