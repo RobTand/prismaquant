@@ -1806,6 +1806,9 @@ pq_py_library(
     srcs = [
         "test_native_expert_source_binding_audit.py",
     ],
+    data = [
+        "test_native_expert_source_binding_audit.py",
+    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
