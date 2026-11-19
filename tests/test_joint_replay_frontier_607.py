@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import shutil
 import sys
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -58,6 +62,30 @@ def test_replay_scratch_stays_outside_the_source_checkout(scratch):
 
 
 # --- the sealed contract ---------------------------------------------------
+
+
+def test_read_order_routes_original_frames_through_the_byte_owner(monkeypatch):
+    owner = getattr(replay, "_length_framed_bytes_sha256", None)
+    assert owner is not None
+    record = json.loads((ROOT / "tests/fixtures/joint_replay_read_order_2541.json").read_bytes())
+    items = replay.replay_read_items(record["cells"], record["cells"])
+    prefix = bytes.fromhex(record["prefix_hex"])
+    digest = Mock(wraps=hashlib.sha256(prefix))
+    sha256 = Mock(return_value=digest)
+    monkeypatch.setitem(owner.__globals__, "hashlib", SimpleNamespace(sha256=sha256))
+    raw = replay._framed(items)
+    sha256.assert_called_once_with(prefix)
+    assert [call.args[0].hex() for call in digest.update.call_args_list] == [
+        part for frame in zip(record["length_hex"], record["row_hex"], strict=True) for part in frame
+    ]
+    assert type(raw).__name__ == record["result_type"]
+    assert raw == bytes.fromhex(record["digest_hex"])
+    monkeypatch.undo()
+    assert replay.read_order_sha256(items) == record["digest_hex"]
+    refused = replay.replay_read_items([record["refused_name"]], {record["refused_name"]: []})
+    with pytest.raises(UnicodeEncodeError) as exc:
+        replay._framed(refused)
+    assert [exc.value.encoding, exc.value.reason] == record["refusal"]
 
 
 # --- the runtime-side refusals ---------------------------------------------
