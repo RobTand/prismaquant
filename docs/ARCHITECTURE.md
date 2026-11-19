@@ -24763,7 +24763,21 @@ profile pin intact (`fixed_head.py`):
   the embedding-side perturbation is not measured by the head cost (§7.5).
 
 The allocator stamps `lm_head_format` and `lm_head_mode = profile_pinned_bf16|fixed|dp` in
-its metadata. `run-pipeline.sh` uses the same resolved policy to expand `COST_FORMATS`, choose
+its metadata. In DP mode, `lm_head_format` records the configured policy, not the
+selected rung. The expanded assignment supplies the rung, which can be BF16.
+Exact artifact pricing replaces the head's source span with its selected payload.
+The MTP rebase replaces the separate MTP source storage once.
+
+`quantizable_population` separates the body and admitted head. It records their
+parameter counts and tensor payload bytes. It excludes immutable embeddings,
+unrelated pins, and auxiliary MTP and visual tensors. Body bpp keeps its legacy
+scope. Selectable bpp includes the DP head in both the payload and parameter
+counts. Neither rate uses whole-artifact bytes. The allocator binds the record
+to the assignment. Validation checks that identity before reporting the record.
+The card reads it from the recipe. Tessera plan provenance carries the record
+separately from wire coverage. This disclosure does not admit a head for Tessera export.
+
+`run-pipeline.sh` uses the same resolved policy to expand `COST_FORMATS`, choose
 the head probe/cost census, filter production-cache profile pins, and pass the exporter's
 remaining `--ignore` names. `export_native_compressed` trusts that allocator metadata for
 only the head aliases; an explicit operator `--ignore` remains highest precedence. It matters
