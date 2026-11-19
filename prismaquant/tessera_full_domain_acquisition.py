@@ -8,11 +8,73 @@ and downstream validation remain separate from this acquisition schedule.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from math import isfinite, sqrt
+from statistics import mean, stdev
 
 from .quality_prefill_population import RateDomain
 
 SCHEMA = 'prismaquant.tessera_full_domain_acquisition.v1'
+
+
+def audit_joint_allocation_regret(
+    allocator_pick: str,
+    byte_budget: int,
+    roster: Mapping[str, Mapping],
+    *,
+    roster_limit: int,
+) -> dict:
+    """Compare the allocator pick with all measured assignments that fit.
+
+    Supply the complete roster from before surrogate pruning.
+    Include each charged payload once in each assignment.
+    Align the loss samples by position across assignments.
+    Use this audit for research only.
+    """
+    if not roster:
+        raise ValueError("The audit cannot use an empty roster.")
+    if type(roster_limit) is not int or len(roster) > roster_limit:
+        raise ValueError("The roster limit must be an integer that covers the roster.")
+    if type(byte_budget) is not int or byte_budget < 0:
+        raise ValueError("The byte budget must be a nonnegative integer.")
+    if allocator_pick not in roster:
+        raise ValueError("The allocator pick is not in the roster.")
+
+    feasible = {}
+    sample_count = None
+    for assignment_id, entry in roster.items():
+        payloads = tuple(entry["wire_payloads"])
+        if not all(isinstance(payload, bytes) for payload in payloads):
+            raise ValueError("Use byte strings for wire payloads.")
+        actual_bytes = sum(map(len, payloads))
+        stamp = entry["total_bytes"]
+        if type(stamp) is not int or stamp != actual_bytes:
+            raise ValueError("The byte stamp does not match the actual byte total.")
+        samples = tuple(entry["loss_samples"])
+        if not samples:
+            raise ValueError("The sample list is empty.")
+        if sample_count is not None and len(samples) != sample_count:
+            raise ValueError("The sample counts differ.")
+        if not all(map(isfinite, samples)):
+            raise ValueError("A loss sample is not finite.")
+        sample_count = len(samples)
+        if actual_bytes <= byte_budget:
+            feasible[assignment_id] = (mean(samples), actual_bytes, assignment_id, samples)
+
+    if allocator_pick not in feasible:
+        raise ValueError("The allocator pick exceeds the byte budget.")
+    pick_mean, pick_bytes, _, pick_samples = feasible[allocator_pick]
+    winner_mean, winner_bytes, winner_id, winner_samples = min(feasible.values())
+    paired = tuple(a - b for a, b in zip(pick_samples, winner_samples, strict=True))
+    return {
+        "allocator_pick": {"assignment_id": allocator_pick, "actual_bytes": pick_bytes, "mean_loss": pick_mean},
+        "measured_winner": {"assignment_id": winner_id, "actual_bytes": winner_bytes, "mean_loss": winner_mean},
+        "paired_differences": paired,
+        "mean_regret": mean(paired),
+        "standard_error": stdev(paired) / sqrt(len(paired)) if len(paired) > 1 else None,
+        "feasible_count": len(feasible),
+        "ranking_available": len(feasible) > 1,
+    }
 
 
 def propose_full_domain_acquisition(

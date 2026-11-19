@@ -11,6 +11,7 @@ import sys
 import pytest
 import torch
 
+from prismaquant import tessera_full_domain_acquisition
 from prismaquant.cost_currency import CostCurrencyError
 from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from prismaquant.tessera_full_domain_acquisition import joint_acquisition_from_cost_data
@@ -222,3 +223,76 @@ def test_nonmapping_row_does_not_become_an_unmeasured_family(joint_payload):
     payload["costs"][name][FORMATS[0]] = "error: unbound scalar summary"
     with pytest.raises(ValueError, match="raw row mappings"):
         joint_acquisition_from_cost_data(payload, {name: shape}, [FAMILY], max_new_points=2)
+
+
+def test_joint_allocation_regret_includes_surrogate_dominated_assignment():
+    audit = getattr(tessera_full_domain_acquisition, "audit_joint_allocation_regret", None)
+    assert audit is not None
+    roster = {
+        "pick": dict(wire_payloads=(b"ab",), total_bytes=2,
+                     loss_samples=(-1, 3, 4), surrogate_loss=0),
+        "dominated": dict(wire_payloads=(b"a", b"bc"), total_bytes=3,
+                          loss_samples=(-4, 0, 0), surrogate_loss=1),
+        "over": dict(wire_payloads=(b"abcd",), total_bytes=4, loss_samples=(-5, -5, -5)),
+    }
+    report = audit("pick", 3, roster, roster_limit=3)
+    assert roster["dominated"]["surrogate_loss"] > roster["pick"]["surrogate_loss"]
+    assert report["allocator_pick"] == {"assignment_id": "pick", "actual_bytes": 2, "mean_loss": 2}
+    assert report["measured_winner"] == {
+        "assignment_id": "dominated", "actual_bytes": 3, "mean_loss": pytest.approx(-4 / 3),
+    }
+    assert report["measured_winner"]["actual_bytes"] <= 3 < len(roster["over"]["wire_payloads"][0])
+    assert max(roster["over"]["loss_samples"]) < report["measured_winner"]["mean_loss"]
+    assert report["feasible_count"] == 2
+    assert report["ranking_available"] is True
+    assert report["paired_differences"] == (3, 3, 4)
+    assert report["mean_regret"] == pytest.approx(10 / 3)
+    assert report["standard_error"] == pytest.approx(1 / 3)
+
+    report = audit("pick", 2, roster, roster_limit=3)
+    assert report["feasible_count"] == 1
+    assert report["measured_winner"] == report["allocator_pick"]
+    assert report["measured_winner"]["actual_bytes"] == 2
+    assert report["mean_regret"] == 0
+    assert report["ranking_available"] is False
+
+
+def test_joint_allocation_regret_refuses_incorrect_byte_stamp():
+    audit = getattr(tessera_full_domain_acquisition, "audit_joint_allocation_regret", None)
+    assert audit is not None
+    roster = {"pick": dict(wire_payloads=(b"ab",), total_bytes=1, loss_samples=(0,))}
+    with pytest.raises(ValueError, match="byte stamp"):
+        audit("pick", 2, roster, roster_limit=1)
+
+
+def test_joint_allocation_regret_breaks_ties_by_bytes_then_id():
+    audit = getattr(tessera_full_domain_acquisition, "audit_joint_allocation_regret", None)
+    assert audit is not None
+    roster = {
+        "a": dict(wire_payloads=(b"ab",), total_bytes=2, loss_samples=(-1,)),
+        "c": dict(wire_payloads=(b"a",), total_bytes=1, loss_samples=(-1,)),
+        "b": dict(wire_payloads=(b"b",), total_bytes=1, loss_samples=(-1,)),
+    }
+    report = audit("a", 2, roster, roster_limit=3)
+    assert report["measured_winner"]["assignment_id"] == "b"
+    assert report["standard_error"] is None
+
+
+@pytest.mark.parametrize("pick,budget,limit,samples,match", [
+    ("absent", 2, 2, (0,), "not in the roster"),
+    ("other", 1, 2, (0,), "exceeds the byte budget"),
+    ("pick", 1, 2, None, "empty roster"),
+    ("pick", 1, 1, (0,), "roster limit"),
+    ("pick", 1, 2, (), "sample list is empty"),
+    ("pick", 1, 2, (0, 1), "sample counts differ"),
+    ("pick", 1, 2, (float("nan"),), "not finite"),
+])
+def test_joint_allocation_regret_refuses_invalid_audit(pick, budget, limit, samples, match):
+    audit = getattr(tessera_full_domain_acquisition, "audit_joint_allocation_regret", None)
+    assert audit is not None
+    roster = {} if samples is None else {
+        "pick": dict(wire_payloads=(b"a",), total_bytes=1, loss_samples=(0,)),
+        "other": dict(wire_payloads=(b"bc",), total_bytes=2, loss_samples=samples),
+    }
+    with pytest.raises(ValueError, match=match):
+        audit(pick, budget, roster, roster_limit=limit)
