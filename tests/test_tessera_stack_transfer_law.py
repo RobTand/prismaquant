@@ -213,6 +213,20 @@ def test_a_stack_whose_reference_is_not_a_census_is_refused():
             sampled_mse=stack.sampled_mse, currency=stack.currency)
 
 
+def test_transfer_fit_refuses_reference_values_without_spread():
+    reference = {expert: {"gate_proj": 1.0} for expert in range(3)}
+    measured = {832: {expert: {"gate_proj": expert + 2.0} for expert in range(3)}}
+    sample = StackRateSample("flat", ("gate_proj",), (0, 1, 2), REFERENCE,
+                             reference, (0, 1, 2), measured)
+    with pytest.raises(TesseraFormatError) as error:
+        fit_stack_transfer_law([sample], hold_out="other")
+    assert str(error.value) == (
+        "rung 832 projection 'gate_proj': the reference values have no spread, "
+        "so no slope is identified")
+    assert reference == {expert: {"gate_proj": 1.0} for expert in range(3)}
+    assert measured == {832: {expert: {"gate_proj": expert + 2.0} for expert in range(3)}}
+
+
 def test_weights_reproduce_the_campaign_total_convention(population):
     """``sum_e w_e * sum_p mse`` -- the same product the HT path estimates."""
     stack = population["s:layer1"]
