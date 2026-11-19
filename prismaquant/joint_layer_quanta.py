@@ -72,7 +72,6 @@ from .joint_campaign_ledger import (
 )
 
 
-PLAN_BLOCK_SCHEMA = "prismaquant.joint_layer_quanta.plan.v1"
 COVERAGE_SCHEMA = "prismaquant.joint_layer_quanta.coverage.v1"
 #: The stage-A capture schema, named here so the slice binder and the
 #: dispatcher cite one spelling.
