@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from prismaquant import dev_mode
+from prismaquant import dev_mode, digests
 
 
 class _LongDiagnosticRepr:
@@ -121,3 +121,27 @@ def test_diagnostic_fingerprint_routes_only_the_existing_bytes(monkeypatch):
     encoded = b'"' + b"\\u00e9" * 161 + b'"'
     assert dev_mode._shown(value) == _expected_rendering(value, encoded)
     assert seen == [encoded]
+
+
+def test_diagnostic_json_uses_the_exact_repr_profile(monkeypatch):
+    class Diagnostic(_LongDiagnosticRepr):
+        def __str__(self):
+            return "other"
+
+    value = {"z": Diagnostic(), "a": "😀"}
+    original = b'{"a": "\\ud83d\\ude00", "z": "' + b"repr-\\u00e9-" * 30 + b'"}'
+    assert dev_mode._shown(value) == _expected_rendering(repr(value), original)
+    with pytest.raises(TypeError):
+        digests.DIRECT_ASCII_SPACED_LAX.encoded(value)
+    assert digests.DIRECT_ASCII_SPACED_LAX_DEFAULT_STR.encoded(value) == (
+        b'{"a": "\\ud83d\\ude00", "z": "other"}'
+    )
+
+    encode = getattr(dev_mode, "diagnostic_json_bytes", None)
+    assert encode is not None
+    assert encode is digests.diagnostic_json_bytes
+    assert encode(value) == original
+    spy = Mock(wraps=encode)
+    monkeypatch.setattr(dev_mode, "diagnostic_json_bytes", spy)
+    assert dev_mode._shown(value) == _expected_rendering(repr(value), original)
+    spy.assert_called_once_with(value)

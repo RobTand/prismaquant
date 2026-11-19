@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Use `diagnostic_json_bytes` for diagnostic fingerprints (#2541).
+  Keep the original ASCII escapes and text fallback.
+
 - Use the shared byte framing recipe for the joint replay read order (#2541, #2648).
   Keep the domain tag, row order, and raw digest bytes unchanged.
 

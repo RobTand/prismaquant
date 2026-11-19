@@ -45,6 +45,7 @@ MANIFEST_SOURCE_BLOBS = {
 # afd626d6d adds staged object offsets in the two read scopes, preserving their
 # raw SHA-256 calls and digest comparisons against the logical entry bytes.
 # digests: bounded chunks_sha256hex owner supports the native byte writer.
+# The diagnostic JSON profile does not change the guarded-read recipes.
 # tensor_digests: the additive retained token owner route from 58a2db300.
 # perturbed_x_cache, PQ #3421: the unreachable landing wait, ram branches and
 # declared_size are deleted; the five retained raw-hashlib calls are unchanged.
@@ -54,8 +55,8 @@ MANIFEST_SOURCE_BLOBS = {
 # Future changed pins require a per-file --reason and print the source diff.
 CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('27653aa3feb5f4d14b6cca1651bd232f23f601f0',
                                       '15993e22c339d1cbb7c157d69d904dff031a535bee09bb35797cbbe654f693ce'),
- 'prismaquant/digests.py': ('1511a8142cca4b1fb9067bb5cbbcf92098f95f69',
-                            'e8ab9ab2d8afd9fcbc3bc6fd57401247405bd17ec850fefb71e4694edb2dbb99'),
+ 'prismaquant/digests.py': ('64598f61c367cd789bf3edf9e11d31ba13929587',
+                            '9b9e179069b47aefb61a3bf57acfe29d4d0478c34c5b2568753529c49892de0f'),
  'prismaquant/tensor_digests.py': ('0777758650869edc365cbf545280250e6fa175f2',
                                    '8baeaf7541a23481b9d233a7c65ee5f679f4fcc248c004e83ad0ca16ea8ee50a'),
  'prismaquant/tessera_census_cache.py': ('2f8143e6af37a0c49ec223b14873cdbdc8f9d44d',

@@ -49,13 +49,12 @@ modules that own them, and each one hands its comparison to
 """
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
-from .digests import bytes_sha256hex
+from .digests import bytes_sha256hex, diagnostic_json_bytes
 
 #: The one environment variable. Read at the gates, never cached, so a
 #: subprocess or a container inherits it through the environment alone.
@@ -125,7 +124,7 @@ def _shown(value: Any) -> str:
     if len(text) <= _SHOWN_CHARS:
         return text
     try:
-        encoded = json.dumps(value, sort_keys=True, default=repr).encode()
+        encoded = diagnostic_json_bytes(value)
     except (TypeError, ValueError):
         encoded = text.encode()
     digest = bytes_sha256hex(encoded)[:16]
