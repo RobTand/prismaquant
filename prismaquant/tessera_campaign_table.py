@@ -445,13 +445,10 @@ def _stack_cost_rows(
     """Build every measured + interpolated row for one packed stack.
 
     ``transfer_law`` maps a family to the ``StackTransferLaw`` fitted on the
-    OTHER stacks of that family.  It is consulted only for a rung that covers
-    exactly ``sample.transfer_law_experts`` -- the second tier of a two-tier
-    schedule -- and its rows are model predictions, written with
-    ``PROVENANCE_INTERPOLATED`` and a ``transfer_law`` block and never with
-    the Horvitz-Thompson fields, which describe a draw this value did not come
-    from.  ``None`` (the default) leaves every schedule that measured one tier
-    behaving exactly as before.
+    other stacks of that family. Use the law only for incomplete rungs that
+    cover the transfer-law draw. Mark these predictions with
+    ``PROVENANCE_INTERPOLATED`` and a ``transfer_law`` block. Omit the
+    Horvitz-Thompson fields. Use ``None`` for schedules with one tier.
     """
     from .tessera_rate_surface import (
         PROVENANCE_INTERPOLATED, PROVENANCE_MEASURED, TesseraRateSurface,
@@ -484,7 +481,7 @@ def _stack_cost_rows(
 
     rows: dict[str, dict] = {}
     measured_by_family: dict[str, list[tuple[int, float, float]]] = {}
-    #: family -> [(format_name, rung), ...] measured on the law draw only.
+    #: family -> [(format_name, rung), ...] for incomplete rungs that cover the draw.
     law_tier: dict[str, list[tuple[str, int]]] = {}
     law_experts = set(sample.transfer_law_experts)
     for format_name in sorted(by_format):
@@ -494,11 +491,7 @@ def _stack_cost_rows(
         if missing:
             covered = {e for e in sample.sampled_experts
                        if len(per_expert.get(e, ())) == roles}
-            if law_experts and covered == law_experts:
-                # The second tier of a two-tier schedule: this rung was encoded
-                # on the transfer-law draw only, by design.  It is priced by
-                # the law below, not by HT -- the drawn experts here fit an
-                # intercept, they do not stand in for the stack.
+            if law_experts and law_experts <= covered:
                 contributing = [a for e in sorted(covered) for a in per_expert[e]]
                 families = {a.family for a in contributing}
                 if len(families) != 1:
@@ -702,9 +695,7 @@ def _stack_cost_rows(
                 },
             }
 
-    # The transfer-law tier: rungs encoded on the law draw only, predicted for
-    # every expert from its own censused reference value.  Model predictions,
-    # so they carry a ``transfer_law`` block and none of the sampling fields.
+    # Predict each expert's value from its own census reference.
     for family, entries in sorted(law_tier.items()):
         pair = None if transfer_law is None else transfer_law.get(family)
         if pair is None:
@@ -712,10 +703,8 @@ def _stack_cost_rows(
                 refused.append({
                     "qname": q, "family": family, "format_name": format_name,
                     "reason": "stack_transfer_law_absent",
-                    "detail": (f"rung {rung} was encoded on the transfer-law "
-                               "draw only and no law was fitted for this "
-                               "family; the rung is left unpriced rather than "
-                               "estimated from a partial draw"),
+                    "detail": (f"Rung {rung} covers the transfer-law draw. "
+                               f"No fit for family {family} can price this rung."),
                 })
             continue
         record, law, reference_format = pair
@@ -808,11 +797,8 @@ def _stack_draw_description(block: "Mapping[str, object]") -> dict:
 def _stack_rate_evidence(sample: StackExpertSample, anchors, refused: list):
     """One two-tier stack's evidence, per family, as a ``StackRateSample``.
 
-    A family qualifies only when exactly one of its rungs was encoded on every
-    expert of the frame (the census tier, which every prediction regresses on)
-    and at least one other was encoded on exactly the transfer-law draw.  A
-    family that fails either test is recorded and skipped: the rungs it does
-    hold are still priced by the measured path.
+    A family needs exactly one census rung. It also needs at least one
+    incomplete rung that covers the transfer-law draw.
 
     Returns ``{family: (record, reference_format_name)}``.
     """
@@ -843,12 +829,11 @@ def _stack_rate_evidence(sample: StackExpertSample, anchors, refused: list):
     law_set = set(law_experts)
     records: dict[str, tuple] = {}
     for family in sorted({key[0] for key in seen}):
-        census = [rung for (fam, rung), rows in sorted(seen.items())
-                  if fam == family
-                  and {e for e, row in rows.items() if len(row) == roles} == frame]
-        law_rungs = [rung for (fam, rung), rows in sorted(seen.items())
-                     if fam == family
-                     and {e for e, row in rows.items() if len(row) == roles} == law_set]
+        coverage = {rung: {e for e, row in rows.items() if len(row) == roles}
+                    for (fam, rung), rows in sorted(seen.items()) if fam == family}
+        census = [rung for rung, covered in coverage.items() if covered == frame]
+        law_rungs = [rung for rung, covered in coverage.items()
+                     if law_set <= covered < frame]
         if not law_rungs:
             continue
         if len(census) != 1:
