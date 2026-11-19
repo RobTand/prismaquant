@@ -138552,5 +138552,38 @@
       "tests/test_duplication_baseline.py": "Pass (20 tests).",
       "isolated_file_load": "Pass. The module returns 32 raw bytes without loading the prismaquant package."
     }
+  },
+  "gguf_assignment_retention_2541": {
+    "leaf": "#2541 artifact assignment identity",
+    "disposition": "Retain the deprecated GGUF implementation. Do not migrate either call under #2541 or #2542. Keep the historical #2542 rows in refresh_2540.",
+    "calls": [
+      {
+        "historical_id": "hashlib:prismaquant/export_gguf.py::export_gguf@401:13",
+        "current_id": "hashlib:prismaquant/export_gguf.py::export_gguf@408:13",
+        "current_route": "hashlib.sha256(payload).hexdigest()",
+        "comparison_owner": "prismaquant.digests.bytes_sha256hex"
+      },
+      {
+        "historical_id": "supplemental-json:prismaquant/export_gguf.py::export_gguf@402:8",
+        "current_id": "supplemental-json:prismaquant/export_gguf.py::export_gguf@409:8",
+        "current_route": "json.dumps(dict(sorted(assignment.items())), separators=(\",\", \":\")).encode()",
+        "comparison_owner": "prismaquant.digests.DIRECT_ASCII_LAX.encoded"
+      }
+    ],
+    "contract": "The parser gives a flat dictionary of string keys and string values. The exporter sorts only the top-level keys. The owner sorts all dictionary keys, but this input has no nested dictionary. Both encoders use compact ASCII-escaped JSON without a final LF. The exporter writes full lowercase hex to prismaquant.assignment_sha256. The footprint budget identity normalizes names and formats and uses UTF-8 JSON without ASCII escaping. It is not the owner for this contract.",
+    "fixture": "tests/fixtures/gguf_assignment_identity_2541.json",
+    "scope_exclusion": "The calibration hash is separate. Its historical ID is hashlib:prismaquant/export_gguf.py::export_gguf@448:12. Its current ID is hashlib:prismaquant/export_gguf.py::export_gguf@455:12.",
+    "baseline": {
+      "path": "tests/fixtures/duplication_baseline.json",
+      "scope": "hashlib:prismaquant/export_gguf.py::export_gguf",
+      "row_delta": 0,
+      "reason": "Both hashes stay in the scope. The inventory does not count the supplemental JSON call as a primitive because the encoder does not set sort_keys=True.",
+      "observation": "The baseline and the local inventory each have one row for this scope."
+    },
+    "local_checks": {
+      "tests/test_export_output_safety.py": "Pass.",
+      "tests/test_export_output_safety.py::test_gguf_assignment_identity_matches_original_bytes": "Pass. The exporter and the owner give the original assignment bytes and digest. The published GGUF file has the original artifact hash. Without the new fixture, the test fails at the missing-record assertion before it reads the file. This checks the fixture guard, not a change to exporter behavior.",
+      "tests/test_duplication_baseline.py": "Pass."
+    }
   }
 }
