@@ -20,6 +20,7 @@ import copy
 import hashlib
 import json
 import math
+import pickle
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -57,6 +58,14 @@ SLOW = [5.0, 4.0, 6.0]   # median 5.0
 #: the one every member's wire record is stamped with before the panel is
 #: frozen -- the intake gate refuses an installed-package seal.
 WIRE_SEAL = "7" * 64
+
+
+def test_cost_payload_refuses_a_non_mapping_costs_field(tmp_path):
+    path = tmp_path / "costs.pkl"
+    path.write_bytes(pickle.dumps({"costs": []}))
+
+    with pytest.raises(RuntimePriceError, match="cost payload carries no costs mapping"):
+        emitter.load_cost_payload(path)
 
 
 def _collective(world_size, **updates):
