@@ -77,6 +77,15 @@ def _cell(tmp_path, *, stamp, executing_image):
     """
     panel = json.loads((CELL / "panel.json").read_text())
     receipt = json.loads((CELL / "receipt.json").read_text())
+    # These synthetic records do not attest historical reference production.
+    identity = {"schema": "prismaquant.served_quantizer_identity.v1",
+                "backend": "registered_scaled_fp4_quant", "op": "scaled_fp4_quant",
+                "platform": "fixture", "torch": "fixture", "torch_git": "fixture",
+                "vllm": "fixture", "image_content_sha256": "a" * 64, "dequant_kernel": None}
+    panel["reference_served_quantizer"] = identity
+    joint = panel["joint_operator_identity"]
+    joint["arithmetic"]["served_quantizer"] = identity
+    panel["joint_operator_identity_sha256"] = joint_identity_sha256(joint)
     panel["activation_quantizer_attestation"] = copy.deepcopy(stamp)
     panel["runtime"] = copy.deepcopy(panel["runtime"])
     panel["runtime"]["image"] = executing_image
