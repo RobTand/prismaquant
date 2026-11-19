@@ -116,6 +116,38 @@ STRUCTURE_DENSE = "dense"
 class TesseraExportLaneError(RuntimeError):
     """The Tessera export lane refuses this run.  Always actionable."""
 
+
+def read_completion_build(build_path: str | Path, build_sha256: str):
+    """Read the build anchor and bind the final check to its original allocation."""
+    from functools import partial
+
+    from .footprint import (
+        enforce_whole_artifact_budget, whole_artifact_budget_from_assignment_payload,
+    )
+    from .layer_config import canonicalize_assignment
+
+    raw = Path(build_path).read_bytes()
+    if bytes_sha256hex(raw) != build_sha256:
+        raise TesseraExportLaneError("Tessera build anchor changed after preflight")
+    build = json.loads(raw)
+    recipe = build.get("layer_config") if isinstance(build, dict) else None
+    if not isinstance(recipe, str) or not recipe:
+        raise TesseraExportLaneError("The Tessera build anchor must name the original allocation.")
+    raw = Path(recipe).read_bytes()
+    if bytes_sha256hex(raw) != build.get("layer_config_sha"):
+        raise TesseraExportLaneError("The Tessera allocation changed after preflight.")
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise TesseraExportLaneError("The Tessera allocation must be a JSON object.")
+    where = "Tessera completion"
+    if whole_artifact_budget_from_assignment_payload(payload, where=where) is None:
+        return build, None
+    return build, partial(
+        enforce_whole_artifact_budget, assignment_payload=payload, where=where,
+        assignment=canonicalize_assignment(payload),
+    )
+
+
 def export_setup(model_path: str | Path, plan: Mapping[str, Any]) -> dict:
     """Derive export work and census inputs without runtime qualification.
 
@@ -2640,7 +2672,7 @@ def preflight(model_path: str | Path, *, target=None,
             cached_units_path, scope=scope, metadata=allocation_meta)
             if cached_units_path is not None else None)
         build = {
-            "source_model": str(model_path), "layer_config": str(assignment_path),
+            "source_model": str(model_path), "layer_config": str(Path(assignment_path).resolve()),
             "layer_config_sha": assignment_sha,
             "cached_encoder_source_proof_mode": cached_unit_encoder_source_proof_mode(),
             **prefill_frontier_replay_claim(read_layer_config_metadata(assignment_path)),

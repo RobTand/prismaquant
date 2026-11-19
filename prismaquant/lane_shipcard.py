@@ -102,6 +102,8 @@ def open_lane_shipcard(
     build: Mapping[str, Any] | None = None,
     shipcard_path: str | Path | None = None,
     overwrite: bool = False,
+    keep_existing: bool = False,
+    check_completed=None,
 ) -> Path:
     """Open the ship record for ``artifact_dir`` under ``lane``'s gate set.
 
@@ -115,13 +117,21 @@ def open_lane_shipcard(
     spec = lane_spec_for_lane(lane)
     path = Path(shipcard_path) if shipcard_path else root / SHIPCARD_FILENAME
     if path.exists() and not overwrite:
+        if keep_existing:
+            if check_completed is not None:
+                check_completed(root)
+            previous = load_shipcard(path).get("build")
+            if (build is None or not isinstance(previous, Mapping)
+                    or previous.get("layer_config_sha") != build.get("layer_config_sha")):
+                raise LaneShipcardError("The existing card names a different allocation.")
+            return path
         raise LaneShipcardError(
             f"a ship record already exists at {path}; re-opening it would "
             "discard every slot the serve lane has filled. Pass --overwrite "
             "only when the artifact's bytes changed"
         )
     open_shipcard(root, build=_lane_build(spec, build), lane=spec.export_container,
-                  shipcard_path=path, overwrite=overwrite)
+                  shipcard_path=path, overwrite=overwrite, check_completed=check_completed)
     return path
 
 
@@ -217,7 +227,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="JSON file of build-lane facts to stamp")
     p_open.add_argument("--shipcard", default=None,
                         help="write here instead of <artifact>/shipcard.json")
-    p_open.add_argument("--overwrite", action="store_true")
+    p_open.add_argument("--build-sha256", help="SHA-256 of the Tessera build anchor")
+    existing = p_open.add_mutually_exclusive_group()
+    existing.add_argument("--overwrite", action="store_true")
+    existing.add_argument("--keep-existing", action="store_true")
 
     p_preflight = sub.add_parser(
         "preflight", help="report all shipcard refusals as JSON without writes")
@@ -259,7 +272,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         build: dict[str, Any] | None = None
-        if args.build_json:
+        check_completed = None
+        if args.cmd == "open" and args.build_sha256 is not None:
+            if not args.build_json or canonical_export_lane(args.lane) != "tessera":
+                p.error("--build-sha256 requires --lane tessera and --build-json")
+            from .tessera_export_lane import read_completion_build
+
+            build, check_completed = read_completion_build(args.build_json, args.build_sha256)
+        elif args.cmd == "open" and args.keep_existing:
+            p.error("--keep-existing requires --build-sha256")
+        elif args.build_json:
             build = json.loads(Path(args.build_json).read_text(
                 encoding="utf-8"))
             if not isinstance(build, dict):
@@ -272,8 +294,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1 if report["problems"] else 0
         path = open_lane_shipcard(
             args.artifact, args.lane, build=build,
-            shipcard_path=args.shipcard, overwrite=args.overwrite)
-    except (LaneShipcardError, ValueError, OSError) as exc:
+            shipcard_path=args.shipcard, overwrite=args.overwrite,
+            keep_existing=args.keep_existing, check_completed=check_completed)
+    except (RuntimeError, ValueError, OSError) as exc:
         print(f"[lane-shipcard] ERROR: {exc}", file=sys.stderr)
         return 2
 

@@ -109,6 +109,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--source', type=Path, help='the complete Tessera source export to dispatch')
     parser.add_argument('--plan', type=Path, help='the layer plan the campaign partitions into quanta')
+    parser.add_argument('--build-json', type=Path, help='Tessera build anchor for the allocation budget')
+    parser.add_argument('--build-sha256', help='SHA-256 from Tessera preflight')
     parser.add_argument('--input-scales', type=Path, help='optional pre-computed scales to seal into the workspace')
     parser.add_argument('--encoder-checkout', type=Path, help='Git checkout the pinned encoder is archived from')
     parser.add_argument('--encoder-revision', help='full immutable commit ID of the encoder to pin')
@@ -129,6 +131,8 @@ def main(argv=None):
     parser.add_argument('--dry-run', action='store_true',
                         help='derive source partitions and construction-census inputs; do not stage or submit')
     args = parser.parse_args(argv)
+    if (args.build_json is None) != (args.build_sha256 is None):
+        parser.error('Specify --build-json and --build-sha256 together.')
     if min(args.cpus, args.mem_gb, args.assembly_mem_gb) < 1:
         parser.error('resource reservations must be positive')
     if args.dry_run:
@@ -149,7 +153,9 @@ def main(argv=None):
         parser.error('--workspace is required for execution or resume')
     workspace = args.workspace.resolve()
     if args.resume:
-        if any(getattr(args, name) is not None for name in ('source', 'plan', 'input_scales', 'encoder_checkout', 'encoder_revision', 'image', 'out', 'prepare_hosts')):
+        if any(getattr(args, name) is not None for name in (
+                'source', 'plan', 'input_scales', 'encoder_checkout', 'encoder_revision',
+                'image', 'out', 'prepare_hosts', 'build_json', 'build_sha256')):
             parser.error('--resume uses the sealed workspace; input overrides require a new workspace')
         spec = model.read_json(workspace / common.STATE / 'job.json')
     else:
@@ -179,6 +185,8 @@ def main(argv=None):
                 'cpus': args.cpus, 'mem_gb': args.mem_gb, 'assembly_mem_gb': args.assembly_mem_gb,
                 'tags': args.tags or ['gb10'], 'grid': args.grid, 'q256': args.q256,
                 'prepare_hosts': sorted(set(args.prepare_hosts))}
+        if args.build_json is not None:
+            spec.update(build_json=str(args.build_json.resolve()), build_sha256=args.build_sha256)
         model.atomic_json(workspace / common.STATE / 'job.json', spec)
         model.atomic_json(workspace / common.SOURCE / 'job.json', spec)
         common.initialize_git(workspace / common.SOURCE, message='PrismaQuant pinned export source')
@@ -205,6 +213,12 @@ def main(argv=None):
     result = model.read_json(Path(spec['out']) / 'pb-result.json')
     if result.get('contract') != spec['contract'] or result.get('index') is not None:
         raise ValueError('assembled output record belongs to another export')
+    if 'build_json' in spec or 'build_sha256' in spec:
+        from prismaquant.tessera_export_lane import read_completion_build
+
+        _, check_completed = read_completion_build(spec['build_json'], spec['build_sha256'])
+        if check_completed is not None:
+            check_completed(spec['out'])
     model.atomic_json(workspace / common.STATE / 'export-result.json', result)
     print(json.dumps({'out': spec['out'], 'contract': spec['contract'], 'workspace': str(workspace)}))
     return 0
@@ -213,5 +227,5 @@ def main(argv=None):
 if __name__ == '__main__':
     try:
         raise SystemExit(main())
-    except (ValueError, OSError, subprocess.CalledProcessError) as exc:
+    except (RuntimeError, ValueError, OSError, subprocess.CalledProcessError) as exc:
         raise SystemExit(f'dispatch_model: {exc}')

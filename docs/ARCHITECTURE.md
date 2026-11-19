@@ -3156,6 +3156,18 @@ and `tools/tessera_fleet/{dispatch_model,model_worker}.py` own these rules.
 The consumer proof is `tests/test_tessera_export_setup.py`.
 No production format, serving default, runtime pin or active PACT path changes.
 
+**Tessera completion cap (#4664).** PrismaQuant verifies the preflight build
+anchor and the original layer config. It checks the stamp against the original
+assignment, not the projected Tessera plan. The shared
+`footprint.enforce_whole_artifact_budget` gate counts every regular file
+recursively. This includes nested sidecars. The pipeline counts the weight
+manifest and the staged, fixed-size shipcard before it publishes the card or
+reports success. The pipeline also checks the directory when it keeps a card.
+For fleet merges, pass `--build-json` and `--build-sha256` at dispatch. The
+workspace retains this binding on resume. The dispatcher checks the merged
+output, including its assembly record, before it writes the release result
+outside the artifact. Native export keeps its existing gate.
+
 Re-stamped 2026-10-07 for issue #2408.
 The Tessera cell reader accepts an explicit kernel build in `ServingContext`.
 The reader matches kernel build and module kind without an image-digest key.

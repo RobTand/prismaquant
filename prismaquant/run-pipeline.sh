@@ -2277,38 +2277,34 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
     "${TESSERA_CACHED_UNIT_ARGS[@]}" \
     2>&1 | tee "${WORK_DIR}/logs/export.log"
 
+  # Check the completed directory before the ship record can progress.
+  TESSERA_CARD_ARGS=()
+  if [[ -f "${WORK_DIR}/exported/shipcard.json" ]]; then
+    TESSERA_CARD_ARGS+=(--keep-existing)
+  fi
+  if [[ -z "$TESSERA_BUILD_SHA256" ]]; then
+    # Keep a legacy card without a digest only for an unbudgeted allocation.
+    if [[ ${#TESSERA_CARD_ARGS[@]} -eq 0 ]] || ! python3 -c '
+import json
+import sys
+from prismaquant.footprint import whole_artifact_budget_from_assignment_payload
+with open(sys.argv[1], encoding="utf-8") as source:
+    payload = json.load(source)
+sys.exit(whole_artifact_budget_from_assignment_payload(payload, where="Tessera completion") is not None)
+' "${WORK_DIR}/artifacts/layer_config.json"; then
+      echo "[pipeline] ERROR: Tessera completion requires the preflight build digest." >&2
+      exit 2
+    fi
+  elif ! python3 -m prismaquant.lane_shipcard open \
+         --lane tessera --artifact "${WORK_DIR}/exported" \
+         --build-json "$TESSERA_BUILD_JSON" --build-sha256 "$TESSERA_BUILD_SHA256" \
+         "${TESSERA_CARD_ARGS[@]}"; then
+    echo "[pipeline] ERROR: Tessera completion failed." >&2
+    exit 2
+  fi
   echo
   echo "[pipeline] done."
   echo "  Artifact: ${WORK_DIR}/exported"
-  # The build lane OPENS the ship record; the serve lane CLOSES it (R13).
-  #
-  # It did not, on this lane, until 2026-09-03: Tessera's exporter has no
-  # concept of a PrismaQuant shipcard and this arm exits ~130 lines above the
-  # driver's shipcard block, so every gate lane_specs/tessera.json declares was
-  # enforced by nothing (RobTand/prismaquant#119). `lane_shipcard open` opens a
-  # record whose slots ARE this lane's declared gates -- including
-  # `route.census`, principle 12's second leg, which carried no slot at all --
-  # so an un-run gate is now an unfilled slot on a real card that
-  # tools/publish_artifact.py refuses on, instead of a sentence in a JSON file.
-  #
-  # The gates are still NAMED, not RUN, here: each needs a fresh vLLM container
-  # with the pinned plugin editable-installed, and both residencies, because
-  # the two modes decode the same bytes by different paths. Building that
-  # runner is R16's open half and stays with #119.
-  #
-  # Skip-if-exists like every other stage in this driver, and for the same
-  # reason plus one: re-opening a card DISCARDS every slot the serve lane has
-  # already filled, so `lane_shipcard open` refuses without --overwrite. A
-  # re-run over a completed build would otherwise die here on a refusal whose
-  # message ("unpublishable until one exists") is false -- one exists.
-  if [[ -f "${WORK_DIR}/exported/shipcard.json" ]]; then
-    echo "  Ship record: ${WORK_DIR}/exported/shipcard.json exists, kept (re-open would discard filled slots)"
-  elif ! python3 -m prismaquant.lane_shipcard open \
-         --lane tessera --artifact "${WORK_DIR}/exported" \
-         --build-json "$TESSERA_BUILD_JSON"; then
-    echo "[pipeline] ERROR: EXPORT_CONTAINER=tessera: could not open the Tessera ship record. The artifact is unpublishable without one, and writing a base card by hand would omit this lane's own gates, so the export is not done until this succeeds." >&2
-    exit 2
-  fi
   # Print a shell-safe recipe for the same target admission just checked.
   # Legacy context-free callers retain the wrapper's image/mode defaults.
   TESSERA_PRINT_SERVE=("TESSERA_SERVE_MODE=${TESSERA_SERVE_MODE}" "TS=${TESSERA_REPO%/}")
