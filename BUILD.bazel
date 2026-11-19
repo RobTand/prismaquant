@@ -11571,6 +11571,19 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "prismaquant/production_scalar_solve",
+    srcs = [
+        "prismaquant/production_scalar_solve.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/allocator_cycle",
+        ":prismaquant/assignment_space",
+    ],
+)
+
+pq_py_library(
     name = "experiments/plot_sparse_rate_family_transfer",
     srcs = [
         "experiments/plot_sparse_rate_family_transfer.py",
