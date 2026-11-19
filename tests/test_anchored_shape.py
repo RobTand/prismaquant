@@ -5,6 +5,7 @@ import pytest
 
 from prismaquant.anchored_shape import (
     AnchoredShapeError,
+    EndpointCurvatureModel,
     LogShapeObservation,
     audit_anchored,
     fit_anchor_correction,
@@ -150,3 +151,11 @@ def test_prediction_outside_finite_positive_float_range_refuses():
         fit = fit_anchor_correction(shape, anchors, {"a": 0, "b": 1, "c": 10})
         with pytest.raises(AnchoredShapeError, match="representable"):
             predict_anchored(fit, "c")
+
+
+def test_endpoint_curvature_context_refuses_text_sequences():
+    model = EndpointCurvatureModel("value", 1, 3, 1, (0.0,) * 4, (1.0,) * 4, (0.0,) * 5)
+    assert model.bind(2.0, 1.0, (3.0,)).predict(2) == 1.5
+    for context in ("3", b"3"):
+        with pytest.raises(AnchoredShapeError, match="context must be a finite numeric sequence"):
+            model.bind(2.0, 1.0, context)
