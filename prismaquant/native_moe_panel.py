@@ -693,15 +693,6 @@ def _expect_member_roster(unit, members, shape, *, count, pattern, where):
     return members
 
 
-#: The keys a prepared owner adds to its geometry, beyond the contract fields.
-#: `experts` is an ALIAS of the geometry's own expert count -- LFM spells it
-#: `experts`, GLM spells it `n_routed_experts`, and the roster walks one key.
-#: It is listed here because it is derived, not declared: treating it as a
-#: contract field made the derived view misclassify as the other geometry
-#: (root review of 266f80e52f/9e1f2634).
-_OWNER_VIEW_KEYS = ("format", "rank_local_intermediate", "experts")
-
-
 def geometry_only(shape):
     """Declared geometry and optional execution rank, without derived fields.
 
