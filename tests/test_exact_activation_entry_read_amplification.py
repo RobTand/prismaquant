@@ -16,11 +16,14 @@ import hashlib
 import json
 import os
 import stat
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import pytest
 import torch
 
+from prismaquant import perturbed_x_cache
 from prismaquant.perturbed_x_cache import (
     ExactActivationReference,
     prefetch_exact_activation_cache_entries,
@@ -44,12 +47,94 @@ def _identity(slot: str, *, session: str = SESSION) -> dict:
 
 
 def _write(directory: Path, name: str, tensor: torch.Tensor, *,
-           session: str = SESSION, release_file_pages: bool = False, durable: bool = True):
+           session: str = SESSION, release_file_pages: bool = False, durable: bool = True,
+           preallocate: bool = False):
     nbytes = tensor.numel() * tensor.element_size()
     return write_exact_activation_cache_entry(
         directory, name, tensor, identity=_identity(name, session=session),
         max_tensor_bytes=nbytes, max_file_bytes=nbytes + 65536,
-        release_file_pages=release_file_pages, durable=durable)
+        release_file_pages=release_file_pages, durable=durable, preallocate=preallocate)
+
+
+@pytest.mark.parametrize("preallocate", [False, True])
+def test_exact_writer_removes_its_staging_file_but_keeps_the_committed_winner(
+        tmp_path, monkeypatch, preallocate):
+    publish = perturbed_x_cache.write_activation_cache_entry
+    link = os.link
+    path = tmp_path / "overlap.pt"
+    staging = path.with_suffix(".pt.tmp")
+    winner = torch.arange(8)
+    loser = torch.zeros_like(winner)
+
+    def commit_winner(*args, **kwargs):
+        nonlocal ref, committed, identity
+        with monkeypatch.context() as patch:
+            patch.setattr(perturbed_x_cache, "write_activation_cache_entry", publish)
+            ref = _write(tmp_path, "overlap", winner, preallocate=preallocate)
+        identity = path.stat()
+        committed = path.read_bytes()
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "link", check_loser_link)
+            return publish(*args, **kwargs)
+
+    def check_loser_link(source, destination, **kwargs):
+        assert torch.equal(torch.load(staging, weights_only=True)["inputs"], loser)
+        return link(source, destination, **kwargs)
+
+    ref = committed = identity = None
+    with monkeypatch.context() as patch:
+        patch.setattr(perturbed_x_cache, "write_activation_cache_entry", commit_winner)
+        with pytest.raises(FileExistsError) as error:
+            _write(tmp_path, "overlap", loser, preallocate=preallocate)
+
+    assert error.value.filename2 == path.name
+    assert not staging.exists()
+    with pytest.raises(RuntimeError, match="entry already exists"):
+        _write(tmp_path, "overlap", loser, preallocate=preallocate)
+    assert os.path.samestat(path.stat(), identity)
+    assert path.read_bytes() == committed
+    assert hashlib.sha256(committed).hexdigest() == ref.sha256
+
+
+@pytest.mark.parametrize("preallocate", [False, True])
+def test_exact_writer_refuses_staging_owned_by_another_attempt(tmp_path, monkeypatch, preallocate):
+    publish = perturbed_x_cache.write_activation_cache_entry
+    link = os.link
+    staging = tmp_path / "overlap.pt.tmp"
+    winner = torch.arange(8)
+    admitted = Event()
+    resume = Event()
+
+    def pause_first_writer(*args, **kwargs):
+        if not admitted.is_set():
+            admitted.set()
+            assert resume.wait(timeout=10)
+        return publish(*args, **kwargs)
+
+    def resume_first_writer(source, destination, **kwargs):
+        identity = staging.stat()
+        staged = staging.read_bytes()
+        resume.set()
+        with pytest.raises(FileExistsError) as error:
+            first.result(timeout=10)
+        assert error.value.filename == staging.name
+        assert os.path.samestat(staging.stat(), identity)
+        assert staging.read_bytes() == staged
+        return link(source, destination, **kwargs)
+
+    monkeypatch.setattr(perturbed_x_cache, "write_activation_cache_entry", pause_first_writer)
+    monkeypatch.setattr(os, "link", resume_first_writer)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(_write, tmp_path, "overlap", torch.zeros_like(winner),
+                            preallocate=preallocate)
+        try:
+            assert admitted.wait(timeout=10)
+            ref = _write(tmp_path, "overlap", winner, preallocate=preallocate)
+        finally:
+            resume.set()
+    assert not staging.exists()
+    with _prefetch([ref]) as window:
+        assert torch.equal(window.get(ref), winner)
 
 
 def _prefetch(references, *, session: str = SESSION, release_file_pages: bool = False):
