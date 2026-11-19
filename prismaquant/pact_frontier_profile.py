@@ -167,16 +167,7 @@ def pact_cohort_from_profile(profile=None, config=None):
 
 def tp_splits_for_role(role, profile=None):
     """Return the TP split count from the profile scope."""
-    owner = _require_profile(profile)
-    count = owner.pact_tp_splits_for_role(role)
-    if count is not None:
-        return count
-    if role == "down_proj":
-        raise ValueError(
-            f"profile {getattr(owner, 'name', 'unknown')} declares no TP split "
-            f"for {role}"
-        )
-    return 1
+    return _require_profile(profile).pact_tp_splits_for_role(role)
 
 
 def _legacy_cohort():
