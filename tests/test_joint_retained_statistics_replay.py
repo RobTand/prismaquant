@@ -1,12 +1,16 @@
 """Retained joint replay keeps the PWC owner while replacing each probe lease."""
 from collections import Counter
+import json
 import os
+import threading
 
 import pytest
 import torch
 
 from prismaquant import format_registry as fr
 from prismaquant import io_engine
+from prismaquant import joint_statistics_replay as replay
+from prismaquant.digests import DIRECT_ASCII_STRICT, bytes_sha256hex
 from prismaquant.joint_retained_window_plan import RetainedWindowBudget
 from prismaquant.joint_statistics_plan import plan_joint_statistics_target_windows
 from prismaquant.joint_statistics_replay import (
@@ -70,6 +74,127 @@ def _fixture(tmp_path):
         max_windows_per_layer=2,
     )
     return modules, specs, cache, paths, policy, budget
+
+
+@pytest.fixture
+def local_admission(tmp_path):
+    modules = {name: torch.nn.Linear(16, 16, bias=False, device='meta')
+               for name in ('first', 'second')}
+    paths = {}
+    for name, fmt, filename, size in (
+            ('first', FORMATS[0], 'first-fp8', 13),
+            ('first', FORMATS[1], 'first-nvfp4', 29),
+            ('second', FORMATS[0], 'second-fp8', 17),
+            ('second', FORMATS[1], 'second-nvfp4', 37)):
+        path = tmp_path / filename
+        path.write_bytes(b'x' * size)
+        paths[name, fmt] = str(path)
+    cache = ProductionWeightCache(paths, {}, activation_max_abs=dict.fromkeys(modules, 1.0))
+    budget = RetainedWindowBudget(
+        physical_limit_bytes=16777216, safety_margin_bytes=4096,
+        metadata_reserve_bytes=4096, runtime_reserve_bytes=4096,
+        workspace_reserve_bytes=16384, boundary_reserve_bytes=0,
+        auxiliary_reserve_bytes=0, load_buffer_bytes=37, read_page_reserve_bytes=8192,
+        candidate_delta_bytes=1024, statistics_cap_bytes=2048,
+        retained_render_cap_bytes=96, max_windows_per_layer=2)
+
+    def admit(workers):
+        return replay.preflight_joint_operator_admission(
+            {0: tuple(modules)}, modules, dict.fromkeys(modules, FORMATS), cache,
+            retained_budget=budget, source_bytes=4096, policy=dict(
+                schema=SCHEMA, max_statistics_bytes=budget.statistics_cap_bytes,
+                max_candidate_bytes=budget.candidate_delta_bytes,
+                max_render_resident_bytes=budget.retained_render_cap_bytes,
+                max_load_buffer_bytes=budget.load_buffer_bytes,
+                workspace_reserve_bytes=budget.workspace_reserve_bytes,
+                max_replay_cotangent_bytes=16384, prefetch_workers=workers))
+
+    return admit, cache, paths
+
+
+@pytest.mark.parametrize('workers', [1, 2])
+def test_retained_admission_bounds_parallel_stats(local_admission, monkeypatch, workers):
+    admit, cache, paths = local_admission
+    engine = io_engine.IOEngine()
+    engine.width = len(paths)
+    monkeypatch.setattr(io_engine, 'ENGINE', engine)
+    caller = threading.current_thread()
+    first_reads = threading.Barrier(workers + 1, timeout=10)
+    lock = threading.Lock()
+    active = peak = reads = 0
+    estimate = cache.estimate_nbytes
+    submit = engine.submit
+    futures = []
+
+    def track_submit(fn, *args):
+        assert sum(not future.done() for future in futures) < workers
+        future = submit(fn, *args)
+        if not futures:
+            result = future.result
+
+            def collect():
+                # Hold the first reads until the caller collects a result.
+                first_reads.wait()
+                return result()
+
+            future.result = collect
+        futures.append(future)
+        return future
+
+    def track_stat(keys):
+        nonlocal active, peak, reads
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            reads += 1
+            first = reads <= workers
+        try:
+            if first and threading.current_thread() is not caller:
+                first_reads.wait()
+            return estimate(keys)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(engine, 'submit', track_submit)
+    monkeypatch.setattr(cache, 'estimate_nbytes', track_stat)
+    try:
+        admit(workers)
+        assert peak == workers
+        assert reads == len(futures) == len(paths)
+    finally:
+        first_reads.abort()
+        if engine._pool is not None:
+            engine._pool.shutdown(wait=True)
+
+
+@pytest.mark.parametrize('workers', [1, 2])
+def test_retained_admission_preserves_plan_and_missing_refusal(
+        local_admission, tmp_path, monkeypatch, workers):
+    admit, _, _ = local_admission
+    plans = []
+    plan_targets = replay.plan_retained_targets
+
+    def record_plan(*args, **kwargs):
+        plan = plan_targets(*args, **kwargs)
+        plans.append(DIRECT_ASCII_STRICT.text(plan.as_dict()).encode('ascii'))
+        return plan
+
+    monkeypatch.setattr(replay, 'plan_retained_targets', record_plan)
+    admit(workers)
+    encoded, = plans
+    assert bytes_sha256hex(encoded) == '7d80bbc41a18b835d0649cd720725df3b1a7dcd12a77227cc66d548962cf648a'
+    assert [(w['names'], w['render_bytes']) for w in json.loads(encoded)['windows']] == [
+        (['first'], 42), (['second'], 54)]
+
+    missing = tmp_path / 'first-fp8'
+    missing.unlink()
+    plans.clear()
+    with pytest.raises(FileNotFoundError) as error:
+        admit(workers)
+    assert (error.value.errno, error.value.strerror, error.value.filename) == (
+        2, 'No such file or directory', str(missing))
+    assert not plans
 
 
 def _spy_reads(monkeypatch, reads):

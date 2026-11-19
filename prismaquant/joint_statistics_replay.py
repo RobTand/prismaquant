@@ -8,6 +8,7 @@ import os
 
 import torch
 
+from . import io_engine
 from .joint_aura import JointOperatorStatisticsLease, arithmetic_identity
 from .joint_retained_window_plan import (
     RetainedWindowBudget, plan_retained_targets, targets_from_statistics_plan,
@@ -457,7 +458,7 @@ def register_replay_reclaimers(guard, *, spill, render_cache, render_stream):
     return remove
 
 
-def retained_admission_targets(statistics_plan, specs, cache):
+def retained_admission_targets(statistics_plan, specs, cache, *, prefetch_workers):
     """Join a statistics plan to the PWC's declared candidate file sizes.
 
     Reads no tensor. ``resolve_key`` is an index lookup and ``estimate_nbytes``
@@ -479,9 +480,12 @@ def retained_admission_targets(statistics_plan, specs, cache):
     # belongs to the existing PWC window immediately before its first read,
     # not an all-candidate header walk ahead of the PB read frontier.
     key_costs = {}
-    for key in selected_keys:
-        size = cache.estimate_nbytes([key])
-        key_costs[key] = {'incoming_storage_bytes': size, 'serialized_bytes': size}
+    for start in range(0, len(selected_keys), prefetch_workers):
+        batch = selected_keys[start:start + prefetch_workers]
+        futures = [io_engine.ENGINE.submit(cache.estimate_nbytes, [key]) for key in batch]
+        for key, future in zip(batch, futures):
+            size = future.result()
+            key_costs[key] = {'incoming_storage_bytes': size, 'serialized_bytes': size}
     targets = targets_from_statistics_plan(statistics_plan, keys_by_name, key_costs)
     return keys_by_name, requested_by_name, targets
 
@@ -551,7 +555,8 @@ def preflight_joint_operator_admission(names_by_layer, modules, formats_by_name,
         statistics_plan = plan_joint_statistics_target_windows(
             twins, specs, max_statistics_bytes=retained_budget.statistics_cap_bytes,
             activation_max_abs=joint_activation_maxima(cache), projection_backend=None)
-        _, _, targets = retained_admission_targets(statistics_plan, specs, cache)
+        _, _, targets = retained_admission_targets(
+            statistics_plan, specs, cache, prefetch_workers=policy['prefetch_workers'])
         plan = plan_retained_targets(targets, budget=retained_budget,
                                      source_bytes=source_bytes,
                                      footprint_scope='pwc_serialized_upper_bound')
@@ -671,7 +676,7 @@ def observe_and_project_retained_windows(
         raise RuntimeError('retained joint replay requires an empty PWC resident baseline')
 
     keys_by_name, requested_by_name, targets = retained_admission_targets(
-        statistics_plan, specs, cache)
+        statistics_plan, specs, cache, prefetch_workers=policy['prefetch_workers'])
     retained_plan = plan_retained_targets(
         targets, budget=retained_budget, source_bytes=source_bytes,
         footprint_scope='pwc_serialized_upper_bound')
