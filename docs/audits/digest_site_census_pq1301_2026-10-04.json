@@ -138585,5 +138585,37 @@
       "tests/test_export_output_safety.py::test_gguf_assignment_identity_matches_original_bytes": "Pass. The exporter and the owner give the original assignment bytes and digest. The published GGUF file has the original artifact hash. Without the new fixture, the test fails at the missing-record assertion before it reads the file. This checks the fixture guard, not a change to exporter behavior.",
       "tests/test_duplication_baseline.py": "Pass."
     }
+  },
+  "diagnostic_json_2541": {
+    "leaf": "#2541 diagnostic JSON encoding",
+    "historical_id": "sorted-json:prismaquant/dev_mode.py::_shown@130:18",
+    "current_consumer": "prismaquant/dev_mode.py::_shown@127:18",
+    "owner_route": "prismaquant.digests.diagnostic_json_bytes",
+    "gap_evidence": "The spaced lax profile without a fallback raises TypeError for the fixture object. The default=str profile writes other instead of the repr text. The recipe binds the existing JsonProfile byte encoder with default=repr.",
+    "fixture": "tests/test_dev_mode_digest_routing_1804.py",
+    "comparison": "test_diagnostic_json_uses_the_exact_repr_profile",
+    "historical_consumer_blob": "1de4f205ed5fdd69ceadcc8716cdf801f9046ca2",
+    "historical_fixture_blob": "f84a0258ea015d0b3e816c54665a42c4a8ca77c5",
+    "historical_encoder_replay": "Run the original _shown body from the refresh_2540 call record. The 16 existing diagnostic cases pass. The new owner comparison matches the original diagnostic output and fails the assertion that the route exists.",
+    "unicode_evidence": "The literal fixtures check ASCII escapes for é and lone surrogates. The owner comparison checks the surrogate pair for the supplementary character and the escapes in the repr text. The mixed-key fallback keeps strict UTF-8 bytes. The fallback refuses a lone surrogate.",
+    "baseline": {
+      "removed_live_scope": "sorted-json:prismaquant/dev_mode.py::_shown",
+      "row_delta": -1,
+      "ceiling_sha256": "cb33cf970cf2a8f58f1d751c6aa295d3cf63aff0b2adaf32e17fb46a21ed36ef",
+      "change": "Keep the ceiling. The live consumer no longer has the sorted JSON primitive. The owner reuses its existing encoder."
+    },
+    "initial_local_checks": {
+      "tests/test_dev_mode_digest_routing_1804.py": "Pass.",
+      "tests/test_digest_profiles_1301.py::test_profile_names_are_unique": "Fail. The expected profile count did not include the new profile.",
+      "tests/test_duplication_baseline.py": "Not run. The command stopped at the profile check."
+    },
+    "local_checks": {
+      "tests/test_dev_mode_digest_routing_1804.py": "Pass.",
+      "tests/test_digest_profiles_1301.py": "Pass.",
+      "tests/test_digest_profiles_1301.py::test_profile_names_are_unique": "Pass with the original test.",
+      "tests/test_guarded_read_digest_retention_2637.py": "Pass.",
+      "tests/test_duplication_baseline.py": "Pass.",
+      "command_exit": "The local box command exited with status 0. PrismaBuild did not run."
+    }
   }
 }

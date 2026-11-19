@@ -318,6 +318,9 @@ DIRECT_ASCII_SPACED_LAX = JsonProfile(
 DIRECT_ASCII_SPACED_LAX_DEFAULT_STR = JsonProfile(
     "direct-ascii-spaced-lax-default-str", ensure_ascii=True, allow_nan=True,
     separators=(", ", ": "), default=str)
+diagnostic_json_bytes = JsonProfile(
+    "direct-ascii-spaced-lax-default-repr", ensure_ascii=True, allow_nan=True,
+    separators=(", ", ": "), default=repr).encoded
 DIRECT_ASCII_SPACED_STRICT = JsonProfile(
     "direct-ascii-spaced-strict", ensure_ascii=True, allow_nan=False,
     separators=(", ", ": "))
