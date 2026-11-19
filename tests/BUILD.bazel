@@ -4656,6 +4656,7 @@ pq_py_library(
         "//:prismaquant/joint_projection_backend",
         "//:prismaquant/render_cache_paths",
         "//:prismaquant/stage_inputs",
+        "//:prismaquant/staged_whole_file",
         ":cpu_staged_fixtures",
         ":test_joint_projection_backend_lib",
         "@pq_pip//pytest",
