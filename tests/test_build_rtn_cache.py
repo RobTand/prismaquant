@@ -50,6 +50,16 @@ class _LegacyContainerProfile:
 LegacyPackedExperts = type("LegacyPackedExperts", (nn.Module,), {})
 
 
+def test_iter_quantizable_tensors_omits_vision_linears():
+    model = nn.Module()
+    model.vision = nn.Linear(32, 32, bias=False, device="meta")
+    model.projection = nn.Linear(32, 32, bias=False, device="meta")
+
+    yielded = list(iter_quantizable_tensors(model, _NoPackedProfile()))
+
+    assert yielded == [("projection.weight", model.projection, "weight")]
+
+
 def test_iter_quantizable_tensors_covers_generic_packed_experts():
     model = _ToyPackedModel()
 
