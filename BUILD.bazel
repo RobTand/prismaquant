@@ -455,13 +455,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "prismaquant/tautology",
-    srcs = [
-        "prismaquant/tautology.py",
-    ],
-)
-
-pq_py_library(
     name = "archive/trellis_wire_2026-09-02/tests/test_trellis_rate_surface",
     srcs = [
         "archive/trellis_wire_2026-09-02/tests/test_trellis_rate_surface.py",
@@ -4508,6 +4501,11 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
     ],
+)
+
+filegroup(
+    name = "files/prismaquant/vendored",
+    srcs = glob(["prismaquant/vendored/**"], exclude = ["**/BUILD.bazel", "bazel-*/**", "*bazel-remote-grpc.log", "*execution_log.binpb.zst", "gate-artifacts/**", "gate-output/**", "**/__pycache__/**", "**/*.pyc"]),
 )
 
 pq_py_library(
@@ -8818,6 +8816,13 @@ pq_py_library(
     deps = [
         ":experiments/alloc_lead_asd/a_side_diag",
         "@pq_pip//torch",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/vendored/tautology",
+    srcs = [
+        "prismaquant/vendored/tautology.py",
     ],
 )
 
