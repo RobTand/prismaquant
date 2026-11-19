@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from safetensors import safe_open
 
-from prismaquant import source_generation as sg, native_results as nr
+from prismaquant import flux_jobs, source_generation as sg, native_results as nr
 from prismaquant.flux_jobs import ExecutionResult
 from test_capture_original_material import _owner
 from test_original_source_admission import (  # noqa: F401
@@ -235,3 +235,44 @@ def test_scientific_artifact_consumer_checks_selected_node_roles_and_binding(tmp
     with pytest.raises(RuntimeError, match=refusal):
         sg._original_artifact_publication(replace(selected, publication=publication),
             node_id='nonqualifying-artifact-control', roles={'control'})
+
+
+@pytest.mark.parametrize('role', ['control', 'execution', 'action_result', 'receipt'])
+def test_successful_selection_refuses_independent_observation(tmp_path, monkeypatch, capsys,
+                                                              nonqualifying_runtime, role):
+    node_id = 'nonqualifying-cpu-fixture'
+    roles = {'receipt', 'authority'} if role == 'receipt' else sg.ORIGINAL_CUDA_ARTIFACT_ROLES
+    launch = dict(argv=['true', '--node-id', node_id], source={'checkout': str(tmp_path),
+                  'commit': 'a' * 40, 'tree': 'b' * 40}, afterok=[], environment={}, staged_input=None,
+                  resources=vars(flux_jobs.FluxResources(cores=1, memory_gib=1, gpus=0, walltime_s=60)))
+    launch_binding = _bound(tmp_path / 'launch.json', dict(launch, schema='pq.flux.launch.v1',
+                                                          record_dir=str(tmp_path)))
+    coordinates = dict(job_id='1', record_dir=str(tmp_path), launch_sha256=launch_binding['sha256'])
+    _bound(tmp_path / 'submission.json', dict(coordinates, schema='pq.flux.submission.v1', state='submitted'))
+    producer = {key: launch[key] for key in ('argv', 'source', 'resources', 'afterok', 'staged_input')}
+    monkeypatch.setattr(nr, 'execution_context', lambda: dict(producer, schema=nr.PRODUCER_SCHEMA, **coordinates))
+    # Replace only the Flux execution checks. Keep the publication and byte checks active.
+    monkeypatch.setattr(flux_jobs, 'collect_job',
+                        lambda saved: ExecutionResult('succeeded', saved.job_id, saved.record_dir, payload_exit=0))
+    monkeypatch.setattr(flux_jobs, 'verify_native_launch', lambda saved, **expected: launch)
+    for name in ('eventlog.json', 'status.json', 'R.json', 'stderr'):
+        (tmp_path / name).touch()
+
+    input_path = tmp_path / 'input.json'
+    inputs = {'input': {**_bound(input_path, {'device': 'cpu'}), 'bytes': input_path.stat().st_size}}
+    bindings = {name: _bound(tmp_path / f'{name}.json', {'artifact': name}) for name in sorted(roles)}
+    publication = nr.publish_result(tmp_path / 'publication.json', producer_id=node_id, inputs=inputs,
+        artifacts={name: Path(binding['path']) for name, binding in bindings.items()}, max_artifact_bytes=4096)
+    (tmp_path / 'stdout').write_text(capsys.readouterr().out, encoding='ascii')
+    selection = dict(coordinates, schema=nr.SELECTION_SCHEMA, publication=publication, expected_launch=launch,
+        producer_id=node_id, inputs=inputs, runtime=nonqualifying_runtime, max_publication_bytes=1 << 20,
+        max_evidence_bytes=4096, max_artifact_bytes=4096)
+
+    selected = sg._verified_original_result(selection, resource_check=None)
+    assert selected.execution.status == 'succeeded'
+    assert sg._original_artifact_publication(selected, node_id=node_id, roles=roles) is selected
+    assert sg._published_original_json(selected, role, bindings[role], selection, None) == {'artifact': role}
+    other = _bound(tmp_path / 'other.json', {'artifact': role, 'other': True})
+    with pytest.raises(RuntimeError, match=f'selected published {role} binding'):
+        sg._published_original_json(selected, role, other, selection, None)
+    assert sg._verified_original_result(selection, resource_check=None) == selected
