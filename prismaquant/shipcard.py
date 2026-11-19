@@ -1616,7 +1616,8 @@ def _assemble_shipcard(
     return card
 
 
-def open_shipcard(model_dir, *, build=None, lane=None, shipcard_path=None, overwrite=False):
+def open_shipcard(model_dir, *, build=None, lane=None, shipcard_path=None, overwrite=False,
+                  check_completed=None):
     """Seal finished weight content and write a fresh canonical shipcard.
 
     The build claims and lane resolve before anything is written. Conflicting
@@ -1642,7 +1643,10 @@ def open_shipcard(model_dir, *, build=None, lane=None, shipcard_path=None, overw
         card = _assemble_shipcard(root, build_payload, resolved_lane, attestation)
         if path.parent.resolve() != root.resolve():
             card["external_artifact"] = True
-        _publish_shipcard(path, card)
+        if check_completed is None:
+            _publish_shipcard(path, card)
+        else:
+            _publish_shipcard(path, card, artifact_dir=root, check_completed=check_completed)
         return card
 
 
@@ -1688,7 +1692,8 @@ def update_shipcard(
         return card
 
 
-def _publish_shipcard(out: Path, card: Mapping[str, Any]) -> Path:
+def _publish_shipcard(out: Path, card: Mapping[str, Any], *,
+                      artifact_dir: Path | None = None, check_completed=None) -> Path:
     encoded = (json.dumps(card, indent=2, default=str) + "\n").encode("utf-8")
     reserved = card.get("reserved_file_bytes")
     if reserved is not None:
@@ -1713,11 +1718,31 @@ def _publish_shipcard(out: Path, card: Mapping[str, Any]) -> Path:
         encoded += b" " * (reserved - len(encoded))
     from .cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
 
-    temporary = out.with_name(out.name + unique_temp_suffix())
+    # Count the staged card before it gets its final name.
+    stage = out
+    if check_completed is not None:
+        if out.parent.resolve().is_relative_to(artifact_dir.resolve()):
+            if not out.exists():
+                stage = out.with_name(out.name + unique_temp_suffix())
+            elif not out.is_file() or out.stat().st_size != len(encoded):
+                raise ValueError("The replacement card must have the same file size.")
+        if stage == out:
+            check_completed(artifact_dir)
+    temporary = stage.with_name(stage.name + unique_temp_suffix())
     try:
-        atomic_write_bytes(out, encoded)
+        atomic_write_bytes(stage, encoded)
+        if stage != out:
+            check_completed(artifact_dir)
+            os.replace(stage, out)
+            directory_fd = os.open(out.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     finally:
         temporary.unlink(missing_ok=True)
+        if stage != out:
+            stage.unlink(missing_ok=True)
     return out
 
 
