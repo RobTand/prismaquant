@@ -156,6 +156,70 @@ _KNEE_DIAGNOSTIC_MIN_LOG_SPAN_DECADES = 1.0
 _KNEE_DIAGNOSTIC_TAIL_MIDPOINT_FRACTION = 0.5
 
 
+SOLVER_CONTRACT = "additive_candidate_proposal_then_exact_assignment_filter"
+
+
+@dataclass(frozen=True)
+class ScalarSelection:
+    proposal: dict[str, str]
+    assignment: dict[str, str]
+    exact_bytes: int
+    achieved_bits: float
+    loss: float
+
+
+def solve_scalar(
+    stats, candidates, target, format_specs, format_rank, bit_precision, *,
+    space, profile, tolerance, diagnostics,
+    no_fused_promote=False, paired_trade=None, byte_budget=None, fixed_bytes=0, shared_sidecars=(),
+):
+    """Check the exact charge before accepting each expanded proposal."""
+    diagnostics.update(solver_contract=SOLVER_CONTRACT, global_optimality_claimed=False,
+                       exact_filter_trace=[])
+    proposal_target = target
+    for attempt in range(16):
+        proposal_diag = {}
+        proposal, additive = solve_with_promotion(
+            stats, candidates, proposal_target, format_specs, format_rank, bit_precision,
+            no_fused_promote=no_fused_promote, overshoot_tolerance=tolerance,
+            profile=profile, diagnostics=proposal_diag,
+        )
+        diagnostics['solver_calls'] = attempt + 1
+        diagnostics.update({k: v for k, v in proposal_diag.items() if k != 'achieved_bits'})
+        if proposal is None:
+            return None
+        expanded = space.expand(proposal, include_auxiliary=False).assignment
+        payload = space.payload(expanded, require_all_stats=True)
+        extra = fixed_bytes + sum(size for size, users in shared_sidecars
+                                  if any(expanded.get(n) == fmt for n, fmt in users))
+        exact_bits = payload['bits_total'] + 8 * extra
+        achieved = exact_bits / max(payload['quantizable_params'], 1)
+        feasible = (achieved <= target + tolerance if byte_budget is None
+                    else exact_bits <= 8 * byte_budget)
+        trace = dict(attempt=attempt, proposal_target_bits=float(proposal_target),
+                     solver_additive_candidate_bpp=float(additive),
+                     exact_assignment_payload_bpp=achieved, feasible=feasible)
+        diagnostics['exact_filter_trace'].append(trace)
+        trade = paired_trade(expanded) if paired_trade is not None else None
+        if trade is not None:
+            trace['paired_rate_trade'] = summarize_paired_rate_trade(trade)
+            if trade['refused']:
+                diagnostics['reason'] = 'routed_expert_dominance'
+                trace['feasible'] = False
+                return None
+        if feasible:
+            diagnostics.update(achieved_bits=achieved, solver_additive_candidate_bpp=float(additive),
+                               exact_assignment_payload_bpp=achieved)
+            return ScalarSelection(proposal, expanded, int(exact_bits / 8), achieved,
+                                   compute_assignment_predicted_dloss(proposal, candidates))
+        next_target = proposal_target - (achieved - target) - max(float(bit_precision), 1e-9)
+        if next_target >= proposal_target or next_target < 0.0:
+            break
+        proposal_target = next_target
+    diagnostics.update(feasible=False, reason='exact_assignment_payload_filter_exhausted')
+    return None
+
+
 def _serialized_format_rates(
     specs: list[fr.FormatSpec],
     stats: Mapping[str, Mapping],
@@ -3502,7 +3566,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
 
     def _solve_for_target_uncached(target_bits: float):
         requested_target = float(target_bits)
-        mutable_target_bits = requested_target
         if measured_runtime_table is not None:
             from .allocator_solver import RuntimeFrontierLimitError, solve_runtime_frontier
             fixed = _measured_fixed_resources()
@@ -3589,92 +3652,20 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                             proposal.predicted_dloss, proposal.predicted_dloss)
             diag["reason"] = "no_runtime_frontier_assignment_passed_exact_checks"
             return None, float("nan"), float("inf"), float("inf")
-        if mutable_total_params <= 0:
-            if fixed_total_params > 0 and mutable_target_bits >= 0.0:
+        if requested_target < 0.0 or mutable_total_params <= 0:
+            if mutable_total_params <= 0 and fixed_total_params > 0 and requested_target >= 0.0:
                 return {}, 0.0, 0.0, 0.0
             return None, float("nan"), float("inf"), float("inf")
-        if mutable_target_bits < 0.0:
+        diag = _solve_diagnostics[round(requested_target, 9)] = {}
+        selected = solve_scalar(
+            stats, candidates, requested_target, format_specs, format_rank, args.bit_precision,
+            space=assignment_space, profile=model_profile, tolerance=args.overshoot_tolerance,
+            diagnostics=diag, no_fused_promote=args.no_fused_promote,
+            paired_trade=_paired_trade_for_assignment,
+        )
+        if selected is None:
             return None, float("nan"), float("inf"), float("inf")
-        outer_diag: dict = {
-            "solver_contract": (
-                "additive_candidate_proposal_then_exact_assignment_filter"
-            ),
-            "global_optimality_claimed": False,
-            "exact_filter_trace": [],
-        }
-        _solve_diagnostics[round(requested_target, 9)] = outer_diag
-        solver_calls = 0
-        for attempt in range(16):
-            proposal_diag: dict = {}
-            assign, solver_achieved = solve_with_promotion(
-                stats,
-                candidates,
-                mutable_target_bits,
-                format_specs,
-                format_rank,
-                args.bit_precision,
-                no_fused_promote=args.no_fused_promote,
-                overshoot_tolerance=args.overshoot_tolerance,
-                profile=model_profile,
-                diagnostics=proposal_diag,
-            )
-            solver_calls += 1
-            outer_diag["solver_calls"] = solver_calls
-            outer_diag.update({
-                key: value
-                for key, value in proposal_diag.items()
-                if key not in {"achieved_bits"}
-            })
-            if assign is None:
-                return None, float("nan"), float("inf"), float("inf")
-            expanded = assignment_space.expand(
-                assign,
-                include_auxiliary=False,
-            ).assignment
-            exact = assignment_space.payload(
-                expanded,
-                require_all_stats=True,
-            )
-            exact_achieved = float(exact["bits_per_param"])
-            outer_diag["exact_filter_trace"].append({
-                "attempt": attempt,
-                "proposal_target_bits": float(mutable_target_bits),
-                "solver_additive_candidate_bpp": float(solver_achieved),
-                "exact_assignment_payload_bpp": exact_achieved,
-                "feasible": bool(
-                    exact_achieved
-                    <= requested_target + args.overshoot_tolerance
-                ),
-            })
-            trade = _paired_trade_for_assignment(expanded)
-            if trade is not None:
-                outer_diag["exact_filter_trace"][-1]["paired_rate_trade"] = summarize_paired_rate_trade(trade)
-                if trade["refused"]:
-                    outer_diag["reason"] = "routed_expert_dominance"
-                    outer_diag["exact_filter_trace"][-1]["feasible"] = False
-                    return None, float("nan"), float("inf"), float("inf")
-            if exact_achieved <= requested_target + args.overshoot_tolerance:
-                outer_diag["achieved_bits"] = exact_achieved
-                outer_diag["solver_additive_candidate_bpp"] = float(
-                    solver_achieved
-                )
-                outer_diag["exact_assignment_payload_bpp"] = exact_achieved
-                mutable_total = compute_assignment_predicted_dloss(
-                    assign, candidates
-                )
-                return assign, exact_achieved, mutable_total, mutable_total
-            overage = exact_achieved - requested_target
-            next_target = (
-                mutable_target_bits
-                - overage
-                - max(float(args.bit_precision), 1e-9)
-            )
-            if next_target >= mutable_target_bits or next_target < 0.0:
-                break
-            mutable_target_bits = next_target
-        outer_diag["feasible"] = False
-        outer_diag["reason"] = "exact_assignment_payload_filter_exhausted"
-        return None, float("nan"), float("inf"), float("inf")
+        return selected.proposal, selected.achieved_bits, selected.loss, selected.loss
 
     def _write_layer_config(assignment, achieved, total, mutable_total, *,
                             selected_whole_artifact_budget_stamp=None, replay=None):
@@ -3967,9 +3958,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             # shared sidecar it ever counted belonged to the retired codebook
             # lane (archived 2026-09-25, #1304).
             "body_shared_cb_sidecar_bits": 0.0,
-            "solver_contract": (
-                "additive_candidate_proposal_then_exact_assignment_filter"
-            ),
+            "solver_contract": SOLVER_CONTRACT,
             "global_optimality_claimed": False,
             # The lane's blocks: its menu widths and reductions (per-Linear and
             # after aggregation), its group knapsack, the Hessian identity and
