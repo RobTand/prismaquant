@@ -321,3 +321,121 @@ def test_scalar_problem_expands_packed_members_with_dense_competition():
     assert exact.assignment == {**dict.fromkeys(members, "NVFP4"), dense: "FP8_E4M3"}
     assert exact.exact_bytes == 35344
     assert problem.solve(50688).assignment == dict.fromkeys(names, "FP8_E4M3")
+
+
+def test_packed_gate_matches_cli_and_exhaustive_oracle(monkeypatch, tmp_path):
+    packed = _FIXTURE["packed"]
+    members, dense = packed["members"], packed["dense"]
+
+    class PackedProfile(DefaultProfile):
+        def packed_expert_format_group(self, name):
+            return packed["group_key"] if name in members else None
+
+    from prismaquant import model_profiles
+
+    profile = PackedProfile()
+    monkeypatch.setattr(model_profiles, "detect_profile", lambda path: profile)
+    monkeypatch.chdir(tmp_path)
+    names = [*members, dense]
+    stats = {n: _stats(packed["shape"], 1.0) for n in names}
+    costs = _costs(names, [(5, 1), (5, 1), (20, 1)])
+    shapes = {f"{n}.weight": packed["shape"] for n in names}
+    shapes.update(_FIXTURE["source"]["immutable_shapes"])
+    (tmp_path / "model").mkdir()
+    save_file({n: torch.zeros(shape, dtype=torch.bfloat16) for n, shape in shapes.items()},
+              "model/model.safetensors")
+    (tmp_path / "probe.pkl").write_bytes(pickle.dumps({"stats": stats, "meta": {"model": "model"}}))
+    (tmp_path / "cost.pkl").write_bytes(pickle.dumps({"costs": costs, "meta": {"formats": _FORMATS}}))
+    records = _scalar_records(((5, 5, 5), (5, 5, 5)))
+    args = _gate_args(records, _problem(stats, costs, profile=profile))
+    args["population"] = dict(zip(members, args["population"].values()))
+    oracle = [(3 * 9224, 30, (0, 0)), (2 * 9224 + 16896, 11, (0, 1)),
+              (2 * 16896 + 9224, 22, (1, 0)), (3 * 16896, 3, (1, 1))]
+    for cap in (35343, 35344, 43016):
+        size, loss, (group_fmt, dense_fmt) = min((row for row in oracle if row[0] <= cap),
+                                                key=lambda row: row[1])
+        monkeypatch.setattr(sys, "argv", [
+            "allocator", "--probe", "probe.pkl", "--costs", "cost.pkl",
+            "--formats", ",".join(_FORMATS), "--allow-default-profile",
+            "--bit-precision", "0.0001", "--overshoot-tolerance", "0.0",
+            "--target-bits", repr(cap * 8 / 49152), "--layer-config", "choice.json",
+            "--pareto-csv", "choice.csv",
+        ])
+        allocator.main()
+        layer = json.loads((tmp_path / "choice.json").read_text())
+        cli = {n: "FP8_E4M3" if layer[n]["bits"] == 8 else "NVFP4" for n in names}
+        result = surface.production_stack_transfer_regret_gate(
+            records, **{**args, "byte_budget": cap}, budget_sensitivity=(1.0,))
+        assert result["predicted_assignment"] == cli == {
+            **dict.fromkeys(members, _FORMATS[group_fmt]), dense: _FORMATS[dense_fmt],
+        }
+        assert result["predicted_bytes"] == size == layer["__prismaquant__"]["body_assignment_payload_bits_total"] / 8
+        assert result["predicted_loss"] == pytest.approx(loss)
+        assert result["regrets_pct"] == [0.0] * 50
+
+
+def test_campaign_transfer_scores_rebuild_tessera_frontiers(monkeypatch):
+    from types import SimpleNamespace
+
+    from prismaquant import allocator_candidates, production_scalar_solve
+    from prismaquant.tessera_campaign_table import CURRENCY
+
+    family = "TESSERA_E4M3_K1"
+    low, high = f"{family}_R832", f"{family}_R960"
+    name = _NAMES[0]
+    stats = {name: _stats((256, 256), 4.0)}
+    cap = 65536
+    costs = {name: {fmt: {
+        "output_mse": mse, "output_mse_measured": measured,
+        "cost_source": ("tessera_campaign_measured" if measured else "tessera_campaign_interpolated"),
+        "currency": CURRENCY, "tessera_family": family, "tessera_body_rate_q256": rate,
+        "hessian_identity": {"applied": True}, "activation_quantized": True,
+        "activation_contract": "fp8_per_token_dynamic",
+    } for fmt, rate, mse, measured in ((low, 832, 5.0, True), (high, 960, 1.0, False))}}
+    loo = {name: {family: {"max_abs_log2_error": 0.05}}}
+    # Supply admission for this CPU fixture only. Keep the allocator and byte accounting real.
+    monkeypatch.setattr(allocator_candidates, "candidate_rung_admission",
+                        lambda *_args, **_kwargs: SimpleNamespace(
+                            requires_serving_context=False, admits=lambda _mode: True))
+    cls = production_scalar_solve.ProductionScalarProblem
+    try:
+        problem = cls(stats, costs, (low, high), currency=CURRENCY, census_loo=loo,
+                      source_manifest={name: "BF16"})
+    except TypeError:
+        assert False, "The scalar problem must accept census evidence."
+    solve_scalar = production_scalar_solve.solve_scalar
+    menus = []
+
+    def capture(stats, candidates, *args, **kwargs):
+        menus.append({c.fmt for c in candidates[name]})
+        return solve_scalar(stats, candidates, *args, **kwargs)
+
+    monkeypatch.setattr(production_scalar_solve, "solve_scalar", capture)
+    for evidence, expected_menu, winner, expected_loss in (
+        (None, {low, high}, high, 2.0),
+        (24.0, {low}, low, 10.0),
+        (19.8, {low}, low, 10.0),
+        (4.0, {low, high}, high, 2.0),
+    ):
+        solve, score = problem.prepare(None if evidence is None else {name: {high: evidence}})
+        selected = solve(cap)
+        assert menus[-1] == expected_menu
+        assert selected.assignment == {name: winner}
+        assert score(selected.assignment) == expected_loss
+        if evidence is not None:
+            assert score({name: high}) == pytest.approx(evidence / 2)
+    records = {stack: replace(
+        record, currency=CURRENCY, reference_q256=832,
+        reference_mse={e: {"down_proj": 20 * v / 7} for e, v in enumerate((1, 2, 4))},
+        sampled_mse={960: {e: {"down_proj": 4 * v / 7} for e, v in enumerate((1, 2, 4))}},
+    ) for stack, record in _records().items()}
+    result = surface.production_stack_transfer_regret_gate(
+        records, problem=problem, population={name: [("a", e, "down_proj") for e in range(3)]},
+        format_rates={low: 832, high: 960}, byte_budget=cap, budget_sensitivity=(1.0,),
+        draws=50, seed=7)
+    assert result["predicted_assignment"] == {name: high}
+    assert result["predicted_loss"] == pytest.approx(2.0)
+    assert result["regrets_pct"] == [0.0] * 50
+    assert problem.evidence_inputs()["costs"] == costs
+    with pytest.raises(allocator_candidates.CensusLooBandError):
+        cls(stats, costs, (low, high), currency=CURRENCY)
