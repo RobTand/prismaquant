@@ -20,8 +20,7 @@ declaration with the reads. The first strictly staged quantum died on its
 first head tensor.
 
 A tensor is read as one span ``[start, end)`` of its shard, in absolute file
-offsets. :func:`selection_spans` resolves a selection through each shard's
-safetensors header. The strict staged reader serves one span from one
+offsets. The strict staged reader serves one span from one
 staged range that contains it whole (``residency_shard_reader``). A span that
 two ranges cover together is not covered, and neither is a span no range
 covers. :func:`uncovered_spans` applies that rule.
@@ -239,33 +238,6 @@ def tensor_span(header: Mapping, base: int, size: int, path: str,
             or not 0 <= begin <= end <= size - base):
         raise ValueError(f"{path} tensor {name!r} has an invalid span")
     return (path, base + begin, base + end)
-
-
-def selection_spans(selection: Mapping[str, Sequence[tuple[str, str]]], *,
-                    source_reads=None,
-                    extra: Mapping[str, Sequence[str]] | None = None,
-                    ) -> list[Span]:
-    """Every non-empty tensor span the loader reads for ``selection``, sorted.
-
-    ``extra`` adds ``{shard path: [checkpoint name, ...]}`` read beside the
-    selection: the FP8 ``weight_scale_inv`` siblings the loader reads for
-    FP8-sourced weights. Zero-byte tensors carry no payload (the strict
-    reader builds them locally) and are left out.
-    """
-    wanted: dict[str, list[str]] = {}
-    for shard, pairs in selection.items():
-        wanted.setdefault(os.path.normpath(shard), []).extend(
-            ckpt for _live, ckpt in pairs)
-    for shard, names in (extra or {}).items():
-        wanted.setdefault(os.path.normpath(shard), []).extend(names)
-    spans: set[Span] = set()
-    for path in sorted(wanted):
-        header, base, size = read_safetensors_header(path, source_reads=source_reads)
-        for name in wanted[path]:
-            span = tensor_span(header, base, size, path, name)
-            if span[2] > span[1]:
-                spans.add(span)
-    return sorted(spans)
 
 
 def uncovered_spans(entries: Iterable[Mapping], spans: Iterable[Span]) -> list[Span]:
