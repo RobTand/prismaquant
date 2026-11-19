@@ -1,0 +1,49 @@
+{
+  "issue": 2541,
+  "kind": "experiment",
+  "measures": [25, 37, 38],
+  "scope": "Check the existing Stage A resume receipt contract. Do not change runtime code.",
+  "check_correction": "Keep only the test and this measurement record. Remove the leaf additions from the changelog and census. This experiment checks existing behavior. It does not require an assertion failure on the base.",
+  "call_manifest": {
+    "historical_id": "sorted-json:prismaquant/stage_a_chain_resume.py::apply_chain_resume@570:15",
+    "leaf_owner": "Stage A resume receipt parity",
+    "current_call": "prismaquant/stage_a_chain_resume.py:559: payload = indent2_json_file_bytes(record)",
+    "recipe": "prismaquant.digests.indent2_json_file_bytes",
+    "disposition": "Retain the existing route. Do not claim a new migration.",
+    "exclusions": "Chain state, self-sealing, split publication, and campaign identities have separate contracts."
+  },
+  "fixture": "tests/test_stage_a_chain_resume.py::test_resume_receipt_matches_original_publication",
+  "fixture_evidence": {
+    "prior_session_record": "The earlier leaf record reports equal outcomes from the base consumer with the historical publication expression and with the existing owner. It reports equal ASCII-escaped receipt bytes, one final LF, and the record seal. It reports mixed-key and NaN refusals before the duplicate-file refusal.",
+    "limitation": "The latest command does not repeat that original capture. No digest call is replaced by this experiment.",
+    "consumer_source_sha256": "b7078d6c6855a4650640b6cef41ee8bceb888f8a7806fc2b03e7111f295ad1a0",
+    "test_without_receipt_function_sha256": "b1dba5eb74a5cb0085cbc9326f27e9284323aedc6f36970c3637cc350ba40c4b",
+    "test_hash_scope": "The command removes only the receipt test function before hashing. This is not a claim about the full unedited base file."
+  },
+  "local_checks": {
+    "tests/test_stage_a_chain_resume.py": {
+      "command": "python -m pytest -q tests/test_stage_a_chain_resume.py",
+      "exit_code": 0,
+      "outcome": "65 passed. No tests skipped."
+    },
+    "tests/test_duplication_baseline.py": {
+      "command": "python -m pytest -q tests/test_duplication_baseline.py",
+      "exit_code": 0,
+      "outcome": "20 passed. No tests skipped."
+    },
+    "tests/test_campaign_digest_profiles_2174.py": {
+      "outcome": "Not applicable. The file is absent.",
+      "reason": "This leaf tests the Stage A resume record. The retained cluster_campaign module publishes bytes only. It has no JSON encoder. The historical campaign identity and framing checks do not test this contract."
+    }
+  },
+  "environment": "Local CPU box. Python 3.12.3. Torch 2.15.0+cpu. This is not a PrismaBuild result.",
+  "verification_scope": "The last command tested the current test code. Subsequent edits move documentation into this record only. The check must verify the final tree.",
+  "baseline": {
+    "path": "tests/fixtures/duplication_baseline.json",
+    "scope": "sorted-json:prismaquant/stage_a_chain_resume.py::apply_chain_resume",
+    "live_scope_rows": 0,
+    "baseline_contains_scope": true,
+    "row_delta": 0,
+    "disposition": "Keep the historical ceiling. This experiment changes no primitive scope."
+  }
+}
