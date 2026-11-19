@@ -1,7 +1,7 @@
 """Continuous trellis rate surface: dense rungs from sparse measured anchors.
 
-RESEARCH ONLY.  Nothing here is imported by ``run-pipeline.sh``, the default
-format menu, or any export path.
+This module does not qualify formats for serving. The production transfer
+check uses the scalar allocator. The greedy diagnostic is for research.
 
 The problem this closes
 -----------------------
@@ -63,7 +63,7 @@ reported as a measurement.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Mapping, Sequence, TYPE_CHECKING
 
 from tessera.errors import GrammarError
@@ -92,6 +92,7 @@ __all__ = [
     "fit_stack_transfer_law",
     "leave_one_anchor_out",
     "predict_stack_rates",
+    "production_stack_transfer_regret_gate",
     "rate_surface_solver_menu",
     "selective_encode_plan",
     "stack_transfer_regret_gate",
@@ -932,6 +933,10 @@ def predict_stack_rates(
     ``n`` points would move the number that was validated.  Its size is
     reported as ``smearing_factor_not_applied`` so a reader can see it.
     """
+    return _predict_stack_rates(stack, law)
+
+
+def _predict_stack_rates(stack, law, projection_losses=None):
     if int(stack.reference_q256) != int(law.reference_q256):
         raise TesseraFormatError(
             f"{stack.stack}: censused at {stack.reference_q256}, the law "
@@ -982,6 +987,8 @@ def predict_stack_rates(
             share[projection] = math.fsum(
                 stack.weight(e) * predictions[e][projection]
                 for e in stack.experts)
+        if projection_losses is not None:
+            projection_losses[rate] = predictions
         total = math.fsum(share[p] for p in stack.projections)
         if not math.isfinite(total) or total <= 0.0:
             raise TesseraFormatError(
@@ -1047,7 +1054,7 @@ def stack_transfer_regret_gate(
     max_regret_pct: float = 0.1,
     budget_sensitivity: Sequence[float] = (0.5, 0.75, 1.0, 1.25),
 ) -> dict:
-    """The study's regret estimate on the campaign's own data (PQ #495.5).
+    """Greedy research diagnostic for the campaign's own data (PQ #495.5).
 
     For each stack a hold-out law is fitted over every OTHER stack and the
     base prediction made from this stack's own sample.  Each draw then
@@ -1070,34 +1077,13 @@ def stack_transfer_regret_gate(
     nothing here encodes, allocates, or serves.  No KL or served-quality claim
     rides on it.
     """
-    import random
-
     samples = _stack_rate_samples(records)
     if len(samples) < 2:
         raise TesseraFormatError(
             "the regret gate needs at least two stack records: a pooled slope "
             "fitted on the stack it predicts is not a hold-out")
-    if type(draws) is not int or draws < 50:
-        raise TesseraFormatError(
-            f"draws must be an integer of at least 50 (the study's floor), "
-            f"got {draws!r}")
-    if type(byte_budget) is not int or byte_budget <= 0:
-        raise TesseraFormatError("byte_budget must be a positive integer")
-    if not math.isfinite(max_regret_pct) or max_regret_pct < 0.0:
-        raise TesseraFormatError("max_regret_pct must be a finite nonnegative number")
-    factors = tuple(budget_sensitivity)
-    if (not factors or any(not math.isfinite(f) or f <= 0.0 for f in factors)):
-        raise TesseraFormatError("budget_sensitivity must be nonempty positive factors")
-
-    references = {int(sample.reference_q256) for sample in samples.values()}
-    if len(references) != 1:
-        raise TesseraFormatError(
-            f"the stacks disagree about the reference rung ({sorted(references)})")
-    reference = references.pop()
-    targets = sorted(set.intersection(
-        *(set(sample.target_q256) for sample in samples.values())))
-    if not targets:
-        raise TesseraFormatError("the stacks share no predictable target rung")
+    factors = _validate_transfer_gate(byte_budget, draws, max_regret_pct, budget_sensitivity)
+    reference, targets = _shared_transfer_rates(samples)
     menus = {name: tuple(sorted((reference, *targets))) for name in samples}
     for name, menu in menus.items():
         costs = unit_bytes.get(name) if isinstance(unit_bytes, Mapping) else None
@@ -1108,33 +1094,8 @@ def stack_transfer_regret_gate(
                 f"{name}: no byte cost for rung(s) {missing}; regret at a byte "
                 "budget is meaningless without the bytes")
 
-    laws, base_predicted = {}, {}
-    for name in sorted(samples):
-        law = fit_stack_transfer_law(samples, hold_out=name)
-        laws[name] = law
-        prediction = predict_stack_rates(samples[name], law)
-        base_predicted[name] = {reference: samples[name].reference_total(),
-                                **prediction["predicted"]}
-
-    rng = random.Random(seed)
-    draw_scores: list[dict[str, dict[int, float]]] = []
-    for _ in range(draws):
-        truth: dict[str, dict[int, float]] = {}
-        for name in sorted(samples):
-            sample = samples[name]
-            resampled = rng.choices(list(sample.sampled_experts),
-                                    k=len(sample.sampled_experts))
-            perturbed = StackRateSample(
-                stack=sample.stack, projections=sample.projections,
-                experts=sample.experts, reference_q256=sample.reference_q256,
-                reference_mse=sample.reference_mse,
-                sampled_experts=tuple(resampled),
-                sampled_mse=sample.sampled_mse, weights=sample.weights,
-                currency=sample.currency)
-            redrawn = predict_stack_rates(perturbed, laws[name])
-            truth[name] = {reference: sample.reference_total(),
-                           **redrawn["predicted"]}
-        draw_scores.append(truth)
+    base_predicted, truths = _transfer_score_draws(samples, draws, seed)
+    draw_scores = list(truths)
 
     def regrets_at(budget: int) -> list[float]:
         values = []
@@ -1187,6 +1148,173 @@ def stack_transfer_regret_gate(
         "predicted_assignment": _greedy_allocate(base_predicted, unit_bytes, byte_budget),
         "sensitivity": sensitivity,
     }
+
+
+def _validate_transfer_gate(byte_budget, draws, max_regret_pct, budget_sensitivity):
+    if type(draws) is not int or draws < 50:
+        raise TesseraFormatError(
+            f"draws must be an integer of at least 50 (the study's floor), "
+            f"got {draws!r}")
+    if type(byte_budget) is not int or byte_budget <= 0:
+        raise TesseraFormatError("byte_budget must be a positive integer")
+    if not math.isfinite(max_regret_pct) or max_regret_pct < 0.0:
+        raise TesseraFormatError("max_regret_pct must be a finite nonnegative number")
+    factors = tuple(budget_sensitivity)
+    if not factors or any(not math.isfinite(f) or f <= 0.0 for f in factors):
+        raise TesseraFormatError("budget_sensitivity must be nonempty positive factors")
+    return factors
+
+
+def _shared_transfer_rates(samples):
+    references = {int(sample.reference_q256) for sample in samples.values()}
+    if len(references) != 1:
+        raise TesseraFormatError(
+            f"the stacks disagree about the reference rung ({sorted(references)})")
+    targets = sorted(set.intersection(*(set(s.target_q256) for s in samples.values())))
+    if not targets:
+        raise TesseraFormatError("the stacks share no predictable target rung")
+    return references.pop(), targets
+
+
+def _transfer_score_draws(samples, draws, seed, *, per_projection=False):
+    import random
+
+    names = sorted(samples)
+    laws = {name: fit_stack_transfer_law(samples, hold_out=name) for name in names}
+
+    def scores(sample):
+        law = laws[sample.stack]
+        if per_projection:
+            cells = {}
+            _predict_stack_rates(sample, law, cells)
+            return {sample.reference_q256: sample.reference_mse, **cells}
+        return {sample.reference_q256: sample.reference_total(),
+                **predict_stack_rates(sample, law)['predicted']}
+
+    def truths():
+        rng = random.Random(seed)
+        for _ in range(draws):
+            yield {name: scores(replace(samples[name], sampled_experts=tuple(rng.choices(
+                samples[name].sampled_experts, k=len(samples[name].sampled_experts)))))
+                for name in names}
+
+    return {name: scores(samples[name]) for name in names}, truths()
+
+
+def production_stack_transfer_regret_gate(
+    records: Mapping[str, StackRateSample], *,
+    problem,
+    population: Mapping[str, Sequence[tuple[str, int, str]]],
+    format_rates: Mapping[str, int],
+    byte_budget: int, draws: int = 64, seed: int = 0, max_regret_pct: float = 0.1,
+    budget_sensitivity: Sequence[float] = (0.5, 0.75, 1.0, 1.25),
+) -> dict:
+    """Check transfer regret with the production scalar solver.
+
+    Map each transfer unit to its (stack, expert, projection) cells. Map each
+    changed format to its evidence rung. Other units and formats keep their
+    declared costs. Supply a ProductionScalarProblem for the common byte
+    scope and legal menus.
+    """
+    from .digests import canonical_json_sha256
+
+    factors = _validate_transfer_gate(byte_budget, draws, max_regret_pct, budget_sensitivity)
+    samples = dict(sorted(_stack_rate_samples(records).items())) if records else {}
+    population = {name: tuple(sorted(map(tuple, cells))) for name, cells in sorted(population.items())}
+    cells = [cell for unit in population.values() for cell in unit]
+    if (not cells or len(set(cells)) != len(cells) or any(not unit for unit in population.values())
+            or population.keys() - problem.legal_formats.keys()):
+        raise TesseraFormatError('Map each transfer cell once to an admitted unit.')
+    eligible = {name for name, _, _ in cells}
+    if any(s.currency != problem.currency for s in samples.values()):
+        raise TesseraFormatError('Use one loss currency for the allocation and evidence.')
+    if any(expert not in samples[name].experts or projection not in samples[name].projections
+           for name, expert, projection in cells if name in samples):
+        raise TesseraFormatError('Map only cells in the declared evidence census.')
+    changed = {n: {fmt: rate for fmt, rate in format_rates.items() if fmt in problem.legal_formats[n]}
+               for n in population}
+    if any(not menu for menu in changed.values()):
+        raise TesseraFormatError('Map at least one admitted format per transfer unit.')
+
+    scope = dict(byte_budget=byte_budget, **problem.budget_scope())
+    result = dict(
+        schema='prismaquant.production_stack_transfer_regret_gate.v1',
+        solver_contract=problem.solver_contract, global_optimality_claimed=False,
+        stacks=sorted(eligible), currency=problem.currency,
+        byte_budget=byte_budget, budget_scope=scope, draws=draws, seed=seed,
+        max_regret_pct=float(max_regret_pct),
+        evidence_sha256=canonical_json_sha256(
+            dict(samples={n: asdict(s) for n, s in samples.items()}, population=population,
+                 format_rates=format_rates, problem=problem.evidence_inputs()), where='transfer evidence'),
+        budget_sha256=canonical_json_sha256(scope, where='transfer budget'),
+        status='insufficient_evidence', passes=False, sensitivity={},
+    )
+    if len(samples) < 2 or eligible - samples.keys():
+        return result
+    try:
+        reference, targets = _shared_transfer_rates(samples)
+        if any(rate not in (reference, *targets) for menu in changed.values() for rate in menu.values()):
+            return result
+        base, truths = _transfer_score_draws(samples, draws, seed, per_projection=True)
+    except TesseraFormatError as exc:
+        return dict(result, evidence_reason=str(exc))
+
+    result.update(reference_q256=reference, target_q256=targets)
+
+    def score_table(evidence):
+        return {n: {fmt: math.fsum(
+                    samples[stack].weight(expert) * evidence[stack][rate][expert][projection]
+                    for stack, expert, projection in population[n])
+                    for fmt, rate in menu.items()}
+                for n, menu in changed.items()}
+
+    sensitivity_caps = {str(f): max(1, int(byte_budget * f)) for f in factors}
+    solve_base, loss_base = problem.prepare(score_table(base))
+    selections = {cap: solve_base(cap) for cap in sorted({byte_budget, *sensitivity_caps.values()})}
+    regrets = {cap: [] for cap, selection in selections.items() if selection is not None}
+    for truth in truths:
+        if not regrets:
+            break
+        solve_truth, loss_truth = problem.prepare(score_table(truth))
+        for cap in tuple(regrets):
+            best = solve_truth(cap)
+            if best is None:
+                del regrets[cap]
+                continue
+            predicted = loss_truth(selections[cap].assignment)
+            selected_on_truth = loss_truth(best.assignment)
+            if selected_on_truth > 0.0:
+                regrets[cap].append(max(0.0, (predicted / selected_on_truth - 1.0) * 100.0))
+            else:
+                regrets[cap].append(math.inf if predicted > 0.0 else 0.0)
+    for values in regrets.values():
+        values.sort()
+    for label, cap in sensitivity_caps.items():
+        point = dict(byte_budget=cap, feasible=cap in regrets)
+        if cap in regrets:
+            values = regrets[cap]
+            point.update(p50_regret_pct=_percentile(values, 50), p90_regret_pct=_percentile(values, 90),
+                         max_regret_pct=values[-1])
+        result['sensitivity'][label] = point
+    if byte_budget in regrets:
+        selected = selections[byte_budget]
+        ordered = regrets[byte_budget]
+        p90 = _percentile(ordered, 90)
+        passes = p90 <= max_regret_pct
+        result.update(status='pass' if passes else 'regret_failure', passes=passes,
+                      predicted_assignment=selected.assignment, predicted_bytes=selected.exact_bytes,
+                      predicted_loss=loss_base(selected.assignment), regrets_pct=ordered,
+                      p50_regret_pct=_percentile(ordered, 50), p90_regret_pct=p90,
+                      max_regret_pct_observed=ordered[-1])
+    else:
+        result['status'] = 'infeasible'
+    if not result['passes']:
+        result['fallback'] = dict(mode='full_missing_band', scope='global', rows=[
+            dict(stack=name, expert=expert, rate_q256=rate)
+            for name in sorted(eligible) for expert in sorted(samples[name].experts)
+            for rate in samples[name].target_q256 if expert not in samples[name].sampled_mse[rate]
+        ])
+    return result
 
 
 def selective_encode_plan(
