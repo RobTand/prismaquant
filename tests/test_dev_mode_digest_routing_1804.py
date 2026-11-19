@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from unittest.mock import Mock
 
 import pytest
 
@@ -76,6 +77,16 @@ def test_mixed_key_sort_error_keeps_strict_utf8_repr_fallback():
     encoded = b"{1: '" + b"x" * 161 + b"', 'z': '\xc3\xa9'}"
     assert repr(value) == text
     assert dev_mode._shown(value) == _expected_rendering(text, encoded)
+
+
+def test_nested_mixed_keys_hash_the_original_utf8_fallback(monkeypatch):
+    value = {"outer": {"z": "é" + "x" * 161, 1: None}}
+    encoded = b"{'outer': {'z': '\xc3\xa9" + b"x" * 161 + b"', 1: None}}"
+    digest = Mock(wraps=dev_mode.bytes_sha256hex)
+    monkeypatch.setattr(dev_mode, "bytes_sha256hex", digest)
+
+    assert dev_mode._shown(value) == encoded.decode()[:160] + "... (191 chars, sha256 7796ea6ef77e9c8b...)"
+    digest.assert_called_once_with(encoded)
 
 
 def test_fallback_lone_surrogate_still_refuses_strict_utf8():
