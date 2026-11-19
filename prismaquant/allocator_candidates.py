@@ -846,7 +846,7 @@ def collect_activation_calibration_rows(
                         measured_dloss=float(measured),
                         weight_only_dloss=float(weight_only),
                     ))
-            else:
+            elif not campaign_output_mse_row(entry, spec.name):
                 weight_only_by_family[family] += 1
     return rows, measured_by_family, weight_only_by_family
 
@@ -1377,6 +1377,31 @@ def refuse_retired_trellis_surface(env: Mapping[str, str] | None = None) -> None
 class CandidateBuild:
     candidates: dict[str, list[Candidate]]
     cost_rows: dict[str, dict[str, dict]]
+    admitted: dict[str, list[Candidate]]
+
+
+def campaign_output_mse_row(row, format_name):
+    return ('output_mse' in row and 'predicted_dloss' not in row
+            and isinstance(row.get('output_mse_measured'), bool)
+            and isinstance(row.get('activation_quantized'), bool)
+            and bool(row.get('activation_contract'))
+            and bool(row.get('currency'))
+            and isinstance(row.get('hessian_identity'), Mapping)
+            and row.get('cost_source') in (
+                'tessera_campaign_measured', 'tessera_campaign_measured_stack_sample',
+                priced_cell.TESSERA_INTERPOLATED_COST_SOURCE)
+            and fr.parse_family_rung(format_name) is not None)
+
+
+def _price_campaign_cell(stats, row, *, gain=1.0, format_name):
+    if not campaign_output_mse_row(row, format_name):
+        return None
+    trace, mse = float(stats.get('h_trace', 0.0)), float(row['output_mse'])
+    if not math.isfinite(trace) or trace <= 0 or not math.isfinite(mse) or mse < 0:
+        raise ValueError('Use finite campaign output MSE and a positive Fisher trace.')
+    # Campaign output MSE includes the effect of the route's activation contract.
+    branch = (BRANCH_MEASURED if row['output_mse_measured'] else BRANCH_INTERPOLATED_OUTPUT)
+    return priced_cell.PricedCell(predicted_dloss(trace, mse, gain), row['cost_source'], branch, False)
 
 
 def require_candidate_coverage(
@@ -1602,9 +1627,11 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
             # cost_entry_predicted_dloss falls back to predicted_dloss or
             # weight_mse for those entries.
             try:
-                cell = priced_cell.price_cell(
-                    s, entry, gain=gain, format_name=spec.name,
-                    activation_pricing=activation_pricing, policy=pricing_policy)
+                cell = _price_campaign_cell(s, entry, gain=gain, format_name=spec.name)
+                if cell is None:
+                    cell = priced_cell.price_cell(
+                        s, entry, gain=gain, format_name=spec.name,
+                        activation_pricing=activation_pricing, policy=pricing_policy)
             except priced_cell.UnpricedCostRow:
                 masked.setdefault((spec.name, UNPRICED_COST_ROW_REASON), []).append(name)
                 unpriceable.setdefault(name, []).append(spec.name)
@@ -1759,8 +1786,9 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
     # trade. Runs on every unit, deferred group members included: the group
     # conjunction is what keeps a member's drop from shrinking the group's
     # name intersection.
+    admitted = out
     out = drop_census_interpolated_within_loo(
-        out,
+        admitted,
         costs,
         census_loo,
         fused_groups=census_loo_groups,
@@ -1776,7 +1804,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
         preserve_runtime_frontier=preserve_runtime_frontier,
         defer_reduction=defer_menu_reduction,
     )
-    return CandidateBuild(out, cost_rows)
+    return CandidateBuild(out, cost_rows, admitted)
 
 
 def selection_serving_lane_provenance(
@@ -2656,9 +2684,13 @@ def aggregate_fused_siblings(
                 # the per-member terms here — and the hedge conversion — are
                 # un-gained.
                 try:
-                    member_pred = priced_cell.cost_entry_predicted_dloss(
-                        stats[m], c, format_name=spec.name,
-                        activation_pricing=activation_pricing, policy=pricing_policy)
+                    cell = _price_campaign_cell(stats[m], c, format_name=spec.name)
+                    if cell is None:
+                        member_pred = priced_cell.cost_entry_predicted_dloss(
+                            stats[m], c, format_name=spec.name,
+                            activation_pricing=activation_pricing, policy=pricing_policy)
+                    else:
+                        member_pred = cell.predicted_dloss
                 except priced_cell.UnpricedCostRow:
                     member_terms = None
                     break

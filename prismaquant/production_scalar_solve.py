@@ -5,11 +5,13 @@ import math
 from copy import deepcopy
 
 from . import format_registry as fr
-from .allocator import SOLVER_CONTRACT, solve_scalar
+from .allocator import SOLVER_CONTRACT, filter_candidates_for_profile, solve_scalar
 from .allocator_candidates import (
     aggregate_fused_siblings,
     aggregate_packed_serving_groups,
     build_candidates,
+    calibrate_activation_fair_pricing,
+    campaign_output_mse_row,
     reduce_continuous_menu,
     require_candidate_coverage,
     serving_groups_by_key,
@@ -24,8 +26,9 @@ class ProductionScalarProblem:
     """Bind one population, format order and charge scope for both score arms.
 
     Supply JSON data for per-Linear stats and costs before menu reduction.
-    Declare format names in promotion rank order. Use scalar predicted loss
-    rows for options that change scores. Extra charges count in the body cap.
+    Declare format names in promotion rank order. Pass weighted MSE sums for
+    campaign rows. Pass predicted loss for scalar rows. Extra charges count
+    in the body cap.
     Declare each extra sidecar once, with the options that use it.
     """
 
@@ -33,7 +36,9 @@ class ProductionScalarProblem:
 
     def __init__(self, stats, costs, formats, *, currency, profile=None,
                  bit_precision=0.0001, fixed_bytes=0, shared_sidecars=None,
-                 source_manifest=None, target_profile=None, context_by_unit=None):
+                 source_manifest=None, target_profile=None, context_by_unit=None,
+                 census_loo=None, calibrated_gains=None, activation_pricing=None,
+                 rung_allowability=None, allowability_m=None, allowability_tensor_parallel=1):
         sidecars = shared_sidecars or {}
         if not currency or not stats:
             raise ValueError('Declare the scalar population and currency.')
@@ -53,14 +58,22 @@ class ProductionScalarProblem:
         self._sidecars = {key: (size, tuple(sorted(set(users))))
                           for key, (size, users) in sidecars.items()}
         self._policy = CostPricingPolicy.from_environment()
-        self._admission = dict(source_manifest=deepcopy(source_manifest), target_profile=target_profile,
-                               context_by_unit=None if context_by_unit is None else dict(context_by_unit))
-        _, _, candidates = self._build(self._costs)
-        self.legal_formats = legal_formats_from_candidates(candidates)
         self._groups = serving_groups_by_key(self._stats, self._profile)
-        self._deferred = frozenset(n for members in self._groups.values() for n in members)
+        self._pricing = dict(calibrated_gains=deepcopy(calibrated_gains),
+                             activation_pricing=deepcopy(activation_pricing))
+        if activation_pricing is None:
+            self._pricing['activation_pricing'] = calibrate_activation_fair_pricing(
+                self._stats, self._costs, list(self._specs.values()))
+        self._admission = dict(source_manifest=deepcopy(source_manifest), target_profile=target_profile,
+                               context_by_unit=None if context_by_unit is None else dict(context_by_unit),
+                               census_loo=deepcopy(census_loo),
+                               rung_allowability=None if rung_allowability is None else dict(rung_allowability),
+                               allowability_m=allowability_m,
+                               allowability_tensor_parallel=allowability_tensor_parallel)
+        _, build = self._build(self._costs)
+        self.legal_formats = legal_formats_from_candidates(build.admitted)
         self._candidate_bytes = {n: {c.fmt: int(c.memory_bytes) for c in menu}
-                                 for n, menu in candidates.items()}
+                                 for n, menu in build.admitted.items()}
         if any(fmt not in self.legal_formats.get(n, ())
                for _, users in self._sidecars.values() for n, fmt in users):
             raise ValueError('A sidecar user is not an admitted option.')
@@ -69,10 +82,17 @@ class ProductionScalarProblem:
         stats = deepcopy(self._stats)
         build = build_candidates(
             stats, costs, list(self._specs.values()), bit_precision=self._precision,
-            defer_menu_reduction=stats.keys(), pricing_policy=self._policy, **self._admission,
+            census_loo_groups=self._groups, pricing_policy=self._policy,
+            defer_menu_reduction={n for members in self._groups.values() for n in members},
+            **self._pricing, **self._admission,
         )
         require_candidate_coverage(stats, build.candidates)
-        return stats, build.cost_rows, build.candidates
+        for name, menu in build.admitted.items():
+            for candidate in menu:
+                row, _ = resolve_cost_row(build.cost_rows[name], candidate.fmt)
+                if row.get('cost_currency', row.get('currency', self.currency)) != self.currency:
+                    raise ValueError('Use one loss currency for all admitted rows.')
+        return stats, build
 
     def budget_scope(self):
         return dict(scope='expanded_body_and_declared_charges', fixed_bytes=self._fixed_bytes,
@@ -88,6 +108,13 @@ class ProductionScalarProblem:
                     target_profile=self._admission['target_profile'],
                     serving_context={n: ctx.as_dict() for n, ctx in
                                      (self._admission['context_by_unit'] or {}).items()},
+                    census_loo=self._admission['census_loo'],
+                    calibrated_gains=self._pricing['calibrated_gains'],
+                    activation_pricing=self._pricing['activation_pricing'].as_dict(),
+                    rung_allowability={family: table.provenance() for family, table in
+                                       (self._admission['rung_allowability'] or {}).items()},
+                    allowability_m=self._admission['allowability_m'],
+                    allowability_tensor_parallel=self._admission['allowability_tensor_parallel'],
                     bit_precision=self._precision, ucb_z=self._policy.ucb_z)
 
     def solve(self, byte_budget, scores=None):
@@ -98,31 +125,35 @@ class ProductionScalarProblem:
         """Build new frontiers and retain prices for expanded selections."""
         costs = {n: dict(menu) for n, menu in self._costs.items()}
         for name, menu in (scores or {}).items():
-            for fmt, loss in menu.items():
+            for fmt, score in menu.items():
                 if fmt not in self.legal_formats.get(name, ()):
                     raise ValueError('Change scores only for admitted options.')
+                if not math.isfinite(score) or score < 0:
+                    raise ValueError('Use finite nonnegative scores.')
                 row, key = resolve_cost_row(costs[name], fmt)
-                if row is None or set(row) != {'predicted_dloss'}:
-                    raise ValueError('Change scores only for scalar cost rows.')
-                if not math.isfinite(loss) or loss < 0:
-                    raise ValueError('Use finite nonnegative loss scores.')
-                costs[name][key] = {'predicted_dloss': loss}
-        stats, costs, candidates = self._build(costs)
-        if legal_formats_from_candidates(candidates) != self.legal_formats:
+                if row is not None and campaign_output_mse_row(row, fmt):
+                    costs[name][key] = dict(row, output_mse=score / float(self._stats[name]['h_trace']))
+                elif row is not None and set(row) == {'predicted_dloss'}:
+                    costs[name][key] = {'predicted_dloss': score}
+                else:
+                    raise ValueError('Use scalar cost rows or campaign rows in the declared currency.')
+        stats, build = self._build(costs)
+        if legal_formats_from_candidates(build.admitted) != self.legal_formats:
             raise ValueError('The score change changed the admitted menus.')
-        linear_candidates = candidates
-        candidates = reduce_continuous_menu(
-            candidates, stats, bit_precision=self._precision, defer_reduction=self._deferred)
-        options = dict(profile=self._profile, pricing_policy=self._policy)
+        legal = legal_formats_from_candidates(build.candidates)
+        options = dict(profile=self._profile, pricing_policy=self._policy, **self._pricing)
         specs = list(self._specs.values())
-        grouped, costs, candidates = aggregate_packed_serving_groups(stats, costs, specs, candidates, **options)
-        grouped, costs, candidates = aggregate_fused_siblings(grouped, costs, specs, candidates, **options)
+        grouped, costs, candidates = aggregate_packed_serving_groups(
+            stats, build.cost_rows, specs, build.candidates, **options)
+        grouped, _, candidates = aggregate_fused_siblings(grouped, costs, specs, candidates, **options)
+        names = tuple(candidates)
+        candidates = filter_candidates_for_profile(candidates, self._admission['target_profile'])
         candidates = reduce_continuous_menu(candidates, grouped, bit_precision=self._precision)
-        require_candidate_coverage(grouped, candidates)
+        require_candidate_coverage(names, candidates)
         space = AssignmentSpace(
             stats=grouped, accounting_stats=stats, fixed_stats={}, fixed_formats={},
             aggregation=AggregationPolicy(True, True), profile=self._profile,
-            format_rank=self._rank, legal_formats=self.legal_formats,
+            format_rank=self._rank, legal_formats=legal,
         )
         params = sum(grouped[n]['n_params'] for n in candidates)
 
@@ -135,6 +166,6 @@ class ProductionScalarProblem:
             )
 
         def loss(assignment):
-            return compute_assignment_predicted_dloss(assignment, linear_candidates)
+            return compute_assignment_predicted_dloss(assignment, build.admitted)
 
         return solve, loss

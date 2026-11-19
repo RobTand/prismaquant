@@ -1214,7 +1214,7 @@ def production_stack_transfer_regret_gate(
     Map each transfer unit to its (stack, expert, projection) cells. Map each
     changed format to its evidence rung. Other units and formats keep their
     declared costs. Supply a ProductionScalarProblem for the common byte
-    scope and legal menus.
+    scope and legal menus. Global fallback can save less than selective fallback.
     """
     from .digests import canonical_json_sha256
 
