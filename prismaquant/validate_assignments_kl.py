@@ -45,6 +45,7 @@ from prismaquant.gpu_guard import require_cuda_hot_path
 from prismaquant.layer_config import (
     canonicalize_format,
     is_layer_config_meta_key,
+    layer_config_metadata,
 )
 from prismaquant.model_profiles import detect_profile_with_warning
 from prismaquant.footprint import (
@@ -114,6 +115,16 @@ def load_assignment_json(path: str | Path, base: Mapping[str, str] | None = None
         merged.update(assignment)
         return merged
     return assignment
+
+
+def _resolved_quantizable_population(payload, assignment, *, where):
+    metadata = layer_config_metadata(payload) or payload
+    population = metadata.get("quantizable_population")
+    if population is not None and metadata.get("assignment_sha256") != (
+        assignment_serialization_sha256(assignment)
+    ):
+        raise ValueError(f"{where}: quantizable population does not match the resolved assignment")
+    return population
 
 
 def _parse_labeled_path(value: str) -> tuple[str, Path]:
@@ -1162,15 +1173,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     ):
         parser.error("additivity requires one current base assignment")
     assignment_budget_metadata: dict[tuple[str, str], Mapping | None] = {}
-    for (label, assignment, path), (_path_label, raw_path) in zip(
-        assignments, labeled_paths
-    ):
-        assignment_budget_metadata[(label, path)] = (
-            whole_artifact_budget_from_assignment_payload(
-                candidate_payloads[(label, path)],
-                where=f"assignment {label!r} ({path})",
-                assignment=assignment,
-            )
+    assignment_populations: dict[tuple[str, str], Mapping | None] = {}
+    for label, assignment, path in assignments:
+        key = (label, path)
+        where = f"assignment {label!r} ({path})"
+        assignment_budget_metadata[key] = whole_artifact_budget_from_assignment_payload(
+            candidate_payloads[key], where=where, assignment=assignment,
+        )
+        assignment_populations[key] = _resolved_quantizable_population(
+            candidate_payloads[key], assignment, where=where,
         )
         # Price every assignment before loading a multi-billion-parameter
         # model, so a format the registry refuses fails here.
@@ -1714,6 +1725,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "whole_artifact_budget": dict(candidate_budget),
                 } if candidate_budget is not None else {}),
             }
+            population = assignment_populations[(label, path)]
+            if population is not None:
+                result["quantizable_population"] = population
+                resolved_assignment_payload["quantizable_population"] = population
             result["resolved_assignment_payload"] = resolved_assignment_payload
             result["resolved_assignment_payload_sha256"] = DIRECT_UTF8_STRICT.sha256(
                     resolved_assignment_payload)

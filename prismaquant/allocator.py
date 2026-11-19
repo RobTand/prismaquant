@@ -114,10 +114,11 @@ from .fixed_head import (
     is_lm_head_name,
     parse_allow_pinned,
 )
-from .footprint import whole_artifact_budget_stamp
 from .footprint import (
     NVFP4_WEIGHT_ONLY_STATS_KEY,
+    assignment_serialization_sha256,
     nvfp4_global_sidecar_bytes,
+    whole_artifact_budget_stamp,
 )
 from .visual_linears import (  # noqa: F401 -- re-exported: callers and tests read them here
     VISUAL_NON_LINEAR_NAME_RE,
@@ -3667,6 +3668,40 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             return None, float("nan"), float("inf"), float("inf")
         return selected.proposal, selected.achieved_bits, selected.loss, selected.loss
 
+    def solver_assignment_for_accounting(complete):
+        return {name: fmt for name, fmt in complete.items()
+                if (not _is_visual_linear(name, model_profile)
+                    and not _is_mtp_linear(name) and name not in fixed_lm_head_names)}
+
+    def _quantizable_population_metadata(complete):
+        if not lm_head_dp_unpinned:
+            return {}
+        body, head = {}, {}
+        for name, fmt in solver_assignment_for_accounting(complete).items():
+            if is_lm_head_name(name, model_profile):
+                head[name] = fmt
+            elif not model_profile.is_pinned_name(name):
+                body[name] = fmt
+
+        def payload_counts(assignment):
+            payload = assignment_space.payload(assignment, require_all_stats=True)
+            return {"params": payload["quantizable_params"],
+                    "tensor_payload_bytes": int(payload["bits_total"]) // 8}
+
+        body_counts = payload_counts(body)
+        head_counts = payload_counts(head)
+        selectable = {key: value + head_counts[key] for key, value in body_counts.items()}
+        for counts in (body_counts, selectable):
+            counts["bpp"] = 8 * counts["tensor_payload_bytes"] / max(counts["params"], 1)
+        return {
+            "assignment_sha256": assignment_serialization_sha256(complete),
+            "quantizable_population": {
+                "body": body_counts,
+                "head": {**head_counts, "mode": "dp", "formats": head},
+                "selectable": selectable,
+            },
+        }
+
     def _write_layer_config(assignment, achieved, total, mutable_total, *,
                             selected_whole_artifact_budget_stamp=None, replay=None):
         print(
@@ -3704,11 +3739,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # promotion above, so neither can collapse the per-unit entries back
         # into a group format; the carried block and the receipts below close
         # over exactly these entries.
-        def body_assignment_for_accounting(complete):
-            return {name: fmt for name, fmt in complete.items()
-                    if (not _is_visual_linear(name, model_profile)
-                        and not _is_mtp_linear(name) and name not in fixed_lm_head_names)}
-
         routed_unit_rates_record = None
         if args.routed_unit_rates:
             from . import footprint as _fp_routed_rates
@@ -3723,7 +3753,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 canonical_format=_canonical_candidate_format,
             )
             achieved = float(assignment_space.payload(
-                body_assignment_for_accounting(assignment_expanded),
+                solver_assignment_for_accounting(assignment_expanded),
                 require_all_stats=True)["bits_per_param"])
             try:
                 final_assignment = _stamped_assignment(assignment_expanded)
@@ -3841,27 +3871,27 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     "PASSTHROUGH_SOURCE_REQUIREMENTS deliberately."
                 )
 
-        final_body_assignment = body_assignment_for_accounting(assignment_expanded)
-        paired_trade = _paired_trade_for_assignment(final_body_assignment)
+        final_solver_assignment = solver_assignment_for_accounting(assignment_expanded)
+        paired_trade = _paired_trade_for_assignment(final_solver_assignment)
         if paired_trade is not None and paired_trade["refused"]:
             refusals = {layer: summarize_paired_routed_layer(row)
                         for layer, row in paired_trade["routed_layers"].items() if row["refused"]}
             raise SystemExit("[alloc] ERROR: routed layer rate trade refused: "
                              + DIRECT_ASCII_SPACED_LAX.text(refusals))
-        final_body_payload = assignment_space.payload(
-            final_body_assignment,
+        final_solver_payload = assignment_space.payload(
+            final_solver_assignment,
             require_all_stats=True,
         )
-        final_body_achieved = float(final_body_payload["bits_per_param"])
+        final_solver_achieved = float(final_solver_payload["bits_per_param"])
         if not math.isclose(
-            final_body_achieved,
+            final_solver_achieved,
             float(achieved),
             rel_tol=0.0,
             abs_tol=1e-9,
         ):
             raise AssertionError(
                 "final expanded assignment payload does not reconcile with the "
-                f"exact-filtered solve: final={final_body_achieved}, "
+                f"exact-filtered solve: final={final_solver_achieved}, "
                 f"solve={achieved}"
             )
         final_assignment_payload = assignment_space.payload(
@@ -3879,9 +3909,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         final_serve_feasibility = None
         if serving_constraints_active:
             final_serve_feasibility = _serve_feasibility(
-                assignment_expanded if measured_runtime_table is not None else final_body_assignment,
+                assignment_expanded if measured_runtime_table is not None else final_solver_assignment,
                 resident_bytes=int(
-                    round(float(final_body_payload["bits_total"]) / 8.0)),
+                    round(float(final_solver_payload["bits_total"]) / 8.0)),
             )
             if not final_serve_feasibility.feasible:
                 violated = ", ".join(
@@ -3904,6 +3934,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     "table that prices this menu's format families."
                 )
 
+        population_metadata = _quantizable_population_metadata(
+            _stamped_assignment(assignment_expanded))
+        body_population = population_metadata.get("quantizable_population", {}).get("body")
         layer_cfg = {}
         for name, fmt in assignment_expanded.items():
             if fmt in format_specs:
@@ -3944,16 +3977,21 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             ),
             "lm_head_cost_pricing": fixed_lm_head_cost_pricing,
             "target_bits": float(args.target_bits),
-            "achieved_bits": final_body_achieved,
+            "achieved_bits": final_solver_achieved,
             "achieved_bits_scope": (
+                "solver_assignment_tensor_payload_including_dp_head"
+                if lm_head_dp_unpinned else
                 "body_assignment_tensor_payload_including_deduplicated_cb_sidecars"
             ),
-            "body_assignment_payload_bits_total": float(
-                final_body_payload["bits_total"]
+            "body_assignment_payload_bits_total": (
+                float(8 * body_population["tensor_payload_bytes"]) if body_population is not None
+                else float(final_solver_payload["bits_total"])
             ),
-            "body_assignment_quantizable_params": int(
-                final_body_payload["quantizable_params"]
+            "body_assignment_quantizable_params": (
+                body_population["params"] if body_population is not None
+                else int(final_solver_payload["quantizable_params"])
             ),
+            **population_metadata,
             # Frozen at 0.0 for byte-identical layer-config metadata: the only
             # shared sidecar it ever counted belonged to the retired codebook
             # lane (archived 2026-09-25, #1304).
@@ -4076,7 +4114,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             counts[fmt] += 1
         print(
             f"\n[alloc] target={args.target_bits} "
-            f"exact_assignment_payload_bpp={final_body_achieved:.3f}"
+            f"exact_assignment_payload_bpp={final_solver_achieved:.3f}"
         )
         for fmt, n in sorted(counts.items(), key=lambda kv: -kv[1]):
             print(f"  {fmt:>14}: {n:>5} layers")
@@ -4089,7 +4127,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             args.bit_attribution_json,
             args.bit_attribution_csv,
             target_bits=args.target_bits,
-            achieved_bits=final_body_achieved,
+            achieved_bits=final_solver_achieved,
             assignment_expanded=assignment_expanded,
             candidates=candidates,
             stats_entry_for=assignment_space.stats_for,
@@ -4796,7 +4834,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         manifest_rows = []
         seen_payloads: set[str] = set()
         for idx, record in enumerate(pareto_seed_records):
-            assignment = record["assignment"]
+            assignment = (
+                _stamped_assignment(record["assignment"]) if lm_head_dp_unpinned
+                else record["assignment"]
+            )
             digest_src = DIRECT_ASCII_LAX.text(assignment)
             digest = hashlib.sha256(digest_src.encode()).hexdigest()[:12]
             if digest in seen_payloads:
@@ -4853,6 +4894,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 ),
                 "target_profile": target_profile,
                 "assignment": dict(sorted(assignment.items())),
+                **_quantizable_population_metadata(assignment),
                 **({
                     "whole_artifact_budget": record_budget_stamp,
                 } if record_budget_stamp is not None else {}),

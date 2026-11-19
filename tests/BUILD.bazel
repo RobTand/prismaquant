@@ -24619,12 +24619,16 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/allocator_cycle",
         "//:prismaquant/lane_shipcard",
+        "//:prismaquant/layer_config",
         "//:tools/__init__",
         "//:tools/tessera_fleet/__init__",
         "//:tools/tessera_fleet/dispatch_model",
         "@pq_pip//pytest",
+        "@pq_pip//safetensors",
         "@pq_pip//tessera_quant",
+        "@pq_pip//torch",
     ],
 )
 
@@ -34432,7 +34436,6 @@ pq_py_test(
     deps = [
         "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
         "//:pqtel/__init__",
-        "//:prismaquant/allocator_cycle",
         "//:prismaquant/aura_additivity_gate",
         "//:prismaquant/build_production_cache",
         "//:prismaquant/expert_empirical_cost",
