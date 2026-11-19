@@ -30,8 +30,8 @@ from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_s
 SCHEMA = 'prismaquant.bazel-gate.v1'
 NONHERMETIC = Path(__file__).resolve().parents[2] / 'tools/bazel/nonhermetic.bzl'
 EXCERPT_LABELS, EXCERPT_BYTES, EXCERPT_READ = 5, 4096, 1 << 20
-# The amd64 executor allows 64 tasks. The CPU limits throughput at about 56 (Fleet lead 3, 2026-11-18).
-AMD64_TASK_BUDGET = 56
+# dl380g10 has 40 physical cores; the rest of the host uses some (Fleet lead 3, 2026-11-19: load1 101 at 52 actions).
+AMD64_TASK_BUDGET = 36
 
 
 class GateError(RuntimeError):
