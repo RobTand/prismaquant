@@ -29549,6 +29549,11 @@ pq_py_library(
     srcs = [
         "test_package_json_publication_3879_split.py",
     ],
+    data = [
+        "//:docs/audits/digest_site_census_pq1301_2026-10-04.json",
+        "//:prismaquant/stage_a_chain_split.py",
+        "test_package_json_publication_3879_split.py",
+    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",

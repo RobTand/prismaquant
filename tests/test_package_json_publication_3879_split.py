@@ -5,11 +5,16 @@ The expected bytes are literals. No second encoder makes them.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
-from prismaquant import stage_a_chain_resume, stage_a_chain_split
+from prismaquant import digests, stage_a_chain_resume, stage_a_chain_split
 from prismaquant.digests import JsonProfile
 
+CENSUS = Path(__file__).resolve().parents[1] / "docs/audits/digest_site_census_pq1301_2026-10-04.json"
+SPLIT_MAIN = "sorted-json:prismaquant/stage_a_chain_split.py::main@"
 FILE_PROFILE = "direct-ascii-indent2-lax"
 STDOUT_PROFILE = "direct-ascii-spaced-lax"
 
@@ -97,4 +102,65 @@ def test_split_publication_profile_calls(
     else:
         assert not receipt.exists()
         assert captured.out == b""
+    assert captured.err == b""
+
+
+def test_census_owner_routes_give_the_literal_nonfinite_bytes():
+    published = []
+    for call in json.loads(CENSUS.read_bytes())["refresh_2540"]["calls"]:
+        if not call["id"].startswith(SPLIT_MAIN):
+            continue
+        module, profile, method = call["owner"]["route"].rsplit(".", 2)
+        assert module == digests.__name__
+        # The consumer adds one LF to each profile text.
+        text = getattr(getattr(digests, profile), method)(RICH) + "\n"
+        published.append((call["id"], text.encode()))
+    assert published == [(SPLIT_MAIN + "534:48", RICH_FILE), (SPLIT_MAIN + "536:10", RICH_STDOUT)]
+
+
+@pytest.mark.parametrize("mixed", [False, True], ids=["nonfinite", "mixed"])
+def test_split_stdout_receipt_without_file(tmp_path, monkeypatch, capsysbinary, mixed):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        stage_a_chain_resume, "read_chain_state",
+        lambda space: {"run_identity": {"n_probes": 1}, "n_batches": 1})
+    monkeypatch.setattr(
+        stage_a_chain_split, "join_split_checkpoint",
+        lambda space, boundary, **_kwargs: {"boundary": boundary})
+    value = {1: "number", "x": "text"} if mixed else RICH
+    monkeypatch.setattr(stage_a_chain_split, "join_receipt", lambda space, record: value)
+    monkeypatch.setattr(
+        stage_a_chain_split, "atomic_write_bytes", lambda *_: pytest.fail("Do not write a receipt file."))
+    argv = ["--output-root", "work", "--boundary", "2"]
+
+    if mixed:
+        with pytest.raises(TypeError) as raised:
+            stage_a_chain_split.main(argv)
+        assert str(raised.value) == MIXED_MESSAGE
+    else:
+        assert stage_a_chain_split.main(argv) == 0
+
+    captured = capsysbinary.readouterr()
+    assert captured.out == (b"" if mixed else RICH_STDOUT)
+    assert captured.err == b""
+
+
+def test_split_receipt_write_failure_stops_stdout(tmp_path, monkeypatch, capsysbinary):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        stage_a_chain_resume, "read_chain_state",
+        lambda space: {"run_identity": {"n_probes": 1}, "n_batches": 1})
+    monkeypatch.setattr(
+        stage_a_chain_split, "join_split_checkpoint",
+        lambda space, boundary, **_kwargs: {"boundary": boundary})
+    monkeypatch.setattr(stage_a_chain_split, "join_receipt", lambda space, record: RICH)
+    (tmp_path / "blocked").write_bytes(b"keep\n")
+    argv = ["--output-root", "work", "--boundary", "2", "--receipt", "blocked/receipt.json"]
+
+    with pytest.raises(FileExistsError):
+        stage_a_chain_split.main(argv)
+
+    assert (tmp_path / "blocked").read_bytes() == b"keep\n"
+    captured = capsysbinary.readouterr()
+    assert captured.out == b""
     assert captured.err == b""
