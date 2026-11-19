@@ -48,6 +48,18 @@ def test_selector_refuses_unknown_or_unqualified_inputs(config):
         backend.normalize_projection_backend(config)
 
 
+def test_projection_qualification_refuses_wrong_schema_or_status(tmp_path, monkeypatch):
+    path = tmp_path / 'qualification.json'
+    monkeypatch.setattr(joint_projection_contract, 'QUALIFICATION_PATH', path)
+    for schema, status in (('wrong', 'qualified'), ('prismaquant.joint_projection_qualification.v1', 'pending')):
+        raw = json.dumps({'schema': schema, 'status': status}).encode()
+        path.write_bytes(raw)
+        with pytest.raises(RuntimeError, match=r'\Ajoint projection backend has no qualified packaged runtime\Z'):
+            joint_projection_contract.projection_qualification.__wrapped__()
+        assert path.read_bytes() == raw
+        assert list(tmp_path.iterdir()) == [path]
+
+
 def test_fused_lease_refuses_missing_explicit_prewarm():
     layer = torch.nn.Linear(8, 4, bias=False)
     with pytest.raises(RuntimeError, match='explicitly prewarmed before the lease'):
