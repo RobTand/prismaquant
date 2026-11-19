@@ -3273,6 +3273,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/digests",
         "//:prismaquant/io_engine",
         "//:prismaquant/joint_retained_window_plan",
         "@pq_pip//pytest",
