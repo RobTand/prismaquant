@@ -187,6 +187,15 @@ def test_native_rank_observer_never_infers_tp2_transport_from_environment(monkey
         _graph_rank_observation(None, model_dir="unused")
 
 
+def test_native_graph_refuses_out_of_range_worker_rank(native_graph, monkeypatch):
+    native, _, model, _, _, _ = native_graph
+    distributed = types.ModuleType("vllm.distributed")
+    distributed.get_tp_group = lambda: types.SimpleNamespace(world_size=1, rank_in_group=1)
+    monkeypatch.setitem(sys.modules, "vllm.distributed", distributed)
+    with pytest.raises(ValueError, match="^cannot observe the worker's tensor-parallel group$"):
+        native._graph_rank_observation(None, model_dir=str(model))
+
+
 def test_native_resolved_compilation_preserves_boolean_numeric_distinction(native_graph):
     native, args, model, config, ranks, calls = native_graph
     args.compilation_config = '{"mode":true}'
