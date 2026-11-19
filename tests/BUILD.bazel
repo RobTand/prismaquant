@@ -34765,6 +34765,7 @@ pq_py_library(
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/dev_mode",
+        "//:prismaquant/digests",
         "//:prismaquant/joint_cost_stage_a",
         "//:prismaquant/matmul_arithmetic",
         "//:prismaquant/staged_tier_policy",

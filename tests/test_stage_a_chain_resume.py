@@ -40,6 +40,7 @@ import torch
 from prismaquant import joint_cost_stage_a as stage_a
 from prismaquant import stage_a_chain_resume as resume_mod
 from prismaquant.cost_stage_checkpoint import canonical_json_bytes
+from prismaquant.digests import indent2_json_file_bytes
 from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.joint_adjoint_band import build_band_receipt
@@ -143,6 +144,46 @@ def test_resume_declaration_uses_shared_sha256_grammar(monkeypatch):
     monkeypatch.setattr(consumer, "is_sha256hex", recording, raising=False)
     consumer.parse_declaration(f"{ONE}:{TWO}")
     assert seen == [ONE, TWO], "The recorder must get both digests in order."
+
+
+def test_resume_receipt_matches_original_publication(tmp_path):
+    plan = resume_mod.ChainResume(
+        document={"boundary_storage": {"session": {"generation": 1001}}},
+        boundary=2, checkpoints=[], checkpoint_directories=[], compatibility=None,
+        implementation_sha256=ONE, index=1,
+    )
+    path = resume_mod.resume_directory(tmp_path) / "resume-001.json"
+    split = {"note": "é雪"}
+    original = b'''{
+  "compatibility": null,
+  "implementation_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "index": 1,
+  "partial_checkpoints_set_aside": [],
+  "producer": null,
+  "record_sha256": "9adf6c1afbce67f6aee2e003cfcf1ea038160eb2149357738376909d94b608e0",
+  "removed_rolling_entries": 0,
+  "schema": "prismaquant.stage_a.chain_resume.v1",
+  "session": {
+    "generation": 1001
+  },
+  "split": {
+    "note": "\\u00e9\\u96ea"
+  },
+  "switch_checkpoint": 2
+}
+'''
+    record = resume_mod.apply_chain_resume(tmp_path, plan, split=split)
+    assert record == json.loads(original)
+    assert indent2_json_file_bytes(record) == path.read_bytes() == original
+
+    for invalid in ({1: 0, "1": 0}, {"value": float("nan")}):
+        with pytest.raises(ValueError) as error:
+            resume_mod.apply_chain_resume(tmp_path, plan, split=invalid)
+        assert str(error.value) == "chain resume record is not canonical JSON data"
+    with pytest.raises(ChainResumeRefused) as error:
+        resume_mod.apply_chain_resume(tmp_path, plan, split=split)
+    assert str(error.value) == f"{path} already exists: another relaunch resumed this run"
+    assert path.read_bytes() == original
 
 
 class _Interrupted(Exception):
