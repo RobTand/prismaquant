@@ -16,6 +16,7 @@ from tools.tp_decode_feasibility import (
     VERDICT_LOSE,
     VERDICT_UNKNOWN,
     VERDICT_WIN,
+    _parse_cpu_pin,
     _resolve_sizes,
     build_decision_rows,
     check_scratch_path,
@@ -51,6 +52,12 @@ def test_resolve_sizes_parses_and_sorts():
         (8192, 12288, 16384)
     with pytest.raises(SystemExit):
         _resolve_sizes(type("A", (), {"sizes_bytes": "8191"}))  # not bf16-even
+
+
+def test_cpu_pin_refuses_a_core_shared_by_two_ranks():
+    assert _parse_cpu_pin("2-3,4-5") == [{2, 3}, {4, 5}]
+    with pytest.raises(SystemExit, match="a core appears in two ranks' sets"):
+        _parse_cpu_pin("2-3,3-5")
 
 
 # ---------------------------------------------------------------------------
