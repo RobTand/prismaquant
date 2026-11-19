@@ -330,13 +330,15 @@ class StreamedCausalLM:
             pass_state=pass_state,
         )
 
-    def _finish(self, hidden: torch.Tensor) -> torch.Tensor:
+    def tail_head_input(self, hidden: torch.Tensor) -> torch.Tensor:
         hidden = self.profile.collapse_hidden_after_layers(
             hidden, self.base_model
         )
         norm = _get_final_norm(self.base_model)
-        if norm is not None:
-            hidden = norm(hidden)
+        return norm(hidden) if norm is not None else hidden
+
+    def _finish(self, hidden: torch.Tensor) -> torch.Tensor:
+        hidden = self.tail_head_input(hidden)
         return self._head()(hidden)
 
     def capture_boundaries(

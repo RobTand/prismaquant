@@ -7,6 +7,7 @@ import torch
 import copy
 import pickle
 import hashlib
+import inspect
 
 import prismaquant.aura_cost as aura
 from prismaquant.joint_aura import paired_candidate_difference
@@ -114,6 +115,45 @@ def test_joint_streamed_matches_full_model_output_residual_oracle(monkeypatch):
     finally:
         for handle in handles:
             handle.remove()
+
+
+def test_streamed_head_weight_projection_matches_float64():
+    compute = aura.compute_aura_cost_streamed
+    assert "head_weight_delta" in inspect.signature(compute).parameters
+    model, _, runner, cache = _fixture()
+    width = model.lm_head.in_features
+    model.model.norm = torch.nn.LayerNorm(width, elementwise_affine=False)
+    calib = torch.tensor([[1, 2, 3, 4], [7, 6, 5, 2]])
+    delta = torch.randn_like(model.lm_head.weight) * 0.03
+
+    def run(**kwargs):
+        return compute(
+            runner, calib, ["FP8_DYNAMIC", "NVFP4A16", "BF16"], n_probes=3,
+            min_free_gib=0, production_cache=cache, joint_activation=True,
+            model_identity=_model_identity("joint-source"), probe_microbatch=1,
+            token_scope="last", temperature=1.5, **kwargs,
+        )
+
+    baseline = run()
+    actual = run(head_weight_delta=delta)
+    assert actual["provenance"]["probe_identity"] == baseline["provenance"]["probe_identity"]
+    assert actual["costs"] == baseline["costs"]
+
+    oracle = _DenseTinyLM(model.state_dict()).eval()
+    oracle.model.norm = copy.deepcopy(model.model.norm)
+    head_inputs = []
+    with oracle.lm_head.register_forward_pre_hook(lambda _, args: head_inputs.append(args[0])):
+        logits = oracle(calib).logits
+    change = head_inputs[0].detach().double() @ delta.double().T
+    expected = []
+    for seed in range(7000, 7003):
+        probe = fisher_probe_scalar(
+            logits, seed=seed, token_scope="last", temperature=1.5, distribution="rademacher",
+            token_count_override=2, global_row_offset=0,
+        )
+        grad, = torch.autograd.grad(probe, logits)
+        expected.append(float((grad.double() * change).sum()))
+    assert actual["head_signed_weight_per_probe"] == pytest.approx(expected, rel=2e-5, abs=2e-9)
 
 
 def test_joint_activation_identity_reduces_to_weight_only_cost():
