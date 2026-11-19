@@ -671,7 +671,7 @@ def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_f
 
 @pytest.mark.parametrize('mode,include_test,build_exit,passes,build_count,amd64_jobs', [
     ('pr', False, 0, True, 1, 16), ('pr', True, 0, True, 1, 16),
-    ('pr', True, 0, True, 5, 9),
+    ('pr', True, 0, True, 5, 6),
     ('main', True, 0, True, 1, 16), ('main', False, 0, False, 1, 16),
     ('pr', True, 1, False, 1, 16),
 ])
