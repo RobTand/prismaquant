@@ -151,6 +151,23 @@ def _bind_receipt(record, receipt):
     return _reseal_like_regen(record), digest
 
 
+def test_body_slice_bind_checks_run_seals(tmp_path, monkeypatch):
+    from prismaquant import joint_layer_quanta as quanta
+
+    record, receipt = _fixture(tmp_path)
+    fields = []
+    seal_check = quanta.seal_check
+
+    def track_seal(field, *args, **kwargs):
+        fields.append(field)
+        return seal_check(field, *args, **kwargs)
+
+    monkeypatch.setattr(quanta, "seal_check", track_seal)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    _bind_receipt(record, receipt)
+    assert {"plan_sha256", "prepared_sha256", "campaign_scope"} <= set(fields)
+
+
 def test_phase_names_freeze_repeated_reader_schedule():
     names = quantum_boundary_read_phase_names(
         [7, 6, 5, 4], 3, batch_windows=2, n_probes=2, replay_windows=2)

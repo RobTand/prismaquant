@@ -22,7 +22,6 @@ from .digests import (
     bytes_sha256hex,
     file_digest_sha256hex,
     indent2_json_file_bytes,
-    text_sha256hex,
 )
 from .file_identity import file_stat_signature
 from .stage_inputs import bound_stat_fence as _bound_stat_fence, read_bound as _read_bound
@@ -43,6 +42,8 @@ SCHEMA_V1 = "prismaquant.joint_catalog_extension.v1"
 #: A header that seals its scope keeps producing v2 bytes: the sealed scope
 #: rules, and nothing is embedded over it.
 SCHEMA_V3 = "prismaquant.joint_catalog_extension.v3"
+SCHEMA_V4 = "prismaquant.joint_catalog_extension.v4"
+HEADER_SCHEMAS = (SCHEMA, SCHEMA_V3, SCHEMA_V4)
 DERIVED_SCOPE_SCHEMA = "prismaquant.joint_catalog_extension.derived_scope.v1"
 DERIVED_SCOPE_RULE = "sealed_null_derived_from_original_plan"
 #: The artifacts a campaign scope names, where a joint plan binds them by
@@ -635,6 +636,8 @@ def _pairs(prepared):
 
 def verify_catalog_pair(inputs):
     """Check a proposed overlay without issuing any capture-reuse authority."""
+    from .joint_campaign_ledger import roster_digest
+    from .joint_layer_quanta import qname_layer
     from .production_weight_cache import ProductionWeightCache
     from .tessera_joint_aura import PREPARED_SCHEMA, RENDER_COMPARISON_BY_ORIGIN
 
@@ -681,18 +684,25 @@ def verify_catalog_pair(inputs):
     for key in PREPARED_SCIENCE:
         _require(key in old and key in new, "missing prepared scientific identity " + key)
         _same(old[key], new[key], "prepared " + key)
-    _same(set(old["formats_by_qname"]), set(new["formats_by_qname"]), "source qname roster")
     old_pairs, new_pairs = _pairs(old), _pairs(new)
-    _require(old_pairs < new_pairs, "catalog must strictly add candidates without removing any")
+    old_names, new_names = set(old["formats_by_qname"]), set(new["formats_by_qname"])
+    fresh = new_names - old_names
+    # The original cache keeps all source cells. Compare the copies for units that both caches price.
+    retained = {pair for pair in old_pairs if pair[0] in new_names}
+    if not fresh:
+        _same(old_names, new_names, "source qname roster")
+    _require(retained <= new_pairs and bool(new_pairs - old_pairs),
+             "catalog must strictly add candidates without removing any from retained units")
     catalog = _json(overlay, "candidate overlay catalog")
     catalog_view(catalog)
     declared = [(cell.get("qname"), cell.get("format")) for cell in catalog["cells"]]
     _same(len(set(declared)), len(declared), "unique catalog-declared added cells")
     _same(sorted(new_pairs - old_pairs), sorted(declared), "catalog-declared added cells")
-    for name, formats in old["formats_by_qname"].items():
-        extended = new["formats_by_qname"][name]
+    for name, extended in new["formats_by_qname"].items():
+        formats = old["formats_by_qname"].get(name, ["BF16"])
         _require(set(formats) <= set(extended), "original candidate removed for " + name)
         added = [fmt for fmt in extended if fmt not in formats]
+        _require(name not in fresh or added, "fresh unit has no added candidate: " + name)
         expected = tuple(formats) if not added else extended_roster(formats, added)
         _same(tuple(extended), expected,
               "extended candidate order (added formats, sorted, before terminal BF16) for " + name)
@@ -717,9 +727,15 @@ def verify_catalog_pair(inputs):
               {tuple(row["member"]): row["path"] for row in resources["candidate_files"]},
               "resource-policy actual candidate file roster")
     _same(previous.levers, extended.levers, "original render levers")
-    _same(previous.activation_max_abs, extended.activation_max_abs, "original activation maxima mapping")
+    if fresh:
+        shared = old_names & new_names
+        _same({name: value for name, value in (previous.activation_max_abs or {}).items() if name in shared},
+              {name: value for name, value in (extended.activation_max_abs or {}).items() if name in shared},
+              "retained activation maxima mapping")
+    else:
+        _same(previous.activation_max_abs, extended.activation_max_abs, "original activation maxima mapping")
     old_verified, new_verified = previous.metadata["verified_cells"], extended.metadata["verified_cells"]
-    for pair in sorted(old_pairs):
+    for pair in sorted(retained):
         _same(previous.weights[pair], extended.weights[pair], "original render path " + repr(pair))
         _same(old_verified[pair], new_verified[pair], "original qualified identity " + repr(pair))
     source_by_name = {}
@@ -733,12 +749,15 @@ def verify_catalog_pair(inputs):
     recipe = added_format_recipes()
     with EncoderAdoptionValidation() as proof_checks:
         for pair in additions:
+            is_fresh = pair[0] in fresh
             cell = new_verified[pair]
             _require(isinstance(cell, dict) and all(k in cell for k in QUALIFIED_CELL_FIELDS),
                      "added candidate lacks actual render qualification " + repr(pair))
             _same(cell["render_origin"], "encoded", "historical candidate render origin")
             _same(cell["render_comparison"], RENDER_COMPARISON_BY_ORIGIN["encoded"],
                   "actual render/wire comparison")
+            if is_fresh:
+                source_by_name.setdefault(pair[0], cell["source_weight"])
             _same(cell["source_weight"], source_by_name.get(pair[0]), "added candidate source " + repr(pair))
             for key in ("encoding_identity_sha256", "wire_sha256", "render_file_sha256"):
                 value = cell[key]
@@ -755,8 +774,13 @@ def verify_catalog_pair(inputs):
             _require(isinstance(adoption, dict) and adoption.get("schema") == ADOPTION_SCHEMA,
                      "added candidate lacks explicit source/H adoption evidence")
             reference_pair = tuple(adoption.get("reference_pair", []))
-            _require(reference_pair in old_pairs and reference_pair[0] == pair[0],
-                     "adoption reference is not an original candidate of the same unit")
+            if is_fresh:
+                layer = qname_layer(pair[0])
+                _require(reference_pair in old_pairs and layer is not None and qname_layer(reference_pair[0]) == layer,
+                         "The fresh unit reference must name an original candidate in the same layer.")
+            else:
+                _require(reference_pair in old_pairs and reference_pair[0] == pair[0],
+                         "adoption reference is not an original candidate of the same unit")
             reference = adoption.get("reference_encoding_identity")
             candidate = adoption.get("candidate_encoding_identity")
             _require(isinstance(reference, dict) and isinstance(candidate, dict), "adoption identities are missing")
@@ -766,7 +790,10 @@ def verify_catalog_pair(inputs):
                   cell["encoding_identity_sha256"], "authenticated added encoding identity")
             for field in ("unit", "source", "projection", "calibration", "encoder_fixture_id"):
                 _require(field in reference and field in candidate, "adoption identity lacks " + field)
-                _same(reference[field], candidate[field], "adopted source/H " + field)
+                if not is_fresh:
+                    _same(reference[field], candidate[field], "adopted source/H " + field)
+            if is_fresh:
+                _same(reference["unit"], reference_pair[0], "reference unit")
             _same(candidate["unit"], pair[0], "adopted unit")
             _same(candidate.get("recipe"), recipe(pair[1]), "added candidate recipe for " + pair[1])
             # Hash the existing source-migration proof once; do not manufacture a
@@ -782,6 +809,8 @@ def verify_catalog_pair(inputs):
             "added_pairs_sha256": canonical_json_sha256(additions, where="added candidate pairs"),
             "scientific_identity_sha256": canonical_json_sha256(science, where="adjoint science"),
             "source_qnames": len(old["formats_by_qname"])}
+    if fresh:
+        evidence["extended_unit_roster_sha256"] = roster_digest(sorted(new_names))
     _same(fences, tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"])))
                         for b in bindings), "catalog metadata changed during verification")
     # One validated pair under its admission policy. Rebinding 45 records does
@@ -812,17 +841,8 @@ def _check_capture(header, inputs, original):
     calibration = original["calibration_input"]
     _same(identity.get("calibration_sha256"), calibration["calibration_sha256"], "capture calibration")
     _same(identity.get("calibration_shape"), calibration["shape"], "capture calibration shape")
-    # Stage A seals one of two roster spellings, and the run header says
-    # which. A fresh run hashes one terminating newline per qname. A run
-    # resumed from a forward-recovery capsule seals the campaign's canonical
-    # spelling, the quantum roster (``resolve_forward_campaign``). Never
-    # compare unlike hashes.
-    names = sorted(original["formats_by_qname"])
-    if (header.get("boundary_storage") or {}).get("forward_recovery") is not None:
-        from .joint_campaign_ledger import (roster_digest)
-        expected = roster_digest(names)
-    else:
-        expected = text_sha256hex("".join(name + "\n" for name in names))
+    from .joint_layer_quanta import capture_roster_digest
+    expected = capture_roster_digest(header, original["formats_by_qname"])
     _same(identity.get("unit_roster_sha256"), expected, "capture qname roster")
     plan = _json(inputs["original_plan"], "original plan")
     for key in ("n_probes", "seed_base"):
@@ -940,7 +960,7 @@ def _effective_run_identity(document, header, inputs, plan):
     if not _seal(None, identity.get("campaign_scope"),
                  "the original run sealed no campaign scope and the extension derives none; "
                  "create it with the frozen campaign identity (--campaign-identity)",
-                 same=document.get("schema") == SCHEMA_V3 and block is not None):
+                 same=document.get("schema") in (SCHEMA_V3, SCHEMA_V4) and block is not None):
         return identity
     return {**identity, "campaign_scope": _check_derived_scope(block, inputs, plan)}
 
@@ -955,12 +975,11 @@ def create_extension(*, inputs, adjoint_capture, output, publish=None, campaign_
     the default is ``publish_new_bytes``. The Stage B preparation passes its
     produced-output writer (PQ #1070).
 
-    ``campaign_identity`` binds the operator's frozen campaign identity file
-    by path and SHA256. It is required, and used, only when the run header
-    seals ``campaign_scope: null`` (PQ #1126): the document is then v3 and
-    carries the scope :func:`derive_original_campaign_scope` derives from the
-    original plan. A header that seals its scope creates the v2 bytes it
-    always did, whether or not an identity is given.
+    In certified mode, a run header with a null scope requires the frozen
+    ``campaign_identity`` file (PQ #1126). The extension records the scope
+    that :func:`derive_original_campaign_scope` derives from the original plan.
+    Format-only extensions use v2 with a sealed scope or v3 with a derived scope.
+    Extensions that add fresh units use v4.
     """
     evidence = verify_catalog_pair(inputs)
     header = _run_header(_json(adjoint_capture, "original adjoint capture"))
@@ -984,6 +1003,8 @@ def create_extension(*, inputs, adjoint_capture, output, publish=None, campaign_
         # The creator holds its own block to the consumers' check before publishing it.
         _check_derived_scope(block, inputs, plan)
         document.update(schema=SCHEMA_V3, original_campaign_scope=block)
+    if "extended_unit_roster_sha256" in evidence:
+        document["schema"] = SCHEMA_V4
     raw = indent2_json_file_bytes(document)
     writer = publish_new_bytes if publish is None else publish
     _require(writer(Path(output), raw), "extension output already exists; refusing overwrite")
@@ -998,28 +1019,27 @@ def extension_run_header(bound):
     verifies it independently.
     """
     document = _json(bound, "catalog extension")
-    if document.get("schema") in (SCHEMA, SCHEMA_V3):
+    if document.get("schema") in HEADER_SCHEMAS:
         return document["adjoint_run_header"]
     _same(document.get("schema"), SCHEMA_V1, "extension schema")
     return _run_header(_json(document["adjoint_capture"], "original adjoint capture"))
 
 
-def require_extension(bound, *, run_header, plan_sha256, prepared_sha256):
+def require_extension(bound, *, run_header, plan_sha256, prepared_sha256, unit_roster=None):
     """Independently check the pair and return the effective original run identity.
 
-    ``run_header`` is the Stage A run header a slice, band or receipt
-    carries; the extension must bind exactly it. The identity returned is
-    the sealed one, or, for a v3 extension over a run that sealed
-    ``campaign_scope: null``, the sealed identity with the derived scope in
-    its place (:func:`_effective_run_identity`); consumers compare its
-    ``campaign_scope`` with the campaign's.
+    The extension must bind the exact ``run_header`` from the slice, band
+    or receipt. The result keeps the capture roster and supplies the derived
+    scope if the extension has one. If the caller supplies ``unit_roster``,
+    compare it with the roster of the extended preparation.
     """
     document = _json(bound, "catalog extension")
-    _require(document.get("schema") in (SCHEMA, SCHEMA_V1, SCHEMA_V3), "extension schema differs")
+    schema = document.get("schema")
+    _require(schema in (*HEADER_SCHEMAS, SCHEMA_V1), "extension schema differs")
     inputs = document["inputs"]
     _seal(plan_sha256, inputs["extended_plan"]["sha256"], "extended plan binding")
     _seal(prepared_sha256, inputs["extended_prepared"]["sha256"], "extended prepared binding")
-    if document["schema"] in (SCHEMA, SCHEMA_V3):
+    if schema in HEADER_SCHEMAS:
         header = document["adjoint_run_header"]
         _same(document["adjoint_run_header_sha256"],
               canonical_json_sha256(header, where="original Stage A run header"),
@@ -1032,22 +1052,31 @@ def require_extension(bound, *, run_header, plan_sha256, prepared_sha256):
     _same(canonical_json_sha256(header, where="original Stage A run header"),
           canonical_json_sha256(run_header, where="Stage A run header"),
           "original Stage A run header")
-    plan = _check_capture(header, inputs, _json(inputs["original_prepared"], "original prepared"))
+    original = _json(inputs["original_prepared"], "original prepared")
+    plan = _check_capture(header, inputs, original)
     identity = _effective_run_identity(document, header, inputs, plan)
-    if dev_mode_enabled():
+    extended_roster_digest = None
+    if schema == SCHEMA_V4 or not dev_mode_enabled():
+        evidence = verify_catalog_pair(inputs)
+        extended_roster_digest = evidence.get("extended_unit_roster_sha256")
+        _same(schema == SCHEMA_V4, extended_roster_digest is not None, "fresh unit extension schema")
+        _same(document["evidence"], evidence, "independently recomputed extension evidence")
+    else:
         # Recomputing the evidence opens both production caches only to
         # re-seal what the creator recorded: seal-only work (PQ #1147).
         dev_warning("catalog extension evidence is not recomputed (sealing is off, "
                     "PQ #1147); the recorded evidence is used")
-    else:
-        _same(document["evidence"], verify_catalog_pair(inputs),
-              "independently recomputed extension evidence")
+    if unit_roster is not None:
+        from .joint_campaign_ledger import roster_digest
+        _seal(roster_digest(unit_roster),
+              extended_roster_digest or roster_digest(original["formats_by_qname"]), "extended unit roster")
     return identity
 
 
 def extension_campaign_identity(document):
-    """The frozen campaign identity binding a v3 extension derives its scope from, or None."""
-    block = document.get("original_campaign_scope") if document.get("schema") == SCHEMA_V3 else None
+    """Return the frozen campaign identity binding for a derived scope, if present."""
+    block = (document.get("original_campaign_scope")
+             if document.get("schema") in (SCHEMA_V3, SCHEMA_V4) else None)
     if block is None:
         return None
     return dict(block["derived_from"]["campaign_identity"])

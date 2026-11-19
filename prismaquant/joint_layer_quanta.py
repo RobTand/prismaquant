@@ -62,7 +62,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 from .dev_mode import seal_check
-from .digests import DIRECT_ASCII_LAX, bytes_sha256hex
+from .digests import DIRECT_ASCII_LAX, bytes_sha256hex, text_sha256hex
 from .qnames import LAYER_QNAME as _QNAME_LAYER
 from .source_read_plan import uncovered_spans
 from .joint_campaign_ledger import (
@@ -490,6 +490,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
     its slice digest; a re-run with more bands adds layers and leaves every
     earlier record byte-identical. The coverage proof still tiles every
     parent layer. With none, every layer gets an unbound record.
+    A completed preparation or a catalog extension also binds the unit roster.
     """
     if not isinstance(plan, dict) or not isinstance(prepared, dict):
         raise ValueError("layer_quanta needs the plan and prepared mappings")
@@ -568,7 +569,8 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
     if proofs:
         bound_slices = covered_slices(
             proofs, layers, plan_sha256=plan_sha256, prepared_sha256=prepared_sha256,
-            scope=scope, checkpoints=checkpoints, catalog_extension=catalog_extension)
+            scope=scope, checkpoints=checkpoints, catalog_extension=catalog_extension,
+            unit_roster=roster if prepared.get("status") == "complete" or catalog_extension is not None else None)
         if not bound_slices:
             raise ValueError("no sealed Stage A proof covers any campaign layer: refusing")
     quanta_root = output_root.rstrip("/") + "/layer-quanta"
@@ -1097,9 +1099,17 @@ def adjoint_binding_fields(adjoint_slice: Mapping | None, *, slice_path: str) ->
             "slice_path": slice_path}
 
 
+def capture_roster_digest(header: Mapping, unit_roster: Sequence[str]) -> str:
+    """Use the roster digest format of the Stage A run."""
+    if (header.get("boundary_storage") or {}).get("forward_recovery") is not None:
+        return roster_digest(unit_roster)
+    return text_sha256hex("".join(name + "\n" for name in sorted(unit_roster)))
+
+
 def check_adjoint_run_header(header: Mapping, *, plan_sha256: str, prepared_sha256: str,
                              scope: Mapping, checkpoints: Sequence[int],
-                             catalog_extension: Mapping | None = None) -> str:
+                             catalog_extension: Mapping | None = None,
+                             unit_roster: Sequence[str] | None = None) -> str:
     """Digest a stage-A run header after checking it answers for this campaign.
 
     The header is the run-level part of every slice (``run_identity``,
@@ -1114,7 +1124,7 @@ def check_adjoint_run_header(header: Mapping, *, plan_sha256: str, prepared_sha2
     from .joint_adjoint_slices import stage_a_run_header_sha256
     check_adjoint_run_identity(
         header, plan_sha256=plan_sha256, prepared_sha256=prepared_sha256,
-        scope=scope, catalog_extension=catalog_extension)
+        scope=scope, catalog_extension=catalog_extension, unit_roster=unit_roster)
     stride = header.get("stride")
     marks = stride.get("boundaries") if isinstance(stride, dict) else None
     if not isinstance(marks, list) or sorted(marks) != sorted(checkpoints):
@@ -1125,7 +1135,8 @@ def check_adjoint_run_header(header: Mapping, *, plan_sha256: str, prepared_sha2
 
 def check_adjoint_run_identity(header: Mapping, *, plan_sha256: str,
                                prepared_sha256: str, scope: Mapping,
-                               catalog_extension: Mapping | None = None) -> None:
+                               catalog_extension: Mapping | None = None,
+                               unit_roster: Sequence[str] | None = None) -> None:
     """Check that a stage-A run header answers for this campaign's identity.
 
     The plan and prepared digests (or, for a catalog extension, the original
@@ -1155,13 +1166,18 @@ def check_adjoint_run_identity(header: Mapping, *, plan_sha256: str,
         # scope the extension derived from the original plan (PQ #1126).
         from .joint_catalog_extension import require_extension
         identity = require_extension(catalog_extension, run_header=header,
-                                     plan_sha256=plan_sha256, prepared_sha256=prepared_sha256)
+                                     plan_sha256=plan_sha256, prepared_sha256=prepared_sha256,
+                                     unit_roster=unit_roster)
     else:
         for field, expected in (("plan_sha256", plan_sha256),
                                 ("prepared_sha256", prepared_sha256)):
             seal_check(field, expected, identity.get(field), where="stage-A run header",
                        refusal=ValueError(
                            f"the stage-A run answers for another {field}: refusing"))
+        if unit_roster is not None:
+            seal_check("unit_roster_sha256", capture_roster_digest(header, unit_roster),
+                       identity.get("unit_roster_sha256"), where="stage-A run header",
+                       refusal=ValueError("The Stage A run binds a different unit roster."))
     if scope_set:
         seal_check("campaign_scope", scope, identity.get("campaign_scope"),
                    where="stage-A run header",
@@ -1192,7 +1208,8 @@ def _proof_slices(proof: Mapping, layers: Sequence[int]) -> dict[int, dict]:
 def covered_slices(proofs: Sequence[Mapping], layers: Sequence[int], *,
                    plan_sha256: str, prepared_sha256: str, scope: Mapping,
                    checkpoints: Sequence[int],
-                   catalog_extension: Mapping | None = None) -> dict[int, dict]:
+                   catalog_extension: Mapping | None = None,
+                   unit_roster: Sequence[str] | None = None) -> dict[int, dict]:
     """The slice of every layer the given sealed stage-A proofs cover.
 
     Proofs are completed receipts or checkpoint bands. All share one run
@@ -1207,7 +1224,7 @@ def covered_slices(proofs: Sequence[Mapping], layers: Sequence[int], *,
         digest = check_adjoint_run_header(
             stage_a_run_header(proof), plan_sha256=plan_sha256,
             prepared_sha256=prepared_sha256, scope=scope, checkpoints=checkpoints,
-            catalog_extension=catalog_extension)
+            catalog_extension=catalog_extension, unit_roster=unit_roster)
         if header_sha is None:
             header_sha = digest
         elif digest != header_sha:
@@ -1224,13 +1241,15 @@ def covered_slices(proofs: Sequence[Mapping], layers: Sequence[int], *,
 
 def bind_adjoint_slice(adjoint: Mapping, layer: int, *, plan_sha256: str,
                        prepared_sha256: str, scope: Mapping, checkpoints: Sequence[int],
-                       catalog_extension: Mapping | None = None) -> tuple[dict, str]:
+                       catalog_extension: Mapping | None = None,
+                       unit_roster: Sequence[str] | None = None) -> tuple[dict, str]:
     """The slice ``layer`` reads, checked against this campaign, and its digest.
 
     ``adjoint`` is a slice, a completed receipt or the checkpoint band of
     ``layer``'s nearest checkpoint; a receipt or band is reduced to the slice
     first, so every caller binds the same value however stage A was handed
-    over.
+    over. If the caller supplies the unit roster, check it against Stage A
+    or the catalog extension.
     """
     from .joint_adjoint_slices import (
         STAGE_A_SLICE_FIELDS, adjoint_slice_sha256, slice_run_header, stage_a_slice,
@@ -1243,7 +1262,7 @@ def bind_adjoint_slice(adjoint: Mapping, layer: int, *, plan_sha256: str,
     check_adjoint_run_header(
         slice_run_header(adjoint_slice), plan_sha256=plan_sha256,
         prepared_sha256=prepared_sha256, scope=scope, checkpoints=checkpoints,
-        catalog_extension=catalog_extension)
+        catalog_extension=catalog_extension, unit_roster=unit_roster)
     return adjoint_slice, adjoint_slice_sha256(adjoint_slice)
 
 

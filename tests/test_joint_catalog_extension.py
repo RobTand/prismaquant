@@ -228,6 +228,139 @@ def _pair(tmp_path, campaign, probe, *, scoped=False, identity=None, added=None,
     return inputs, receipt, capture
 
 
+@pytest.mark.parametrize('wrong_layer', [False, True])
+def test_v4_binds_fresh_units_to_the_body_capture(tmp_path, campaign, probe, monkeypatch, wrong_layer):
+    from prismaquant.joint_adjoint_checkpoints import adjoint_receipt_path, write_adjoint_receipt
+    from prismaquant.joint_adjoint_slices import stage_a_slice
+    from prismaquant.joint_campaign_ledger import roster_digest
+    from prismaquant.joint_layer_quanta import bind_adjoint_slice, qname_layer
+    from prismaquant.joint_quanta_join import stage_a_expected_slices
+    from prismaquant.model_profiles.glm5_next import Glm5NextProfile
+    from prismaquant.tessera_campaign import GLM_ATTENTION_ALLOW_PINNED, campaign_roster
+
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
+    body = [f'model.language_model.layers.{i}.mlp.down_proj' for i in range(3)]
+    kda = ('q_proj', 'k_proj', 'v_proj', 'b_proj', 'forget_gate.f_a_proj',
+           'forget_gate.f_b_proj', 'g_a_proj', 'g_b_proj', 'o_proj')
+    mla = ('q_a_proj', 'q_b_proj', 'kv_a_proj_with_mqa', 'kv_b_proj', 'o_proj')
+    lifted = [name.replace('mlp.down_proj', 'self_attn.' + leaf)
+              for name, leaves in zip(body, (kda, kda, mla)) for leaf in leaves]
+    indexer = body[-1].replace('mlp.down_proj', 'self_attn.indexer.wk')
+    attention = campaign_roster(body + lifted + [indexer], Glm5NextProfile(),
+                                allow_pinned=GLM_ATTENTION_ALLOW_PINNED, pinned_roster_only=True)
+    assert set(attention.dense) == set(lifted)
+    assert indexer in attention.pinned
+    campaign['roster'] = body
+    inputs, _, _ = _pair(tmp_path, campaign, probe)
+    original = json.loads(Path(inputs['original_prepared']['path']).read_bytes())
+    prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
+    plan = json.loads(Path(inputs['extended_plan']['path']).read_bytes())
+    overlay = json.loads(Path(plan['inputs']['candidate_overlay']['path']).read_bytes())
+    cache = pickle.loads(Path(prepared['production_cache']['path']).read_bytes())
+    source_cache = pickle.loads(Path(original['production_cache']['path']).read_bytes())
+    source_cells = source_cache.metadata['verified_cells']
+    fresh_cells, weights, rosters, maxima, declared = {}, {}, {}, {}, []
+    source_files = set()
+    for i, name in enumerate(body):
+        adoption = cache.metadata['verified_cells'][name, ADDED_FORMAT]['catalog_source_adoption']
+        source_file = tmp_path / f'body-{i}.pt'
+        source_file.write_bytes(f'Body render {i}'.encode())
+        source_files.add(source_file)
+        source_cache.weights[tuple(adoption['reference_pair'])] = str(source_file)
+    for i, fresh in enumerate(attention.dense):
+        name = body[qname_layer(fresh)]
+        cell = copy.deepcopy(cache.metadata['verified_cells'][name, ADDED_FORMAT])
+        adoption = cell['catalog_source_adoption']
+        before_cell = source_cells[tuple(adoption['reference_pair'])]
+        if wrong_layer and i == 0:
+            other = cache.metadata['verified_cells'][campaign['roster'][1], ADDED_FORMAT]
+            reference = other['catalog_source_adoption']
+            adoption.update(reference_pair=reference['reference_pair'],
+                            reference_encoding_identity=reference['reference_encoding_identity'])
+        candidate = adoption['candidate_encoding_identity']
+        candidate.update(unit=fresh, source={**candidate['source'], 'sha256': 'a'*64},
+                         calibration={'hessian_sha256': 'b'*64})
+        cell['source_weight'] = {**before_cell['source_weight'], 'content_sha256': 'c'*64}
+        cell['encoding_identity_sha256'] = canonical_json_sha256(candidate, where='fresh unit')
+        fresh_cells[fresh, ADDED_FORMAT] = cell
+        weights[fresh, ADDED_FORMAT] = cache.weights[name, ADDED_FORMAT]
+        rosters[fresh] = [ADDED_FORMAT, 'BF16']
+        maxima[fresh] = 8.0
+        declared.append({'qname': fresh, 'format': ADDED_FORMAT})
+    original['production_cache'] = _write(tmp_path, 'body-cache.pkl', source_cache, binary=True)
+    inputs['original_prepared'] = _write(tmp_path, 'body-prepared.json', original)
+    receipt = _receipt(inputs, campaign, probe, scope=campaign['scope'])
+    write_adjoint_receipt(tmp_path, receipt)
+    receipt_path = adjoint_receipt_path(tmp_path)
+    capture = {'path': str(receipt_path), 'sha256': hashlib.sha256(receipt_path.read_bytes()).hexdigest()}
+    overlay.update(cells=declared, cell_sources=[0] * len(declared))
+    plan['inputs']['candidate_overlay'] = _write(tmp_path, 'fresh-overlay.json', overlay)
+    inputs['extended_plan'] = _write(tmp_path, 'fresh-plan.json', plan)
+    fresh_cache = ProductionWeightCache(weights=weights, levers={}, activation_max_abs=maxima,
+        metadata={**cache.metadata, 'inputs': plan['inputs'], 'verified_cells': fresh_cells})
+    prepared.update(plan_sha256=inputs['extended_plan']['sha256'], formats_by_qname=rosters,
+                    production_cache=_write(tmp_path, 'fresh-cache.pkl', fresh_cache, binary=True),
+                    measured_cells=len(fresh_cells))
+    inputs['extended_prepared'] = _write(tmp_path, 'fresh-prepared.json', prepared)
+
+    output = tmp_path / 'extension.json'
+    if wrong_layer:
+        for mode in ('0', '1'):
+            monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+            with pytest.raises(ValueError, match='same layer'):
+                create_extension(inputs=inputs, adjoint_capture=capture, output=output)
+            assert not output.exists()
+        return
+    body_paths = {*source_files, Path(capture['path']), Path(original['production_cache']['path']),
+                  Path(inputs['original_prepared']['path'])}
+    before = {path: path.read_bytes() for path in body_paths}
+    try:
+        bound = create_extension(inputs=inputs, adjoint_capture=capture, output=output)
+    except ValueError as exc:
+        raise AssertionError(f'The bridge refused fresh units: {exc}') from exc
+    assert json.loads(output.read_bytes())['schema'] == 'prismaquant.joint_catalog_extension.v4'
+    args = _site_args(inputs, campaign)
+    effective = require_extension(bound, run_header=stage_a_run_header(receipt),
+                                  plan_sha256=args['plan_sha256'], prepared_sha256=args['prepared_sha256'])
+    assert effective == receipt['run_identity']
+    direct = dict(args, plan_sha256=inputs['original_plan']['sha256'],
+                  prepared_sha256=inputs['original_prepared']['sha256'])
+    body_binding = bind_adjoint_slice(receipt, 0, unit_roster=body, **direct)
+    with pytest.raises(ValueError, match='unit roster'):
+        bind_adjoint_slice(receipt, 0, unit_roster=attention.dense, **direct)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    assert bind_adjoint_slice(receipt, 0, unit_roster=attention.dense, **direct) == body_binding
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
+    with pytest.raises(ValueError, match='extended unit roster'):
+        bind_adjoint_slice(receipt, 0, unit_roster=body, catalog_extension=bound, **args)
+    quantum_inputs = dict(parent_manifest_sha256=campaign['manifest_sha256'],
+        plan_path=inputs['extended_plan']['path'], prepared_path=inputs['extended_prepared']['path'],
+        stride=8, adjoint_receipt=receipt)
+    with pytest.raises(ValueError, match='unit roster'):
+        layer_quanta(plan, prepared, campaign['parent_manifest'], **quantum_inputs,
+            plan_sha256=direct['plan_sha256'], prepared_sha256=direct['prepared_sha256'])
+    built = layer_quanta(plan, prepared, campaign['parent_manifest'], **quantum_inputs,
+        plan_sha256=args['plan_sha256'], prepared_sha256=args['prepared_sha256'], catalog_extension=bound)
+    assert len(built['records']) == 3
+    _, join_digests = stage_a_expected_slices({'adjoint_receipt': receipt})
+    for record in built['records']:
+        layer = record['layer']
+        body_slice = stage_a_slice(receipt, layer)
+        digest = adjoint_slice_sha256(body_slice)
+        assert bind_adjoint_slice(receipt, layer, unit_roster=attention.dense,
+                                  catalog_extension=bound, **args) == (body_slice, digest)
+        assert record['campaign']['unit_roster_sha256'] == roster_digest(attention.dense)
+        assert record['adjoint']['slice_sha256'] == digest == join_digests[layer]
+    for (name, _), cell in fresh_cells.items():
+        adoption = cell['catalog_source_adoption']
+        pair = tuple(adoption['reference_pair'])
+        assert qname_layer(name) == qname_layer(pair[0])
+        assert adoption['reference_encoding_identity']['unit'] == pair[0]
+        assert cell['source_weight'] != source_cells[pair]['source_weight']
+        assert adoption['candidate_encoding_identity']['calibration'] != adoption['reference_encoding_identity']['calibration']
+    assert {path: path.read_bytes() for path in body_paths} == before
+
+
 def _campaign_identity(tmp_path, inputs):
     """The frozen campaign identity an operator seals once, bound by path and digest."""
     from prismaquant.tessera_campaign_table import (campaign_identity, joint_campaign_scope)
