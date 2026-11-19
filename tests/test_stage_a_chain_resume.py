@@ -40,7 +40,7 @@ import torch
 from prismaquant import joint_cost_stage_a as stage_a
 from prismaquant import stage_a_chain_resume as resume_mod
 from prismaquant.cost_stage_checkpoint import canonical_json_bytes
-from prismaquant.digests import indent2_json_file_bytes
+from prismaquant.digests import DIRECT_ASCII_STRICT, indent2_json_file_bytes
 from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.joint_adjoint_band import build_band_receipt
@@ -92,6 +92,19 @@ def _offline_tier_policy():
     deactivate_staged_tier_policy_for_tests()
     yield
     deactivate_staged_tier_policy_for_tests()
+
+
+def test_chain_state_keeps_original_final_lf(tmp_path):
+    path = Path(__file__).resolve().parents[1] / "docs/measurements/2541-receipt-final-lf.json"
+    original = json.loads(path.read_bytes())["calls"][
+        "sorted-json:prismaquant/stage_a_chain_resume.py::write_chain_state@204"]
+    expected = original["published_ascii"].encode("ascii")
+    assert expected.endswith(b"}\n")
+    document = {"z": "caf\u00e9", "a": 1}
+    note = resume_mod.write_chain_state(tmp_path, document)
+    assert chain_state_path(tmp_path).read_bytes() == expected
+    assert DIRECT_ASCII_STRICT.encoded(document) + b"\n" == expected
+    assert note["sha256"] == original["published_sha256"]
 
 
 def test_resume_declaration_compatibility():

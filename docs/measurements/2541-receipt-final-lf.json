@@ -1,0 +1,56 @@
+{
+  "scope": "Check the final LF. Keep the current publication routes and the resume record seal.",
+  "tree_sha256": {
+    "source": "The sha256sum output of the local check run below. This leaf changes no source file and no baseline file.",
+    "prismaquant/stage_a_chain_resume.py": "b7078d6c6855a4650640b6cef41ee8bceb888f8a7806fc2b03e7111f295ad1a0",
+    "prismaquant/stage_a_chain_split.py": "69278efc8205912dcf15c343c0d357dd8f84fc352036240718f6c4f41a0581b8",
+    "prismaquant/digests.py": "e8ab9ab2d8afd9fcbc3bc6fd57401247405bd17ec850fefb71e4694edb2dbb99",
+    "tests/test_package_json_publication_3879_split.py": "a9bf6394deefdee32ebf7af542e19d8fe25433528a27134962b1daf314a86b57",
+    "tests/fixtures/duplication_baseline.json": "cb33cf970cf2a8f58f1d751c6aa295d3cf63aff0b2adaf32e17fb46a21ed36ef"
+  },
+  "calls": {
+    "sorted-json:prismaquant/stage_a_chain_resume.py::write_chain_state@204": {
+      "census_row": "The census holds this call as a site row with line 204. The refresh_2540 list has no call ID for it. The key of this entry is the site and that line.",
+      "current_location": "prismaquant/stage_a_chain_resume.py:221",
+      "owner": "prismaquant.digests.DIRECT_ASCII_STRICT.encoded",
+      "lf_source": "The state caller adds one LF before it publishes and hashes the bytes.",
+      "test": "tests/test_stage_a_chain_resume.py::test_chain_state_keeps_original_final_lf",
+      "published_ascii": "{\"a\":1,\"z\":\"caf\\u00e9\"}\n",
+      "published_sha256": "8f8125429775d490d6f06448491d5b41803945052087aa9f21950ed4c4e2a742"
+    },
+    "sorted-json:prismaquant/stage_a_chain_split.py::main@534:48": {
+      "current_location": "prismaquant/stage_a_chain_split.py:534",
+      "owner": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "lf_source": "The file caller adds one LF.",
+      "test": "tests/test_package_json_publication_3879_split.py::test_split_publication_profile_calls"
+    },
+    "sorted-json:prismaquant/stage_a_chain_split.py::main@536:10": {
+      "current_location": "prismaquant/stage_a_chain_split.py:535",
+      "owner": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "lf_source": "The print call adds one LF.",
+      "test": "tests/test_package_json_publication_3879_split.py::test_split_publication_profile_calls"
+    }
+  },
+  "fixture_provenance": "The chain state test uses bytes from the unedited sources identified by the hashes above. The split test uses the original file and stdout literals. The record docs/measurements/chain_resume_receipt_2541.json holds the apply_chain_resume call.",
+  "baseline_row_delta": 0,
+  "baseline_reconciliation": "The ceiling lists sorted-json rows for apply_chain_resume and stage_a_chain_split.main. The live routes do not use those primitives. This leaf changes no runtime scope and keeps the ceiling.",
+  "local_checks": {
+    "environment": "Local CPU box. Python 3.12.3. Torch 2.15.0+cpu. No PrismaBuild run.",
+    "revision": "The command ran on the tree of this leaf with one new test. After the run, a session changed only this record: the hash block, the census_row note and this block. The test reads none of these fields. The check must verify the final tree.",
+    "tests/test_stage_a_chain_resume.py": {
+      "command": "python -m pytest -q tests/test_stage_a_chain_resume.py",
+      "exit_code": 0,
+      "outcome": "66 passed. The summary line shows no skip."
+    },
+    "tests/test_package_json_publication_3879_split.py": {
+      "command": "python -m pytest -q tests/test_package_json_publication_3879_split.py",
+      "exit_code": 0,
+      "outcome": "8 passed. The summary line shows no skip."
+    },
+    "tests/test_duplication_baseline.py": {
+      "command": "python -m pytest -q tests/test_duplication_baseline.py",
+      "exit_code": 0,
+      "outcome": "20 passed. The summary line shows no skip."
+    }
+  }
+}

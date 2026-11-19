@@ -34760,6 +34760,11 @@ pq_py_library(
     srcs = [
         "test_stage_a_chain_resume.py",
     ],
+    data = [
+        "//:docs/measurements/2541-receipt-final-lf.json",
+        "//:prismaquant/stage_a_chain_resume.py",
+        "test_stage_a_chain_resume.py",
+    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
