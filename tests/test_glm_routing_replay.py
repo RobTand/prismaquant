@@ -34,6 +34,14 @@ def test_preserves_original_route_order_weights_and_integer_width():
         select_original_routes(Packed(), (x, ids, weights), {}, sequence_length=3)
 
 
+def test_original_routes_refuse_floating_point_expert_indices():
+    inputs = torch.zeros((1, 2), dtype=torch.bfloat16, device="cpu")
+    indices = torch.tensor([[0, 1]], dtype=torch.float32, device="cpu")
+    weights = torch.tensor([[0.75, 0.25]], dtype=torch.float32, device="cpu")
+    with pytest.raises(ValueError, match="unsupported original route dtype"):
+        select_original_routes(Packed(), (inputs, indices, weights), {}, sequence_length=1)
+
+
 def test_source_router_epsilon_is_inspected_and_never_assumed_lfm():
     assert router_normalization_epsilon(Router()) == 1e-20
     with pytest.raises(ValueError, match="denominator differs"):
