@@ -1,18 +1,20 @@
 """Run an offline decoded G3 screen. This is not served KL."""
 from __future__ import annotations
 
+import argparse
 from contextlib import nullcontext
 import io
 import json
 from pathlib import Path
 import pickle
+import sys
 
 import numpy as np
 import torch
 
 from .digests import bytes_sha256hex, file_sha256hex
 from .g3_numerics import token_kl
-from .quality_stage import artifact, cli, read_binding, g3_candidate_binding
+from .quality_stage import SCHEMA, artifact, cli, finite_number, g3_candidate_binding, read_binding
 
 
 def _g3_json(binding, label):
@@ -408,7 +410,45 @@ def verify_g3_result(result, config):
             raise ValueError("G3 paired teacher numeric data differs")
 
 
+def _compare_g3(paths):
+    results = [json.loads(path.read_bytes()) for path in paths]
+    for result in results:
+        if (result["schema"], result["stage"], result["measurement"]["status"]) != (SCHEMA, "g3_v2", "succeeded"):
+            raise ValueError("Each input must contain a successful G3 measurement.")
+    pick_teacher, baseline_teacher = (result["identity"]["teacher"] for result in results)
+    if pick_teacher["sha256"] != baseline_teacher["sha256"]:
+        raise ValueError("The teacher digests do not match.")
+    names = _g3_json(pick_teacher, "G3 pick teacher")["windows"]
+    read_binding(baseline_teacher, "G3 baseline teacher")
+    if not isinstance(names, list) or len(names) != 25 or len(set(names)) != 25:
+        raise ValueError("The teacher must contain 25 distinct window IDs.")
+    means = []
+    for result in results:
+        population = result["population"]
+        count, rows = population["windows"], population["per_window"]
+        if (type(count) is not int or count != len(names) or population["window_ids"] != names
+                or [row["window_id"] for row in rows] != names):
+            raise ValueError("The result windows do not match the teacher windows in order.")
+        means.append([finite_number(row["mean_kl"], "mean_kl") for row in rows])
+    deltas = [pick - baseline for pick, baseline in zip(*means, strict=True)]
+    return {"pick_teacher": pick_teacher, "baseline_teacher": baseline_teacher,
+            "per_window": [{"window_id": name, "delta_kl": delta} for name, delta in zip(names, deltas, strict=True)],
+            "mean_delta_kl": sum(deltas) / len(deltas)}
+
+
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "compare":
+        parser = argparse.ArgumentParser(prog="python -m prismaquant.g3_v2 compare")
+        parser.add_argument("pick", metavar="PICK_RESULT", type=Path)
+        parser.add_argument("baseline", metavar="BASELINE_RESULT", type=Path)
+        args = parser.parse_args(argv[1:])
+        try:
+            report = json.dumps(_compare_g3((args.pick, args.baseline)), allow_nan=False)
+        except (KeyError, OSError, OverflowError, TypeError, ValueError) as error:
+            parser.error(str(error))
+        print(report)
+        return 0
     return cli("g3_v2", measure_g3, preflight_g3, argv)
 
 
