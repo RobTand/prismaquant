@@ -314,6 +314,25 @@ def test_bounded_wire_read_fences_symlinks_size_and_actual_bytes(tmp_path):
         _read_verified_wire_blob({**cell, "wire": str(alias)})
 
 
+def test_staged_wire_buffer_must_match_receipt(monkeypatch):
+    from types import SimpleNamespace
+
+    from prismaquant import staged_whole_file, tessera_joint_aura
+
+    expected = "6da2b47c2f6909a57534dbbecec4944d74dff2424ab4c6f2f3d5f8dc9a3789cc"
+    cell = {"wire": "cell.tessera", "record": {
+        "blob_bytes": 10, "blob_sha256": expected}}
+    buffer = bytearray(b"exact-wire")
+    resolver = SimpleNamespace(staged_read=lambda *args, **kwargs: object())
+    monkeypatch.setattr(tessera_joint_aura, "residency_resolver", lambda: resolver)
+    monkeypatch.setattr(staged_whole_file, "read_staged_buffer", lambda *args, **kwargs: buffer)
+
+    assert tessera_joint_aura._read_verified_wire_blob(cell) == (b"exact-wire", expected)
+    buffer[:] = b"wrong-wire"
+    with pytest.raises(ValueError, match=r": wire checksum: identity mismatch\Z"):
+        tessera_joint_aura._read_verified_wire_blob(cell)
+
+
 @pytest.mark.parametrize("field,value,refusal", [
     ("probe_microbatch", 0, "probe_microbatch"),
     ("n_probes", 1, "n_probes"),

@@ -165,10 +165,6 @@ def _read_verified_wire_blob(cell):
     _require(type(size) is int and size > 0,
              f"{wire}: wire receipt needs positive blob_bytes")
     expected = record.get("blob_sha256")
-    # The immutable stage, when it holds this wire. The receipt already names
-    # the digest, so the staged object is admitted only if its bytes hash to
-    # the same value the pool copy would have to. Unset environment, no stage,
-    # no change.
     resolver = residency_resolver()
     staged = (None if resolver is None
               else resolver.staged_read(wire, expected_sha256=expected))
@@ -176,17 +172,19 @@ def _read_verified_wire_blob(cell):
         from .staged_whole_file import read_staged_buffer
         blob = bytes(read_staged_buffer(resolver, wire, staged,
                                        label='wire', expected_bytes=size))
-        return blob, bytes_sha256hex(blob)
-    from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
-    if policy_is_active():
-        raise refuse_pool_bulk_read(
-            str(wire), "readset-not-staged" if resolver is None
-            else "staged-not-serving")
-    return _read_wire_bytes(wire, size, expected=expected)
+    else:
+        from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
+        if policy_is_active():
+            raise refuse_pool_bulk_read(
+                str(wire), "readset-not-staged" if resolver is None
+                else "staged-not-serving")
+        blob = _read_wire_bytes(wire, size)
+    digest = bytes_sha256hex(blob)
+    _same(digest, expected, f"{wire}: wire checksum")
+    return blob, digest
 
 
-def _read_wire_bytes(wire, size, *, expected):
-    """One fenced read of ``size`` bytes, digested and bound to the receipt."""
+def _read_wire_bytes(wire, size):
     before = wire.lstat()
     _require(stat.S_ISREG(before.st_mode),
              f"{wire}: wire must be a regular file, not a symlink")
@@ -208,9 +206,7 @@ def _read_wire_bytes(wire, size, *, expected):
           f"{wire}: wire changed during its content read")
     _same(_stat_signature(wire.lstat()), _stat_signature(before),
           f"{wire}: wire changed during its content read")
-    digest = bytes_sha256hex(blob)
-    _same(digest, expected, f"{wire}: wire checksum")
-    return blob, digest
+    return blob
 
 
 def _json(path, value):
