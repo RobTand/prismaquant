@@ -10,6 +10,7 @@ estimator or serving claim is made; probe-sampling scope is unchanged.
 from __future__ import annotations
 import copy
 import math
+import struct
 
 import pytest
 import torch
@@ -665,6 +666,129 @@ def test_spill_attribution_releases_candidate_lease_after_callback(monkeypatch):
     collector(key=("u", "candidate"), delta=delta, window_index=0, probe_index=0)
     gc.collect()
     assert references and references[-1]() is None, "resident candidate lease escaped callback"
+
+
+@pytest.fixture(scope="module")
+def spill_rows(tmp_path_factory):
+    from prismaquant import perturbed_x_cache
+    from prismaquant.joint_cost_quantum import SpillSequenceAttribution
+    from prismaquant.joint_replay_spill import StageBReplaySpill, spill_geometry
+    from prismaquant.routed_experts import PackedExpertProjection
+
+    dtype = torch.bfloat16
+    weight = torch.full((1, 1), 2.0, dtype=dtype)
+    dense = _linear(weight).to(dtype)
+    experts = torch.nn.Module()
+    experts.weight = torch.nn.Parameter(weight.repeat(2, 1, 1))
+    experts.forward = lambda x, expert: torch.nn.functional.linear(x, experts.weight[expert])
+    routed = PackedExpertProjection("routed", "experts.weight", "experts", experts,
+                                    "weight", 0, "down_proj", experts.weight[0])
+    modules = {"dense": dense, "routed": routed}
+    fmt = "FP8_E4M3"
+    spec = _spec(fmt, torch.round)
+    specs = {name: {fmt: spec} for name in modules}
+    delta = torch.full((1, 1), 0.5)
+    keys = [(name, fmt) for name in modules]
+    windows = [tuple(modules)]
+    geometry = spill_geometry(modules, windows, pending=modules, batch_tokens=[4] * 3,
+                              n_probes=2, element_size=2, experts_per_token=1)
+    inputs = [torch.full((2, 2, 1), value, dtype=dtype) for value in (1.75, -1.75, 2.25)]
+    root = tmp_path_factory.mktemp("attribution-spill")
+    with pytest.MonkeyPatch.context() as patch:
+        # Use the test directory and a fixed I/O grid. Keep the spill file and replay.
+        patch.setattr(perturbed_x_cache.StageBSpillScratch, "require_local_root",
+                      staticmethod(lambda path: path))
+        patch.setattr(perturbed_x_cache, "_direct_io_block", lambda fd: 4096)
+        with StageBReplaySpill(root=root, max_bytes=1 << 20, geometry=geometry,
+                               window_names=windows, n_probes=2, dtype=dtype,
+                               device="cpu", threads=False) as spill:
+            for probe, scales in enumerate(((1, 1, -1), (-1, 3, -2))):
+                with spill.capture(probe, modules, specs, activation_max_abs={},
+                                   projection_backend=None) as capture:
+                    for x, count, scale in zip(inputs, (2, 0, 1), scales):
+                        flat = x.flatten(0, 1)
+                        outputs = [dense(x), experts(flat[count:], 1)]
+                        if count:
+                            outputs.append(experts(flat[:count], 0))
+                        for output in outputs:
+                            output.backward(torch.full_like(output, scale))
+                        capture.end_batch()
+
+            rows = {}
+            for enabled in (False, True):
+                collector = SpillSequenceAttribution(
+                    config=joint.normalize_sequence_attribution(
+                        {"candidates": "all", "gate_relative": 0.002}),
+                    linears=modules, formats_by_qname=specs, activation_maxima={},
+                    projection_backend=None, spill=spill, guard=None,
+                    n_probes=2, n_samples=6, seqlen=2, probe_microbatch=1,
+                    capture_batch=2, token_scope="all", calibration_sha256="c" * 64,
+                ) if enabled else None
+                terms = []
+                for probe in range(2):
+                    with joint.JointOperatorStatisticsLease(
+                            modules, specs, max_statistics_bytes=16, max_candidate_bytes=4) as lease:
+                        lease.begin_probe()
+                        spill.replay(0, probe, lease)
+                        lease.finish_observations()
+                        for key in keys:
+                            lease.project({key: delta})
+                            if collector is not None:
+                                collector(key=key, delta=delta, window_index=0, probe_index=probe)
+                        terms.append(lease.finish_projections())
+                spill.close_replay_stream()
+                for key in keys:
+                    name, _ = key
+                    components = [probe[key] for probe in terms]
+                    totals = [part["total"] for part in components]
+                    fixture = _row(name, totals, fmt=fmt)
+                    probe = dict(fixture["probe_identity"], calibration_shape=[6, 2], token_scope="all")
+                    operator = dict(fixture["joint_operator_identity"],
+                                    probe_identity_sha256=joint_aura_rows.joint_identity_sha256(probe))
+                    rows[enabled, name] = joint_aura_rows.make_joint_aura_entry(
+                        operator_identity=operator, probe_identity=probe, signed_components=components,
+                        sequence_attribution=collector.row_sidecar(key, totals) if enabled else None)
+    return rows
+
+
+def test_routed_spill_sidecar_signed_block_parts_and_gate(spill_rows):
+    row = spill_rows[True, "routed"]
+    sidecar = row["sequence_attribution"]
+    assert sidecar["scope"] == "capture_batch_block"
+    assert sidecar["block_geometry"]["blocks"] == _blocks((0, 2), (2, 2), (4, 2))
+    # Probe 0 routes two rows, no rows, and one row to expert 0.
+    # Probe 1 multiplies the first and last routed gradients by -1 and 2.
+    assert sidecar["components_per_probe"] == [
+        [_comps(1.75, 1.0, 0.25), _comps(0, 0, 0), _comps(-1.125, 0.5, 0.125)],
+        [_comps(-1.75, -1.0, -0.25), _comps(0, 0, 0), _comps(-2.25, 1.0, 0.25)],
+    ]
+    assert row["signed_per_probe"] == [2.5, -4.0]
+    assert sidecar["reconciliation"] == {
+        "residual_per_probe": [0.0, 0.0], "norm_per_probe": [4.75, 6.5],
+        "gate_relative": 0.002, "gate_method": joint_aura_rows.SEQUENCE_ATTRIBUTION_GATE_METHOD,
+    }
+
+
+def test_routed_spill_leaveout_prices_and_fresh_jackknife_se(spill_rows):
+    leaveout = spill_rows[True, "routed"]["sequence_attribution"]["leaveout"]
+    assert leaveout["uncertainty_scope"] == LEAVEOUT_SCOPE
+    # The retained signed totals are (-0.5, -1), (2.5, -4), and (3, -3).
+    prices = leaveout["price_per_block"]
+    assert prices == [0.46875, 8.34375, 6.75]
+    mean = sum(prices) / 3
+    assert leaveout["jackknife_standard_error"] == pytest.approx(
+        math.sqrt((2 / 3) * sum((price - mean) ** 2 for price in prices)))
+
+
+@pytest.mark.parametrize("name", ["dense", "routed"])
+def test_spill_sidecar_keeps_price_and_probe_se_bits(spill_rows, name):
+    on, off = spill_rows[True, name], spill_rows[False, name]
+    assert joint_aura_rows.validate_joint_aura_entry(on)
+    assert joint_aura_rows.validate_joint_aura_entry(off)
+    assert "sequence_attribution" in on
+    assert "sequence_attribution" not in off
+    for field in ("predicted_dloss", "predicted_dloss_stderr"):
+        assert struct.pack("!d", on[field]) == struct.pack("!d", off[field]), field
 
 
 def test_streamed_candidate_selector_does_not_instrument_other_rows():
