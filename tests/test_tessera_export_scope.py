@@ -541,6 +541,36 @@ def test_research_route_is_refused_without_the_override(case, tmp_path, monkeypa
     assert "selected Tessera route is" in err and "device_qualified" in err
 
 
+@pytest.mark.parametrize("leaf,family,rung", [
+    ("0.self_attn.o_proj", "TESSERA_E4M3_K1", 896),
+    ("3.self_attn.q_b_proj", "TESSERA_E4M3_K1", 896),
+    ("3.self_attn.kv_b_proj", "TESSERA_BF16_K1", 1792),
+], ids=["kda", "mla", "kv_b_proj"])
+def test_glm_attention_export_refuses_a_rung_without_a_cell(case, leaf, family, rung):
+    name = "model.language_model.layers." + leaf
+    (case.model / "config.json").write_text(json.dumps({
+        "model_type": "glm5_next", "architectures": ["Glm5NextForConditionalGeneration"],
+        "text_config": {"num_hidden_layers": 4, "num_nextn_predict_layers": 0,
+                        "layer_types": ["linear_attention"] * 3 + ["deepseek_sparse_attention"]},
+    }))
+    header = json.dumps({name + ".weight": {
+        "dtype": "BF16", "shape": [256, 256], "data_offsets": [0, 131072]}}).encode()
+    (case.model / "model.safetensors").write_bytes(struct.pack("<Q", len(header)) + header)
+    del case.payload[DENSE], case.payload[EXPERT]
+    case.payload[name] = {"data_type": "tessera", "bits": 4, "tessera_format": f"{family}_R{rung}"}
+    _scope(case)["by_unit"] = {name: _context()}
+    _save(case)
+    contract = _payload()
+    if family == "TESSERA_BF16_K1":
+        contract["formats"].append(dict(contract["formats"][0],
+            family=family, name_pattern=family + "_R{k}"))
+    case.contract.write_text(json.dumps(contract))
+
+    with pytest.raises(export.TesseraExportLaneError, match="selected Tessera route is unattested") as refusal:
+        export.require_assignment_scope(case.model, case.assignment, target=Target())
+    assert name in str(refusal.value)
+
+
 def test_research_route_override_stamps_the_override_and_the_histogram(
         case, tmp_path, monkeypatch):
     from prismaquant import shipcard
