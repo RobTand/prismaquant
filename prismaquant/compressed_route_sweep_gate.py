@@ -450,11 +450,6 @@ def _match_group(groups, names: Sequence[str], cls: str):
     return hits
 
 
-def _matched_ignore(ignore, names: Sequence[str], cls: str) -> list[str]:
-    return [target for target, matcher in ignore
-            if any(matcher(name, cls) for name in names)]
-
-
 def _served_activation(row: Mapping[str, Any]) -> tuple[dict | None, str]:
     """``(descriptor, reason)``; a ``None`` descriptor is NOT VERIFIED."""
     scheme = row.get("scheme")
@@ -533,7 +528,10 @@ def compare_rank(body: Mapping[str, Any], *, groups, ignore) -> dict:
             continue
         names = [name, *_leaf_names(name, mapping)]
         hits = _match_group(groups, names, cls)
-        ignored = _matched_ignore(ignore, names, cls)
+        ignored = [
+            target for target, matcher in ignore
+            if any(matcher(name, cls) for name in names)
+        ]
         if len(hits) > 1:
             conflicts.append(
                 f"{name}: matches {len(hits)} config groups "
