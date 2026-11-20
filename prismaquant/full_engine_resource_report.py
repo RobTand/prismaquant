@@ -535,19 +535,6 @@ def _step_intervals(value: Any, where: str):
     return rows
 
 
-def _recomputed_coverage_state(intervals, executed: Any) -> str:
-    """The coverage state the declared counts support.
-
-    ``complete`` is a claim like any other: it is true when the capture said
-    how many steps it executed and declared an interval for every one of them,
-    and a report that asserts it on other counts is asserting the very license
-    the classification runs on.
-    """
-    if intervals and executed is not None and executed == len(intervals):
-        return ADMITTED_STEP_COVERAGE
-    return "partial"
-
-
 def _understood_run(run: Mapping) -> dict:
     """The run-identity fields this reader knows, for comparing two identities.
 
@@ -884,7 +871,10 @@ def _observations(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Map
             raise RuntimePriceError(
                 f"{where}: step coverage declares {coverage['declared']!r} steps where the "
                 f"report carries {len(intervals)}")
-        recomputed = _recomputed_coverage_state(intervals, coverage["executed"])
+        executed = coverage["executed"]
+        recomputed = (ADMITTED_STEP_COVERAGE
+                      if intervals and executed is not None and executed == len(intervals)
+                      else "partial")
         if coverage["state"] != recomputed:
             raise RuntimePriceError(
                 f"{where}: step coverage claims {coverage['state']!r} where its own declared "
