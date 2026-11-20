@@ -19,6 +19,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from prismaquant.digests import INSERTION_ASCII_SPACED_LAX
 from prismaquant.joint_catalog_extension import (
     catalog_control_bindings, catalog_sources, create_extension, extension_campaign_identity,
     require_extension)
@@ -378,9 +379,9 @@ def prepare(args):
         'launch recipe')])
     if publication is not None:
         publication.finalize(Path(publication.publication.producer['record_dir']) / 'produced-result.json')
-    print(json.dumps({'status': 'metadata_ready', 'launch': str(root/launch_name),
-                      'catalog_extension': extension,
-                      'produced_batches': [] if publication is None else publication.batches}))
+    print(INSERTION_ASCII_SPACED_LAX.text({
+        'status': 'metadata_ready', 'launch': str(root/launch_name), 'catalog_extension': extension,
+        'produced_batches': [] if publication is None else publication.batches}))
 
 
 def main(argv=None):

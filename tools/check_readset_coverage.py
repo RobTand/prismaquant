@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX_DEFAULT_STR  # noqa: E402
 from prismaquant.readset_coverage import (  # noqa: E402
     gaps_report, load_manifest, load_source_plan, quantum_prefetch_targets,
     quantum_rows_gaps, source_read_gaps, stage_a_prefetch_targets,
@@ -129,7 +130,7 @@ def main(argv=None) -> int:
     except (OSError, ValueError, KeyError) as exc:
         print(f"check_readset_coverage: refused: {exc}", file=sys.stderr)
         return 2
-    text = json.dumps(report, indent=2, sort_keys=True, default=str)
+    text = DIRECT_ASCII_INDENT2_LAX_DEFAULT_STR.text(report)
     if args.out is not None:
         Path(args.out).write_text(text + "\n")
     print(text)
