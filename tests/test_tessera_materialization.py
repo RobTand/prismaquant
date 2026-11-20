@@ -4,8 +4,10 @@ import copy
 import hashlib
 import json
 import pickle
+from pathlib import Path
 from types import SimpleNamespace
 
+import prismaquant
 import pytest
 import torch
 
@@ -20,8 +22,149 @@ from prismaquant import tessera_lane
 from prismaquant import tessera_campaign as tc
 from prismaquant import tessera_expert_projection as tep
 from prismaquant.layer_config import canonicalize_assignment, load_assignment
+from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 from test_tessera_packed_export_scope import _pack
 from test_tessera_export_projection import case, _units, FMT, STACK, N, DENSE
+from test_tessera_stack_sample_cost import _packed_probe_row
+
+
+EXPECTED_DIGESTS = {
+    "dense": "7f9943c40416c736971db8f18b247bba6cb3418d4c2b69730657bddafc8ec17a",
+    "solo": "076406db7e7941289c5811e489938521078cc24d495dc195f3dce1e5f296a6f0",
+    "peers": "7cbc9dc4cca161f42d14b685d10d7acc620f7289424c6e36db69b932c3e187f7",
+    "lfm-TESSERA_BF16_K1_R256": "ad24604f470e2689ec7383ea2357a25f315fc32f96c4a7df014f3de3854b9dad",
+    "lfm-TESSERA_BF16_K1_R1142": "5996dc3b744c375dc24b77352bdcef82f820d766564649676c3c8fe1e5a84503",
+    "lfm-TESSERA_BF16_K1_R2027": "4a326a64b02fe1abd04946b64db504028cfaebec23ec4fb0837175c778084a5e",
+    "lfm-TESSERA_E2M1_K1_R256": "0ecf58fddbc49644870893c8fe79f91ab79ad07c0d45ab5e55d0e65e3b7ac53c",
+    "lfm-TESSERA_E2M1_K1_R512": "8823e9d1f492d2ce25b3073bab8b8cb43963cd70388396ba86658f6ede0d03ef",
+}
+FAMILY = "TESSERA_E2M1_K1"
+LAW_EXPERTS = (0, 1, 2)
+
+
+def _cost_anchor(name, rate, loss):
+    return campaign_table.CampaignAnchor(name, FAMILY, f"{FAMILY}_R{rate}", rate, loss, 0.0,
+                                         1024, 4.0, "bfloat16", False, 1100, 1.0)
+
+
+def _census_sample(packed, probe, profile, *, seed, **plan):
+    experts = range(probe["num_experts"])
+    return campaign_table.stack_sample_from_probe(
+        packed, probe, profile, sampled_experts=experts,
+        inclusion_prob=dict.fromkeys(experts, 1.0), seed=seed, design="census", **plan)
+
+
+def _two_tier_cost_inputs(stack_count, profile):
+    anchors, samples, probes = {}, {}, {}
+    for layer in range(stack_count):
+        module = f"model.layers.{layer}.feed_forward.experts"
+        packed = f"{module}.down_proj"
+        probes[packed] = dict(_packed_probe_row(4, [1.0] * 4, packed_param="down_proj"),
+                              _packed_experts_module=module)
+        samples[packed] = _census_sample(packed, probes[packed], profile, seed=3,
+                                         transfer_law_experts=LAW_EXPERTS)
+        for expert, (name,) in samples[packed].members.items():
+            reference = 2.0 ** (expert - 8)
+            rows = [_cost_anchor(name, 960, reference)]
+            if expert in LAW_EXPERTS:
+                rows += [_cost_anchor(name, 832, 2 * reference),
+                         _cost_anchor(name, 1088, 0.5 * reference)]
+            anchors[name] = {FAMILY: rows}
+    return anchors, samples, probes
+
+
+def _price_cost_table(anchors, samples):
+    return campaign_table.campaign_cost_payload(
+        anchors, {}, loo={}, provenance={}, stack_samples=samples)
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_DIGESTS)
+def test_one_census_rung_matches_main_cost_pickle(case_id):
+    profile = Lfm2MoeProfile()
+    anchors, samples = {}, {}
+    if case_id == "dense":
+        points = ((832, 0.25), (960, 0.125), (1088, 0.0625))
+        anchors[DENSE] = {FAMILY: [_cost_anchor(DENSE, rate, loss) for rate, loss in points]}
+    elif case_id.startswith("lfm-"):
+        fmt = case_id.removeprefix("lfm-")
+        fixture = Path(__file__).parent / "fixtures" / "tessera_stack_lfm_layer18.json"
+        data = json.loads(fixture.read_text())
+        samples = {packed: _census_sample(packed, probe, profile, seed=1)
+                   for packed, probe in data["packed_probe_rows"].items()}
+        for name, rows in data["member_anchors"].items():
+            row = next(row for row in rows if row["format_name"] == fmt)
+            anchors[name] = {row["family"]: [campaign_table.CampaignAnchor(qname=name, **row)]}
+    else:
+        anchors, samples, _ = _two_tier_cost_inputs(1 if case_id == "solo" else 2, profile)
+    payload = prismaquant.digests.canonical_pickle_bytes(_price_cost_table(anchors, samples))
+    assert hashlib.sha256(payload).hexdigest() == EXPECTED_DIGESTS[case_id]
+
+
+@pytest.mark.parametrize("pinned", [False, True], ids=["old-record", "resume"])
+def test_census_plan_survives_anchor_reappend(tmp_path, pinned):
+    profile = Lfm2MoeProfile()
+    anchors, original_samples, probes = _two_tier_cost_inputs(2, profile)
+    groups, records = [], {}
+    sizes = dict.fromkeys(map(str, range(4)), 1.0)
+    for packed, sample in original_samples.items():
+        draw = campaign_table.draw_stack_sample(sizes, 4, seed=3, stack=packed)
+        record = dict(probe_row=probes[packed], sampled_experts=draw["units"],
+                      inclusion_prob=draw["inclusion_probability"], seed=3,
+                      design=draw["method"] + campaign_table.STACK_SAMPLE_COUNTS_SUFFIX,
+                      transfer_law_experts=list(LAW_EXPERTS), draw=draw,
+                      sizes=dict(source="counts", values=sizes, sha256=draw["size_sha256"]))
+        if pinned:
+            record["reference_q256"] = 960
+        records[packed] = record
+        members = [name for (name,) in sample.members.values()]
+        groups.append(dict(key=f"s:{sample.packed_experts_module}", members=members,
+                           inclusion_probability=dict.fromkeys(members, 1.0),
+                           stack_samples={packed: record}))
+    samples = campaign_table.selection_stack_samples(json.loads(json.dumps({"groups": groups})), profile)
+    packed, target = next(iter(samples)), f"{FAMILY}_R1088"
+    initial = _price_cost_table(anchors, samples)["costs"][packed][target]
+    assert initial["transfer_law"]["reference_q256"] == 960
+    (name,) = samples[packed].members[3]
+    anchors[name][FAMILY].append(_cost_anchor(name, 832, 0.25))
+    states = {name: {"anchors": [vars(row) for row in families[FAMILY]]}
+              for name, families in anchors.items()}
+    journal = prismaquant.cost_stage_checkpoint
+    manifest = tmp_path / "cost.anchors.json"
+    root = manifest.with_suffix(".json.parts")
+    args = dict(stage=campaign_table.STAGE, qnames=sorted(states), manifest_path=manifest,
+                identity=dict(units=dict.fromkeys(states, {}), stack_sampling_identity=records))
+    _, digest, _ = journal.prepare_journal(root, resume=False, **args)
+    assert journal.stored_manifest_identity(manifest)["stack_sampling_identity"] == records
+
+    def write(name):
+        journal.write_unit(root, stage=campaign_table.STAGE, qname=name,
+                           identity_sha256=digest, state=states[name])
+
+    def resume():
+        _, _, loaded = journal.prepare_journal(root, resume=True, **args)
+        evidence = {name: {FAMILY: [campaign_table.CampaignAnchor(**row) for row in state["anchors"]]}
+                    for name, state in loaded.items()}
+        return _price_cost_table(evidence, samples)
+
+    for name in states:
+        write(name)
+    before = resume()
+    if not pinned:
+        assert set(before["costs"][packed]) == {f"{FAMILY}_R832", f"{FAMILY}_R960"}
+        refusal, = [row for row in before["non_interpolable"]
+                    if row["reason"] == "stack_transfer_law_reference_missing"]
+        assert refusal["qname"] == packed
+        assert refusal["census_rungs"] == [832, 960]
+        return
+
+    assert before["costs"][packed][target]["transfer_law"]["reference_q256"] == 960
+    for (name,) in samples[packed].members.values():
+        rows = states[name]["anchors"]
+        rows.append(rows.pop(0))
+        assert rows[0]["body_rate_q256"] == 832
+        write(name)
+    serialize = prismaquant.digests.canonical_pickle_bytes
+    assert serialize(resume()) == serialize(before)
 
 
 @pytest.fixture
@@ -325,7 +468,6 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
         from prismaquant import tessera_calibration_cache as cc
         census = json.loads(s.census.read_text())
         from test_tessera_calibration_cache import canonical_fields
-        import prismaquant
         census.update(canonical_fields())
         s.census.write_text(json.dumps(census))
         monkeypatch.setattr(prismaquant,'pretrained_initialization_contract',lambda model:canonical_fields()['model_load_contract'])
@@ -464,8 +606,6 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
     cost = pickle.loads(cost_path.read_bytes())
     # The existing CPU bridge fixture replaces only the hessian-status report.
     cost['provenance']['hessian']['recipe'] = th.encoder_recipe()
-    from test_tessera_stack_sample_cost import _packed_probe_row
-    from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
     profile = Lfm2MoeProfile()
     population = campaign._require_campaign_population(model, profile, 1)
     samples = {}
@@ -511,7 +651,6 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
     metadata = json.loads(output.read_text())['__prismaquant__']
     assert metadata[tep.EXPERT_WIRES_KEY][missing] == original_record
     assert load_assignment(output) == assignment
-    from pathlib import Path
     from safetensors import safe_open
     shapes = {}
     for shard in Path(argv[1]).glob('*.safetensors'):
