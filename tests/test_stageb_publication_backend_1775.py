@@ -416,3 +416,9 @@ def test_atomic_unit_is_not_acknowledged_before_directory_fsync(
 def test_pool_backend_refuses_unbounded_or_invalid_execution(kwargs):
     with pytest.raises((ValueError, TypeError)):
         BoundedPublisher(budget_bytes=8, **kwargs)
+
+
+def test_publication_job_refuses_a_noncallable_disposer():
+    with pytest.raises(TypeError) as exc:
+        PublicationJob("unit", 1, lambda: None, dispose="not callable")
+    assert str(exc.value) == "a publication job disposer must be callable"
