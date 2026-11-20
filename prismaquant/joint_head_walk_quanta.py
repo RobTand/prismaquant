@@ -168,20 +168,6 @@ def verify_quanta_coverage(quanta, names) -> list:
     return ordered
 
 
-def _quantum_journal_identity(journal_dir) -> dict:
-    """Read one quantum journal's manifest identity (the custody root)."""
-    manifest_path = Path(journal_dir) / "manifest.json"
-    try:
-        manifest = json.loads(manifest_path.read_text())
-    except (OSError, ValueError) as exc:
-        raise ValueError(
-            f"head-walk quantum journal at {journal_dir} has no readable manifest") from exc
-    _require(isinstance(manifest, Mapping), "head-walk quantum manifest is not an object")
-    identity = manifest.get("identity")
-    _require(isinstance(identity, Mapping), "head-walk quantum manifest carries no identity")
-    return dict(identity)
-
-
 def join_head_walk_journals(receipts, *, dest, names) -> dict:
     """Join per-quantum journals into the one journal a resumed walk consumes.
 
@@ -222,7 +208,16 @@ def join_head_walk_journals(receipts, *, dest, names) -> dict:
         quantum, journal_dir = receipt.get("quantum"), receipt.get("journal_dir")
         _require(isinstance(quantum, Mapping) and journal_dir is not None,
                  "head-walk join receipt needs a quantum descriptor and a journal_dir")
-        identity = _quantum_journal_identity(journal_dir)
+        manifest_path = Path(journal_dir) / "manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text())
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                f"head-walk quantum journal at {journal_dir} has no readable manifest") from exc
+        _require(isinstance(manifest, Mapping), "head-walk quantum manifest is not an object")
+        identity = manifest.get("identity")
+        _require(isinstance(identity, Mapping), "head-walk quantum manifest carries no identity")
+        identity = dict(identity)
         stored_quantum = identity.get("quantum")
         _require(dict(stored_quantum or {}) == dict(quantum),
                  "head-walk quantum journal was banked under another descriptor")
