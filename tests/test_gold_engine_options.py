@@ -248,8 +248,11 @@ def test_wikitext_corpus_base_bytes(monkeypatch, tmp_path, runner, source):
         ids = module.torch.tensor([[11, 12, 13, 14, 15]], device="cpu")
         return types.SimpleNamespace(input_ids=ids)
 
-    # Compare the in-memory digests with the reviewed file digest recipe.
-    sha256 = importlib.import_module(RUNNERS[0])._file_sha256(path)
+    # Flux f3dJLVHXkoR recorded these values at base 6b3fa6953.
+    if source == "text_file":
+        sha256 = "dc8e24d7545010e5c8c07ce64709b970f8371efe21416c3991caa4c7271c13d4"
+    else:
+        sha256 = "63c0b48bdd61e2d7548b56b253bdf75a048ad70a620a84ab7fda4234bf417ff6"
     if full_kl:
         result = module._load_wikitext_calibration(
             tokenize, n_samples=2, seqlen=2, window_seed=42, **kwargs)
@@ -258,7 +261,14 @@ def test_wikitext_corpus_base_bytes(monkeypatch, tmp_path, runner, source):
         corpus = {"source": source, **origin, "bytes": len(raw),
                   "corpus_sha256": sha256, "total_tokens": 5}
         assert result == ([[13, 14], [11, 12]], [2, 0], 5, corpus)
-        print(repr((result, module._strict_json_text({"corpus": result[3]}))))
+        digests = sys.modules["prismaquant.digests"]
+        encoded = module._strict_json_text({"corpus": result[3]}).encode("utf-8")
+        expected_sha256 = (
+            "19c66ab08dc77e14d240b288a24aab53efcf019b8b4c5ac9e991819b9d1b80bb"
+            if source == "text_file"
+            else "b2619e7922b61134b5ffa3cf10bdf01bf660e881d2a1d500c2ef509151a8ff4f"
+        )
+        assert digests.bytes_sha256hex(encoded) == expected_sha256
     else:
         result = module._load_ids(tokenize, split="test", n_tokens=4, **kwargs)
         fingerprint = f"file:sha256:{sha256}" if source == "text_file" else "révision-fixe"
@@ -269,11 +279,15 @@ def test_wikitext_corpus_base_bytes(monkeypatch, tmp_path, runner, source):
             args=types.SimpleNamespace(n_tokens=4, seqlen=2, split="test"),
             ids=ids, dataset_evidence=evidence, tokenizer_identity_sha256="a" * 64,
             chunks=[[11, 12], [13, 14]], n_tokens_scored=2)
-        assert contract["dataset"]["fingerprint"] == fingerprint
-        assert contract["dataset"]["corpus_sha256"] == sha256
-        contract_sha = module._canonical_sha256(contract)
-        profile = sys.modules["prismaquant.digests"].DIRECT_UTF8_STRICT
-        print(repr((result, profile.encoded(contract), contract_sha)))
+        digests = sys.modules["prismaquant.digests"]
+        encoded = digests.DIRECT_UTF8_STRICT.encoded(contract)
+        expected_sha256 = (
+            "ec1acc371b0bc28db93f30f901840f6255ac266499b61a61642862c7552af841"
+            if source == "text_file"
+            else "60aa63b7d8fbb4ca83df98cada4af1e468486202daddcd625e81ae65410f74e4"
+        )
+        assert digests.bytes_sha256hex(encoded) == expected_sha256
+        assert module._canonical_sha256(contract) == expected_sha256
 
 
 @pytest.mark.parametrize("runner", RUNNERS)
@@ -297,11 +311,9 @@ def test_wikitext_corpus_refusal(monkeypatch, tmp_path, runner, present):
     assert type(error.value) is error_type
     assert error.value.__cause__ is None
     if present:
-        assert (error.value.encoding, error.value.object, error.value.start) == ("utf-8", b"\xff", 0)
+        assert str(error.value) == "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
     else:
-        assert (error.value.errno, error.value.filename) == (2, "corpus.txt")
-    print({"raised": f"{error_type.__module__}.{error_type.__qualname__}",
-           "text": str(error.value), "cause": None})
+        assert str(error.value) == "[Errno 2] No such file or directory: 'corpus.txt'"
 
 
 @pytest.mark.parametrize("runner", RUNNERS)
