@@ -285,3 +285,8 @@ def test_identity_with_the_unbounded_runtime_solver_on_a_glm53_prefix(n_units, w
                                         for f, c, _b in row})
     assert Fraction(diag["total_cost"], den) == exact_cost
     assert diag["total_bytes"] == exact_bytes <= budget
+
+
+def test_exact_mckp_refuses_an_unnamed_format():
+    with pytest.raises(ValueError, match="a format must be a nonempty string"):
+        solve_exact_mckp({"unit": [("", 0, 1)]}, max_bytes=1)
