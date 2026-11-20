@@ -186,10 +186,6 @@ class IoSpanLog:
         self._open: list[IoSpan] = []
         self.records: list[dict] = []
 
-    def add_source(self, name: str, source) -> None:
-        """Register another counter source; it applies to spans opened later."""
-        self._sources[str(name)] = source
-
     # -- readings -----------------------------------------------------------
 
     def _read_proc_io(self):
