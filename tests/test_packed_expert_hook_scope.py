@@ -304,3 +304,19 @@ def test_the_hook_set_is_the_full_visible_module_set(monkeypatch):
             f"collector hooked {sorted(hooked)}, not the full visible set "
             f"{sorted(visible)}; the render narrowed the hook set (#145)"
         )
+
+
+def test_activation_reservoir_refuses_a_short_priority_tensor():
+    from unittest import TestCase
+
+    from prismaquant.production_weight_cache import update_priority_reservoir
+
+    with TestCase().assertRaises(ValueError) as error:
+        update_priority_reservoir(
+            None, None, torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+            max_rows=2,
+            new_priorities=torch.tensor([0.25]),
+        )
+    assert str(error.exception) == (
+        "new_priorities length must match the incoming row count"
+    )
