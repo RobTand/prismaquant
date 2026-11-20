@@ -85,3 +85,19 @@ def test_selection_model_disagreement_refuses_before_pricing_or_cache(tmp_path):
         _resolve(_request(tmp_path, ['--units', str(path)]))
     assert not (tmp_path/'cache').exists()
     assert not (tmp_path/'cost.pkl').exists()
+
+
+def test_scope_refuses_selection_with_no_anchor_groups(tmp_path):
+    path = tmp_path/'units.json'
+    path.write_text(json.dumps({
+        'schema': campaign.UNITS_SCHEMA,
+        'model': 'fixture',
+        'layer_stride': 1,
+        'groups': [],
+    }))
+    request = _request(tmp_path, ['--units', str(path)])
+    with pytest.raises(RuntimeError) as exc:
+        _resolve(request)
+    assert str(exc.value) == f"--units {path}: names no anchor group"
+    assert not (tmp_path/'cache').exists()
+    assert not (tmp_path/'cost.pkl').exists()
