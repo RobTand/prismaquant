@@ -47128,6 +47128,7 @@ pq_py_library(
         "test_digest_recipes_3040.py",
     ],
     data = [
+        "fixtures/digest_recipes_3031_3033_3036.json",
         "fixtures/digest_recipes_3040.json",
         "test_digest_recipes_3040.py",
     ],
