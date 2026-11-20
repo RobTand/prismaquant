@@ -110,12 +110,6 @@ def kda_capture_kernel_setting(environ: Mapping) -> str | None:
     return text
 
 
-def producer_kernel_mode(producer: Mapping) -> str | None:
-    """The mode a handoff's ``producer`` block names: its kernel, or ``None`` (fallback)."""
-    stamp = producer.get("kda_capture_kernel")
-    return None if stamp is None else stamp["name"]
-
-
 def consumer_handoff_mode(setting: str | None) -> str | None:
     """The mode a band-serial consumer launched with ``setting`` binds a handoff in.
 
@@ -142,7 +136,8 @@ def resolve_kda_capture_kernel(setting: str | None, *, layers, producer=None) ->
     if setting is not None:
         return setting
     if producer is not None:
-        return producer_kernel_mode(producer)
+        stamp = producer.get("kda_capture_kernel")
+        return None if stamp is None else stamp["name"]
     return DEFAULT_KERNEL if any(layer_runs_kda(layer) for layer in layers) else None
 
 
