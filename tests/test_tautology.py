@@ -64,6 +64,15 @@ def test_scan_nested_test_trees_without_executing_source(tmp_path):
     ]
 
 
+def test_scan_continues_after_unreadable_python_sources(tmp_path):
+    (tmp_path / "test_syntax.py").write_text("def test_broken(:\n", encoding="utf-8")
+    (tmp_path / "test_encoding.py").write_bytes(b"\xff")
+    (tmp_path / "test_sample.py").write_text(
+        "def test_sample():\n    assert True\n", encoding="utf-8"
+    )
+    assert scan(tmp_path) == [Finding("test_sample.py", 2, "test_sample", "constant")]
+
+
 def test_cli_reports_every_finding_and_clean_exit(tmp_path, capsys):
     target = tmp_path / "test_sample.py"
     target.write_text(
