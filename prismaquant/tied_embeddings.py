@@ -89,11 +89,6 @@ def config_declares_tied_embeddings(cfg: Any) -> bool:
     return False
 
 
-def _load_config_dict(model_path: str) -> dict:
-    with open(Path(model_path) / "config.json") as f:
-        return json.load(f)
-
-
 def _source_tensor_keys(model_path: str) -> set[str]:
     """Every tensor key in the source checkpoint, from the safetensors
     index when present, else from the shard headers."""
@@ -136,7 +131,8 @@ def lm_head_is_tied_alias(model_path: str, *, profile) -> bool:
     allocator's budget.
     """
     try:
-        cfg = _load_config_dict(model_path)
+        with open(Path(model_path) / "config.json") as f:
+            cfg = json.load(f)
     except (OSError, ValueError):
         return False
     if not config_declares_tied_embeddings(cfg):
