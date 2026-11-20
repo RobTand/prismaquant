@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX, INSERTION_ASCII_SPACED_LAX, bytes_sha256hex
 from prismaquant.joint_catalog_extension import _artifact_fence, extended_roster
 from prismaquant.tessera_joint_aura import render_origin_census
 from rebind_t4_qualified_results import SCHEMA as REBINDING_SCHEMA
@@ -268,8 +268,8 @@ def main():
     inputs = {'original_plan': planorigin, 'original_prepared': preporigin,
               'extended_plan': planbinding, 'extended_prepared': prepbinding}
     publish(overlay / 'catalog-pair-inputs.json', doc(inputs))
-    print(json.dumps({'status': 'proposed_candidate_metadata_only', 'inputs': inputs,
-                      'cells': len(cache.weights)}), flush=True)
+    print(INSERTION_ASCII_SPACED_LAX.text({'status': 'proposed_candidate_metadata_only', 'inputs': inputs,
+                                          'cells': len(cache.weights)}), flush=True)
 
 
 if __name__ == '__main__':
