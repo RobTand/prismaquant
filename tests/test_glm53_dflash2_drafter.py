@@ -249,7 +249,7 @@ def test_patch_scripts_are_the_recorded_bytes():
         ("patch_glm5next_eagle3.py",
          "fc1afc2e5fde1c12a587022fa48859dfea65659cc35521200d4195b5f8b97b76"),
         ("patch_glm5_drafter_kv_group.py",
-         "af57080f2e6acdbc1d255df37a32b8d75f6220e4395284cb3b8baa6428547c86"),
+         "b54ee689afce7d31e14d6c72ab028b518abbe9819a11b7e4eaea1966104a31f3"),
         ("selfcheck_glm53_dflash2_drafter.py",
          "e7f562928a61f621f6eb1ad18bf1c85d0fd06ecc905d449cd471441b03ef0e9b"),
     ):
