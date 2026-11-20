@@ -194,3 +194,7 @@ def test_pack_releases_consumed_sources_and_refuses_dtype_promotion():
         _pack(bad,prof,pat,{f'{blk}.gate_up_proj':(1,12,8)})
     assert bad.keys()==original.keys()
     assert all(bad[name] is value for name,value in original.items())
+
+
+def test_lfm_head_has_no_extra_prefixes_without_a_base_model():
+    assert Lfm2MoeProfile().head_resident_extra_prefixes(torch.nn.Module()) == []
