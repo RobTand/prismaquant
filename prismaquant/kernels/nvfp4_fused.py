@@ -73,8 +73,6 @@ def nvfp4_pack_weight(
     rows, cols = weight.shape
     if cols % _NVFP4_GROUP_SIZE != 0:
         raise ValueError(f"NVFP4 group_size=16 does not divide K={cols}")
-    if cols % 2 != 0:
-        raise ValueError(f"NVFP4 packed K must be even, got K={cols}")
 
     # Export-codec-aligned packing (one rendering everywhere): the fused
     # fast path serves perturbed-X / resident W4A4 evaluation, which must
