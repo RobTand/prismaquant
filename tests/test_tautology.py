@@ -6,8 +6,9 @@ import textwrap
 
 import pytest
 
-from prismaquant.tautology import Finding, main, scan_tautologies
 from tests import test_no_tautological_tests as guard
+
+Finding, main, scan = (guard.tautology[name] for name in ("Finding", "main", "scan"))
 
 
 @pytest.mark.parametrize(
@@ -42,7 +43,7 @@ def test_scan_mechanical_tautologies(tmp_path, body, rule, line):
     source = "def test_sample():\n" + textwrap.indent(body, "    ") + "\n"
     (tmp_path / "test_sample.py").write_text(source, encoding="utf-8")
     expected = [] if rule is None else [Finding("test_sample.py", line, "test_sample", rule)]
-    assert scan_tautologies(tmp_path) == expected
+    assert scan(tmp_path) == expected
 
 
 def test_scan_nested_test_trees_without_executing_source(tmp_path):
@@ -58,7 +59,7 @@ def test_scan_nested_test_trees_without_executing_source(tmp_path):
         "def test_fixture():\n    source = 'assert True'\n",
         encoding="utf-8",
     )
-    assert scan_tautologies(tmp_path) == [
+    assert scan(tmp_path) == [
         Finding("archive/old/tests/sample_test.py", 3, "test_sample", "constant")
     ]
 
@@ -84,7 +85,7 @@ def test_cli_reports_every_finding_and_clean_exit(tmp_path, capsys):
 
 
 def test_vendored_guard_runs_with_isolated_standard_library_python(tmp_path):
-    detector = Path(__file__).resolve().parents[1] / "prismaquant" / "tautology.py"
+    detector = Path(__file__).resolve().parents[1] / "prismaquant/vendored/tautology.py"
     (tmp_path / "test_sample.py").write_text(
         "def test_sample():\n    self.assertEqual(actual, actual)\n", encoding="utf-8"
     )
