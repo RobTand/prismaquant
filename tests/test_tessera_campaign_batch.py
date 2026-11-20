@@ -247,3 +247,15 @@ def test_batches_are_unit_major_so_a_batch_wide_memo_reuses_each_factorization()
     heads = [(batch[0][0], batch[0][2]) for batch in batches]
     assert heads[:3] == [(units[0], 832), (units[0], 960), (units[0], 1088)]
     assert heads[3:6] == [(units[8], 832), (units[8], 960), (units[8], 1088)]
+
+
+def test_measure_cells_refuses_repeated_unit_names(tmp_path):
+    weight = torch.ones((1, 1))
+    cache = SimpleNamespace(weights={}, cache_dir=None)
+    with pytest.raises(ValueError, match="anchor batch needs distinct nonempty unit names"):
+        cell_measurement.measure_cells(
+            qnames=["a", "a"], weights=[weight, weight], activations=[weight, weight],
+            format_name=FMT, cache=cache, wire_dir=tmp_path, hessian_required=False,
+        )
+    assert cache.weights == {}
+    assert list(tmp_path.iterdir()) == []
