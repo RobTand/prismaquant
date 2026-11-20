@@ -13,7 +13,7 @@ It also covered `test_tessera_census_cache.py`, `test_tessera_export_lane.py`, `
 | 3. Record each canonical source name and profile root with a pinned serving cell or explicit refusal. | PARTLY | The roster and export audit cover names and roots. Per-entry audit coverage still needs a serving cell or refusal for each entry. |
 | 4. Match each emitted vision name to a pinned cell or refuse export. | PARTLY | Tests cover BF16 shard names and explicit refusal. The pinned-cell check for emitted low-bit vision names remains open. |
 | 5. Refuse incomplete or invalid rows and wire proof. | COVERED | The cache checks the exact unit set and original wire receipts. The #2809 refusal cases cover invalid inputs. |
-| 6. Keep the body and MTP plans equivalent with vision off and on. | COVERED | `test_body_and_mtp_plans_are_equivalent_with_vision` checks the body assignment, MTP selection, selected cache, and BF16 export projection. The NVFP4 case checks allocation and both refusals. |
+| 6. Keep the body and MTP plans equivalent with vision off and on. | COVERED | `test_body_and_mtp_plans_are_equivalent_with_vision` fails if a visual row leaks into the body DP, and checks the selected cache and BF16 export projection. The MTP selection inputs do not depend on vision by construction; the test checks that the stamped MTP record is unchanged. The NVFP4 case checks allocation and both refusals. |
 
 | #2809 item | Verdict | Evidence |
 | --- | --- | --- |
