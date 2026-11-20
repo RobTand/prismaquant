@@ -177,3 +177,27 @@ def test_a_manifest_handed_as_bytes_is_checked_against_its_digest(tmp_path):
         load_manifest(absent, "0" * 64, wire=wire)
     with pytest.raises(OSError):
         load_manifest(absent, digest)
+
+
+def test_source_read_gaps_reports_a_missing_installed_layer_phase():
+    from prismaquant.readset_coverage import source_read_gaps
+
+    shard = "weights.safetensors"
+    phase = "own-002-source"
+    manifest = {
+        "entries": [{"path": shard, "offset": 0, "bytes": 16}],
+        "read_plan": {"phases": [{"name": "head", "entry_indices": [0]}]},
+    }
+    source_plan = {
+        "head_spans": [(shard, 0, 16)],
+        "layer_spans": {2: [(shard, 32, 48)]},
+        "span_tensors": {(shard, 32, 48): "layers.2.weight"},
+    }
+
+    assert source_read_gaps(
+        manifest, source_plan, order=[2], prefetch_targets={2}, phase_of=lambda layer: phase,
+    ) == [
+        {"kind": "missing-phase", "phase": phase, "layer": 2},
+        {"kind": "layer-source", "phase": phase, "layer": 2, "path": shard,
+         "start": 32, "end": 48, "bytes": 16, "tensor": "layers.2.weight"},
+    ]
