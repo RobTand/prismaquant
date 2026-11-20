@@ -38,6 +38,12 @@ def test_score_render_error_accepts_fisher_row_weights():
     )
 
 
+def test_score_render_error_refuses_wrong_activation_width():
+    weight = torch.eye(2)
+    assert score_render_error(weight, weight, torch.ones(1, 2)) == 0.0
+    assert score_render_error(weight, weight, torch.ones(1, 1)) == float("inf")
+
+
 def test_gate_render_candidate_rejects_regression_and_min_gain():
     accepted = gate_render_candidate(
         baseline_score=10.0,
