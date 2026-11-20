@@ -115,14 +115,10 @@ def joint_campaign_acquisition_control_inputs(binding: dict, *, reader=None) -> 
     return entries
 
 
-def joint_campaign_acquisition_control_bytes(document: dict) -> bytes:
-    """One locator-independent representation of already authenticated controls."""
-    content = {key: value for key, value in document.items() if key != "cost_path"}
-    return _digests.canonical_json_bytes(content, where="joint acquisition controls")
-
-
 def joint_campaign_acquisition_control_sha256(document: dict) -> str:
-    return _digests.bytes_sha256hex(joint_campaign_acquisition_control_bytes(document))
+    content = {key: value for key, value in document.items() if key != "cost_path"}
+    return _digests.bytes_sha256hex(
+        _digests.canonical_json_bytes(content, where="joint acquisition controls"))
 
 
 def joint_campaign_acquisition_comparable_identity(identity: dict) -> bytes:
