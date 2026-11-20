@@ -9,6 +9,7 @@ SIGKILL while it holds the baton.
 """
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
 from pathlib import Path
@@ -157,3 +158,21 @@ def test_the_guard_serializes_builders_and_is_released_by_a_kill(tmp_path):
         child.wait()
     with jbl.jit_build_lock(directory) as removed:
         assert removed is False
+
+
+def test_clear_stale_baton_propagates_unexpected_flock_error(tmp_path, monkeypatch):
+    baton = tmp_path / jbl.TORCH_BATON_NAME
+    error = OSError(errno.EIO, 'flock failed')
+
+    def fail_flock(_fd, operation):
+        assert operation == fcntl.LOCK_EX | fcntl.LOCK_NB
+        raise error
+
+    with jbl.jit_build_lock(tmp_path):
+        baton.touch()
+        monkeypatch.setattr(fcntl, 'flock', fail_flock)
+        with pytest.raises(OSError) as exc:
+            jbl.clear_stale_baton(tmp_path)
+
+    assert exc.value is error
+    assert baton.is_file()
