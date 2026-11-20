@@ -17,6 +17,7 @@ import tarfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_STRICT, bytes_sha256hex
+from prismaquant.digests import INSERTION_ASCII_INDENT2_LAX, INSERTION_ASCII_SPACED_LAX
 from prismaquant import native_results
 
 LOW, HIGH = "FP8_E4M3", "FP8_E5M2"
@@ -84,7 +85,7 @@ def fixture(directory, config, probes, layers):
                "provenance": {"cost_mode": "aura", "joint_activation": True, "cost_currency": joint_aura_rows.JOINT_CURRENCY}}
     (directory / "probe.pkl").write_bytes(pickle.dumps({"stats": stats, "meta": {"model": None}}))
     (directory / "costs.pkl").write_bytes(pickle.dumps(payload))
-    (directory / "baseline.json").write_text(json.dumps(dict.fromkeys(costs, HIGH)))
+    (directory / "baseline.json").write_text(INSERTION_ASCII_SPACED_LAX.text(dict.fromkeys(costs, HIGH)))
     return identities
 
 
@@ -204,7 +205,7 @@ def main():
                  "hidden_size": c["hidden_size"], "moe_intermediate_size": c["moe_intermediate_size"], "probes": args.probes},
              "fixture_process_peak_kib": fixture_peak, "allocation": normal, "refusal": refusal,
              "native_threads": {key: os.environ[key] for key in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")}}
-    (args.output / "proof.json").write_text(json.dumps(proof, indent=2))
+    (args.output / "proof.json").write_text(INSERTION_ASCII_INDENT2_LAX.text(proof))
     archive = args.output / "proof.tar.gz"
     with tarfile.open(archive, "w:gz") as target:
         for child in ("allocation", "refusal", "proof.json"):

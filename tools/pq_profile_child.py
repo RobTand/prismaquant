@@ -6,12 +6,11 @@ works while PB's NoNewPrivileges stays enabled. No duration cutoff terminates a
 row: the existing admitted row deadline bounds the whole process tree.
 """
 import argparse
-import json
 from pathlib import Path
 import subprocess
 import sys
 
-from tools.pq_profile_artifact import finish_profile_status, workload_status_path
+from tools.pq_profile_artifact import finish_profile_status, profile_digests, workload_status_path
 
 
 def same_uid_profile_command(executable, command, destination, status):
@@ -31,8 +30,8 @@ def run_profile_workload(command, status):
     workload = subprocess.Popen(command)
     rc = workload.wait()
     with status.open('x') as handle:
-        json.dump({'schema': 'prismaquant.profile_workload_status.v1',
-                   'returncode': rc, 'workload_pid': workload.pid}, handle)
+        profile_digests.INSERTION_ASCII_SPACED_LAX.dump({'schema': 'prismaquant.profile_workload_status.v1',
+                                                       'returncode': rc, 'workload_pid': workload.pid}, handle)
     return rc
 
 

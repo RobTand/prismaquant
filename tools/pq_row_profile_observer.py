@@ -6,10 +6,9 @@ calls, workload launch or row signal. The owner joins this observer after the
 workload. Output never enters a wire, cost row or anchor identity.
 """
 import argparse
-from tools.pq_profile_artifact import file_sha256hex
-from tools.pq_profile_artifact import publish_profile, validate_netdata_window
 from tools.pq_admitted_profile import PROFILE_LOCAL_ROOT
-from tools.pq_profile_artifact import load_profile_source
+from tools.pq_profile_artifact import file_sha256hex, load_profile_source, profile_digests
+from tools.pq_profile_artifact import publish_profile, validate_netdata_window
 import json
 import math
 import os
@@ -59,7 +58,7 @@ telemetry_errors = []
 
 def event(name, **data):
     with lock, (out / 'events.jsonl').open('a') as f:
-        f.write(json.dumps({'epoch': time.time(), 'event': name, **data}) + '\n')
+        f.write(profile_digests.INSERTION_ASCII_SPACED_LAX.text({'epoch': time.time(), 'event': name, **data}) + '\n')
 
 
 def command(args, timeout=10):
@@ -93,8 +92,8 @@ for host in ('sparklina', 'sparky'):
         chart_intervals.append(interval)
     if not required_contexts <= contexts:
         raise RuntimeError('required Netdata contexts missing: ' + host + ': ' + repr(required_contexts - contexts))
-    (out / ('netdata-charts-' + host + '.json')).write_text(json.dumps(
-        {key: info['charts'][key] for key in charts[host]}, indent=2))
+    (out / ('netdata-charts-' + host + '.json')).write_text(profile_digests.INSERTION_ASCII_INDENT2_LAX.text(
+        {key: info['charts'][key] for key in charts[host]}))
 # Include the declared collector cadence, including a short final interval.
 # Netdata's GPU power chart updates every ten seconds on these hosts.
 window_padding = 2 * max(chart_intervals)
@@ -124,8 +123,8 @@ def collect_netdata():
                 data = netdata(host, 'data?' + query)
                 validate_netdata_window(data, after=previous_netdata - window_padding, before=now)
                 with (out / ('netdata-' + host + '.jsonl')).open('a') as f:
-                    f.write(json.dumps({'fetched_epoch': time.time(), 'chart': chart,
-                                       'response': data}) + '\n')
+                    f.write(profile_digests.INSERTION_ASCII_SPACED_LAX.text(
+                        {'fetched_epoch': time.time(), 'chart': chart, 'response': data}) + '\n')
             except Exception as error:
                 telemetry_errors.append(str(error))
                 event('netdata_error', host=host, chart=chart, error=str(error))
@@ -185,8 +184,8 @@ if not collection_ready.wait(60) or telemetry_errors:
     raise RuntimeError('required Netdata initialization failed before readiness')
 event('ready', pyspy_version=version.strip(), initial_power_w=float(first_power),
       target_out=a.target_out, charts=charts, local_profile=str(local_profile))
-(out / 'ready.pending').write_text(json.dumps({'epoch': time.time(), 'target_out': a.target_out,
-    'local_profile': str(local_profile),
+(out / 'ready.pending').write_text(profile_digests.INSERTION_ASCII_SPACED_LAX.text({
+    'epoch': time.time(), 'target_out': a.target_out, 'local_profile': str(local_profile),
     'host': local_host, 'observer_sha256': file_sha256hex(Path(__file__))}))
 (out / 'ready.pending').replace(out / 'ready.json')
 pid = None
@@ -211,8 +210,8 @@ try:
                     os.sched_setaffinity(sampler_tid, affinity)
                     deadline = time.monotonic() + a.row_s + 120
                     event('row_found', pid=pid, affinity=affinity, profile_backend='same_uid_child')
-                    (out / 'target.json').write_text(json.dumps({'pid': pid,
-                        'epoch': time.time(), 'affinity': affinity}))
+                    (out / 'target.json').write_text(profile_digests.INSERTION_ASCII_SPACED_LAX.text(
+                        {'pid': pid, 'epoch': time.time(), 'affinity': affinity}))
                 elif (out / 'workload_done').exists():
                     raise RuntimeError('workload ended without an observed target; profile incomplete')
                 elif now > deadline:
@@ -242,7 +241,7 @@ try:
                         record = {'epoch': epoch, 'pid': pid,
                             'stat': Path('/proc', str(pid), 'stat').read_text(),
                             'io': Path('/proc', str(pid), 'io').read_text()}
-                        proc.write(json.dumps(record) + '\n')
+                        proc.write(profile_digests.INSERTION_ASCII_SPACED_LAX.text(record) + '\n')
                     except Exception as error:
                         telemetry_errors.append(str(error))
                         event('proc_error', pid=pid, error=str(error))

@@ -14,7 +14,7 @@ import platform
 import re
 import socket
 
-from prismaquant.digests import file_sha256hex
+from prismaquant.digests import INSERTION_ASCII_INDENT2_LAX, INSERTION_ASCII_SPACED_LAX, file_sha256hex
 
 
 def own_file(path: Path) -> dict:
@@ -136,13 +136,13 @@ def main() -> None:
               "inputs": inspect_inputs(args.source, args.draw),
               "quality_measured": False, "gpu_d38_approval": False}
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(result, indent=2) + "\n")
-    print(json.dumps({"out": str(args.out), "table_version": result["table"]["table_version"],
-                      "rung_status_counts": result["table"]["status_counts"],
-                      "flag_eligible_rungs": result["table"]["flag_eligible_rungs"],
-                      "profile_kernels": len(result["profile"]["kernels"]),
-                      "weight_shapes": [r["shape"] for r in result["inputs"]["weight_slices"]],
-                      "quality_measured": False}), flush=True)
+    args.out.write_text(INSERTION_ASCII_INDENT2_LAX.text(result) + "\n")
+    print(INSERTION_ASCII_SPACED_LAX.text({"out": str(args.out), "table_version": result["table"]["table_version"],
+                                         "rung_status_counts": result["table"]["status_counts"],
+                                         "flag_eligible_rungs": result["table"]["flag_eligible_rungs"],
+                                         "profile_kernels": len(result["profile"]["kernels"]),
+                                         "weight_shapes": [r["shape"] for r in result["inputs"]["weight_slices"]],
+                                         "quality_measured": False}), flush=True)
 
 
 if __name__ == "__main__":

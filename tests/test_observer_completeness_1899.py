@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.pq_profile_artifact import validate_netdata_window
+from tools.pq_profile_artifact import profile_digest_owner, validate_netdata_window
 
 SOURCE=Path(__file__).resolve().parents[1]/'tools/pq_row_profile_observer.py'
 
@@ -94,7 +94,7 @@ def test_fresh_finite_netdata_is_a_real_positive(tmp_path, partial_null, sample_
            'netdata':lambda *args:payload,
            'event':lambda *a,**kw:None,'out':tmp_path,'telemetry_errors':errors,
            'collection_ready':SimpleNamespace(set=lambda:None),'math':math,'window_padding':padding,
-           'json':__import__('json'),'urllib':__import__('urllib.parse')}
+           'profile_digests':profile_digest_owner(),'urllib':__import__('urllib.parse')}
     exec(compile(ast.fix_missing_locations(ast.Module(body=functions,type_ignores=[])),str(SOURCE),'exec'),space)
     space['collect_netdata']()
     assert not errors, errors
