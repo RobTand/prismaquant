@@ -449,3 +449,19 @@ def test_the_pipelined_selected_path_prices_the_same_bytes_and_identities(
     for key in ("identity_sha256", "envelope_identity", "anchors", "state",
                 "wire_records", "wires", "costs"):
         assert runs["sync"][key] == runs["pipelined"][key], key
+
+
+def test_cell_batch_refuses_missing_activation_input(monkeypatch, tmp_path):
+    def fail_encode(*args, **kwargs):
+        pytest.fail("The batch called the encoder.")
+
+    monkeypatch.setattr(tessera_render, "encode_tessera_units", fail_encode)
+    with pytest.raises(ValueError) as error:
+        cell_measurement.measure_cells(
+            qnames=UNITS, format_name=FMT,
+            weights=[torch.zeros(1, 1, device="cpu") for _ in UNITS],
+            activations=[torch.zeros(1, 1, device="cpu")],
+            cache=None, wire_dir=tmp_path, hessian_required=False,
+        )
+    assert str(error.value) == "anchor batch needs one weight and activation input per unit"
+    assert not list(tmp_path.iterdir())
