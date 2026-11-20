@@ -13,7 +13,9 @@ from types import MappingProxyType
 
 import pytest
 
+from prismaquant import allocator
 from prismaquant.rung_allowability import RungAllowability, RungAllowabilityError
+from prismaquant.tessera_runtime_contract import contract_path
 
 V3FIX = Path(__file__).parent / "fixtures" / "rung_allowability_v3"
 FAMILY = "TESSERA_E4M3_K1"
@@ -278,19 +280,26 @@ def test_final_check_threads_per_unit_scope(monkeypatch):
                                               "columns": 7, "m": 8}})
 
 
-def test_allocator_mtp_uses_the_same_scoped_input(tmp_path, monkeypatch):
-    from prismaquant import allocator, format_registry as registry
+def _allocator_mtp_inputs(tmp_path, payload, *, rate=896, runtime_image=None):
     from test_glm_mtp_selection import _write_payload
     from types import SimpleNamespace
-    payload, owner, unit = _direct_mtp_case(monkeypatch)
-    monkeypatch.setattr(registry, "format_is_producer_eligible", lambda *a, **k: True)
-    target = SimpleNamespace(context=lambda structure: _serving_context(structure))
+
+    target = SimpleNamespace(context=lambda structure: _serving_context(structure, runtime_image))
     profile = SimpleNamespace(structure_spec=lambda: {}, packed_expert_format_group=lambda name: None,
         per_expert_moe_regex=lambda: None, per_expert_mtp_regex=lambda: None)
     cost, constants = _write_payload(tmp_path, payload)
     args = SimpleNamespace(mtp_joint_cost=cost, mtp_byte_budget=501, mtp_serve_constants=constants,
-        mtp_acceptance_points=None, mtp_formats=f"{FAMILY}_R896", mtp_regime=8,
+        mtp_acceptance_points=None, mtp_formats=f"{FAMILY}_R{rate}", mtp_regime=8,
         mtp_tensor_parallel=1, mtp_routing=None)
+    return args, target, profile
+
+
+def test_allocator_mtp_uses_the_same_scoped_input(tmp_path, monkeypatch):
+    from prismaquant import format_registry as registry
+
+    payload, owner, unit = _direct_mtp_case(monkeypatch)
+    monkeypatch.setattr(registry, "format_is_producer_eligible", lambda *a, **k: True)
+    args, target, profile = _allocator_mtp_inputs(tmp_path, payload)
     _, selected = allocator._select_mtp(args, serving_target=target, profile=profile,
         rung_allowability={FAMILY: owner}, target_profile="research")
     assert selected["assignment"] == {unit: f"{FAMILY}_R896"}
@@ -302,10 +311,34 @@ def test_allocator_mtp_uses_the_same_scoped_input(tmp_path, monkeypatch):
     assert refused.value.code == 2
 
 
-def _serving_context(structure):
+def test_allocator_mtp_requires_the_exact_packaged_tessera_contract(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("PRISMAQUANT_TESSERA_DEV_PIN", raising=False)
+    monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "attested")
+    payload, unit = _direct_mtp_payload(
+        1024, unit="model.language_model.layers.45.mlp.shared_experts.gate_proj")
+    fmt = f"{FAMILY}_R1024"
+    payload["costs"][unit] = {fmt: payload["costs"][unit][fmt]}
+    image = ("localhost/prismaquant/spark-vllm-nccl230@sha256:"
+             "5be13705acaecc7b4aaf342a84f80d67844c9970ff8375bf9fbeecc9c98ce84a")
+    args, target, profile = _allocator_mtp_inputs(tmp_path, payload, rate=1024, runtime_image=image)
+    _, selected = allocator._select_mtp(args, serving_target=target, profile=profile,
+        target_profile="research")
+    assert selected["assignment"] == {unit: fmt}
+    assert selected["resident_bytes"] == 500
+
+    changed = tmp_path / "runtime_contract.json"
+    changed.write_bytes(contract_path().read_bytes() + b"\n")
+    monkeypatch.setattr("prismaquant.tessera_runtime_contract.contract_path", lambda: changed)
+    with pytest.raises(SystemExit) as refused:
+        allocator._select_mtp(args, serving_target=target, profile=profile, target_profile="research")
+    assert refused.value.code == 2
+    assert "empty menu" in capsys.readouterr().err
+
+
+def _serving_context(structure, runtime_image=None):
     from prismaquant.lane_eligibility import ServingContext
     return ServingContext(platform="sm_121", structure=structure, residency="resident",
-                          runtime_image="localhost/test@sha256:" + "0" * 64,
+                          runtime_image=runtime_image or "localhost/test@sha256:" + "0" * 64,
                           execution_mode="eager")
 
 
@@ -356,7 +389,6 @@ def test_legacy_producer_needs_only_original_api(tmp_path, monkeypatch):
     import types
     from prismaquant import rung_allowability as consumer
     from prismaquant.lane_eligibility import load_published_formats
-    from prismaquant.tessera_runtime_contract import contract_path
     from _rung_allowability_producer import ExternalProducer
     original = ExternalProducer()
     legacy = types.SimpleNamespace(**{name: getattr(original, name) for name in
@@ -625,11 +657,10 @@ def _mtp_cost_owner(monkeypatch):
     return _mutated(owner, shape)
 
 
-def _direct_mtp_case(monkeypatch, rate=896):
+def _direct_mtp_payload(rate, *, unit=None):
     from test_glm_mtp_selection import _row, _probe, ROUTED, PARAMS
     from canonical_quality_fixtures import scope_for
-    owner = _mtp_cost_owner(monkeypatch)
-    unit = ROUTED[0]
+    unit = unit or ROUTED[0]
     probe = _probe()
     probe.update(calibration_shape=[512, 512], token_scope="all")
     rows = {f"{FAMILY}_R{rung}": _row(unit, f"{FAMILY}_R{rung}", [value] * 4, probe)
@@ -639,6 +670,12 @@ def _direct_mtp_case(monkeypatch, rate=896):
     payload = {"schema": "prismaquant.glm_mtp_cost.v1", "mtp_layer": 45,
         "groups": {"g": [unit]}, "params": {unit: PARAMS}, "source_dtype": {unit: "bfloat16"},
         "costs": {unit: rows}, "wire_bytes": {unit: {f"{FAMILY}_R{rate}": 500}}}
+    return payload, unit
+
+
+def _direct_mtp_case(monkeypatch, rate=896):
+    owner = _mtp_cost_owner(monkeypatch)
+    payload, unit = _direct_mtp_payload(rate)
     return payload, owner, unit
 
 
