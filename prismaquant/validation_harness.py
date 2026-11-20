@@ -216,7 +216,9 @@ def _compute_metrics(
             "PRISMAQUANT_VALIDATION_FAKE_METRICS in lightweight tests"
         ) from exc
 
-    torch_device = _resolve_torch_device(torch, device)
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested for validation but is not available")
+    torch_device = torch.device(device)
     torch_dtype = _torch_dtype(torch, dtype, torch_device)
     assignment = _layer_config_to_assignment(layer_config)
     from .streamed_model_identity import (
@@ -316,12 +318,6 @@ def _compute_metrics(
         "ppl_mmlu_acc": float(ppl_mmlu_acc),
         "end_kl": float(end_kl),
     }
-
-
-def _resolve_torch_device(torch, device: str):
-    if device.startswith("cuda") and not torch.cuda.is_available():
-        raise RuntimeError("CUDA was requested for validation but is not available")
-    return torch.device(device)
 
 
 def _torch_dtype(torch, dtype: str, device) -> Any:
