@@ -118,14 +118,11 @@ def _mtp_payload():
 
 
 @pytest.fixture
-def mtp_case(tmp_path, monkeypatch):
+def mtp_case(tmp_path):
     pytest.importorskip("torch")
     from test_allocator_byte_budget_selection import _fixture
     from test_glm_mtp_selection import PARAMS, _write_payload
 
-    from prismaquant import format_registry
-
-    monkeypatch.setattr(format_registry, "format_is_producer_eligible", lambda name, **_: True)
     draft = {f"{name}.weight": ("BF16", (64, 128)) for name in ROUTED + SHARED}
     assert 64 * 128 == PARAMS
     model_dir, probe_p, cost_p, _stats = _fixture(
@@ -139,8 +136,10 @@ def mtp_case(tmp_path, monkeypatch):
 
 
 def _run_mtp(monkeypatch, case, *extra):
+    from prismaquant import format_registry
     from test_allocator_byte_budget_selection import _run
 
+    monkeypatch.setattr(format_registry, "format_is_producer_eligible", lambda name, **_: True)
     tmp_path, probe_p, cost_p = case[:3]
     selection, layer_cfg = _run(monkeypatch, tmp_path, probe_p, cost_p, disk_gb=1.0,
         fmt_for_target=lambda t: "FP8_E4M3",
@@ -212,15 +211,18 @@ def test_the_budget_stamp_binds_the_assignment_the_file_emits(mtp_case, monkeypa
             == assignment_serialization_sha256(emitted))
 
 
-def test_declared_profile_supplies_mtp_structures_and_routing(mtp_case):
+def test_declared_profile_supplies_mtp_structures_and_routing(mtp_case, monkeypatch):
     from prismaquant import allocator
     from prismaquant.model_profiles import detect_profile
     from prismaquant.tessera_serving_scope import ServingTarget
-    from test_tessera_scope_endpoints import IMAGE
 
+    monkeypatch.delenv("PRISMAQUANT_TESSERA_DEV_PIN", raising=False)
+    monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "attested")
+    image = ("localhost/prismaquant/spark-vllm-nccl230@sha256:"
+             "5be13705acaecc7b4aaf342a84f80d67844c9970ff8375bf9fbeecc9c98ce84a")
     profile = detect_profile(str(mtp_case[0] / "model"))
     assert profile.name == "qwen3"
-    target = ServingTarget("sm_121", IMAGE, "eager", "resident")
+    target = ServingTarget("sm_121", image, "eager", "resident")
     stats, contexts = allocator._mtp_scope_inputs(
         mtp_case[3], target, profile, routing="fixture-routing")
     assert {stats[name]["unit_structure"] for name in ROUTED} == {"routed_moe"}
@@ -229,6 +231,10 @@ def test_declared_profile_supplies_mtp_structures_and_routing(mtp_case):
     assert all("routing" not in stats[name] for name in SHARED)
     assert {name: context.structure for name, context in contexts.items()} == {
         name: row["unit_structure"] for name, row in stats.items()}
+    rung = "TESSERA_E4M3_K1_R1024"
+    assert allocator._mtp_rung_attestation(target, profile)(ROUTED[0], rung)
+    streamed = ServingTarget("sm_121", image, "eager", "streamed")
+    assert not allocator._mtp_rung_attestation(streamed, profile)(ROUTED[0], rung)
 
 
 def test_mtp_card_still_refuses_a_missing_declared_profile(mtp_case, monkeypatch):

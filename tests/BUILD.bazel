@@ -64351,7 +64351,6 @@ pq_py_library(
         "//:prismaquant/layer_config",
         ":test_allocator_byte_budget_selection_lib",
         ":test_glm_mtp_selection_lib_cycle",
-        ":test_tessera_scope_endpoints_lib",
         "@pq_pip//pytest",
     ],
 )
