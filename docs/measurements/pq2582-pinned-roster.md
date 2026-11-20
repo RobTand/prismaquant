@@ -19,4 +19,4 @@ The campaign menu test checks the BF16 activation rule for `kv_b_proj`. Its synt
 
 Use one pytest worker and one native thread. The byte fixture writes four 256 by 256 BF16 weights, 512 KiB of tensor data.
 The scoped export test uses only a synthetic contract and source header. Positive route qualification requires a matching pinned runtime cell and device evidence.
-The lead runs the CPU tests in Flux. Test and mutation results are pending.
+Flux CPU job `f3czuJST9U3` at `9273a0d3f` (gate venv): the six touched test files, 111 passed, exit 0; `tools/ci/static_checks.sh --merge-main` exit 0. Each of the three one-line mutations above made its test fail (1/1, 3/3, 1/1).
