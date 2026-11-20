@@ -451,3 +451,11 @@ def test_the_runtime_execution_and_the_counters_carry_the_kernel_only_when_named
     block = counters.finish(units_done=0, units_total=0)["kda_capture_kernel"]
     assert block["executed"] is False and block["name"] == "kda_gram_v1"
     assert block["scoped_passes"] == 0
+
+
+def test_unqualified_kda_receipt_is_refused(tmp_path, monkeypatch):
+    path = tmp_path / "kda_chunk_qualification.json"
+    path.write_text(json.dumps({"schema": capture.QUALIFICATION_SCHEMA, "status": "pending"}))
+    monkeypatch.setattr(capture, "QUALIFICATION_PATH", path)
+    with pytest.raises(capture.KdaCaptureKernelRefused, match="qualification is not qualified"):
+        capture._qualification()
