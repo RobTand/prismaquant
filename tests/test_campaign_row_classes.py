@@ -468,3 +468,13 @@ def test_the_tracked_table_attests_the_rocm_interpreter_with_a_receipt():
     for tag in ("gb10", "sparky", "sparklina", "gx10-6b77"):
         assert table["tags"][tag]["isa"] == "sm121"
         assert table["tags"][tag]["gpu_runtime"] == "nvidia"
+
+
+def test_container_spec_refuses_a_string_readonly():
+    spec = {"container": {"image": "example:pinned", "mounts": [
+        {"source": "/input", "target": "/data", "readonly": False}]}}
+    container_tool.validate_container(spec)
+    spec["container"]["mounts"][0]["readonly"] = "false"
+    with pytest.raises(RuntimeError) as error:
+        container_tool.validate_container(spec)
+    assert str(error.value) == "container mount readonly must be boolean"
