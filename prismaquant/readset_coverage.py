@@ -159,19 +159,6 @@ def stage_a_prefetch_targets(order: Sequence[int], lookahead: int) -> set[int]:
     return targets
 
 
-def _quantum_head_gaps(record: Mapping, source_plan: Mapping) -> list[dict]:
-    sealed = (record.get("executable_readset") or {}).get("head_source")
-    if sealed is None:
-        return [{"kind": "head-selection-unsealed", "phase": HEAD_PHASE,
-                 "layer": None}]
-    if (sealed.get("tensors") != source_plan["head_tensors"]
-            or sealed.get("layers_prefix") != source_plan["layers_prefix"]):
-        return [{"kind": "head-selection-differs", "phase": HEAD_PHASE,
-                 "layer": None, "sealed_tensors": len(sealed.get("tensors") or []),
-                 "loader_tensors": len(source_plan["head_tensors"])}]
-    return []
-
-
 def quantum_record_gaps(record: Mapping, manifest: Mapping,
                         source_plan: Mapping, *, lookahead: int,
                         order: Sequence[int] | None = None) -> list[dict]:
@@ -190,7 +177,16 @@ def quantum_record_gaps(record: Mapping, manifest: Mapping,
         return (executable_own_source_phase_name(installed) if installed == layer
                 else executable_source_phase_name(installed))
 
-    gaps = _quantum_head_gaps(record, source_plan)
+    gaps = []
+    sealed = (record.get("executable_readset") or {}).get("head_source")
+    if sealed is None:
+        gaps.append({"kind": "head-selection-unsealed", "phase": HEAD_PHASE,
+                     "layer": None})
+    elif (sealed.get("tensors") != source_plan["head_tensors"]
+          or sealed.get("layers_prefix") != source_plan["layers_prefix"]):
+        gaps.append({"kind": "head-selection-differs", "phase": HEAD_PHASE,
+                     "layer": None, "sealed_tensors": len(sealed.get("tensors") or []),
+                     "loader_tensors": len(source_plan["head_tensors"])})
     gaps += source_read_gaps(manifest, source_plan, order=order,
                              prefetch_targets=quantum_prefetch_targets(order, lookahead),
                              phase_of=phase_of)
