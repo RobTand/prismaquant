@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -20,6 +19,7 @@ sys.path.insert(0, str(_TOOLS_ROOT))
 from prismaquant_source_bootstrap import activate_prismaquant_source
 
 activate_prismaquant_source()
+from prismaquant import digests
 
 try:  # package mode (`python -m tools.measure_vllm_full_kl`)
     from .gold_engine_options import (
@@ -146,7 +146,7 @@ def _load_wikitext_calibration(
             "source": "text_file",
             "path": str(text_file),
             "bytes": len(raw),
-            "corpus_sha256": hashlib.sha256(raw).hexdigest(),
+            "corpus_sha256": digests.bytes_sha256hex(raw),
         }
     else:
         from datasets import load_dataset
@@ -164,7 +164,7 @@ def _load_wikitext_calibration(
             "source": "datasets",
             "cache_dir": str(cache_dir),
             "bytes": len(text.encode("utf-8")),
-            "corpus_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "corpus_sha256": digests.text_sha256hex(text),
             "datasets_fingerprint": getattr(ds, "_fingerprint", None),
         }
     ids = tokenizer(
