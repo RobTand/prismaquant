@@ -294,17 +294,6 @@ def _substitute_decoder_notes(
     return notes
 
 
-def _performance_stack_differences(
-    left: Mapping[str, Any] | None,
-    right: Mapping[str, Any] | None,
-) -> list[str]:
-    if left is None or right is None:
-        return []
-    a = performance_stack_payload(left)
-    b = performance_stack_payload(right)
-    return sorted(key for key in set(a) | set(b) if a.get(key) != b.get(key))
-
-
 def _recorded_population(payload: Mapping[str, Any], metric: str) -> dict | None:
     """The recorded population and metric settings, excluding arm identity."""
     fields = ["schema", "n_samples", "seqlen", "spec_decode_detected"]
@@ -432,7 +421,10 @@ def compare(
                      "unrecorded equivalence is not established.")
 
     if pa and pb and pa != pb:
-        differing = _performance_stack_differences(ma, mb)
+        stack_a = performance_stack_payload(ma)
+        stack_b = performance_stack_payload(mb)
+        differing = sorted(key for key in set(stack_a) | set(stack_b)
+                           if stack_a.get(key) != stack_b.get(key))
         lines.append("")
         lines.append(f"performance_stack_fingerprint {label_a}: {pa[:16]}")
         lines.append(f"performance_stack_fingerprint {label_b}: {pb[:16]}")
