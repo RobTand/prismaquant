@@ -23,3 +23,5 @@ It also covered `test_tessera_census_cache.py`, `test_tessera_export_lane.py`, `
 | Missing or mismatched original wire receipts | COVERED | Tests cover missing receipts and files, unmeasured rows, wrong sizes, and changed bytes, including same-size substitutions. |
 | Source and recipe identity mismatches | COVERED | Intake refuses mismatched source and encoder hashes, recipe ranks, and receipt names. |
 | BF16 passthrough and the independent GLM source-precision pin | COVERED | Tests read the BF16 shard names, types, and values. GLM preflight preserves source precision and refuses low-bit vision. |
+
+Flux CPU job `f3ceCsa3gCf` on `36bb06619`: the five vision test files, 92 passed, exit 0; `tools/ci/static_checks.sh --merge-main` exit 0 (graph impact: new edges 0). The new test alone (job `f3cfRZPub8b`): 4 passed (two synthetic profiles, BF16 and NVFP4).
