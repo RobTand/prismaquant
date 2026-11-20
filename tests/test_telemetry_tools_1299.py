@@ -177,6 +177,21 @@ def test_unit_journal_memory_sample_is_unchanged(tmp_path, monkeypatch, stat_tex
         GOLDEN.value(new)
 
 
+def test_unit_journal_spy_counts_only_main_thread_samples(tmp_path):
+    from tools import unit_journal_bench as bench
+
+    profile = tmp_path / "profile.raw"
+    profile.write_text(
+        "thread (1): MainThread;publish (journal.py:10);atomic_write_bytes (io.py:20) 4\n"
+        "thread (1): MainThread;atomic_write_bytes (io.py:20) 2\n"
+        "thread (1): MainThread;unknown (journal.py:30) 3\n"
+        "thread (2): Worker;atomic_write_bytes (io.py:20) 50\n"
+    )
+    result = bench._spy_main(profile)
+    assert result["samples"] == 9
+    assert result["by_function"] == {"atomic_write_bytes": 6, "other": 3}
+
+
 def test_memcg_peaks_reads_the_same_fields(tmp_path):
     from tools.staged_exact_read_bench import MemcgPeaks
 
