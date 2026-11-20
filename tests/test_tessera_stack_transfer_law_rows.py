@@ -75,7 +75,7 @@ PLANTED = {832: {"w1": (1.05, 1.30), "w3": (0.95, 1.45)},
            1088: {"w1": (0.96, -1.20), "w3": (1.04, -1.35)}}
 
 
-def _stack(module, *, offset, anchors):
+def _stack(module, *, offset, anchors, **plan):
     """One two-tier stack: a 960 census, plus 832/1088 on the law draw only."""
     h = [1.0 + 0.3 * expert for expert in range(EXPERTS)]
     reference = {}
@@ -99,7 +99,7 @@ def _stack(module, *, offset, anchors):
         f"{module}.gate_up_proj", _probe_row(module, h), _profile(),
         sampled_experts=range(EXPERTS),
         inclusion_prob={e: 1.0 for e in range(EXPERTS)}, seed=11,
-        design="census", transfer_law_experts=LAW_EXPERTS)
+        design="census", transfer_law_experts=LAW_EXPERTS, **plan)
     return sample, reference
 
 
@@ -257,7 +257,8 @@ def test_completed_target_replaces_prediction_and_keeps_reference(completed):
     anchors = {}
     samples = {}
     for module, offset in ((MODULE_A, 0.0), (MODULE_B, 1.4)):
-        sample, _ = _stack(module, offset=offset, anchors=anchors)
+        sample, _ = _stack(module, offset=offset, anchors=anchors,
+                           reference_q256=REFERENCE)
         samples[sample.packed_qname] = sample
     before = _payload(anchors, samples)
     completed_key = f"TESSERA_E2M1_K1_R{completed}"
