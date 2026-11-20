@@ -19,6 +19,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import torch
 from safetensors.torch import save_file
 
@@ -302,3 +303,17 @@ class TestAllocatorVisualEndToEnd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_visual_discovery_refuses_conflicting_shard_shapes(tmp_path):
+    name = "model.visual.blocks.0.attn.qkv"
+    weight = f"{name}.weight"
+    save_file({weight: torch.zeros(4, 2)}, str(tmp_path / "first.safetensors"))
+    stats = discover_visual_linear_stats_from_source(str(tmp_path))
+    assert stats[name]["out_features"] == 4
+    assert stats[name]["in_features"] == 2
+
+    save_file({weight: torch.zeros(6, 2)}, str(tmp_path / "second.safetensors"))
+    with pytest.raises(RuntimeError) as exc:
+        discover_visual_linear_stats_from_source(str(tmp_path))
+    assert name in str(exc.value)
