@@ -221,6 +221,19 @@ def test_vendored_qwen3_rope_matches_upstream_on_cpu():
     torch.testing.assert_close(vendored_sin, upstream_sin, rtol=0, atol=0)
 
 
+def test_vendored_qwen3_requires_exactly_one_input():
+    from prismaquant.vendored.transformers_qwen3 import Qwen3ForCausalLM
+
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(0)
+        model = Qwen3ForCausalLM(_tiny_qwen3_config()).model
+    both = {"input_ids": torch.tensor([[1]]), "inputs_embeds": torch.zeros(1, 1, model.config.hidden_size)}
+    model.layers[0].register_forward_pre_hook(lambda *_: pytest.fail("The decoder layer must not run."))
+    for kwargs in ({}, both):
+        with pytest.raises(ValueError, match="exactly one of input_ids or inputs_embeds"):
+            model(**kwargs)
+
+
 def test_vendored_qwen3_model_refreshes_invalid_rope_cache():
     from prismaquant.vendored.transformers_qwen3 import Qwen3ForCausalLM
 
