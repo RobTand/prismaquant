@@ -103,3 +103,10 @@ def test_dense_prices_the_shared_window_but_invalid_structure_refuses():
     assert _payload(structure="dense") == _payload(structure="routed_moe")
     with pytest.raises(TesseraFormatError, match="structure"):
         _payload(structure="stacked")
+
+
+def test_footprint_reader_refuses_three_dimensions():
+    footprint = dict(_payload(), shape=[*SHAPE, 2])
+    with pytest.raises(TesseraFormatError) as exc:
+        validate_tessera_tensor_payload_breakdown(footprint)
+    assert str(exc.value) == "footprint shape must be a two-element sequence"
