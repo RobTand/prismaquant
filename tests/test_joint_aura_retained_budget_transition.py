@@ -137,6 +137,19 @@ def sealed(tmp_path, monkeypatch):
             "prepared_plan": prepared_plan, "run_plan": run_plan, "prepared": prepared}
 
 
+def test_retained_budget_cli_writes_receipt_and_reports_its_digest(sealed, tmp_path, capsys):
+    output = tmp_path / "cli-receipt.json"
+    bindings = sealed["bindings"]
+    argv = ["--output", str(output)]
+    for name, binding in bindings.items():
+        option = "--" + name.replace("_", "-")
+        argv.extend([option, binding["path"], f"{option}-sha256", binding["sha256"]])
+
+    assert transition.main(argv) == 0
+    assert json.loads(output.read_bytes())["inputs"] == bindings
+    assert json.loads(capsys.readouterr().out) == {"path": str(output), "sha256": file_sha256hex(output)}
+
+
 # ---------------------------------------------------------------- the key set
 
 def test_the_enumerated_key_set_is_the_whole_retained_budget_and_nothing_else():
