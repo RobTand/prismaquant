@@ -155,3 +155,14 @@ def test_cli_registration_persists_authoritative_settings_and_truthful_model_sco
     assert saved["model_identity_scope"] == (
         "local_content" if local_model else "remote_identifier")
     assert saved == output["eval_meta"]
+
+
+def test_registry_comparison_refuses_a_missing_baseline_id(tmp_path):
+    registry = _registry(tmp_path, _settings(), _settings())
+    assert registry.compare("candidate", "baseline")["pass"] is True
+    before = registry.path.read_bytes()
+    with pytest.raises(KeyError) as exc:
+        registry.compare("candidate", "absent")
+
+    assert exc.value.args == ("artifact record not found: absent",)
+    assert registry.path.read_bytes() == before
