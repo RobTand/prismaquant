@@ -193,22 +193,11 @@ def package_digest(root: Path, unshipped: list[str] | None = None):
     return tree_digest(root, _package_skip(unshipped or []))
 
 
-def _is_git_repository(path: Path) -> bool:
-    """A worktree or a bare repository; the shared mirror is the latter.
-
-    ``(path / ".git").exists()`` was the earlier test and it refuses a bare
-    repository, which is the only form that can live on the shared mount for
-    every worker to archive from -- and no fleet worker but the one that made
-    it has a Tessera worktree.
-    """
-    done = subprocess.run(
-        ["git", "--no-optional-locks", "-C", str(path), "rev-parse",
-         "--git-dir"], capture_output=True, text=True)
-    return done.returncode == 0
-
-
 def _archive_into(commit: str, clone: Path, dest: Path) -> None:
-    if not _is_git_repository(clone):
+    done = subprocess.run(
+        ["git", "--no-optional-locks", "-C", str(clone), "rev-parse",
+         "--git-dir"], capture_output=True, text=True)
+    if done.returncode != 0:
         raise SystemExit(f"{clone} is not a Tessera clone; pass --clone")
     dest.mkdir(parents=True, exist_ok=True)
     archive = subprocess.run(
