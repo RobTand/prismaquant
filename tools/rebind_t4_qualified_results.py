@@ -30,7 +30,7 @@ import argparse
 import json
 from pathlib import Path
 
-from prismaquant.digests import DIRECT_ASCII_LAX, bytes_sha256hex
+from prismaquant.digests import DIRECT_ASCII_LAX, INSERTION_ASCII_SPACED_LAX, bytes_sha256hex
 
 SCHEMA = 'prismaquant.t4_qualified_rebinding.v1'
 
@@ -151,8 +151,8 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open('xb') as handle:
         handle.write(raw)
-    print(json.dumps({'path': str(out), 'sha256': bytes_sha256hex(raw), 'rows': len(rows),
-                      'anchor_changed': sum(r['cell_sha256'] != r['previous_cell_sha256'] for r in rows)}),
+    print(INSERTION_ASCII_SPACED_LAX.text({'path': str(out), 'sha256': bytes_sha256hex(raw), 'rows': len(rows),
+                                          'anchor_changed': sum(r['cell_sha256'] != r['previous_cell_sha256'] for r in rows)}),
           flush=True)
 
 

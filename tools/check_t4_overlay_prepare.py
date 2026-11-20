@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex  # noqa: E402
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX, INSERTION_ASCII_SPACED_LAX, bytes_sha256hex  # noqa: E402
 
 
 def bound_json(binding):
@@ -97,7 +97,7 @@ def main():
     plan = bound_json(inputs['extended_plan'])
     refuse_model_reads(plan['model'])
     evidence = verify_catalog_pair(inputs)
-    print(json.dumps({'step': 'verify_catalog_pair', 's': round(time.monotonic() - started, 1)}), flush=True)
+    print(INSERTION_ASCII_SPACED_LAX.text({'step': 'verify_catalog_pair', 's': round(time.monotonic() - started, 1)}), flush=True)
     data = load_measured_anchor_input(plan['inputs'], verify_payloads=False, require_existing_renders=True,
                                       historical_encoder_reuse=plan.get('historical_encoder_reuse'))
     catalog = bound_json(plan['inputs']['candidate_overlay'])
@@ -108,8 +108,8 @@ def main():
         if pair in catalog_pairs:
             added_by_format[pair[1]] += 1
     added = sum(added_by_format.values())
-    print(json.dumps({'step': 'load_measured_anchor_input', 'cells': len(data.cells), 'added': added,
-                      's': round(time.monotonic() - started, 1)}), flush=True)
+    print(INSERTION_ASCII_SPACED_LAX.text({'step': 'load_measured_anchor_input', 'cells': len(data.cells),
+                                          'added': added, 's': round(time.monotonic() - started, 1)}), flush=True)
     completion = bound_json(inputs['extended_prepared'])
     raw = Path(completion['production_cache']['path']).read_bytes()
     assert bytes_sha256hex(raw) == completion['production_cache']['sha256'], 'qualified PWC'
@@ -130,7 +130,7 @@ def main():
         handle.write(raw)
         handle.flush()
         os.fsync(handle.fileno())
-    print(json.dumps({**result, 'result': {'path': str(out), 'sha256': bytes_sha256hex(raw)}}), flush=True)
+    print(INSERTION_ASCII_SPACED_LAX.text({**result, 'result': {'path': str(out), 'sha256': bytes_sha256hex(raw)}}), flush=True)
 
 
 if __name__ == '__main__':

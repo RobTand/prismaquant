@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prismaquant.cost_stage_checkpoint import _load_unit, canonical_json_sha256, unit_path
 from prismaquant.joint_aura import activation_identity
 from prismaquant import format_registry as fr
-from prismaquant.digests import DIRECT_ASCII_LAX, bytes_sha256hex
+from prismaquant.digests import DIRECT_ASCII_LAX, INSERTION_ASCII_SPACED_LAX, bytes_sha256hex
 from prismaquant.joint_catalog_extension import (
     CATALOG_SCHEMA_V1, CATALOG_SCHEMA_V2, R13_ADDED_FORMAT, added_format_recipes, catalog_sources, catalog_stat_fence,
     catalog_view)
@@ -322,9 +322,9 @@ def main():
     with out.open('xb') as handle:
         handle.write(raw)
     counts = {fmt: sum(1 for cell in cells if cell['format'] == fmt) for fmt in formats}
-    print(json.dumps({'path': str(out), 'sha256': sha(raw), 'schema': catalog['schema'], 'cells': len(cells),
-                      'cells_by_format': counts, 'carried_from': carried_from,
-                      'seconds': time.monotonic() - started, 'status': catalog['status']}), flush=True)
+    print(INSERTION_ASCII_SPACED_LAX.text({'path': str(out), 'sha256': sha(raw), 'schema': catalog['schema'],
+                                          'cells': len(cells), 'cells_by_format': counts, 'carried_from': carried_from,
+                                          'seconds': time.monotonic() - started, 'status': catalog['status']}), flush=True)
 
 
 if __name__ == '__main__':
