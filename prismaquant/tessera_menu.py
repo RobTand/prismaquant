@@ -339,12 +339,6 @@ def _tessera_attestation_source(contract) -> str:
     return f"{_TESSERA_ATTESTATION_SOURCE}:{contract.commit[:12]}"
 
 
-def _packaged_attestation_source(table) -> str:
-    """The packaged contract's provenance string, stamped with its release."""
-    version = getattr(table, "runtime_version", "") or "unknown"
-    return f"{_PACKAGED_ATTESTATION_SOURCE}:{version}"
-
-
 def tessera_runtime_contract():
     """The pinned Tessera contract, or ``None``.  **The one read.**
 
@@ -732,7 +726,8 @@ def _route_admission(
                     f" under serving context {serving_context.as_dict()}"
                 )
     else:
-        source = _packaged_attestation_source(runtime)
+        version = getattr(runtime, "runtime_version", "") or "unknown"
+        source = f"{_PACKAGED_ATTESTATION_SOURCE}:{version}"
         readable = _rate_is_readable(rung, runtime.reader_rate_range(family.name))
         requires_context = runtime.requires_serving_context
         verdict = snapshot_rung_admission(name, runtime, serving_context=serving_context)
