@@ -147,3 +147,11 @@ def test_certified_fixture_replay_ignores_unrelated_card_json(replay_case):
     config, result, _ = replay_case
     Path(config["backend"]["tokenizer"], "shipcard.json").write_text(json.dumps({"status": "updated"}))
     assert verify_result(result, config, config_sha256="a" * 64)["status"] == "passed"
+
+
+def test_task_replay_refuses_an_unsupported_criterion_operator(replay_case):
+    config, result, _ = replay_case
+    config["criteria"][0]["op"] = "eq"
+    with pytest.raises(ValueError) as exc_info:
+        verify_result(result, config, config_sha256="a" * 64)
+    assert str(exc_info.value) == "criterion metric or operator is invalid"
