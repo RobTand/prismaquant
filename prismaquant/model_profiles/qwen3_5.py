@@ -284,19 +284,6 @@ class Qwen3_5Profile(ModelProfile):
 # as `read_mtp_source_state_dict()` / `load_mtp_state_dict()`.
 # ---------------------------------------------------------------------------
 
-def _build_single_layer_config(text_config):
-    """Return a `Qwen3_5MoeTextConfig` (or compatible) with exactly one
-    decoder layer of type 'full_attention'. This matches vLLM's MTP:
-    one full-attention decoder block per MTP step.
-
-    `copy.deepcopy` is used so the body's config is untouched and
-    gradient checkpointing state on the original model doesn't leak."""
-    cfg = copy.deepcopy(text_config)
-    cfg.layer_types = ["full_attention"]
-    cfg.num_hidden_layers = 1
-    return cfg
-
-
 class MtpModule(nn.Module):
     """Mirrors `vllm.model_executor.models.qwen3_5_mtp.Qwen3_5MultiTokenPredictor`
     but built on HF primitives so Fisher hooks and autograd work normally.
@@ -312,7 +299,9 @@ class MtpModule(nn.Module):
 
     def __init__(self, text_config):
         super().__init__()
-        mtp_cfg = _build_single_layer_config(text_config)
+        mtp_cfg = copy.deepcopy(text_config)
+        mtp_cfg.layer_types = ["full_attention"]
+        mtp_cfg.num_hidden_layers = 1
         hidden = mtp_cfg.hidden_size
         eps = mtp_cfg.rms_norm_eps
 
