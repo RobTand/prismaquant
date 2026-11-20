@@ -17,6 +17,5 @@ In Tessera `graph_receipt.py`, replace `for arm in eager + graph:` with
 The graph mutation returns a verdict refusal instead of a population refusal.
 The eager mutation accepts the receipt.
 
-The lead must run the baseline and mutation checks in Flux with pinned Tessera.
 Require zero skipped nodes. Use one CPU worker and a 1 GiB memory budget.
-The test and mutation results are pending. These checks require no GPU or model checkpoint.
+Flux CPU job `f3cxPmN6GwH` at `678b915a5` (gate venv, pinned Tessera e89757b9): 74 passed, 0 skipped, both `[graph]` and `[eager]` PASSED; `tools/ci/static_checks.sh --merge-main` exit 0. The two mutations are confirmed by reading `graph_receipt.py:131-143` of the pinned package, not by a run: they would edit the installed package. No GPU or model checkpoint is needed.
