@@ -27179,10 +27179,10 @@ Two properties make the numbers comparable with the rest of the menu:
   family over every OTHER two-tier stack (`fit_stack_transfer_law`,
   leave-one-stack-out, which is the hold-out every reported number in the
   study was fitted under) and `_stack_cost_rows` predicts the missing rungs
-  from each expert's own censused reference value. A family with fewer than
-  two two-tier stacks, more than one censused rung, or a refused fit gets no
-  law, and its unmeasured rungs stay in `non_interpolable` rather than being
-  estimated from a partial draw.
+  from each expert's own censused reference value. A plan can pin that rung
+  with `reference_q256`. Completed targets keep their draw in peer fits.
+  Older plans require exactly one census rung. Without a valid reference,
+  an eligible peer, and a valid fit, unmeasured rungs stay in `non_interpolable`.
 
   A predicted row carries `PROVENANCE_INTERPOLATED`,
   `cost_source: tessera_campaign_interpolated` and a `transfer_law` block

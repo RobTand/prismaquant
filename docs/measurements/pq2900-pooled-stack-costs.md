@@ -29,3 +29,12 @@ The former dispatcher route is MOOT. `bc0f1420c` removed its only live caller of
 The journal test supplies the sample plan and synthetic member wire records. It checks journal integrity and cost construction.
 Live selective refresh still needs an explicit reference in the producer plan. Main supplies no W1 reference field in `StackExpertSample`.
 Production wire validation and joint intake need an authenticated campaign artifact. See architecture debt D35 and D36.
+
+## Explicit reference follow-up
+
+Criteria 1–3 have CPU coverage for pooled pricing and refresh. The stack plan can bind `reference_q256` in the journal identity.
+The refit keeps completed targets in peer fits. Older records still require exactly one census rung.
+Criterion 4 has CPU accounting and journal coverage. Live cross-row refresh and authenticated joint intake remain open.
+Criterion 5 has CPU cases for resume, old records, and byte equality. Flux verdicts and the dense digest from main are pending.
+The inventory found the defect in 0 of 28 readable tables. Four tables were dense. One named table was absent.
+The 14 checkpoints without `cost.pkl` list zero packed units. The live campaign has no two-tier plan generator.
