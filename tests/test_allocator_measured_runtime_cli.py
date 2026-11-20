@@ -62,6 +62,16 @@ def test_expansion_promotion_and_auxiliary_drift_refuse(assignment):
             slos=ServeSLOs(p95_ttft_ms=5), table_identity={})
 
 
+def test_measured_assignment_requires_resources_for_the_selected_row():
+    with pytest.raises(ServeConstraintError, match=r"measured runtime row is missing: .*qkv.*mixed"):
+        evaluate_measured_assignment(
+            {"q": "A", "k": "B"},
+            option_assignments={("qkv", "mixed"): {"q": "A", "k": "B"}},
+            resources={("qkv", "uniform"): _resources()},
+            fixed_assignment={}, fixed_resources=_resources(),
+            slos=ServeSLOs(p95_ttft_ms=5), table_identity={})
+
+
 @pytest.mark.parametrize("options,diagnostic", [
     (["--serve-dispatch-table", "old.json"], "mutually exclusive"),
     (["--serve-workload-mix", "prefill:a=1"], "mutually exclusive"),
