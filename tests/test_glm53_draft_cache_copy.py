@@ -81,3 +81,12 @@ def test_nested_revalidation_preserves_restored_provenance():
 def test_candidate_refuses_an_unrelated_or_already_edited_runtime():
     with pytest.raises(ValueError, match="not the base image"):
         patch.patched_source(b"unrelated serving runtime")
+
+
+def test_draft_cache_copy_refuses_a_repeated_loader_anchor(monkeypatch):
+    from hashlib import sha256
+
+    raw = (patch.ANCHOR + patch.OLD_COPY + "\n" + patch.ANCHOR).encode("utf-8")
+    monkeypatch.setattr(patch, "BASE_SHA256", sha256(raw).hexdigest())
+    with pytest.raises(ValueError, match="expected exactly one draft dtype copy and load_eagle_model"):
+        patch.patched_source(raw)
