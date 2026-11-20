@@ -119,3 +119,13 @@ def test_dual_interval_handles_equal_charge_dominance_and_unbounded_high():
         stats, same_charge, {"unit": "DOMINATED"}, bit_precision=1.0
     )["unit"]
     assert interval.is_empty
+
+
+def test_dual_interval_refuses_zero_bit_precision():
+    stats, candidates = _menu()
+    assignment = {"unit": "K_SELECTED"}
+    with pytest.raises(ValueError) as exc_info:
+        selected_rung_dual_intervals(
+            stats, candidates, assignment, bit_precision=0.0
+        )
+    assert str(exc_info.value) == "bit_precision must be positive"
