@@ -163,11 +163,6 @@ def owned_builtin_graph(root: dict) -> Iterator[dict]:
         _dispose_owned_containers(containers)
 
 
-def _publish_aura_unit_snapshot(writer, *, name, state, max_bytes, encoded_bytes):
-    writer.publish(qname=name, state=state, max_bytes=max_bytes,
-                   on_encoded_bytes=encoded_bytes.add)
-
-
 class CheckpointPublicationLedger:
     """Bounded measured/submitted/durable state; all methods run on consumer."""
 
@@ -235,9 +230,8 @@ class CheckpointPublicationLedger:
         containers = _owned_mutable_containers(owned)
         return PublicationJob(
             name, self._slot,
-            partial(_publish_aura_unit_snapshot,
-                    self._writer, name=name, state=owned,
-                    max_bytes=self._slot // 4, encoded_bytes=self._encoded_bytes),
+            partial(self._writer.publish, qname=name, state=owned,
+                    max_bytes=self._slot // 4, on_encoded_bytes=self._encoded_bytes.add),
             dispose=partial(_dispose_owned_containers, containers))
 
     def submit(self, name: str, state_factory: Callable[[int], Mapping]) -> bool:
