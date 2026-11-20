@@ -526,15 +526,6 @@ UNIT_RUNGS_SCHEMA = "prismaquant.tessera_expert_unit_rungs.v1"
 _RESOLVE_INSTALLED_CAPABILITY = object()
 
 
-def _routed_unit_capability_refusal(stack: str, distinct: list[str],
-                                    first_unit: str) -> str:
-    return (
-        f"{stack}: first mixed unit {first_unit}; selected rungs differ "
-        f"across the stack {distinct}; planning per-unit rungs requires the Tessera "
-        "runtime contract v57 with producer_interface.routed_units "
-        "(tessera.routed-unit-assignment.v1)")
-
-
 def require_unit_assignment(selected: Mapping[str, str], stack_of: Mapping[str, str],
                             units: Mapping[str, Mapping[str, Any]], *,
                             capability: Any = _RESOLVE_INSTALLED_CAPABILITY,
@@ -584,7 +575,11 @@ def require_unit_assignment(selected: Mapping[str, str], stack_of: Mapping[str, 
         ordered = sorted(members)
         reference = members[ordered[0]]
         first_unit = next((name for name in ordered if members[name] != reference), ordered[0])
-        refusal = _routed_unit_capability_refusal(stack, distinct, first_unit)
+        refusal = (
+            f"{stack}: first mixed unit {first_unit}; selected rungs differ "
+            f"across the stack {distinct}; planning per-unit rungs requires the Tessera "
+            "runtime contract v57 with producer_interface.routed_units "
+            "(tessera.routed-unit-assignment.v1)")
         if capability is _RESOLVE_INSTALLED_CAPABILITY:
             from .tessera_runtime_contract import packaged_routed_unit_capability
             try:
