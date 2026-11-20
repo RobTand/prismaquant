@@ -328,3 +328,11 @@ def test_routing_syncs_the_host_once_not_once_per_expert():
             assert len(sites) >= num_experts, sites  # the instrument sees the old loop
         else:
             assert len(sites) <= ceiling, sites
+
+
+def test_nested_expert_name_resolves_to_its_moe_parent():
+    model = nn.ModuleDict({
+        "mlp": nn.ModuleDict({"experts": nn.ModuleList([nn.Identity()])}),
+    })
+    parent = routed_experts.packed_experts_parent_module(model, "mlp.experts.0")
+    assert parent is model["mlp"]
