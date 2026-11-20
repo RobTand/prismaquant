@@ -275,3 +275,10 @@ def test_gb10_qdq_rows_and_grouped_graph(tmp_path, monkeypatch, family, intermed
             print("GB10_GRAPH " + json.dumps(dict(family=family, capture=True)))
         finally:
             cache.remove()
+
+
+def test_mxfp8_weight_requires_a_feature_dimension():
+    spec = fr.get_format("MXFP8_E4M3")
+    with pytest.raises(ValueError) as error:
+        spec.quantize_dequantize(torch.tensor(1.0))
+    assert str(error.value) == "MXFP8_E4M3 requires at least one tensor dimension"
