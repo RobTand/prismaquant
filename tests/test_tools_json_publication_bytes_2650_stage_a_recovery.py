@@ -35,7 +35,7 @@ PRIOR = {"prefetch-override-r7.json": b'{"prefetch": 1}\n', "stage-a-spec-r7.jso
          "stage-a-dispatch-config.json": b'{"dispatch": {}}\n'}
 
 
-def _setup(root, mp, campaign=CAMPAIGN):
+def _setup(root, mp, campaign=CAMPAIGN, *, validate_manifest=False):
     mp.chdir(root)
     Path("prior").mkdir()
     for name, raw in PRIOR.items():
@@ -52,7 +52,8 @@ def _setup(root, mp, campaign=CAMPAIGN):
     mp.setattr(tool, "_read", lambda path, sha: ({"frontier": 3}, None))
     mp.setattr(tool, "load_original", lambda path, campaign, plan: ({"original": True}, DROPPED))
     mp.setattr(tool, "recovery_manifest", lambda original, capsule, bound: MANIFEST)
-    mp.setattr("prismaquant.data_manifest_contract.check_manifest_v2", lambda manifest: None)
+    if not validate_manifest:
+        mp.setattr("prismaquant.data_manifest_contract.check_manifest_v2", lambda manifest: None)
     mp.setattr("prismaquant.stage_a_produced_output.validate_declaration", lambda template: None)
 
 
@@ -115,6 +116,39 @@ def test_stage_a_recovery_refusal_leaves_no_package(tmp_path, monkeypatch):
     assert str(refusal.value) == "launcher fields differ from the declared set: missing ['run'], unexpected []"
     assert refusal.value.__cause__ is None
     assert not Path("out").exists()
+
+
+def test_recovery_manifest_v2_rejects_repeats_within_one_phase(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch, validate_manifest=True)
+    manifest = {
+        "schema": "prismaquant.prismabuild.data_manifest.v2",
+        "produced_by": {},
+        "annotations": {},
+        "mount_prefix": "/fixture",
+        "entries": [{"path": "/fixture/input", "offset": 0, "bytes": 3,
+                     "sha256": hashlib.sha256(b"abc").hexdigest()}],
+        "entry_count": 1,
+        "total_bytes": 3,
+        "read_plan": {
+            "phases": [
+                {"name": "head", "entry_indices": [0], "bytes": 3, "cumulative_bytes": 3},
+                {"name": "recover", "entry_indices": [0, 0], "bytes": 6, "cumulative_bytes": 9},
+            ],
+            "read_bytes": 9,
+        },
+    }
+    monkeypatch.setattr(tool, "recovery_manifest", lambda original, capsule, bound: manifest)
+    monkeypatch.setattr(tool, "render_launcher", lambda *a, **k: "launcher\n")
+    with pytest.raises(RuntimeError, match="invalid or repeated phase entry index"):
+        tool.main()
+    assert not Path("out").exists()
+
+    plan = manifest["read_plan"]
+    plan["phases"][1].update(entry_indices=[0], bytes=3, cumulative_bytes=6)
+    plan["read_bytes"] = 6
+    tool.main()
+    wire = (Path("out/pkg") / tool.MANIFEST_NAME).read_bytes()
+    assert json.loads(gzip.decompress(wire)) == manifest
 
 
 def test_stage_a_recovery_profile_calls(tmp_path, monkeypatch, capsysbinary):
