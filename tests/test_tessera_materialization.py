@@ -4,8 +4,10 @@ import copy
 import hashlib
 import json
 import pickle
+from pathlib import Path
 from types import SimpleNamespace
 
+import prismaquant
 import pytest
 import torch
 
@@ -20,8 +22,69 @@ from prismaquant import tessera_lane
 from prismaquant import tessera_campaign as tc
 from prismaquant import tessera_expert_projection as tep
 from prismaquant.layer_config import canonicalize_assignment, load_assignment
+from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 from test_tessera_packed_export_scope import _pack
 from test_tessera_export_projection import case, _units, FMT, STACK, N, DENSE
+from test_tessera_stack_sample_cost import _packed_probe_row
+
+
+# Fill these SHA-256 digests from main in Flux.
+EXPECTED_DIGESTS = {
+    "solo": "076406db7e7941289c5811e489938521078cc24d495dc195f3dce1e5f296a6f0",
+    "peers": "7cbc9dc4cca161f42d14b685d10d7acc620f7289424c6e36db69b932c3e187f7",
+    "lfm-TESSERA_BF16_K1_R256": "ad24604f470e2689ec7383ea2357a25f315fc32f96c4a7df014f3de3854b9dad",
+    "lfm-TESSERA_BF16_K1_R1142": "5996dc3b744c375dc24b77352bdcef82f820d766564649676c3c8fe1e5a84503",
+    "lfm-TESSERA_BF16_K1_R2027": "4a326a64b02fe1abd04946b64db504028cfaebec23ec4fb0837175c778084a5e",
+    "lfm-TESSERA_E2M1_K1_R256": "0ecf58fddbc49644870893c8fe79f91ab79ad07c0d45ab5e55d0e65e3b7ac53c",
+    "lfm-TESSERA_E2M1_K1_R512": "8823e9d1f492d2ce25b3073bab8b8cb43963cd70388396ba86658f6ede0d03ef",
+}
+
+
+def _cost_table_digest(case_id):
+    profile = Lfm2MoeProfile()
+    anchors, samples = {}, {}
+    if case_id.startswith("lfm-"):
+        fmt = case_id.removeprefix("lfm-")
+        fixture = Path(__file__).parent / "fixtures" / "tessera_stack_lfm_layer18.json"
+        data = json.loads(fixture.read_text())
+        for packed, probe in data["packed_probe_rows"].items():
+            experts = range(probe["num_experts"])
+            samples[packed] = campaign_table.stack_sample_from_probe(
+                packed, probe, profile, sampled_experts=experts,
+                inclusion_prob=dict.fromkeys(experts, 1.0), seed=1, design="census")
+        for name, rows in data["member_anchors"].items():
+            row = next(row for row in rows if row["format_name"] == fmt)
+            anchors[name] = {row["family"]: [campaign_table.CampaignAnchor(qname=name, **row)]}
+    else:
+        family = "TESSERA_E2M1_K1"
+        for layer in range(1 if case_id == "solo" else 2):
+            module = f"model.layers.{layer}.feed_forward.experts"
+            packed = f"{module}.down_proj"
+            probe = _packed_probe_row(4, [1.0] * 4, packed_param="down_proj")
+            probe["_packed_experts_module"] = module
+            draw = (0, 1, 2)
+            samples[packed] = campaign_table.stack_sample_from_probe(
+                packed, probe, profile, sampled_experts=range(4),
+                inclusion_prob=dict.fromkeys(range(4), 1.0), seed=3, design="census",
+                transfer_law_experts=draw)
+            for expert, (name,) in samples[packed].members.items():
+                reference = 2.0 ** (expert - 8)
+                points = [(960, reference)]
+                if expert in draw:
+                    points.extend(((832, 2 * reference), (1088, 0.5 * reference)))
+                anchors[name] = {family: [
+                    campaign_table.CampaignAnchor(
+                        name, family, f"{family}_R{rate}", rate, loss, 0.0,
+                        1024, 4.0, "bfloat16", False, 1100, 1.0)
+                    for rate, loss in points]}
+    payload = campaign_table.campaign_cost_payload(
+        anchors, {}, loo={}, provenance={}, stack_samples=samples)
+    return hashlib.sha256(prismaquant.digests.canonical_pickle_bytes(payload)).hexdigest()
+
+
+@pytest.mark.parametrize("case_id", EXPECTED_DIGESTS)
+def test_one_census_rung_matches_main_cost_pickle(case_id):
+    assert _cost_table_digest(case_id) == EXPECTED_DIGESTS[case_id]
 
 
 @pytest.fixture
@@ -325,7 +388,6 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
         from prismaquant import tessera_calibration_cache as cc
         census = json.loads(s.census.read_text())
         from test_tessera_calibration_cache import canonical_fields
-        import prismaquant
         census.update(canonical_fields())
         s.census.write_text(json.dumps(census))
         monkeypatch.setattr(prismaquant,'pretrained_initialization_contract',lambda model:canonical_fields()['model_load_contract'])
@@ -464,8 +526,6 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
     cost = pickle.loads(cost_path.read_bytes())
     # The existing CPU bridge fixture replaces only the hessian-status report.
     cost['provenance']['hessian']['recipe'] = th.encoder_recipe()
-    from test_tessera_stack_sample_cost import _packed_probe_row
-    from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
     profile = Lfm2MoeProfile()
     population = campaign._require_campaign_population(model, profile, 1)
     samples = {}
@@ -511,7 +571,6 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
     metadata = json.loads(output.read_text())['__prismaquant__']
     assert metadata[tep.EXPERT_WIRES_KEY][missing] == original_record
     assert load_assignment(output) == assignment
-    from pathlib import Path
     from safetensors import safe_open
     shapes = {}
     for shard in Path(argv[1]).glob('*.safetensors'):
