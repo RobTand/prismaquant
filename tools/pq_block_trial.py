@@ -53,7 +53,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from prismaquant.digests import bytes_sha256hex, canonical_json_sha256, file_sha256hex  # noqa: E402
+from prismaquant.digests import INSERTION_ASCII_SPACED_LAX, bytes_sha256hex, canonical_json_sha256, file_sha256hex  # noqa: E402
 from prismaquant.qnames import DOTTED_LAYER_QNAME  # noqa: E402
 from prismaquant.io_engine import load_file  # noqa: E402
 from prismaquant.residency_map import bind_residency_manifest, residency_report  # noqa: E402
@@ -759,9 +759,9 @@ def run_preflight(args) -> int:
     }
     path = output / "preflight.json"
     write_trial_json(path, result)
-    print(json.dumps({"preflight": True, "out": str(path),
-                      "missing": sorted(missing),
-                      "sha256": file_sha256hex(path, block_size=1 << 20)}), flush=True)
+    print(INSERTION_ASCII_SPACED_LAX.text({"preflight": True, "out": str(path),
+                                         "missing": sorted(missing),
+                                         "sha256": file_sha256hex(path, block_size=1 << 20)}), flush=True)
     return 0
 
 
@@ -875,10 +875,10 @@ def run_encode(args) -> int:
     }
     path = output / "encode-result.json"
     write_trial_json(path, record)
-    print(json.dumps({"encode": True, "out": str(path),
-                      "bank": record["bank"]["path"],
-                      "parents": len(result["parents"]),
-                      "sha256": file_sha256hex(path, block_size=1 << 20)}), flush=True)
+    print(INSERTION_ASCII_SPACED_LAX.text({"encode": True, "out": str(path),
+                                         "bank": record["bank"]["path"],
+                                         "parents": len(result["parents"]),
+                                         "sha256": file_sha256hex(path, block_size=1 << 20)}), flush=True)
     return 0
 
 
@@ -1242,7 +1242,7 @@ def run_score(args) -> int:
     }
     result_path = output / "result.json"
     write_trial_json(result_path, result)
-    print(json.dumps({
+    print(INSERTION_ASCII_SPACED_LAX.text({
         "score": True, "out": str(result_path),
         "geometry": f"{primary_rb}x{primary_cb}",
         "heldout_reduction": evaluation["heldout_reduction"],

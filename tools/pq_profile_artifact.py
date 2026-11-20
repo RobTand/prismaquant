@@ -39,14 +39,14 @@ def load_profile_source(owner_name: str, path: Path) -> ModuleType:
 
 
 def profile_digest_owner():
-    path = Path(__file__).resolve().parents[1] / 'prismaquant/digests.py'
-    return load_profile_source('pq_profile_shared_digest_owner', path)
+    return load_profile_source('pq_profile_shared_digest_owner', _SOURCE_ROOT / 'prismaquant/digests.py')
 
 
-bytes_sha256hex = profile_digest_owner().bytes_sha256hex
-file_sha256hex = profile_digest_owner().file_sha256hex
-canonical_json_sha256 = profile_digest_owner().canonical_json_sha256
-canonical_json_bytes = profile_digest_owner().canonical_json_bytes
+profile_digests = profile_digest_owner()
+bytes_sha256hex = profile_digests.bytes_sha256hex
+file_sha256hex = profile_digests.file_sha256hex
+canonical_json_sha256 = profile_digests.canonical_json_sha256
+canonical_json_bytes = profile_digests.canonical_json_bytes
 
 
 _STATUS_SCHEMA = 'prismaquant.profile_workload_status.v1'
@@ -78,7 +78,7 @@ def finish_profile_status(profile, profiler_returncode):
     status = workload_status_path(profile)
     partial = status.with_name(status.name + '.finalizing')
     with partial.open('x') as handle:
-        json.dump(record, handle)
+        profile_digests.INSERTION_ASCII_SPACED_LAX.dump(record, handle)
     partial.replace(status)
     return record
 

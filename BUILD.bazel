@@ -269,9 +269,6 @@ pq_py_library(
         "prismaquant/digests.py",
         "tools/pq_profile_artifact.py",
     ],
-    deps = [
-        ":prismaquant/digests",
-    ],
 )
 
 pq_py_library(
