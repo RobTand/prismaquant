@@ -475,8 +475,32 @@ def test_native_mapping_owner_parser_refuses_substitution(runtime_layout, monkey
         raw += f'3000-4000 r-xp 00000000 {device} {info.st_ino} {extra}\n'.encode()
         assert set(real()) == {str(library), str(extra)}
         return
-    with pytest.raises(ValueError, match='unsupported|replaced'):
+    with pytest.raises(ValueError, match='unsupported|replaced') as error:
         real()
+    if mutation in {'wrong-device', 'wrong-inode'}:
+        mapped_device, mapped_inode = raw.decode().split()[3:5]
+        stat_device = f'{os.major(known.st_dev):02x}:{os.minor(known.st_dev):02x}'
+        assert str(error.value) == (
+            f'native runtime mapped library replaced: {library.resolve()}; '
+            f'map device={mapped_device} inode={mapped_inode}; '
+            f'stat device={stat_device} inode={known.st_ino}; mount device={device}')
+
+
+def test_native_mapping_mismatch_reports_distinct_mount_device(tmp_path, monkeypatch):
+    library = (tmp_path / 'library.so').resolve()
+    library.touch()
+    info = library.stat()
+    major, minor = os.major(info.st_dev), os.minor(info.st_dev)
+    mount = iter([(major + 1, 0xab)])
+    monkeypatch.setattr(nr, '_mount_device', lambda path: next(mount))
+    raw = f'1000-2000 r-xp 00000000 {major + 1:02x}:ab {info.st_ino + 1} {library}\n'.encode()
+    monkeypatch.setattr(nr, 'open', lambda *args: io.BytesIO(raw), raising=False)
+    with pytest.raises(ValueError) as error:
+        nr._runtime_libraries()
+    assert str(error.value) == (
+        f'native runtime mapped library replaced: {library}; '
+        f'map device={major + 1:02x}:ab inode={info.st_ino + 1}; '
+        f'stat device={major:02x}:{minor:02x} inode={info.st_ino}; mount device={major + 1:02x}:ab')
 
 
 def test_editable_path_injection_is_not_a_complete_distribution_owner(runtime_layout):

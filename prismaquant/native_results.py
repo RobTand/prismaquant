@@ -286,8 +286,13 @@ def _runtime_libraries():
             raise ValueError('native runtime unsupported mapped implementation owner')
         path = _runtime_path(filename)
         info = os.stat(path)
-        if (*_mount_device(path), info.st_ino) != (*(int(v, 16) for v in device.split(':')), int(inode)):
-            raise ValueError(f'native runtime mapped library replaced: {path}')
+        major, minor = _mount_device(path)
+        if (major, minor, info.st_ino) != (*(int(v, 16) for v in device.split(':')), int(inode)):
+            raise ValueError(
+                f'native runtime mapped library replaced: {path}; '
+                f'map device={device} inode={inode}; '
+                f'stat device={os.major(info.st_dev):02x}:{os.minor(info.st_dev):02x} inode={info.st_ino}; '
+                f'mount device={major:02x}:{minor:02x}')
         libraries[path] = file_stat_signature(info)[:4]
     if not libraries or len(libraries) > MAX_RUNTIME_ENTRIES:
         raise ValueError('native runtime requires finite mapped libraries')
