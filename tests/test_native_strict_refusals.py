@@ -125,3 +125,31 @@ def test_immutable_reader_has_no_configured_wait():
     from prismaquant import residency_shard_reader as reader
     assert not hasattr(reader, 'STAGED_RANGE_WAIT_S')
     assert not hasattr(reader, 'staged_range_wait_s')
+
+
+def test_sealed_original_file_requires_a_staged_binding(tmp_path, monkeypatch):
+    from prismaquant.staged_whole_file import read_staged_sealed_file
+
+    path = tmp_path / 'original.bin'
+    payload = b'sealed original'
+    path.write_bytes(payload)
+    digest = sha(payload)
+    receipt = {}
+    assert active_policy() is None
+    with monkeypatch.context() as child:
+        opened = _forbid_source(child, path)
+        with pytest.raises(TierPolicyRefused) as caught:
+            read_staged_sealed_file(path, digest, len(payload), label='original-material',
+                                    delivery_receipt=receipt)
+    assert str(caught.value) == f'staged-tier-forbidden: original-material-not-staged: {path}'
+    assert opened == []
+    assert receipt == {}
+
+    bind(monkeypatch, publish_inputs(tmp_path, [path]))
+    path.unlink()
+    sealed = read_staged_sealed_file(path, digest, len(payload), label='original-material')
+    try:
+        sealed.require_sealed()
+        assert bytes(sealed) == payload
+    finally:
+        sealed.close()
