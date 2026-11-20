@@ -153,6 +153,16 @@ def test_native_execution_mismatch_refuses_publication(controlled, tmp_path):
     assert not Path(plan['output']).exists()
 
 
+def test_forward_evidence_refuses_cpu_proof_from_another_model(tmp_path):
+    evidence = fixture_plan(tmp_path)['forward_equivalence']
+    evidence['cpu_reproduction'] = bound(tmp_path/'cpu_reproduction.json', dict(
+        schema='prismaquant.glm_kda_source_cpu_reproduction.v1',
+        source=dict(modeling_source_sha256='0' * 64),
+    ))
+    with pytest.raises(ValueError, match='CPU source evidence differs'):
+        compatibility._forward_and_graph(evidence, {})
+
+
 @pytest.mark.parametrize('available,initialized', [(True, False), (False, True)])
 def test_cpu_gate_refuses_available_or_initialized_cuda(monkeypatch, available, initialized):
     monkeypatch.setattr(torch.cuda, 'is_available', lambda: available)
