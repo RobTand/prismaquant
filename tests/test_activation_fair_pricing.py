@@ -606,3 +606,17 @@ def test_branch_label_is_derivable_without_a_calibration_object():
     assert cost_entry_activation_pricing_branch(
         stats, _weight_only_row(0.0), "BF16", None
     ) == BRANCH_ACTIVATION_IDENTITY
+
+
+def test_unknown_activation_format_uses_uncalibrated_pricing():
+    fit = calibrate(
+        [
+            CalibrationRow("a", "NVFP4", "nv", 4.0, 1.0),
+            CalibrationRow("b", "NVFP4", "nv", 4.0, 1.0),
+        ],
+        measured_rows_by_family={"nv": 2},
+        weight_only_rows_by_family={"nv": 1},
+        enabled=True,
+    )
+    assert fit.penalty_for("NVFP4", True) == (4.0, BRANCH_CALIBRATED)
+    assert fit.penalty_for("unknown-format", True) == (1.0, BRANCH_UNCALIBRATED)
