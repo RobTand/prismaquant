@@ -136,3 +136,26 @@ def test_synthetic_cpu_main_retains_explicit_uniform_and_text_only_controls(
     assert attribution["n_body_linears"] == len(body)
     assert attribution["body_quantizable_params"] == sum(
         entry["n_params"] for entry in body.values())
+
+
+@pytest.mark.parametrize("visual_format", ["BF16", "NVFP4"])
+def test_body_plan_is_the_same_with_and_without_vision(
+        synthetic_cpu_inputs, monkeypatch, visual_format):
+    # PQ #2575 criterion 6: visual rows stay outside the body DP.
+    case = synthetic_cpu_inputs
+    _set_cli_option(monkeypatch, "--visual-format", visual_format)
+    allocator.main()
+    with_vision = load_assignment(case.output)
+    probe = copy.deepcopy(case.probe)
+    cost = pickle.loads(case.cost_path.read_bytes())
+    for name in case.visuals:
+        del probe["stats"][name]
+        del cost["costs"][name]
+    _write_pickle(case.probe_path, probe)
+    _write_pickle(case.cost_path, cost)
+    allocator.main()
+    without_vision = load_assignment(case.output)
+    body = set(case.probe["stats"]) - set(case.visuals)
+    assert {name: with_vision[name] for name in body} == {
+        name: without_vision[name] for name in body}
+    assert all(with_vision[name] == visual_format for name in case.visuals)

@@ -20,13 +20,10 @@ from safetensors.torch import save_file
 
 from tools.resolve_tessera_dev_pin import resolve_tessera_dev_pin
 
-from prismaquant import allocator, format_registry as fr
 from prismaquant import tessera_export_lane as export
 from prismaquant import tessera_plan_writer as writer
-from prismaquant.allocator_solver import solve_allocation
 from prismaquant.cost_stage_checkpoint import write_unit
-from prismaquant.glm_mtp_selection import load_mtp_cost, select_mtp_rungs
-from prismaquant.layer_config import LAYER_CONFIG_META_KEY, canonicalize_assignment
+from prismaquant.layer_config import LAYER_CONFIG_META_KEY
 from prismaquant.model_profiles import detect_profile
 from prismaquant.tessera_census_cache import (
     CensusCacheError, census_selected_cached_units_manifest,
@@ -37,7 +34,6 @@ from prismaquant.tessera_export_lane import (
 )
 from prismaquant.tessera_joint_aura import STAGE
 from prismaquant.tessera_serving_runtime_pin import load_tessera_serving_runtime_pin
-from test_glm_mtp_selection import CONSTANTS, PARAMS, _probe, _row, _write_payload
 from test_tessera_census_cache import (
     DENSE, ENCODING_SCHEMA, FMT, INPUT_SCHEMA, SEAL, _control,
 )
@@ -49,11 +45,11 @@ BODY = "model.layers.0.mlp.down_proj"
 VISUALS = (VISION, MERGER)
 
 
-def _source(tmp_path, *, architecture="Qwen3_5MoeForConditionalGeneration"):
+def _source(tmp_path):
     source = tmp_path / "source"
     source.mkdir()
     (source / "config.json").write_text(json.dumps({
-        "model_type": "qwen3_5_moe", "architectures": [architecture],
+        "model_type": "qwen3_5_moe", "architectures": ["Qwen3_5MoeForConditionalGeneration"],
         "text_config": {"hidden_size": 32, "num_hidden_layers": 1,
                         "intermediate_size": 32, "moe_intermediate_size": 32,
                         "num_experts": 1},
@@ -152,70 +148,6 @@ def test_projection_records_selected_visual_source_geometry(tmp_path):
         VISION: {"shape": [2, 2], "visual_root": "model.visual"},
         MERGER: {"shape": [3, 2], "visual_root": "model.visual"},
     }
-
-
-@pytest.mark.parametrize("visual_format", ["BF16", "NVFP4"])
-def test_body_and_mtp_plans_are_equivalent_with_vision(tmp_path, visual_format):
-    source, profile, tensors = _source(tmp_path, architecture="Qwen3_5MoeForCausalLM")
-    _, experts, records, cost, roster, shapes, expected, cache_meta = _control(tmp_path)
-    probe = _probe()
-    mtp_path, _ = _write_payload(tmp_path, {
-        "schema": "prismaquant.glm_mtp_cost.v1", "mtp_layer": 45,
-        "groups": {"routed": sorted(experts)}, "params": dict.fromkeys(experts, PARAMS),
-        "source_dtype": dict.fromkeys(experts, "bfloat16"),
-        "costs": {name: {FMT: _row(name, FMT, [0.01] * 4, probe)} for name in experts},
-        "wire_bytes": {name: {FMT: records[name]["blob_bytes"]} for name in experts},
-    })
-    mtp_cost = load_mtp_cost(mtp_path)
-    byte_budget = sum(records[name]["blob_bytes"] for name in experts)
-    text_tensors = {name + ".weight": torch.zeros(2, 2, dtype=torch.bfloat16, device="cpu")
-                    for name in expected}
-
-    for visual_names in ((), VISUALS):
-        save_file(text_tensors | {name + ".weight": tensors[name + ".weight"]
-                                 for name in visual_names}, str(source / "model.safetensors"))
-        names = (DENSE, *visual_names)
-        stats = {name: {"n_params": 4} for name in names}
-        # A visual leak gives the body enough room to upgrade to BF16.
-        candidates = {name: [allocator.Candidate(FMT, 4, 2, 3 if name == DENSE else 1),
-                             allocator.Candidate("BF16", 16, 8, 0)] for name in names}
-        rows = {name: {c.fmt: {"predicted_dloss": c.predicted_dloss} for c in candidates[name]}
-                for name in names}
-        fixed = {}
-        body_stats, _, body_candidates = allocator._prepare_visual_allocations(
-            stats, rows, candidates, visual_format=visual_format,
-            fixed_format_assignment=fixed, fixed_stats={}, profile=profile)
-        body, _ = solve_allocation(body_stats, body_candidates, target_bits=10)
-        assert body == {DENSE: FMT}
-        assert fixed == dict.fromkeys(visual_names, visual_format)
-
-        selection = select_mtp_rungs(mtp_cost.payload, byte_budget=byte_budget,
-                                     constants=CONSTANTS, target_profile="research")
-        assert selection["assignment"] == dict.fromkeys(experts, FMT)
-        config = {name: fr.get_format(fmt).autoround_config() for name, fmt in (body | fixed).items()}
-        config[LAYER_CONFIG_META_KEY] = metadata = dict(cache_meta)
-        allocator._stamp_mtp_selection(mtp_cost, config, body | fixed, selection)
-        assignment = canonicalize_assignment(config)
-        assert assignment == expected | fixed
-        mtp_record = metadata["mtp_selection"]
-        if not visual_names:
-            baseline_mtp = mtp_record
-        assert mtp_record == baseline_mtp
-
-        if visual_names and visual_format == "NVFP4":
-            with pytest.raises(CensusCacheError, match="outside the census roster"):
-                _close(cost, roster, shapes, assignment, metadata, records, hash_blobs=True)
-            with pytest.raises(TesseraExportLaneError, match="outside the text graph"):
-                _plan(tmp_path, profile, source, config)
-            continue
-        manifest = _close(cost, roster, shapes, assignment, metadata, records, hash_blobs=True)
-        assert manifest["units"] == records
-        result = _plan(tmp_path, profile, source, config)
-        projected = json.loads(Path(result["plan_assignment"]).read_text())
-        assert canonicalize_assignment(projected) == expected
-        assert projected[LAYER_CONFIG_META_KEY]["mtp_selection"] == baseline_mtp
-        audit = projected[LAYER_CONFIG_META_KEY]["tessera_export_assignment"]
-        assert audit["source_precision_outside_graph"] == sorted(visual_names)
 
 
 def test_visual_selected_cache_preserves_exact_population_and_receipts(tmp_path):

@@ -13,7 +13,7 @@ It also covered `test_tessera_census_cache.py`, `test_tessera_export_lane.py`, `
 | 3. Record each canonical source name and profile root with a pinned serving cell or explicit refusal. | PARTLY | The roster and export audit cover names and roots. Per-entry audit coverage still needs a serving cell or refusal for each entry. |
 | 4. Match each emitted vision name to a pinned cell or refuse export. | PARTLY | Tests cover BF16 shard names and explicit refusal. The pinned-cell check for emitted low-bit vision names remains open. |
 | 5. Refuse incomplete or invalid rows and wire proof. | COVERED | The cache checks the exact unit set and original wire receipts. The #2809 refusal cases cover invalid inputs. |
-| 6. Keep the body and MTP plans equivalent with vision off and on. | COVERED | `test_body_and_mtp_plans_are_equivalent_with_vision` fails if a visual row leaks into the body DP, and checks the selected cache and BF16 export projection. The MTP selection inputs do not depend on vision by construction; the test checks that the stamped MTP record is unchanged. The NVFP4 case checks allocation and both refusals. |
+| 6. Keep the body and MTP plans equivalent with vision off and on. | COVERED (body) | `tests/test_vision_alloc_failclosed_1921.py::test_body_plan_is_the_same_with_and_without_vision` runs `allocator.main` with the visual rows (VISUAL_FORMAT BF16 and NVFP4) and without them, and checks that every body Linear gets the same format. The MTP selection inputs do not depend on vision by construction. The export projection of body names is covered by `test_checkpoint_body_names_survive_export_projection`. |
 
 | #2809 item | Verdict | Evidence |
 | --- | --- | --- |
@@ -23,6 +23,3 @@ It also covered `test_tessera_census_cache.py`, `test_tessera_export_lane.py`, `
 | Missing or mismatched original wire receipts | COVERED | Tests cover missing receipts and files, unmeasured rows, wrong sizes, and changed bytes, including same-size substitutions. |
 | Source and recipe identity mismatches | COVERED | Intake refuses mismatched source and encoder hashes, recipe ranks, and receipt names. |
 | BF16 passthrough and the independent GLM source-precision pin | COVERED | Tests read the BF16 shard names, types, and values. GLM preflight preserves source precision and refuses low-bit vision. |
-
-Flux CPU job `f3ca75ZAyQ3` on `21ae2ee9d` ran the new equivalence test (BF16 and NVFP4) with the vision,
-visual-allocator, MTP-selection, census-cache, export-lane, graph-impact and Bazel build-file tests: 321 passed, exit 0.
