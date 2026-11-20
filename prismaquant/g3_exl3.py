@@ -113,8 +113,7 @@ def pack_wire(suh: bytes, svh: bytes, trellis: bytes, mcg: bytes) -> bytes:
     return bytes(suh) + bytes(svh) + bytes(trellis) + bytes(mcg)
 
 
-def decode_wire(blob: bytes, in_features: int, out_features: int, device="cpu",
-                expect_mcg: int | None = None) -> torch.Tensor:
+def decode_wire(blob: bytes, in_features: int, out_features: int, device="cpu") -> torch.Tensor:
     """Decode a framed wire to the [out, in] weight (fp32).  Refuses a wire of the wrong length."""
     n_suh, n_svh = 2 * in_features, 2 * out_features
     n_tr = 2 * in_features * out_features * K_BITS // 16
@@ -125,7 +124,4 @@ def decode_wire(blob: bytes, in_features: int, out_features: int, device="cpu",
     svh = buf[n_suh:n_suh + n_svh].view(torch.float16)
     tr = buf[n_suh + n_svh:n_suh + n_svh + n_tr].view(torch.int16).reshape(
         in_features // TILE, out_features // TILE, 256 * K_BITS // 16)
-    stored_mcg = int(buf[-4:].view(torch.int32)[0]) & 0xFFFFFFFF
-    if expect_mcg is not None and stored_mcg != expect_mcg:
-        raise ValueError(f"stored mcg 0x{stored_mcg:08X} != expected 0x{expect_mcg:08X}")
     return effective_weight(tr.to(device), suh.to(device), svh.to(device))
