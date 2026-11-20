@@ -18,7 +18,7 @@ import pytest
 
 from prismaquant.decision_units import block_id_from_qname
 from prismaquant.model_profiles.qwen3 import Qwen3Profile
-from prismaquant.name_projection import NameProjection
+from prismaquant.name_projection import CHECKPOINT, LIVE, NameProjection, NameProjectionError
 
 
 # --------------------------------------------------------------- block id
@@ -75,3 +75,18 @@ def test_projection_seam_carries_no_tp_degree():
     assert not hasattr(NameProjection(Qwen3Profile()), "tp_degree")
     with pytest.raises(TypeError):
         NameProjection(Qwen3Profile(), tp_degree=8)  # type: ignore[call-arg]
+
+
+def test_live_to_source_refuses_a_missing_profile_name(monkeypatch):
+    profile = Qwen3Profile()
+    monkeypatch.setattr(profile, "source_tensor_name", lambda name: None)
+    projection = NameProjection(profile)
+    name = "model.layers.0.mlp.down_proj.weight"
+    with pytest.raises(NameProjectionError) as caught:
+        projection.live_to_source(name)
+    error = caught.value
+    assert error.code == "malformed_profile_result"
+    assert error.name == name
+    assert error.source_namespace == LIVE
+    assert error.target_namespace == CHECKPOINT
+    assert error.tried == ("ModelProfile.source_tensor_name",)
