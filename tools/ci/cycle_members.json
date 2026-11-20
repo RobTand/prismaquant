@@ -49,6 +49,7 @@
     "//tests:test_tl3_harness_table_lib",
     "//tests:test_tools_hash_routing_1680_lib",
     "//tests:test_umbrella_acceptance_2768_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "experiments/exl3_replay_cli.py"
    ],
    "target": "//:experiments/diagnose_exl3_grouped_down_replay_cycle",
@@ -103,6 +104,7 @@
     "//tests:test_tl3_harness_table_lib",
     "//tests:test_tools_hash_routing_1680_lib",
     "//tests:test_umbrella_acceptance_2768_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "experiments/diagnose_exl3_grouped_down_replay.py"
    ],
    "target": "//:experiments/diagnose_exl3_grouped_down_replay_cycle",
@@ -174,6 +176,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/per_row_pricing.py",
     "prismaquant/priced_cell.py"
@@ -356,6 +359,7 @@
     "//tests:test_visual_allocator_roots_1921_lib",
     "//tests:test_visual_allocator_units_1936_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/prefill_frontier.py"
    ],
    "target": "//:prismaquant/allocator_cycle",
@@ -502,6 +506,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/decision_units.py",
     "prismaquant/export_native_compressed.py",
     "prismaquant/glm_mtp_selection.py",
@@ -624,6 +629,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/footprint.py",
     "prismaquant/kl_measurement.py",
@@ -699,6 +705,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/artifact_collection_legacy.py"
    ],
    "target": "//:prismaquant/artifact_collection_cycle",
@@ -765,6 +772,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/artifact_collection.py"
    ],
    "target": "//:prismaquant/artifact_collection_cycle",
@@ -857,6 +865,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_cost.py",
     "prismaquant/joint_aura_retained_budget_transition.py",
     "prismaquant/joint_aura_run_transition.py",
@@ -996,6 +1005,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/glm_mtp_quantum.py",
     "prismaquant/joint_adjoint_checkpoints.py",
     "prismaquant/joint_aura_retained_budget_transition.py",
@@ -1103,6 +1113,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_statistics_replay.py",
     "prismaquant/layer_streaming.py",
     "prismaquant/streaming_model.py",
@@ -1196,6 +1207,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/decision_units.py",
     "prismaquant/kl_measurement.py",
     "prismaquant/perturbed_x_cache.py",
@@ -1273,6 +1285,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_campaign.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -1359,6 +1372,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_aura_rows.py",
     "prismaquant/joint_price_step.py",
     "prismaquant/tessera_full_domain_acquisition.py"
@@ -1512,6 +1526,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_cost.py",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_joint_aura.py"
@@ -1594,6 +1609,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/name_projection.py",
     "prismaquant/production_weight_cache.py",
     "prismaquant/streaming_production_cache.py"
@@ -1666,6 +1682,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/production_weight_cache.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -1733,6 +1750,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/native_render_codec.py",
     "prismaquant/production_weight_cache.py"
    ],
@@ -1799,6 +1817,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/serving_profiles.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -1933,6 +1952,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_visual_export_profile_roots_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/production_weight_cache.py",
     "prismaquant/routed_experts.py",
     "prismaquant/serving_profiles.py",
@@ -2032,6 +2052,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
     "//tests:test_whole_artifact_budget_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/export_native_compressed.py",
     "prismaquant/kl_measurement.py",
@@ -2334,6 +2355,7 @@
     "//tests:test_validator_bpp_population_audit_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/activation_fair_pricing.py",
     "prismaquant/allocator_candidates.py",
     "prismaquant/allocator_solver.py",
@@ -2438,6 +2460,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/runtime_provenance.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -2504,6 +2527,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/quality_stage.py"
    ],
    "target": "//:prismaquant/g3_v2_cycle",
@@ -2575,6 +2599,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_joint_aura.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -2645,6 +2670,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/cost_currency.py",
     "prismaquant/glm_mtp_capture.py",
     "prismaquant/glm_mtp_quantum.py",
@@ -2721,6 +2747,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/glm_mtp_quantum.py",
     "prismaquant/tessera_campaign.py"
    ],
@@ -2788,6 +2815,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_joint_aura.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -2864,6 +2892,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_export_lane.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -2938,6 +2967,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/stage_a_chain_resume.py",
     "prismaquant/stage_a_retirement.py"
    ],
@@ -3086,6 +3116,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/capture_layer_chain.py",
     "prismaquant/glm_mtp_capture.py",
     "prismaquant/joint_adjoint_band.py",
@@ -3243,6 +3274,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/aura_cost.py",
     "prismaquant/glm_capture_compatibility.py",
@@ -3317,6 +3349,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_aura_transitions.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -3444,6 +3477,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/aura_cost.py",
     "prismaquant/cost_currency.py",
@@ -3524,6 +3558,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_aura_retained_budget_transition.py",
     "prismaquant/joint_aura_transitions.py"
    ],
@@ -3595,6 +3630,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_aura_retained_budget_transition.py",
     "prismaquant/joint_aura_run_transition.py",
     "prismaquant/joint_aura_transitions.py"
@@ -3664,6 +3700,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_cost.py",
     "prismaquant/joint_aura_retained_budget_transition.py",
     "prismaquant/joint_aura_run_transition.py",
@@ -3764,6 +3801,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_layer_quanta.py",
     "prismaquant/joint_stageb_resources.py",
     "prismaquant/tessera_export_lane.py",
@@ -3836,6 +3874,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_forward_resume.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -3912,6 +3951,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/cost_streaming.py",
     "prismaquant/joint_adjoint_band.py",
     "prismaquant/joint_forward_campaign.py",
@@ -3980,6 +4020,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_adjoint_checkpoints.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -4095,6 +4136,7 @@
     "//tests:test_uncovered_spans_1643_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_catalog_extension.py",
     "prismaquant/joint_stageb_resources.py",
     "prismaquant/stage_b_prep_io.py"
@@ -4166,6 +4208,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_cost.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -4258,6 +4301,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_adjoint_checkpoints.py",
     "prismaquant/joint_layer_quanta.py",
     "prismaquant/perturbed_x_cache.py"
@@ -4336,6 +4380,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/glm_mtp_quantum.py",
     "prismaquant/joint_aura.py",
     "prismaquant/joint_catalog_extension.py",
@@ -4421,6 +4466,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_catalog_extension.py",
     "prismaquant/streamed_boundary_artifacts.py"
    ],
@@ -4494,6 +4540,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_stageb_resources.py",
     "prismaquant/joint_statistics_replay.py"
    ],
@@ -4580,6 +4627,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_cost.py",
     "prismaquant/glm_mtp_quantum.py",
     "prismaquant/joint_aura.py",
@@ -4655,6 +4703,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/perturbed_x_cache.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -4739,6 +4788,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/validate_assignments_kl.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -4853,6 +4903,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/measured_runtime_prices.py",
     "prismaquant/rung_allowability.py",
@@ -4960,6 +5011,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/allocator_solver.py",
     "prismaquant/cost_currency.py",
@@ -5133,6 +5185,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/autoscale.py",
     "prismaquant/cost_streaming.py",
     "prismaquant/export_native_compressed.py",
@@ -5251,6 +5304,7 @@
     "//tests:test_unrouted_expert_weight_only_rows_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/emu_forward_kl.py",
     "prismaquant/export_native_compressed.py",
     "prismaquant/nvfp4_activation_contract.py",
@@ -5357,6 +5411,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_solver.py",
     "prismaquant/full_engine_resource_report.py",
     "prismaquant/native_runtime_cohort.py",
@@ -5733,6 +5788,7 @@
     "//tests:test_visual_shard_coverage_lib",
     "//tests:test_visual_walk_scope_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/allocator_solver.py",
     "prismaquant/aura_cost.py",
@@ -5858,6 +5914,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/export_native_compressed.py",
     "prismaquant/joint_forward_resume.py",
     "prismaquant/layer_streaming.py",
@@ -5964,6 +6021,7 @@
     "//tests:test_unrouted_expert_weight_only_rows_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/__init__.py",
     "prismaquant/model_profiles/registry.py"
    ],
@@ -6054,6 +6112,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/__init__.py",
     "prismaquant/model_profiles/registry.py"
    ],
@@ -6132,6 +6191,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_visual_export_profile_roots_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/__init__.py",
     "prismaquant/model_profiles/registry.py"
    ],
@@ -6241,6 +6301,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/glm_capture_compatibility.py",
     "prismaquant/model_profiles/registry.py"
    ],
@@ -6310,6 +6371,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/__init__.py",
     "prismaquant/model_profiles/registry.py"
    ],
@@ -6379,6 +6441,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/__init__.py",
     "prismaquant/model_profiles/registry.py"
    ],
@@ -6458,6 +6521,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/__init__.py",
     "prismaquant/model_profiles/registry.py"
    ],
@@ -6526,6 +6590,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/registry.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -6604,6 +6669,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/__init__.py",
     "prismaquant/model_profiles/registry.py"
    ],
@@ -6684,6 +6750,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/__init__.py",
     "prismaquant/model_profiles/qwen3_5_dense.py",
     "prismaquant/model_profiles/registry.py"
@@ -6756,6 +6823,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/__init__.py",
     "prismaquant/model_profiles/registry.py"
    ],
@@ -6822,6 +6890,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/registry.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -6921,6 +6990,7 @@
     "//tests:test_visual_shard_coverage_lib",
     "//tests:test_visual_walk_scope_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/__init__.py",
     "prismaquant/model_profiles/structure.py",
     "prismaquant/model_walk.py",
@@ -6991,6 +7061,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/registry.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -7076,6 +7147,7 @@
     "//tests:test_vision_roster_1921_lib",
     "//tests:test_visual_shard_coverage_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/export_native_compressed.py",
     "prismaquant/lane_spec.py",
     "prismaquant/model_profiles/__init__.py",
@@ -7161,6 +7233,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_visual_walk_scope_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/model_profiles/base.py",
     "prismaquant/model_profiles/deepseek_v4.py",
     "prismaquant/model_profiles/glm5_next.py",
@@ -7240,6 +7313,7 @@
     "//tests:test_unrouted_expert_col_weights_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/export_gguf_direct.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -7304,6 +7378,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/layer_streaming.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -7376,6 +7451,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/allocator_solver.py",
     "prismaquant/decision_units.py",
@@ -7455,6 +7531,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/native_moe_panel.py",
     "prismaquant/native_operator_panel.py",
     "prismaquant/native_panel_kind.py"
@@ -7534,6 +7611,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/native_panel_kind.py"
    ],
    "target": "//:prismaquant/native_execution_binding_cycle",
@@ -7617,6 +7695,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/native_execution_binding.py",
     "prismaquant/native_moe_panel.py",
     "prismaquant/native_panel_kind.py"
@@ -7692,6 +7771,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/native_execution_binding.py",
     "prismaquant/native_moe_panel.py",
     "prismaquant/native_operator_panel.py"
@@ -7776,6 +7856,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/export_batched_gptq.py",
     "prismaquant/export_native_compressed.py",
     "prismaquant/format_registry.py",
@@ -7868,6 +7949,7 @@
     "//tests:test_union_production_cache_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/export_batched_gptq.py",
     "prismaquant/export_native_compressed.py",
     "prismaquant/format_registry.py",
@@ -7942,6 +8024,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/measured_runtime_prices.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -8064,6 +8147,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/build_rtn_cache.py",
     "prismaquant/export_batched_gptq.py",
     "prismaquant/export_native_compressed.py",
@@ -8146,6 +8230,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/validate_assignments_kl.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -8330,6 +8415,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_verified_capture_load_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_checkpoint_journal.py",
     "prismaquant/aura_cost.py",
     "prismaquant/autoscale.py",
@@ -8419,6 +8505,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator.py"
    ],
    "target": "//:prismaquant/allocator_cycle",
@@ -8511,6 +8598,7 @@
     "//tests:test_unrouted_expert_weight_only_rows_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/kl_measurement.py",
     "prismaquant/per_row_pricing.py",
@@ -8591,6 +8679,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/build_rtn_cache.py",
     "prismaquant/export_native_compressed.py",
     "prismaquant/layer_streaming.py",
@@ -8878,6 +8967,7 @@
     "//tests:test_validator_bpp_population_audit_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_checkpoint_journal.py",
     "prismaquant/aura_cost.py",
     "prismaquant/export_native_compressed.py",
@@ -8962,6 +9052,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/g3_v2.py",
     "prismaquant/task_suite.py"
    ],
@@ -9030,6 +9121,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/export_native_compressed.py",
     "prismaquant/validate_assignments_kl.py"
    ],
@@ -9138,6 +9230,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_cost.py",
     "prismaquant/autoscale.py",
     "prismaquant/cost_streaming.py",
@@ -9219,6 +9312,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/glm_mtp_selection.py",
     "prismaquant/joint_aura_rows.py",
@@ -9305,6 +9399,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/full_engine_resource_report.py",
     "prismaquant/measured_runtime_prices.py",
     "prismaquant/shape_runtime_prices.py"
@@ -9372,6 +9467,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/serving_profiles.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -9449,6 +9545,7 @@
     "//tests:test_validate_assignments_kl_bpp_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/validate_assignments_kl.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -9566,6 +9663,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_cost.py",
     "prismaquant/build_rtn_cache.py",
     "prismaquant/export_native_compressed.py",
@@ -9646,6 +9744,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/measured_runtime_prices.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -9747,6 +9846,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/allocator_solver.py",
     "prismaquant/decision_units.py",
@@ -9825,6 +9925,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/rung_allowability.py",
     "prismaquant/tessera_lane.py"
    ],
@@ -9959,6 +10060,7 @@
     "//tests:test_validate_native_graph_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/export_native_compressed.py",
     "prismaquant/tessera_export_lane.py",
     "prismaquant/tessera_route_receipt.py",
@@ -10049,6 +10151,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/shipcard.py",
     "prismaquant/tessera_shipcard.py"
    ],
@@ -10127,6 +10230,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/allocator_candidates.py",
     "prismaquant/emu_forward_kl.py",
     "prismaquant/export_native_compressed.py",
@@ -10208,6 +10312,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/stage_a_selected_row_diagnostic.py",
     "prismaquant/streamed_model_identity.py",
     "prismaquant/tessera_calibration_cache.py",
@@ -10293,6 +10398,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_adjoint_band.py",
     "prismaquant/stage_a_chain_seed.py",
     "prismaquant/stage_a_retirement.py"
@@ -10372,6 +10478,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/glm_mtp.py",
     "prismaquant/joint_adjoint_band.py",
     "prismaquant/stage_a_selected_row_diagnostic.py"
@@ -10447,6 +10554,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_adjoint_band.py",
     "prismaquant/stage_a_chain_resume.py",
     "prismaquant/stage_a_chain_seed.py"
@@ -10518,6 +10626,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_adjoint_band.py",
     "prismaquant/source_generation.py"
    ],
@@ -10596,6 +10705,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/stage_a_selected_row_diagnostic.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -10733,6 +10843,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_cost.py",
     "prismaquant/capture_layer_chain.py",
     "prismaquant/cost_streaming.py",
@@ -10898,6 +11009,7 @@
     "//tests:test_validation_production_cache_identity_audit_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_checkpoint_journal.py",
     "prismaquant/aura_cost.py",
     "prismaquant/build_rtn_cache.py",
@@ -11044,6 +11156,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/autoscale.py",
     "prismaquant/build_rtn_cache.py",
     "prismaquant/capture_layer_chain.py",
@@ -11132,6 +11245,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/aura_cost.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -11197,6 +11311,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/quality_stage.py"
    ],
    "target": "//:prismaquant/g3_v2_cycle",
@@ -11269,6 +11384,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_full_domain_acquisition.py",
     "prismaquant/tessera_rate_surface.py"
    ],
@@ -11406,6 +11522,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_verified_capture_load_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/capture_layer_chain.py",
     "prismaquant/glm_capture_compatibility.py",
     "prismaquant/glm_mtp_capture.py",
@@ -11516,6 +11633,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/glm_mtp_capture.py",
     "prismaquant/tessera_campaign.py"
    ],
@@ -11699,6 +11817,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_verify_anchor_reader_pair_725_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/glm_mtp_capture.py",
     "prismaquant/tessera_joint_aura.py"
    ],
@@ -11769,6 +11888,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_campaign.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -11884,6 +12004,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_catalog_extension.py",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_campaign_cli.py",
@@ -11980,6 +12101,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_verify_anchor_reader_pair_725_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_cell_measurement.py",
     "prismaquant/tessera_joint_aura.py"
@@ -12079,6 +12201,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_campaign.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -12151,6 +12274,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_vision_serve_recognition_1921_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_export_lane.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -12249,6 +12373,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/glm_mtp_capture.py",
     "prismaquant/glm_mtp_selection.py",
     "prismaquant/joint_catalog_extension.py",
@@ -12361,6 +12486,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_vision_serve_recognition_1921_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_menu.py",
     "prismaquant/tessera_plan_writer.py"
@@ -12440,6 +12566,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_allocator.py",
     "prismaquant/tessera_legal_domain.py",
     "prismaquant/tessera_menu.py",
@@ -12559,6 +12686,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/glm_mtp_selection.py",
     "prismaquant/lane_eligibility.py",
     "prismaquant/rung_allowability.py",
@@ -12649,6 +12777,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_campaign_table.py"
    ],
@@ -12821,6 +12950,7 @@
     "//tests:test_verify_anchor_reader_pair_725_lib",
     "//tests:test_vision_serve_recognition_1921_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/glm_mtp_quantum.py",
     "prismaquant/joint_aura_retained_budget_transition.py",
     "prismaquant/joint_aura_run_transition.py",
@@ -12897,6 +13027,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_adjoint_band.py",
     "prismaquant/tessera_joint_aura.py"
    ],
@@ -12972,6 +13103,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/lane_spec.py",
     "prismaquant/shape_runtime_prices.py",
     "prismaquant/tessera_cell_measurement.py",
@@ -13049,6 +13181,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_catalog_extension.py",
     "prismaquant/tessera_formats.py",
     "prismaquant/tessera_full_domain_acquisition.py"
@@ -13166,6 +13299,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/joint_catalog_extension.py",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_export_lane.py",
@@ -13258,6 +13392,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_vision_serve_recognition_1921_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_export_lane.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -13329,6 +13464,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_campaign_table.py"
    ],
@@ -13450,6 +13586,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/lane_eligibility.py",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_campaign_wire.py",
@@ -13523,6 +13660,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_route_trace_gate.py",
     "prismaquant/tessera_shipcard.py"
    ],
@@ -13594,6 +13732,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_shipcard.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -13664,6 +13803,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_campaign_cli.py"
    ],
@@ -13813,6 +13953,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/lane_eligibility.py",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_expert_projection.py",
@@ -13922,6 +14063,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_vision_serve_recognition_1921_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/lane_eligibility.py",
     "prismaquant/shape_runtime_prices.py",
     "prismaquant/tessera_export_lane.py",
@@ -14003,6 +14145,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/shape_runtime_prices.py",
     "prismaquant/tessera_campaign.py",
     "prismaquant/tessera_campaign_cli.py",
@@ -14077,6 +14220,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/tessera_lane.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -14145,6 +14289,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/measured_runtime_prices.py",
     "prismaquant/runtime_provenance.py"
    ],
@@ -14229,6 +14374,7 @@
     "//tests:test_validator_bpp_population_audit_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/lane_spec.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",
@@ -14321,6 +14467,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_vendored_qwen3_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/vendored/transformers_deepseek_v4/__init__.py",
     "prismaquant/vendored/transformers_deepseek_v4/modeling_deepseek_v4.py",
     "prismaquant/vendored/transformers_qwen3/__init__.py"
@@ -14403,6 +14550,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/vendored/__init__.py",
     "prismaquant/vendored/transformers_deepseek_v4/modeling_deepseek_v4.py"
    ],
@@ -14467,6 +14615,7 @@
     "//tests:test_umbrella_acceptance_2768_lib",
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/vendored/__init__.py",
     "prismaquant/vendored/transformers_deepseek_v4/__init__.py"
    ],
@@ -14549,6 +14698,7 @@
     "//tests:test_vendored_override_gate_lib",
     "//tests:test_vendored_qwen3_lib",
     "//tests:test_wave3_selection_and_provenance_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "prismaquant/vendored/__init__.py"
    ],
    "target": "//:prismaquant/vendored/__init___cycle",
@@ -14618,6 +14768,7 @@
     "//tests:test_tool_imports_1304_lib",
     "//tests:test_tools_hash_routing_1680_lib",
     "//tests:test_umbrella_acceptance_2768_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "tools/g3job/g3_readset.py"
    ],
    "target": "//:tools/g3job/g3_offline_decoded_kl_cycle",
@@ -14686,6 +14837,7 @@
     "//tests:test_tool_imports_1304_lib",
     "//tests:test_tools_hash_routing_1680_lib",
     "//tests:test_umbrella_acceptance_2768_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
     "tools/g3job/g3_offline_decoded_kl.py"
    ],
    "target": "//:tools/g3job/g3_offline_decoded_kl_cycle",
@@ -14785,6 +14937,8 @@
     "//tests:test_tool_imports_1304_lib",
     "//tests:test_tools_hash_routing_1680_lib",
     "//tests:test_umbrella_acceptance_2768_lib",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630",
+    "//tests:test_wikitext_ppl_corpus_digest_route_2630_lib",
     "prismaquant/shipcard.py"
    ],
    "target": "//:prismaquant/activation_fair_pricing_cycle",

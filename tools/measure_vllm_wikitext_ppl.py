@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -19,6 +18,8 @@ sys.path.insert(0, str(_TOOLS_ROOT))
 from prismaquant_source_bootstrap import activate_prismaquant_source
 
 activate_prismaquant_source()
+
+from prismaquant import digests
 
 try:  # package mode (`python -m tools.measure_vllm_wikitext_ppl`)
     from .gold_engine_options import (
@@ -150,10 +151,7 @@ def _load_ids(
     if text_file:
         raw = Path(text_file).read_bytes()
         text = raw.decode("utf-8")
-        # A materialized corpus has no `datasets` fingerprint to quote, so the
-        # content hash IS the fingerprint -- spelled so it can never be mistaken
-        # for one.
-        fingerprint = "file:sha256:" + hashlib.sha256(raw).hexdigest()
+        fingerprint = "file:sha256:" + digests.bytes_sha256hex(raw)
     else:
         from datasets import load_dataset
 
@@ -185,7 +183,7 @@ def _load_ids(
         raise RuntimeError("WikiText selected token prefix has the wrong length")
     return selected, {
         "fingerprint": fingerprint,
-        "corpus_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "corpus_sha256": digests.text_sha256hex(text),
         "total_tokens": total_tokens,
     }
 
