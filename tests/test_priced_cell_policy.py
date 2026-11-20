@@ -32,3 +32,14 @@ def test_candidate_build_uses_one_policy_even_if_an_adapter_changes_the_environm
         'predicted_dloss_stderr': 0.5}} for name in stats}
     candidates = assembly.build_candidates(stats, costs, [formats.get_format('BF16')]).candidates
     assert [candidates[name][0].predicted_dloss for name in stats] == [4.0, 4.0]
+
+
+def test_priced_cell_ignores_malformed_activation_loss():
+    policy = CostPricingPolicy(0.0)
+    stats = {}
+    row = {'predicted_dloss': 3.0, 'act_dloss': 0.5}
+    proposal = price_cell(stats, row, format_name='BF16', policy=policy)
+    assert proposal.predicted_dloss == 3.5
+    row['act_dloss'] = 'invalid'
+    proposal = price_cell(stats, row, format_name='BF16', policy=policy)
+    assert proposal.predicted_dloss == 3.0
