@@ -247,6 +247,45 @@ def test_no_constraints_selection_is_identical_to_feature_present_but_unused(
         k: v for k, v in stamp_b.items() if k != "dispatch_table"}
 
 
+def test_glm_selection_bytes_match_when_attention_costs_are_present_without_a_lift(tmp_path):
+    body = [f"model.language_model.layers.{i}.mlp.down_proj" for i in (0, 1)]
+    attention = ["model.language_model.layers.0.self_attn.o_proj",
+                 "model.language_model.layers.3.self_attn.kv_b_proj"]
+    (tmp_path / "config.json").write_text(json.dumps({
+        "model_type": "glm5_next", "architectures": ["Glm5NextForConditionalGeneration"],
+        "text_config": {"num_hidden_layers": 4, "num_nextn_predict_layers": 0,
+                        "layer_types": ["linear_attention"] * 3 + ["deepseek_sparse_attention"]},
+    }))
+    _write_safetensors(tmp_path / "model.safetensors", {
+        name + ".weight": ("BF16", (256, 256)) for name in body + attention})
+    # The budget fits both source attention weights and one FP8 plus one NVFP4 body weight.
+    budget_bytes = 2 * 256 * 256 * 2 + 115_000
+    probe, costs = tmp_path / "probe.pkl", tmp_path / "costs.pkl"
+    layer, selection = tmp_path / "layer_config.json", tmp_path / "selection.json"
+    argv = ["--model-override", str(tmp_path), "--target-profile", "research",
+            "--probe", str(probe), "--costs", str(costs), "--formats", "NVFP4,FP8_E4M3",
+            "--target-bits", "6.5", "--pareto-targets", "5,6.5,9",
+            "--target-disk-gb", str(budget_bytes / fp.GB),
+            "--artifact-overhead-reserve-bytes", "512", "--layer-config", str(layer),
+            "--pareto-csv", str(tmp_path / "pareto.csv")]
+
+    def select(names):
+        probe.write_bytes(pickle.dumps({"stats": {
+            name: {"n_params": 256 * 256, "in_features": 256, "out_features": 256}
+            for name in names}}))
+        costs.write_bytes(pickle.dumps({"costs": {
+            name: {"NVFP4": {"predicted_dloss": (i + 1) * 0.1},
+                   "FP8_E4M3": {"predicted_dloss": (i + 1) * 0.01}}
+            for i, name in enumerate(names)}}))
+        alloc.main(argv)
+        return selection.read_bytes()
+
+    assert select(body) == select(body + attention)
+    assignment = json.loads(layer.read_bytes())
+    assert set(assignment) - {"__prismaquant__"} == set(body)
+    assert [assignment[name]["bits"] for name in body] == [4, 8]
+
+
 def test_unconstrained_ratchet_trace_rows_gain_no_keys(
         monkeypatch, tmp_path):
     """The trace is a shipped artifact; unused features must not widen it."""

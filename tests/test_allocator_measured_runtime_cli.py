@@ -235,6 +235,45 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_
     return name, argv
 
 
+def test_glm_attention_lift_offers_the_priced_class_menus(tmp_path, monkeypatch):
+    monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "research")
+    monkeypatch.delenv("PRISMAQUANT_TESSERA_DEV_PIN", raising=False)
+    kda = "model.language_model.layers.0.self_attn.o_proj"
+    mla = "model.language_model.layers.3.self_attn.q_b_proj"
+    kv = "model.language_model.layers.3.self_attn.kv_b_proj"
+    indexer = "model.language_model.layers.3.self_attn.indexer.wq_b"
+    e4m3, t16 = "TESSERA_E4M3_K1_R1024", "TESSERA_BF16_K1_R1792"
+    _, argv = _main_fixture(tmp_path, units=(kda, mla, kv, indexer), shape=(256, 256),
+        menu={e4m3: (0.2, 1), t16: (0.1, 1), "BF16": (0.0, 1)})
+    cost_path = tmp_path / "costs.pkl"
+    cost = pickle.loads(cost_path.read_bytes())
+    del cost["costs"][kv][e4m3]
+    cost_path.write_bytes(pickle.dumps(cost))
+    (tmp_path / "config.json").write_text(json.dumps({
+        "model_type": "glm5_next", "architectures": ["Glm5NextForConditionalGeneration"],
+        "text_config": {"num_hidden_layers": 4, "num_nextn_predict_layers": 0,
+                        "layer_types": ["linear_attention"] * 3 + ["deepseek_sparse_attention"]},
+    }))
+
+    class BidsChecked(Exception):
+        pass
+
+    build = allocator.build_candidates
+
+    def check_bids(*args, **kwargs):
+        bids = build(*args, **kwargs).admitted
+        assert {name: {bid.fmt for bid in rows} for name, rows in bids.items()} == {
+            kda: {e4m3, t16, "BF16"}, mla: {e4m3, t16, "BF16"}, kv: {t16, "BF16"},
+        }
+        raise BidsChecked
+
+    monkeypatch.setattr(allocator, "build_candidates", check_bids)
+    with pytest.raises(BidsChecked):
+        allocator.main([*argv[1:argv.index("--measured-runtime-table")],
+            "--model-override", str(tmp_path), "--target-profile", "research",
+            "--allow-pinned", "self_attn.o_proj,self_attn.q_b_proj,self_attn.kv_b_proj"])
+
+
 def test_real_cli_selects_same_byte_faster_alternative(tmp_path, monkeypatch):
     name, argv = _main_fixture(tmp_path)
     monkeypatch.setattr(sys, "argv", argv)
