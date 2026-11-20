@@ -1140,15 +1140,6 @@ class StageBReplaySpill:
         return self.geometry.batch_x_bytes
 
     @property
-    def replay_reserve_bytes(self):
-        """Pinned read buffers plus the device staging a window keeps live.
-
-        Under ``operator_gemm`` also one input stream's row blocks and one
-        chunk's FP32 GEMM operands (bounded at the probe-0 capture).
-        """
-        return self.replay_reserve_host_bytes + self.replay_reserve_device_bytes
-
-    @property
     def replay_reserve_host_bytes(self):
         """The pinned read buffers a replay phase allocates (``READ_BUFFER_COUNT``)."""
         return self.replay_chunk_bytes * READ_BUFFER_COUNT
