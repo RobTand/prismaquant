@@ -68,3 +68,11 @@ def test_resume_reconnects_to_the_saved_id_and_never_submits(tmp_path, capsys, m
 def test_a_submission_without_its_staged_binding_is_a_usage_error(tmp_path):
     with pytest.raises(SystemExit):
         g3_submit.main(["--record-dir", str(tmp_path / "record"), *LAUNCH, str(tmp_path / "out")])
+
+
+def test_zero_cpu_request_is_refused_before_submission(tmp_path, capsys, monkeypatch):
+    from prismaquant import flux_jobs
+
+    monkeypatch.setattr(flux_jobs, "submit_job", lambda *a, **k: pytest.fail("The CLI called submit_job."))
+    assert g3_submit.main(arguments(tmp_path, "--cpus", "0")) == 2
+    assert "cores must be an integer >= 1" in capsys.readouterr().err
