@@ -238,31 +238,29 @@ def test_stack_row_prices_exactly_what_the_expanded_experts_would():
 
 @pytest.mark.parametrize("draw", [False, True], ids=["census", "draw"])
 def test_measured_members_are_not_also_cost_keys(draw):
-    h = [1.0, 2.0, 3.0, 4.0]
     experts = (0, 3) if draw else (0, 1, 2, 3)
     family, fmt = "TESSERA_E2M1_K1", "TESSERA_E2M1_K1_R256"
-    anchors = {
-        f"{STEM}.{e}.{role}": {family: [
-            _anchor(f"{STEM}.{e}.{role}", family, fmt, 256, 0.02)]}
-        for e in experts for role in ("w1", "w3")}
     dense = "model.layers.18.self_attn.o_proj"
+    names = (f"{STEM}.{e}.{role}" for e in experts for role in ("w1", "w3"))
+    anchors = {name: {family: [_anchor(name, family, fmt, 256, 0.02)]} for name in names}
     anchors[dense] = {family: [_anchor(dense, family, fmt, 256, 0.5)]}
-    probe = _packed_probe_row(4, h)
+    probe = _packed_probe_row(4, [1.0, 2.0, 3.0, 4.0])
     sample = _sample(probe, sampled=experts, pi=dict.fromkeys(range(4), 0.5 if draw else 1.0))
-    packed = sample.packed_qname
-    payload = _payload(anchors, {sample.packed_qname: sample})
-    assert set(payload["costs"]) == {packed, dense}
-    row = payload["costs"][packed][fmt]
+    packed = f"{STEM}.gate_up_proj"
+    samples = {packed: sample}
+    costs = _payload(anchors, samples)["costs"]
+    assert set(costs) == {packed, dense}
+    row = costs[packed][fmt]
     assert row["num_experts"] == 4
     assert row["output_mse"] == pytest.approx(0.02)
     assert row["currency"] == campaign.CURRENCY
     assert "wire_bytes" not in row
-    assert sorted(row["sampled_experts"]["members"]) == list(experts)
-    assert {(m["qname"], m["wire_bytes"], m["memory_bytes"])
-            for m in row["sampled_experts"]["members"][0]} == {
+    members = row["sampled_experts"]["members"]
+    assert sorted(members) == list(experts)
+    assert {(m["qname"], m["wire_bytes"], m["memory_bytes"]) for m in members[0]} == {
         (f"{STEM}.0.w1", 1100, 1024), (f"{STEM}.0.w3", 1100, 1024)}
-    assert payload["costs"][dense][fmt]["output_mse"] == 0.5
-    assert payload["costs"][dense][fmt]["wire_bytes"] == 1100
+    assert costs[dense][fmt]["output_mse"] == 0.5
+    assert costs[dense][fmt]["wire_bytes"] == 1100
     declared = {f"{STEM}.{e}.{role}": (4, 4)
                 for e in range(4) for role in ("w1", "w3")}
     population = campaign.ExpertPopulation(
@@ -270,10 +268,10 @@ def test_measured_members_are_not_also_cost_keys(draw):
         omitted_outside_layer_stride={})
     block = campaign.campaign_population_block(
         dense_targets=[dense], expert_targets=declared, dense_all=[dense], pinned=[],
-        population=population, layer_stride=1, costs=payload["costs"], menus={},
-        stack_samples={packed: sample}, profile=_profile())
-    assert block["priced"]["packed_parameters"] == {packed: [4, 8, 4]}
-    assert math.prod(block["priced"]["packed_parameters"][packed]) == probe["n_params"] == 128
+        population=population, layer_stride=1, costs=costs, menus={},
+        stack_samples=samples, profile=_profile())["priced"]["packed_parameters"]
+    assert block == {packed: [4, 8, 4]}
+    assert math.prod(block[packed]) == probe["n_params"] == 128
 
 
 def test_a_stack_measured_whole_may_not_also_be_estimated_from_a_sample():
