@@ -600,21 +600,6 @@ def _phase_prediction(
     return phase_ms, None, detail
 
 
-def _statistic_caveats(detail: Mapping[str, Any], slo_statistic: str
-                       ) -> tuple[str, ...]:
-    """A8: name any percentile/point-measurement mismatch."""
-    out: list[str] = []
-    for regime in detail.get("regimes", ()):
-        stat = str(regime.get("reference_statistic", ""))
-        if stat != slo_statistic:
-            out.append(
-                f"arena {regime.get('m_regime')!r} reference statistic is "
-                f"{stat!r}, but the SLO is a {slo_statistic!r} limit; the "
-                "predicted value is not a percentile (assumption A8)"
-            )
-    return tuple(out)
-
-
 def evaluate_assignment(
     assignment: Mapping[str, str],
     stats: Mapping[str, Mapping[str, Any]],
@@ -676,8 +661,15 @@ def evaluate_assignment(
                 direction=direction, satisfied=False, slack=None,
                 unpriced_reason=reason or "phase_not_priced",
             )
-        detail = coverage.get(phase, {})
-        caveats = _statistic_caveats(detail, slo_statistic)
+        caveats: list[str] = []
+        for regime in coverage.get(phase, {}).get("regimes", ()):
+            stat = str(regime.get("reference_statistic", ""))
+            if stat != slo_statistic:
+                caveats.append(
+                    f"arena {regime.get('m_regime')!r} reference statistic is "
+                    f"{stat!r}, but the SLO is a {slo_statistic!r} limit; the "
+                    "predicted value is not a percentile (assumption A8)"
+                )
         if direction == "<=":
             value = ms
             satisfied = value <= float(limit)
@@ -687,15 +679,15 @@ def evaluate_assignment(
             value = 1000.0 / ms if ms > 0 else float("inf")
             satisfied = value >= float(limit)
             slack = value - float(limit)
-            caveats = caveats + (
+            caveats.append(
                 "predicted p05_TPS is the single-stream identity "
                 "1000 / predicted p95_ITL_ms (assumption A7), not a measured "
-                "served throughput under concurrency",
+                "served throughput under concurrency"
             )
         return ConstraintCheck(
             name=name, predicted=value, limit=float(limit), units=units,
             direction=direction, satisfied=satisfied, slack=slack,
-            caveats=caveats,
+            caveats=tuple(caveats),
         )
 
     if slos.p95_ttft_ms is not None:
