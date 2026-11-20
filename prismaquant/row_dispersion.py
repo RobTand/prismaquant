@@ -13,18 +13,6 @@ from typing import Any
 import torch
 
 
-def _measurement_dtype(*tensors: torch.Tensor) -> torch.dtype:
-    """Return a stable matmul dtype without needlessly widening float32."""
-    dtype = tensors[0].dtype
-    for tensor in tensors[1:]:
-        dtype = torch.promote_types(dtype, tensor.dtype)
-    if not dtype.is_floating_point:
-        raise TypeError("row-dispersion inputs must have floating-point dtype")
-    if dtype in (torch.float16, torch.bfloat16):
-        return torch.float32
-    return dtype
-
-
 def _validated_inputs(
     X: torch.Tensor,
     W: torch.Tensor,
@@ -52,7 +40,12 @@ def _validated_inputs(
             "X, W, and W_hat must be on the same device; got "
             f"{X.device}, {W.device}, {W_hat.device}"
         )
-    dtype = _measurement_dtype(X, W, W_hat)
+    dtype = torch.promote_types(X.dtype, W.dtype)
+    dtype = torch.promote_types(dtype, W_hat.dtype)
+    if not dtype.is_floating_point:
+        raise TypeError("row-dispersion inputs must have floating-point dtype")
+    if dtype in (torch.float16, torch.bfloat16):
+        dtype = torch.float32
     return X.to(dtype=dtype), W.to(dtype=dtype), W_hat.to(dtype=dtype)
 
 
