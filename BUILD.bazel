@@ -3992,7 +3992,6 @@ pq_py_library(
         "prismaquant/stage_a_retirement.py",
         "prismaquant/stage_a_selected_row_diagnostic.py",
         "prismaquant/stage_b_prep_io.py",
-        "prismaquant/stage_b_workspace_profile.py",
         "prismaquant/streamed_boundary_artifacts.py",
         "prismaquant/streamed_model_identity.py",
         "prismaquant/streaming_model.py",
@@ -4566,6 +4565,7 @@ pq_py_library(
         ":prismaquant/joint_adjoint_slices",
         ":prismaquant/joint_cost_quantum",
         ":prismaquant/joint_retained_window_plan",
+        ":prismaquant/stage_b_workspace_profile",
         ":prismaquant/staged_tier_policy",
     ],
 )
@@ -8396,6 +8396,22 @@ pq_py_library(
         "README.md",
     ],
     deps = [
+        "@pq_pip//torch",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/stage_b_workspace_profile",
+    srcs = [
+        "prismaquant/stage_b_workspace_profile.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/digests",
+        ":prismaquant/io_spans",
+        ":prismaquant/memory_management",
         "@pq_pip//torch",
     ],
 )
@@ -13347,6 +13363,7 @@ pq_py_library(
         ":prismaquant/source_read_plan",
         ":prismaquant/stage_a_produced_output",
         ":prismaquant/stage_b_pass_profile",
+        ":prismaquant/stage_b_workspace_profile",
         ":prismaquant/stage_inputs",
         ":prismaquant/staged_lease",
         ":prismaquant/staged_tier_policy",
