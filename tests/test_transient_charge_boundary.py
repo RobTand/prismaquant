@@ -352,6 +352,12 @@ def test_a_capture_without_the_reserved_witness_refuses_by_name(tmp_path):
     assert reservation_slack_bytes(v1_report()) == RESERVED - ALLOCATED == 103_246_848
 
 
+def test_reservation_slack_bytes_reports_missing_observation():
+    report = v1_report()
+    del report["observations"]["reservation_slack"]
+    assert reservation_slack_bytes(report) is None
+
+
 def test_the_reader_refuses_a_slack_below_zero(tmp_path):
     report = v1_report()
     report["observations"]["reservation_slack"]["reserved_bytes"] = ALLOCATED - 1
