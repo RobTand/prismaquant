@@ -195,19 +195,6 @@ def entries_from_header(header: Dict[str, Any], source: str) -> List[Dict[str, A
     return out
 
 
-def _endcap_segment(name: str) -> str:
-    """First segment after stripping model./language_model./transformer."""
-    stripped = name
-    changed = True
-    while changed:
-        changed = False
-        for prefix in WRAPPER_PREFIXES:
-            if stripped.startswith(prefix):
-                stripped = stripped[len(prefix):]
-                changed = True
-    return stripped.split(".", 1)[0]
-
-
 def classify(name: str) -> Dict[str, Any]:
     """Classify one checkpoint tensor name.  Raises ClassificationError."""
     segments = name.split(".")
@@ -218,7 +205,15 @@ def classify(name: str) -> Dict[str, Any]:
     if m:
         return {"bucket": BUCKET_LAYER, "layer": int(m.group(1)),
                 "rule": "layers.<n>", "assumed_placement": False}
-    seg = _endcap_segment(name)
+    stripped = name
+    changed = True
+    while changed:
+        changed = False
+        for prefix in WRAPPER_PREFIXES:
+            if stripped.startswith(prefix):
+                stripped = stripped[len(prefix):]
+                changed = True
+    seg = stripped.split(".", 1)[0]
     if seg in EMBED_SEGMENTS:
         return {"bucket": BUCKET_EMBED, "layer": None, "rule": f"embed segment {seg!r}",
                 "assumed_placement": False}
