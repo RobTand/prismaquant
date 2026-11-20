@@ -305,18 +305,6 @@ def _strip_leading_zero_head_phase(phases: object, *, where: str) -> list:
     return list(phases)
 
 
-def _compare_control_phases(old_phases: object, new_phases: object,
-                            *, where: str) -> bool:
-    """True when the nonzero phase tables are identical after removing at
-    most the one known zero-byte head row. Order, names, byte counts and
-    cumulative bounds compare exactly; any other phase drift refuses."""
-    old_rest = _strip_leading_zero_head_phase(old_phases, where=where)
-    if not isinstance(new_phases, list):
-        raise ValueError(f"{where}: the new slice manifest seals no phase "
-                         "table")
-    return old_rest == new_phases
-
-
 def _compare_control_argv(old_argv: object, new_argv: object, *,
                           old_record_path: str, new_record_path: str,
                           where: str) -> bool:
@@ -399,7 +387,11 @@ def _compare_prior_slice(prior_manifest: dict, new_manifest: dict,
         raise ValueError(
             f"{where}: slice manifest annotations differ beyond the control "
             f"phase table and argv: refusing")
-    if not _compare_control_phases(old_phases, new_phases, where=where):
+    old_rest = _strip_leading_zero_head_phase(old_phases, where=where)
+    if not isinstance(new_phases, list):
+        raise ValueError(f"{where}: the new slice manifest seals no phase "
+                         "table")
+    if not (old_rest == new_phases):
         raise ValueError(
             f"{where}: slice phase tables differ beyond the single known "
             f"zero-byte head row (order, names, bytes or cumulative bounds "
