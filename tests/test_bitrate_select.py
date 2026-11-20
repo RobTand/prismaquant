@@ -146,3 +146,13 @@ def test_byte_budget_empty():
 def test_the_unused_bootstrap_helper_stays_deleted():
     import prismaquant.saturation_select as saturation_select
     assert not hasattr(saturation_select, "bootstrap_mean_ci")
+
+
+def test_saturation_refuses_an_unknown_scan_mode():
+    grid = [4.0, 8.0]
+    measure = _measure_fn({4.0: 0.5, 8.0: 0.125}, {4.0: 0.0, 8.0: 0.0})
+    assert find_saturation_bpp(grid, measure)["bpp"] == 8.0
+
+    with pytest.raises(ValueError) as exc:
+        find_saturation_bpp(grid, measure, scan="unknown")
+    assert str(exc.value) == "unknown scan mode 'unknown'"
