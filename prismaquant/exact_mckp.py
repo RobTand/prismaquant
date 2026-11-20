@@ -138,13 +138,6 @@ def exact_integer_costs(values: Mapping[Hashable, object]) -> tuple[dict, int]:
              for key, value in exact.items()}, denominator)
 
 
-def _exact_int(value, label: str) -> int:
-    """An exact integer of either sign (a cost); bytes use ``_runtime_int``."""
-    if isinstance(value, bool) or not isinstance(value, Integral):
-        raise ValueError(f"{label} must be an integer")
-    return int(value)
-
-
 def _lower_hull_steps(options: Sequence[tuple[int, int]]) -> tuple[tuple[int, int], list]:
     """The (bytes, cost) lower convex hull of one unit, as a base and its steps.
 
@@ -266,8 +259,9 @@ def solve_exact_mckp(
             if fmt in seen:
                 raise ValueError(f"duplicate option ({name!r}, {fmt!r})")
             seen.add(fmt)
-            menu.append((fmt, _exact_int(cost, f"{name}@{fmt} cost"),
-                         _runtime_int(size, f"{name}@{fmt} bytes")))
+            if isinstance(cost, bool) or not isinstance(cost, Integral):
+                raise ValueError(f"{name}@{fmt} cost must be an integer")
+            menu.append((fmt, int(cost), _runtime_int(size, f"{name}@{fmt} bytes")))
         if not menu:
             raise ValueError(f"{name!r}: empty option menu")
         # Formats in string order: option index order is lexical order.
