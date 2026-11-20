@@ -29,19 +29,6 @@ def _ensure_triton_cache_writable() -> None:
     import tempfile
     from pathlib import Path
 
-    def _is_writable_dir(path: Path) -> bool:
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                prefix=".prismaquant-write-",
-                dir=path,
-                delete=True,
-            ):
-                pass
-            return True
-        except Exception:
-            return False
-
     configured = os.environ.get("TRITON_CACHE_DIR")
     if configured:
         try:
@@ -51,8 +38,17 @@ def _ensure_triton_cache_writable() -> None:
         return
 
     default = Path.home() / ".triton" / "cache"
-    if _is_writable_dir(default):
+    try:
+        default.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            prefix=".prismaquant-write-",
+            dir=default,
+            delete=True,
+        ):
+            pass
         return
+    except Exception:
+        pass
 
     base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     fallback = base / "prismaquant" / "triton"
