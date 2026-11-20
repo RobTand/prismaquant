@@ -236,6 +236,34 @@ def test_the_stream_head_writes_the_load_all_heads_bytes(monkeypatch, tmp_path, 
     assert [options.get("host") for _names, options in state["snapshots"]] == [True, None]
 
 
+def test_selected_load_all_writes_exact_execution_and_refusal_bytes(monkeypatch, tmp_path):
+    campaign, argv, _state = stream_fixture(monkeypatch, tmp_path)
+    guard = SimpleNamespace(cap_bytes=1024 ** 3, baseline_bytes=lambda: 32,
+                            check=lambda *_args, **_kwargs: None,
+                            snapshot=lambda: {"peak_checkpoint": "source:caf\u00e9"})
+    monkeypatch.setenv("PRISMAQUANT_RELEASE_SOURCE_PAGES", "1")
+    monkeypatch.setenv("MIMALLOC_PURGE_DELAY", "0")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr("prismaquant.memory_management.CaptureMemoryGuard", lambda _device: guard)
+    monkeypatch.setattr("prismaquant.io_spans.GpuPowerSampler.start", lambda self: self)
+
+    with pytest.raises(RuntimeError) as refused:
+        campaign.main([*argv, "--row-head", "load-all", "--campaign-identity-threads", "1"])
+
+    cache = tmp_path / "cache"
+    assert (cache / "row-head-execution.json").read_bytes() == (
+        b'{\n  "dependency": "--row-head load-all was requested",\n'
+        b'  "memory_plan": "memory_bytes",\n  "row_head": "load-all",\n'
+        b'  "schema": "prismaquant.row_head_execution.v1"\n}\n')
+    assert (cache / "selected-anchor-memory-refusal.json").read_bytes() == (
+        b'{\n  "baseline_bytes": 32,\n  "cap_bytes": 1073741824,\n'
+        b'  "memory_guard": {\n    "peak_checkpoint": "source:caf\\u00e9"\n  },\n'
+        b'  "plan": "memory_bytes",\n  "plan_bytes": 1073741824,\n  "slack_bytes": -32\n}\n')
+    assert str(refused.value) == (
+        'selected anchor cgroup budget is smaller than its checked phase plan: '
+        '{"baseline_bytes": 32, "cap_bytes": 1073741824, "plan_bytes": 1073741824, "slack_bytes": -32}')
+
+
 def test_the_first_encode_starts_before_the_late_entries_are_read(monkeypatch, tmp_path):
     import os
     from prismaquant import tessera_calibration_cache as cc
