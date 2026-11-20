@@ -1168,7 +1168,8 @@ def _tessera_unit_encode_kwargs(format_name, *, activation_kwargs,
         )
 
     kwargs = dict(grid=_grid_for(family), q256=int(rung), name=format_name,
-                  verify=bool(verify), **_recipe_encode_kwargs(wire))
+                  verify=bool(verify),
+                  **{key: getattr(wire, key) for key in RECIPE_ENCODE_KEYS})
     if activation_kwargs:
         unknown = sorted(set(activation_kwargs) - set(required))
         if unknown:
@@ -1188,19 +1189,6 @@ def _tessera_unit_encode_kwargs(format_name, *, activation_kwargs,
 #: resolves the same recipe it resolves unaided.
 RECIPE_ENCODE_KEYS = ("body", "span", "scale_plane", "window_bits", "window_seed",
                       "window_sigma", "channel_sigma")
-
-
-def _recipe_encode_kwargs(wire) -> dict:
-    """The resolved recipe, spelled as ``encode_linear``'s wire keywords.
-
-    Forwarded explicitly since #1502: the served wire of a routed E2M1x2 stack
-    below the cap (span-2 TCQ, ``tessera.export.served_recipe``) is not the
-    research recipe ``encode_linear`` resolves when left alone, so a recipe
-    that reached here only as a lookup key encoded the wrong bytes.  Wherever
-    the recipe IS the research one, naming its fields resolves exactly what
-    leaving them ``None`` resolves, so those bytes do not move.
-    """
-    return {key: getattr(wire, key) for key in RECIPE_ENCODE_KEYS}
 
 
 def require_tessera_batch_encoder():
