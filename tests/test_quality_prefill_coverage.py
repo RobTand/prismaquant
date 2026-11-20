@@ -192,3 +192,14 @@ def test_membership_order_does_not_change_the_verdict():
         frontier_label(shuffled, routed_stacks=[routed()]).identity_sha256()
         == frontier_label(memberships(), routed_stacks=[routed()]).identity_sha256()
     )
+
+
+def test_census_membership_rejects_a_bare_string():
+    bare = memberships(
+        census_units="ab",
+        quality_table_units=["a", "b"],
+        runtime_binding_units=["a", "b"],
+        assignment_units=["a", "b"],
+    )
+    with pytest.raises(CoverageError, match="census_units must be an iterable of unit ids"):
+        require_census_equality(bare)
