@@ -185,32 +185,6 @@ NEW_TAIL_FILL = """\
         draft_names = list(draft_group.layer_names)
 """
 
-OLD_LAYOUT_RETURN = """\
-    return (
-        attn_group,
-        mamba_groups,
-        mla_names,
-        idx_names,
-        mla_page,
-        idx_page,
-        tail_names,
-        tail_page,
-    )
-"""
-NEW_LAYOUT_RETURN = """\
-    return (
-        attn_group,
-        mamba_groups,
-        mla_names,
-        idx_names,
-        mla_page,
-        idx_page,
-        tail_names,
-        tail_page,
-        draft_names,
-    )
-"""
-
 OLD_UNPACK = """\
         (
             attn_group,
