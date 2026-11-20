@@ -1,12 +1,13 @@
 """Real Unigram tokenizers drive G3 preflight and retained measurement."""
 import json
+import struct
 from pathlib import Path
 
 import pytest
 from tokenizers import Tokenizer
 from tokenizers.models import Unigram
 
-from prismaquant.g3_v2 import measure_g3, preflight_g3
+from prismaquant.g3_v2 import measure_g3, preflight_g3, verify_g3_result
 from prismaquant.quality_stage import artifact, verify_result, evaluate_criteria
 from test_g3_v2 import make_retained_configuration, put
 
@@ -44,3 +45,18 @@ def test_real_unigram_preflight_and_retained_measurement(tmp_path, prefix):
                         "metrics": facts.pop("metrics"), "error": None}, **facts}
     result["gate"] = evaluate_criteria(result["measurement"]["metrics"], config["criteria"])
     assert verify_result(result, config, config_sha256="a" * 64)["status"] == "not_evaluated"
+
+
+def test_g3_verification_refuses_nonfinite_owned_kl(tmp_path):
+    config = make_unigram_configuration(tmp_path, prefix=False)
+    result = measure_g3(config, tmp_path / "result.json")
+    result["measurement"] = {"metrics": result["metrics"]}
+    verify_g3_result(result, config)
+
+    array = Path(result["artifacts"][0]["path"])
+    array.write_bytes(array.read_bytes()[:-8] + struct.pack("=d", float("nan")))
+    result["artifacts"][0] = artifact(array)
+
+    with pytest.raises(ValueError) as error:
+        verify_g3_result(result, config)
+    assert str(error.value) == "G3 owned KL data must be finite"
