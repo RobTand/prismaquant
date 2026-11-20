@@ -15,6 +15,8 @@ from .schemas import Contract
 from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 
 SCHEMA = "prismaquant.joint_stageb_resource_policy.v1"
+CAPTURE_WORKSPACE_SCHEMA = "prismaquant.stage_b_capture_workspace_profile.v1"
+CHAIN_WORKSPACE_SCHEMA = "prismaquant.stage_b_chain_workspace_profile.v1"
 GIB = 1024 ** 3
 _VERIFIED = {}
 
@@ -145,21 +147,48 @@ def verify_cotangent_plane_fits(plane_bytes, policy, environ):
             "PRISMAQUANT_STAGE_B_COTANGENT_ROOT and _MAX_BYTES to spill it")
 
 
+def chain_roll_owner_bytes(roll):
+    """The owner bytes one measured chain roll states (PQ #1163).
+
+    ``bytes`` is the roll's device workspace: the larger of the allocated
+    and reserved deltas over the CUDA allocator's reading right after the
+    roll's admission released the cache, which is what the guard charges
+    before the roll. ``device_resident_bytes`` is the CUDA reservation that
+    admission read, and ``host_committed_bytes`` the larger of the cgroup's
+    committed bytes at that admission and at the roll's cgroup peak
+    (:func:`prismaquant.memory_management.committed_cgroup_bytes`). Together
+    they are every owner resident in the chain phase as the guard reads it.
+    The workspace includes the successor source bytes that land on the
+    device during the roll: the chain leaves that read in flight (PQ #1166).
+    """
+    from .memory_management import committed_cgroup_bytes
+
+    layer = roll["layer"]
+    admission, host = roll.get("admission"), roll.get("host")
+    if admission is None:
+        raise ValueError(f"chain roll of layer {layer} has no admission reading, so its "
+                         "resident owners were not measured")
+    if host is None:
+        raise ValueError(f"chain roll of layer {layer} has no cgroup reading, so its "
+                         "host committed bytes were not measured")
+    at_peak = committed_cgroup_bytes(int(host["peak_current_bytes"]), host["peak_stat_all"])
+    return {"bytes": max(int(roll["allocated_delta_bytes"]), int(roll["reserved_delta_bytes"])),
+            "device_resident_bytes": int(admission["cuda_reserved_bytes"]),
+            "host_committed_bytes": max(int(admission["cgroup_committed_bytes"]), at_peak)}
+
+
 def chain_owner_from_receipt(path, *, action_key, layer, layers, basis=None):
     """The measured chain owner a ``--stop-after-chain`` receipt states for ``layer``.
 
-    Reads the receipt once, here. The roll of ``layer`` must be complete; its
-    workspace and resident bytes come from the roll's own readings
-    (:func:`prismaquant.stage_b_workspace_profile.chain_roll_owner_bytes`),
-    and the receipt's sha256 goes into the owner. ``layers`` are the layers of
-    the same shape the owner prices.
+    Read the receipt once. Use only a complete roll of ``layer``.
+    Get the owner bytes from :func:`chain_roll_owner_bytes`.
+    Include the receipt's SHA-256 in the owner.
+    ``layers`` lists the layers with the same shape.
     """
-    from .stage_b_workspace_profile import CHAIN_SCHEMA, chain_roll_owner_bytes
-
     path = Path(path).absolute()
     raw = path.read_bytes()
     profile = json.loads(raw)
-    _require(profile.get("schema") == CHAIN_SCHEMA, f"{path} is not a chain workspace profile")
+    _require(profile.get("schema") == CHAIN_WORKSPACE_SCHEMA, f"{path} is not a chain workspace profile")
     rolls = [roll for roll in profile["rolls"] if roll["layer"] == int(layer)]
     _require(len(rolls) <= 1, f"{path} records more than one chain roll of layer {layer}")
     _require(bool(rolls), f"{path} measured no chain roll of layer {layer}")
@@ -450,12 +479,10 @@ def workspace_from_receipt(path, *, action_key):
     Reads the receipt once, here, to take its measured per-batch bytes and its
     sha256; the policy then carries both, and nothing rereads the receipt.
     """
-    from .stage_b_workspace_profile import SCHEMA as PROFILE_SCHEMA
-
     path = Path(path).absolute()
     raw = path.read_bytes()
     profile = json.loads(raw)
-    _require(profile.get("schema") == PROFILE_SCHEMA, f"{path} is not a capture workspace profile")
+    _require(profile.get("schema") == CAPTURE_WORKSPACE_SCHEMA, f"{path} is not a capture workspace profile")
     _require(profile.get("ladder_complete") is True,
              f"{path} records an incomplete ladder; a refused or stopped step prices nothing")
     per_batch = profile["measured"]["workspace_per_batch_bytes"]
