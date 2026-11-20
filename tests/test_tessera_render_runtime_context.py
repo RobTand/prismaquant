@@ -136,3 +136,9 @@ def test_research_mode_keeps_writable_unattested_rungs(monkeypatch):
     monkeypatch.setattr(menu, "menu_mode", lambda: menu.MENU_RESEARCH)
     monkeypatch.setattr(render, "tessera_rung_is_serialisable", lambda _name: True)
     assert render._producer_eligible(NAME)
+
+
+def test_tessera_hessian_support_refuses_a_non_tessera_format():
+    with pytest.raises(ValueError) as exc_info:
+        render.rung_accepts_hessian("BF16")
+    assert str(exc_info.value) == "'BF16' is not a Tessera format name"
