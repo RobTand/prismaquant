@@ -21,6 +21,21 @@ def test_real_shared_rule_accepts_complete_synthetic_record(tmp_path, numerical_
     assert verify(card, model_dir=model, required=["native_export.graph"]) == []
 
 
+@pytest.mark.parametrize("population", ["arms", "eager_pool"], ids=["graph", "eager"])
+def test_shared_rule_refuses_truncated_population(tmp_path, numerical_owner, population):
+    model, card, record, receipt = graph_card(tmp_path, owner=numerical_owner)
+    arm = receipt[population][0]
+    repeat = arm["passes"][1]
+    repeat["choices"] -= 1
+    repeat["members"] -= 1
+    replace_receipt(record, receipt)
+
+    assert verify(card, model_dir=model, required=["native_export.graph"]) == [
+        f"native_export.graph: graph equality receipt refused: malformed population for arm "
+        f"{arm['name']}: incomplete or invalid required equality passes"
+    ]
+
+
 @pytest.mark.parametrize("mode", ["0", "1"])
 @pytest.mark.parametrize("field,value", [
     ("image", "registry/other@sha256:" + "2" * 64),
