@@ -302,3 +302,20 @@ def test_record_over_4mib_refuses():
               "counters": {"path": "/counters", "sha256": "a" * 64, "bytes": 3}}
     with pytest.raises(quantum.QuantumIdentityRefused, match="cap"):
         quantum.quantum_completion_record(result, record_path="/producer/q.json", record_bytes=wire)
+
+
+def test_pilot_refuses_boolean_quantum_record_length(tmp_path):
+    wire = b"0"
+    path = _record_file(tmp_path, wire)
+    result = {"quantum_id": "layer-007", "passed": True, "status": "complete",
+              "units_done": 1, "units_total": 1,
+              "counters": {"path": "/counters", "sha256": "a" * 64, "bytes": 3}}
+    completion = _completion(result, path, wire)
+    bindings = dict(counters={"quantum_id": "layer-007", "units": [1, 1]},
+                    counters_sha256="a" * 64, counters_bytes=3,
+                    quantum_record_sha256=hashlib.sha256(wire).hexdigest(),
+                    quantum_record_path=path)
+    assert pilot.validate_pilot_completion(completion, **bindings)["quantum_record"] == wire
+    completion["quantum_record"]["bytes"] = True
+    with pytest.raises(pilot.PilotRefused, match="quantum record length is malformed"):
+        pilot.validate_pilot_completion(completion, **bindings)
