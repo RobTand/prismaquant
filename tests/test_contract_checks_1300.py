@@ -276,3 +276,12 @@ def test_runfiles_path_golden_still_refuses_odd_components(path):
     with pytest.raises(ValueError) as refused:
         Contract().absolute_posix_path(path, where='source')
     assert str(refused.value) == 'source must be normalized and traversal-free'
+
+
+def test_census_rejects_membership_pairs_without_a_mapping():
+    memberships = {name: ("unit.0",) for name in quality_prefill_coverage.MEMBERSHIP_NAMES}
+    assert quality_prefill_coverage.require_census_equality(memberships) == frozenset({"unit.0"})
+
+    with pytest.raises(quality_prefill_coverage.CoverageError) as refused:
+        quality_prefill_coverage.require_census_equality(list(memberships.items()))
+    assert str(refused.value) == "memberships must be a mapping of the four membership names"
