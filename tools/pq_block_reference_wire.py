@@ -300,12 +300,6 @@ def _expand_bits(values: np.ndarray, width: int) -> np.ndarray:
     return ((values.astype(np.int64)[..., None] >> shifts) & 1).astype(np.uint8)
 
 
-def _collapse_bits(bits: np.ndarray, width: int) -> np.ndarray:
-    """Inverse of :func:`_expand_bits` on the same trailing axis."""
-    shifts = np.arange(width - 1, -1, -1, dtype=np.int64)
-    return (bits.astype(np.int64) << shifts).sum(axis=-1)
-
-
 def _pack_group(values: np.ndarray, widths: np.ndarray) -> np.ndarray:
     """Pack one (parent, column-block) group of fragments, one row per block.
 
@@ -347,7 +341,9 @@ def _unpack_group(packed: np.ndarray, widths: np.ndarray, block_rows: int) -> np
     for k in range(block_cols):
         width = int(widths[k])
         take = block_rows * width
-        out[:, :, k] = _collapse_bits(bits[:, cursor:cursor + take].reshape(n, block_rows, width), width)
+        fragment_bits = bits[:, cursor:cursor + take].reshape(n, block_rows, width)
+        shifts = np.arange(width - 1, -1, -1, dtype=np.int64)
+        out[:, :, k] = (fragment_bits.astype(np.int64) << shifts).sum(axis=-1)
         cursor += take
     return out
 
