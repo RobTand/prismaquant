@@ -326,3 +326,171 @@ def test_sigterm_stops_a_process_with_blocked_workers_after_one_report(tmp_path)
                           text=True, timeout=60)
     assert done.returncode == 75, done.stderr
     assert done.stdout.splitlines() == ["REPORT SIGTERM"]
+
+
+@pytest.fixture
+def render_sample(tmp_path, monkeypatch):
+    sample = getattr(head, "render_sample_intake", None)
+    if sample is None:
+        return None, None, None, None
+
+    import builtins
+    import io
+    import os
+    from pathlib import Path
+
+    from tests import campaign_sample_fixtures
+    from prismaquant.render_cache_paths import cache_weight_filename
+
+    inputs, names, fmt, *_ = campaign_sample_fixtures.fixture(tmp_path)
+    cells = [[name, fmt] for name in sorted(names)]
+    paths = [tmp_path / "campaign/rows/row-0000/cache" / cache_weight_filename(name, fmt)
+             for name, fmt in cells]
+    for path, payload in zip(paths, (b"abc", b"hello")):
+        path.write_bytes(payload)
+    manifest = {"schema": "prismaquant.render_sample.v1", "inputs": inputs,
+                "scope": [0, 2], "cells": cells}
+    config = {"inputs": {**inputs, "candidate_overlay": {"path": str(tmp_path / "absent")}}}
+    opened = []
+
+    def watch(real_open):
+        def record(path, *args, **kwargs):
+            if isinstance(path, (str, Path)):
+                path = Path(path)
+                assert path.suffix != ".tessera", "The reader opened a wire payload."
+                if path in paths:
+                    opened.append(path)
+            return real_open(path, *args, **kwargs)
+        return record
+
+    for module in (builtins, io, os):
+        monkeypatch.setattr(module, "open", watch(module.open))
+
+    def run(**changes):
+        return sample(config, **({"manifest": manifest, "scope": (0, 2), "workers": 1,
+                                  "hash_workers": 1, "trials": 2, "max_trials": 2,
+                                  "max_files": 4, "max_bytes": 16} | changes))
+
+    return run, manifest, paths, opened
+
+
+def test_render_sample_reports_stable_measured_digests(render_sample, tmp_path, monkeypatch):
+    from itertools import count
+    from types import SimpleNamespace
+    from prismaquant.digests import canonical_json_sha256
+    from prismaquant.file_identity import file_stat_signature
+
+    run, manifest, paths, opened = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    ticks = count(step=2)
+    monkeypatch.setattr(head, "time", SimpleNamespace(monotonic=ticks.__next__))
+    before = {path: file_stat_signature(path.stat()) for path in tmp_path.rglob("*")}
+    first, second = run(), run()
+    assert first == second
+    assert first["manifest_sha256"] == canonical_json_sha256(manifest, where="fixture")
+    assert first["inputs"] == manifest["inputs"]
+    assert first["verification"] == "sample-only"
+    expected = ["ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"]
+    assert [[row["sha256"] for row in trial] for trial in first["trials"]] == [expected] * 2
+    assert [[row["cell"] for row in trial] for trial in first["trials"]] == [manifest["cells"]] * 2
+    assert first["payload_files"] == 4 and first["payload_bytes"] == 16
+    assert first["marks"] == {"anchor_input_s": 2, "render_hash_s": 2}
+    assert opened == paths * 4
+    assert {path: file_stat_signature(path.stat()) for path in tmp_path.rglob("*")} == before
+
+
+@pytest.mark.parametrize("budget", ["max_files", "max_bytes", "max_trials"])
+@pytest.mark.parametrize("limit", ["absent", "too_low"])
+def test_render_sample_refuses_over_budget_before_payload(render_sample, budget, limit):
+    run, _, _, opened = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    too_low = {"max_files": 3, "max_bytes": 15, "max_trials": 1}
+    with pytest.raises(ValueError, match=budget):
+        run(**{budget: None if limit == "absent" else too_low[budget]})
+    assert opened == []
+
+
+@pytest.mark.parametrize("field", ["cells", "inputs"])
+def test_render_sample_refuses_an_invalid_manifest_before_payload(render_sample, field):
+    run, manifest, _, opened = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    bad = {"cells": [*manifest["cells"][:1], ["not-admitted", manifest["cells"][-1][1]]],
+           "inputs": {}}
+    with pytest.raises(ValueError, match="manifest"):
+        run(manifest={**manifest, field: bad[field]})
+    assert opened == []
+
+
+def test_render_sample_refuses_a_render_link_to_a_wire(render_sample, tmp_path):
+    run, manifest, paths, opened = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    name, _ = manifest["cells"][0]
+    paths[0].unlink()
+    paths[0].symlink_to(tmp_path / "merged/cache/wire" / (name + ".tessera"))
+    with pytest.raises(ValueError, match="not a regular file"):
+        run(max_bytes=128)
+    assert opened == []
+
+
+def test_render_sample_overlaps_reads_within_the_hash_worker_limit(render_sample, monkeypatch):
+    from threading import Barrier, Lock
+    from prismaquant import cost_stage_checkpoint, digests
+
+    run, manifest, _, _ = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    rendezvous, lock = Barrier(2, timeout=10), Lock()
+    shared_digest = digests.chunks_sha256hex
+    drive = cost_stage_checkpoint._drive_ordered_units
+    widths = []
+    active = peak = 0
+
+    def record_width(roster, walk, commit, *, workers):
+        widths.append(workers)
+        assert workers == 2
+        return drive(roster, walk, commit, workers=workers)
+
+    def overlap(chunks):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        try:
+            rendezvous.wait()
+            return shared_digest(chunks)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(digests, "chunks_sha256hex", overlap)
+    monkeypatch.setattr(cost_stage_checkpoint, "_drive_ordered_units", record_width)
+    result = run(hash_workers=2)
+    assert widths == [2, 2] and peak == 2
+    assert [[row["cell"] for row in trial] for trial in result["trials"]] == [manifest["cells"]] * 2
+
+
+@pytest.mark.parametrize("change", ["extend", "replace"])
+def test_render_sample_refuses_a_file_changed_during_hashing(render_sample, monkeypatch, change):
+    import os
+
+    from prismaquant import digests
+
+    run, _, paths, opened = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    shared_digest = digests.chunks_sha256hex
+
+    def mutate(chunks):
+        digest = shared_digest(chunks)
+        path = paths[0]
+        if change == "extend":
+            os.truncate(path, 4)
+        else:
+            replacement = path.with_suffix(".new")
+            replacement.write_bytes(b"abc")
+            replacement.replace(path)
+        return digest
+
+    monkeypatch.setattr(digests, "chunks_sha256hex", mutate)
+    with pytest.raises(ValueError, match="render changed"):
+        run()
+    assert opened == paths[:1]
