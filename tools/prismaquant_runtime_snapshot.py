@@ -391,16 +391,6 @@ def _manifest_paths(snapshot: Path) -> dict[str, tuple[Any, ...]]:
     }
 
 
-def _is_judge_only(path: str) -> bool:
-    for allowed in JUDGE_ONLY_PATHS:
-        if allowed.endswith("/"):
-            if path.startswith(allowed):
-                return True
-        elif path == allowed:
-            return True
-    return False
-
-
 def judge_divergence(runtime: Path, judge: Path) -> dict[str, Any]:
     """Prove a judge snapshot may validate an artifact built at *runtime*.
 
@@ -420,7 +410,14 @@ def judge_divergence(runtime: Path, judge: Path) -> dict[str, Any]:
         for path in runtime_paths.keys() | judge_paths.keys()
         if runtime_paths.get(path) != judge_paths.get(path)
     )
-    blocking = [path for path in divergent if not _is_judge_only(path)]
+    blocking = [
+        path
+        for path in divergent
+        if not any(
+            path.startswith(allowed) if allowed.endswith("/") else path == allowed
+            for allowed in JUDGE_ONLY_PATHS
+        )
+    ]
     if blocking:
         raise SnapshotError(
             "judge snapshot diverges from the artifact's runtime outside the "
