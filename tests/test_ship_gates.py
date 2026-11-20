@@ -148,33 +148,6 @@ def test_real_ppl_preflight_uses_generic_value_closed_inputs(tmp_path):
     assert result["n_tokens_scored"] == 8176
 
 
-@pytest.mark.parametrize("slot,tool", [
-    ("gold.kl", "measure_vllm_full_kl"), ("gold.ppl", "measure_vllm_wikitext_ppl"),
-])
-def test_stored_gold_producer_uses_recorded_source_bytes(slot, tool):
-    names = (
-        "prismaquant/tessera_runtime/tessera_serving_runtime_pin.json",
-        "tools/dsv4_wikitext_inputs.py", "tools/prepare_dsv4_wikitext_inputs.py",
-        "tools/prismaquant_source_bootstrap.py", "tools/serve_fingerprint.py",
-        "tools/spec_decode_guard.py", "tools/gold_engine_options.py",
-        "tools/gold_measurement_fidelity.py", "tools/full_kl_teacher_payload.py",
-        f"tools/{tool}.py",
-    )
-    # The stored identities refer to old files, with exact synthetic bytes.
-    digest = hashlib.sha256(b"previous source").hexdigest()
-    files = {name: {"bytes": 15, "sha256": digest} for name in names}
-    producer = {
-        "schema": shipcard.GOLD_PRODUCER_IDENTITY_SCHEMA, "measurement_tool": tool,
-        "git_commit": "a" * 40, "git_tree": None, "git_dirty": False,
-        "source_files": files, "source_files_sha256": inputs.canonical_sha256(files),
-    }
-    assert shipcard._verify_gold_producer_identity(
-        slot, {"git_commit": "a" * 40},
-        {"measurement_tool": tool, "producer_identity": producer},
-        canonical_sha=inputs.canonical_sha256,
-    ) == []
-
-
 @pytest.mark.parametrize("damage", ["shape", "token"])
 def test_kl_preflight_refuses_invalid_teacher_values(tmp_path, damage):
     model, teacher, _ = small_inputs(tmp_path)

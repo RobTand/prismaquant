@@ -22534,7 +22534,9 @@ pq_py_test(
     deps = [
         "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
         "//:pqtel/__init__",
+        "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/digests",
         "//:prismaquant/lane_shipcard",
         "//:prismaquant/shipcard_cli",
         "//:tools/__init__",
