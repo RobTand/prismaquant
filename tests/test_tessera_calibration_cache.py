@@ -847,3 +847,13 @@ def test_cli_cache_reader_requires_coverage_not_equal_output_scope(
     torch.testing.assert_close(loaded_h[requested_name], hessians[requested_name], rtol=0, atol=0)
     assert counts == {requested_name: 4}
     assert loaded_maxima == {requested_name: maxima[requested_name]}
+
+
+def test_v3_unit_selection_refuses_missing_partition():
+    selection = {
+        "schema": campaign_selection.UNITS_SCHEMA_V3,
+        "groups": [{"key": "s:experts", "members": ["expert0.gate"]}],
+    }
+    with pytest.raises(RuntimeError) as exc:
+        campaign_selection.validate_unit_selection(selection)
+    assert str(exc.value) == "--units in-memory: v3 requires explicit expert partition metadata"
