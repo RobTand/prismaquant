@@ -60,6 +60,12 @@ def test_selected_request_carries_resolved_head_and_actual_capture_contract(stre
         assert request.seed.checkpoint == 'seed.json' and request.seed.wire_dir == 'seed-wires'
 
 
+def test_encoder_kwargs_memo_refuses_zero_capacity():
+    with pytest.raises(ValueError) as exc:
+        cell_measurement.encoder_kwargs_memo(None, {}, "cpu", max_entries=0)
+    assert str(exc.value) == 'encoder memo capacity must be positive or unbounded'
+
+
 @pytest.mark.parametrize('hessian', ['require', 'off'])
 def test_actual_loaded_census_keeps_shared_constructors_without_creating_h_source(
         monkeypatch, tmp_path, hessian):
