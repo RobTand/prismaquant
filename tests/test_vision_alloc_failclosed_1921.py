@@ -141,9 +141,14 @@ def test_synthetic_cpu_main_retains_explicit_uniform_and_text_only_controls(
 @pytest.mark.parametrize("visual_format", ["BF16", "NVFP4"])
 def test_body_plan_is_the_same_with_and_without_vision(
         synthetic_cpu_inputs, monkeypatch, visual_format):
-    # PQ #2575 criterion 6: visual rows stay outside the body DP.
+    # PQ #2575 criterion 6: visual rows stay outside the body DP. A binding
+    # target gives the body a format mix, so a visual row in the DP moves it.
+    # The second run has no visual probe or cost rows; the source census still
+    # fixes both visual Linears at the uniform format.
     case = synthetic_cpu_inputs
     _set_cli_option(monkeypatch, "--visual-format", visual_format)
+    _set_cli_option(monkeypatch, "--target-bits", "6")
+    _set_cli_option(monkeypatch, "--pareto-targets", "6")
     allocator.main()
     with_vision = load_assignment(case.output)
     probe = copy.deepcopy(case.probe)
@@ -158,4 +163,5 @@ def test_body_plan_is_the_same_with_and_without_vision(
     body = set(case.probe["stats"]) - set(case.visuals)
     assert {name: with_vision[name] for name in body} == {
         name: without_vision[name] for name in body}
+    assert len({with_vision[name] for name in body}) > 1
     assert all(with_vision[name] == visual_format for name in case.visuals)
