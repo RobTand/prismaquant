@@ -150,6 +150,8 @@ class StackExpertSample:
     #: every rung is measured on every expert in ``sampled_experts`` or it is
     #: not priced at all.
     transfer_law_experts: tuple[int, ...] = ()
+    #: Census reference selected in the plan, before any anchor is measured.
+    reference_q256: int | None = None
 
     @property
     def is_census(self) -> bool:
@@ -167,6 +169,7 @@ def stack_sample_from_probe(
     seed: int,
     design: str = "pps_wor",
     transfer_law_experts=(),
+    reference_q256: int | None = None,
 ) -> StackExpertSample:
     """Build a sampling record from the PROBE row and the model profile.
 
@@ -224,6 +227,7 @@ def stack_sample_from_probe(
         seed=int(seed),
         design=str(design),
         transfer_law_experts=tuple(sorted(int(e) for e in transfer_law_experts)),
+        reference_q256=reference_q256,
     )
 
 
@@ -628,10 +632,7 @@ def _stack_cost_rows(
     measured_names = set(rows)
     for family, points in measured_by_family.items():
         if family in law_tier:
-            # A two-tier family has ONE censused rung, so there is no bracket
-            # to interpolate between and the transfer law below is what prices
-            # its other rungs.  Skipping here rather than letting the surface
-            # refuse keeps a designed schedule out of the refusal record.
+            # The transfer law prices incomplete rungs that cover the draw.
             continue
         ordered = sorted(points)
         try:
@@ -797,8 +798,8 @@ def _stack_draw_description(block: "Mapping[str, object]") -> dict:
 def _stack_rate_evidence(sample: StackExpertSample, anchors, refused: list):
     """One two-tier stack's evidence, per family, as a ``StackRateSample``.
 
-    A family needs exactly one census rung. It also needs at least one
-    incomplete rung that covers the transfer-law draw.
+    Use the planned reference. Older plans need exactly one census rung and
+    at least one incomplete rung that covers the transfer-law draw.
 
     Returns ``{family: (record, reference_format_name)}``.
     """
@@ -832,22 +833,26 @@ def _stack_rate_evidence(sample: StackExpertSample, anchors, refused: list):
         coverage = {rung: {e for e, row in rows.items() if len(row) == roles}
                     for (fam, rung), rows in sorted(seen.items()) if fam == family}
         census = [rung for rung, covered in coverage.items() if covered == frame]
+        planned = sample.reference_q256
+        # A completed target still supplies the same draw to peer fits.
         law_rungs = [rung for rung, covered in coverage.items()
-                     if law_set <= covered < frame]
+                     if law_set <= covered
+                     and (covered < frame if planned is None else rung != planned)]
         if not law_rungs:
             continue
-        if len(census) != 1:
+        reference = census[0] if planned is None and len(census) == 1 else planned
+        if reference not in census:
             refused.append({
                 "qname": q, "family": family,
                 "reason": "stack_transfer_law_reference_missing",
                 "detail": (f"{len(census)} rung(s) of family {family} cover the "
                            "whole frame; exactly one is needed, because every "
                            "expert is predicted from its own measured "
-                           "reference value"),
+                           "reference value") if planned is None else
+                          f"Planned reference rung {planned} does not cover the whole frame.",
                 "census_rungs": census,
             })
             continue
-        reference = census[0]
         try:
             record = StackRateSample(
                 stack=q, projections=projections,
@@ -1350,12 +1355,16 @@ def selection_stack_samples(selection: Mapping, profile) -> dict[str, StackExper
         for name, record in sorted(records.items()):
             if name in result:
                 raise StackSampleError(f"{name}: duplicate packed sampling record")
+            reference = record.get("reference_q256")
+            if "reference_q256" in record and (type(reference) is not int or reference <= 0):
+                raise StackSampleError(f"{name}: reference_q256 must be a positive integer")
             sample = stack_sample_from_probe(
                 name, record["probe_row"], profile,
                 sampled_experts=record["sampled_experts"],
                 inclusion_prob=record["inclusion_prob"], seed=record["seed"],
                 design=record["design"],
-                transfer_law_experts=record.get("transfer_law_experts", ()))
+                transfer_law_experts=record.get("transfer_law_experts", ()),
+                reference_q256=reference)
             validate_stack_sample(sample)
             replay = draw_stack_sample(
                 _stack_draw_sizes(record, sample),
