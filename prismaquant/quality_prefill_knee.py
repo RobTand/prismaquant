@@ -83,19 +83,6 @@ class FrontierPoint:
     units: str
     measurement_status: str
 
-    def as_point(self) -> dict[str, object]:
-        """Return the eight-key mapping ``validate_frontier_report`` accepts."""
-        return {
-            "point_id": self.point_id,
-            "assignment_id": self.assignment_id,
-            "bytes": self.bytes,
-            "prefill_budget": self.prefill_budget,
-            "quality_value": self.quality_value,
-            "currency": self.currency,
-            "units": self.units,
-            "measurement_status": self.measurement_status,
-        }
-
 
 @dataclass(frozen=True)
 class Normalisation:
