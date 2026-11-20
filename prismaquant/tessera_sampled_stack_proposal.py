@@ -78,28 +78,6 @@ def _domain(families, costs, stats):
     return result
 
 
-def _stack_roster(payload, profile):
-    from .tessera_expert_projection import PROJECTION_KEY, carried_units
-    projection = payload['provenance'].get(PROJECTION_KEY)
-    _require(projection is not None, 'sampled proposal needs original complete producer projection')
-    _source, units, stack_of = carried_units(projection)
-    _require(set(units) <= set(payload['costs']), 'producer stack member is absent from pilot')
-    group_members = {}
-    for name in payload['costs']:
-        key = profile.packed_expert_format_group(name)
-        if name in units:
-            _require(key is not None, f'{name}: projected expert has no atomic profile group')
-            group_members.setdefault(key, set()).add(name)
-        else:
-            _require(key is None, f'{name}: routed expert is missing from producer projection')
-    stack_members = {stack: set(members) for stack, members in projection['stacks'].items()}
-    _require({frozenset(members) for members in group_members.values()} ==
-             {frozenset(members) for members in stack_members.values()},
-             'profile atomic groups disagree with complete producer stack roster')
-    _require(set(stack_of) == set(units), 'producer projected roster is incomplete')
-    return units, stack_members
-
-
 def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_bytes,
                           reserve_bytes, full_legal_families, target_profile='research',
                           bit_precision=0.01, max_exact_attempts=16,
@@ -133,7 +111,24 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
     if serving_target is not None:
         _require(isinstance(serving_target, ServingTarget),
                  'validation export target must be explicit ServingTarget')
-    units, stacks = _stack_roster(payload, profile)
+    from .tessera_expert_projection import PROJECTION_KEY, carried_units
+    projection = payload['provenance'].get(PROJECTION_KEY)
+    _require(projection is not None, 'sampled proposal needs original complete producer projection')
+    _source, units, stack_of = carried_units(projection)
+    _require(set(units) <= set(costs), 'producer stack member is absent from pilot')
+    group_members = {}
+    for name in costs:
+        key = profile.packed_expert_format_group(name)
+        if name in units:
+            _require(key is not None, f'{name}: projected expert has no atomic profile group')
+            group_members.setdefault(key, set()).add(name)
+        else:
+            _require(key is None, f'{name}: routed expert is missing from producer projection')
+    stacks = {stack: set(members) for stack, members in projection['stacks'].items()}
+    _require({frozenset(members) for members in group_members.values()} ==
+             {frozenset(members) for members in stacks.values()},
+             'profile atomic groups disagree with complete producer stack roster')
+    _require(set(stack_of) == set(units), 'producer projected roster is incomplete')
     unknown = set()
     for name, s in stats.items():
         state = observation_status(s['joint_eval_observations'])
