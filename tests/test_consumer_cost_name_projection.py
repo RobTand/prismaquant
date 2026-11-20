@@ -149,3 +149,10 @@ def test_decision_units_uses_the_shared_leaf_function() -> None:
     assert _decision_unit_name_from_graph_unit(
         "tensor:model.layers.1.mlp.down_proj.weight"
     ) == "model.layers.1.mlp.down_proj"
+
+
+def test_packed_expert_owner_excludes_shared_experts() -> None:
+    from prismaquant.name_projection import is_packed_expert_qname
+
+    assert is_packed_expert_qname("model.layers.0.mlp.experts.gate_up_proj.weight")
+    assert not is_packed_expert_qname("model.layers.0.mlp.shared_experts.gate_up_proj.weight")
