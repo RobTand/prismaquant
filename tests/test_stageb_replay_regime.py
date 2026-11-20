@@ -302,3 +302,8 @@ def test_a_band_serial_producer_admits_only_the_chains_batch_size(
         handoff_regime_refusal(regime, chain_batch_size=0)
     with pytest.raises(TypeError):
         handoff_regime_refusal(regime)  # the chain batch size is never implied
+
+
+def test_replay_regime_refuses_a_list_of_pairs():
+    with pytest.raises(ReplayRegimeRefused, match="neither a string nor a mapping"):
+        normalize_replay_regime([("capture_batch", 2)])
