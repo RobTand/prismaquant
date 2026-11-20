@@ -1597,9 +1597,9 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     to read it first (the quantum row derives its load grace from the
     spec's resource policy); the wrapper seals that parse and reads nothing.
     """
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, INSERTION_ASCII_SPACED_LAX
     spec = (json.loads(Path(spec_path).read_text()) if spec is None
-            else json.loads(json.dumps(spec)))
+            else json.loads(INSERTION_ASCII_SPACED_LAX.text(spec)))
     if spill_bound is not None:
         env = spec.get("env", {})
         if not env.get(STAGE_B_SPILL_ENV[0]):
@@ -2828,9 +2828,10 @@ def check_source_coverage(coverage_rows: list[dict], *, coverage=None) -> None:
         from prismaquant.readset_coverage import quantum_rows_gaps as coverage
     gaps = coverage(coverage_rows)
     if gaps:
+        from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX_DEFAULT_STR
         from prismaquant.readset_coverage import gaps_report
-        print(json.dumps(gaps_report(gaps, rows=len(coverage_rows)),
-                         indent=2, sort_keys=True, default=str), file=sys.stderr)
+        print(DIRECT_ASCII_INDENT2_LAX_DEFAULT_STR.text(
+            gaps_report(gaps, rows=len(coverage_rows))), file=sys.stderr)
         raise DispatchRefused(
             f"{len(gaps)} source read(s) of {len(coverage_rows)} row(s) are "
             "not declared by their readsets (listed above): rebuild the "

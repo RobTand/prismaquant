@@ -56,7 +56,7 @@ from prismaquant.joint_layer_quanta import seal_manifest_bytes  # noqa: E402
 from prismaquant.stage_b_prep_io import (  # noqa: E402
     build_preparation_template, head_phase_entries, preparation_payload_ceiling,
     preparation_read_entries, preparation_read_manifest)
-from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+from prismaquant.digests import DIRECT_ASCII_INDENT1_LAX, DIRECT_ASCII_SPACED_LAX
 
 SUBMISSION_SCHEMA = "prismaquant.stage_b_preparation_submission.v1"
 
@@ -196,7 +196,7 @@ def write_submission(args, entries, annotations, quanta, indexes) -> dict:
         payload_max_bytes=preparation_payload_ceiling(quanta, indexes=indexes))
     out.mkdir(parents=True, exist_ok=True)
     manifest_bytes = seal_manifest_bytes(manifest)
-    template_bytes = (json.dumps(template, sort_keys=True, indent=1) + "\n").encode()
+    template_bytes = DIRECT_ASCII_INDENT1_LAX.encoded(template) + b"\n"
     manifest_path = out / "read-manifest.json.gz"
     template_path = out / "template.json"
     for path, payload in ((manifest_path, manifest_bytes), (template_path, template_bytes)):
@@ -222,8 +222,7 @@ def write_submission(args, entries, annotations, quanta, indexes) -> dict:
                         "--produced-declaration-sha256", hashlib.sha256(template_bytes).hexdigest()],
         "staged_input_required": True,
     }
-    (out / "submission.json").write_bytes(
-        (json.dumps(submission, sort_keys=True, indent=1) + "\n").encode())
+    (out / "submission.json").write_bytes(DIRECT_ASCII_INDENT1_LAX.encoded(submission) + b"\n")
     return submission
 
 
