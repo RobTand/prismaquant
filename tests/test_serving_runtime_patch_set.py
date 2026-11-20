@@ -105,6 +105,15 @@ def test_a_patch_set_with_no_stated_limits_is_refused(tmp_path: Path) -> None:
         load_serving_runtime_patch_set(NAME, root=_write(tmp_path, manifest))
 
 
+def test_patch_set_rejects_qualification_beyond_model_depth(tmp_path: Path) -> None:
+    manifest = _manifest()
+    qualification = manifest["qualification"]
+    qualification["model_layers"] = qualification["full_model_layers"] + 1
+    with pytest.raises(
+            ServingRuntimePatchSetError, match="measures more layers than the model has"):
+        load_serving_runtime_patch_set(NAME, root=_write(tmp_path, manifest))
+
+
 def test_a_manifest_naming_a_script_it_does_not_carry_is_refused(tmp_path: Path) -> None:
     manifest = copy.deepcopy(_manifest())
     manifest["patches"][0]["script"] = "patch_that_lives_in_a_scratch_dir.py"
