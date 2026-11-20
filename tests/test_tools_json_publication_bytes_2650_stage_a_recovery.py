@@ -164,5 +164,6 @@ def test_stage_a_recovery_profile_calls(tmp_path, monkeypatch, capsysbinary):
     assert [(name, _canon(value)) for name, value in calls] == [
         ("direct-ascii-lax", _canon(MANIFEST)),
         ("direct-ascii-indent2-lax", _canon(template)),
+        ("insertion-ascii-indent2-lax", _canon(json.loads(FIELDS_BYTES))),
         ("direct-ascii-indent2-lax", _canon(pins)),
         ("direct-ascii-spaced-lax", _canon(json.loads(out)))]

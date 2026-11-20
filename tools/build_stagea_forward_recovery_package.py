@@ -26,6 +26,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX, DIRECT_ASCII_LAX, DIRECT_ASCII_SPACED_LAX
+from prismaquant.digests import INSERTION_ASCII_INDENT2_LAX, INSERTION_ASCII_SPACED_LAX
 from prismaquant.joint_forward_resume import _read, chain_documents, chain_records
 from prismaquant.stage_a_head import drop_source_head_walk_reads
 
@@ -85,7 +86,7 @@ def load_original(path, campaign, plan):
 
 def recovery_manifest(original, capsule, bound):
     """Keep source reads, add imported inputs at their actual read phases."""
-    manifest = json.loads(json.dumps(original))
+    manifest = json.loads(INSERTION_ASCII_SPACED_LAX.text(original))
     frontier = capsule['frontier']
     layers = 1 + max(int(p['name'].split('-')[1]) for p in original['read_plan']['phases']
                      if p['name'].startswith('forward-'))
@@ -133,7 +134,7 @@ def recovery_manifest(original, capsule, bound):
     # held. Preserve that declared phase even though no source layer replays.
     if frontier == layers:
         tail = next(p for p in original['read_plan']['phases'] if p['name'] == f'forward-{layers-1:03d}')
-        tail = json.loads(json.dumps(tail))
+        tail = json.loads(INSERTION_ASCII_SPACED_LAX.text(tail))
         tail['entry_indices'].extend(index for _, index in sorted(boundaries[layers]))
         phases.insert(1, tail)
     used = sorted({i for phase in phases for i in phase['entry_indices']})
@@ -195,11 +196,10 @@ def main():
     validate_declaration(template)
     template['template_id'] = template['template_id'].removesuffix('-r9') + '-' + label
     (root / 'stagea-512-template-r7.json').write_text(DIRECT_ASCII_INDENT2_LAX.text(template) + '\n')
-    (root / 'launch-fields.json').write_text(json.dumps({
+    (root / 'launch-fields.json').write_text(INSERTION_ASCII_INDENT2_LAX.text({
         'campaign': campaign, 'label': label, 'source_head': args.source_head,
         'manifest_sha256': digest, 'capsule': bound, 'head_walk_reads_dropped': dropped,
-        'template_sha256': hashlib.sha256(TEMPLATE.read_bytes()).hexdigest()},
-        indent=2) + '\n')
+        'template_sha256': hashlib.sha256(TEMPLATE.read_bytes()).hexdigest()}) + '\n')
     names += ['stagea-512-template-r7.json', 'launch-fields.json']
     (root / 'package-pins.json').write_text(DIRECT_ASCII_INDENT2_LAX.text(
         {name: hashlib.sha256((root/name).read_bytes()).hexdigest() for name in names}) + '\n')

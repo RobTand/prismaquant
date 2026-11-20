@@ -103,13 +103,11 @@ import time
 import zlib
 from pathlib import Path
 
-if __package__:
-    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
-    from prismaquant.joint_layer_quanta import (derive_stride, emit_quantum_boundary_readsets, emit_quantum_executable_readsets, layer_quanta, seal_manifest_bytes)
-else:
+if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
-    from prismaquant.joint_layer_quanta import (derive_stride, emit_quantum_boundary_readsets, emit_quantum_executable_readsets, layer_quanta, seal_manifest_bytes)
+from prismaquant.digests import DIRECT_ASCII_INDENT1_STRICT, DIRECT_ASCII_SPACED_LAX
+from prismaquant.joint_campaign_ledger import require_quantum_campaign
+from prismaquant.joint_layer_quanta import (derive_stride, emit_quantum_boundary_readsets, emit_quantum_executable_readsets, layer_quanta, seal_manifest_bytes)
 
 EXIT_REFUSED = 3
 
@@ -163,8 +161,7 @@ def _load_json(path: Path, *, digest: str | None, where: str):
 
 
 def _pretty(value) -> bytes:
-    return (json.dumps(value, indent=1, sort_keys=True,
-                       allow_nan=False) + "\n").encode("utf-8")
+    return DIRECT_ASCII_INDENT1_STRICT.encoded(value) + b"\n"
 
 
 #: Record fields allowed to move between the original root and the new
@@ -215,7 +212,6 @@ def _check_authorized_diff(old: dict, new: dict, *, old_root: str, bound: bool,
     reason. ``adjoint.receipt_sha256`` may differ only when this run binds
     a receipt; otherwise it must be equal.
     """
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     qid = new.get("quantum_id", "?")
     old_root = old_root.rstrip("/")
     # The new tree root is whatever the first moved path swapped to; every
@@ -430,7 +426,6 @@ def _check_authorized_metadata_diff(old: dict, new: dict, *,
     argv inside) -- plus the receipt seal when binding. The data fields
     (``output_space``, ``adjoint.boundary_artifacts``) and every scientific
     field stay byte-equal; the new identity must recompute."""
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     qid = new.get("quantum_id", "?")
     original_root = original_root.rstrip("/")
     if old.get("output_space") != new.get("output_space"):
@@ -520,7 +515,6 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
     band-granular binding, PQ #993) the produced generation may cover a
     subset of the prior quanta; every produced quantum still compares.
     """
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     prior_paths = sorted(prior_dir.glob("layer-*.json"))
     if not prior_paths:
         raise ValueError(f"no prior layer-*.json records under {prior_dir}")
@@ -769,7 +763,6 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
 
 
 def main(argv=None, *, finalize_publication=True) -> int:
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--plan", type=Path, required=True)
     ap.add_argument("--plan-sha256", required=True)

@@ -25,7 +25,7 @@ TOOLS = Path(__file__).resolve().parent
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
-from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX, INSERTION_ASCII_SPACED_LAX
 ROUND_SCHEMA = "prismaquant.stage_a.split_round.v2"
 FORWARD_ROUND_SCHEMA = "prismaquant.stage_a.forward_split_round.v2"
 ROUND_NAME = "round.json"
@@ -177,7 +177,7 @@ def window_groups(base_template: dict, *, tier: str, n_probes: int,
 def row_template(base_template: dict, *, template_id: str, tier: str,
                  window: dict, artifact_budget_bytes: int) -> dict:
     """A row's template: the base's prefix, tier and slots under its own id."""
-    template = json.loads(json.dumps(base_template))
+    template = json.loads(INSERTION_ASCII_SPACED_LAX.text(base_template))
     maxima = template["durable_maxima"]
     if int(maxima["payload_max_bytes"]) != int(artifact_budget_bytes):
         raise SplitDispatchRefused(
@@ -818,42 +818,30 @@ def main(argv=None) -> int:
     compare.add_argument("--baseline", required=True)
     args = parser.parse_args(argv)
     try:
-        if args.command == "seal":
-            document = seal_round(
+        if args.command in ("seal", "seal-forward"):
+            common = dict(
                 round_dir=args.round_dir, checkout=Path(args.checkout).resolve(),
-                split_package=args.split_package,
                 campaign=json.loads(Path(args.campaign_record).read_text())["campaign"],
                 spec=args.spec, prefetch_override=args.prefetch_override,
-                base_template=args.base_template, tier=args.tier,
-                template_prefix=args.template_prefix,
-                artifact_budget_bytes=args.artifact_budget_bytes,
+                base_template=args.base_template, tier=args.tier, template_prefix=args.template_prefix,
+                artifact_budget_bytes=args.artifact_budget_bytes, seconds_per_layer=args.seconds_per_layer,
                 chain_regime={"chain_batch_size": args.chain_batch_size,
                               "chain_probe_fusion": args.chain_probe_fusion},
-                seconds_per_layer=args.seconds_per_layer, digest_layer=args.digest_layer,
-                band_request={"path": args.band_request, "sha256": args.band_request_sha256},
-                band_references=[{"path": path} for path in args.band_reference],
                 python=args.python, timeout_s=args.timeout_s, tag=args.tag, priority=args.priority)
-            print(json.dumps({"round": str(Path(args.round_dir) / ROUND_NAME),
-                              "rows": [row["name"] for row in document["rows"]]}))
-        elif args.command == "seal-forward":
-            document = seal_forward_round(
-                round_dir=args.round_dir, checkout=Path(args.checkout).resolve(),
-                forward_package=args.forward_package,
-                campaign=json.loads(Path(args.campaign_record).read_text())["campaign"],
-                spec=args.spec, prefetch_override=args.prefetch_override,
-                base_template=args.base_template, tier=args.tier,
-                template_prefix=args.template_prefix,
-                artifact_budget_bytes=args.artifact_budget_bytes,
-                chain_regime={"chain_batch_size": args.chain_batch_size,
-                              "chain_probe_fusion": args.chain_probe_fusion},
-                seconds_per_layer=args.seconds_per_layer, n_probes=args.n_probes,
-                python=args.python, timeout_s=args.timeout_s, tag=args.tag, priority=args.priority)
-            print(json.dumps({"round": str(Path(args.round_dir) / ROUND_NAME),
-                              "rows": [row["name"] for row in document["rows"]]}))
+            if args.command == "seal":
+                document = seal_round(
+                    **common, split_package=args.split_package, digest_layer=args.digest_layer,
+                    band_request={"path": args.band_request, "sha256": args.band_request_sha256},
+                    band_references=[{"path": path} for path in args.band_reference])
+            else:
+                document = seal_forward_round(
+                    **common, forward_package=args.forward_package, n_probes=args.n_probes)
+            print(INSERTION_ASCII_SPACED_LAX.text({"round": str(Path(args.round_dir) / ROUND_NAME),
+                                                 "rows": [row["name"] for row in document["rows"]]}))
         elif args.command == "plan":
             document = load_round(args.round_dir)
             for row in document["rows"]:
-                print(json.dumps({"name": row["name"], "row": row["row"]}))
+                print(INSERTION_ASCII_SPACED_LAX.text({"name": row["name"], "row": row["row"]}))
         elif args.command == "status":
             document = load_round(args.round_dir)
             for row in document["rows"]:
@@ -868,7 +856,8 @@ def main(argv=None) -> int:
             names = [label for name in args.rows
                      for label in (document["labels"] if name == "quanta" else [name])]
             for result in submit(args.round_dir, names):
-                print(json.dumps({"name": result["name"], "submissions": result["submissions"]}))
+                print(INSERTION_ASCII_SPACED_LAX.text({
+                    "name": result["name"], "submissions": result["submissions"]}))
         else:
             document = load_round(args.round_dir)
             report = compare_digests(document, args.baseline)
