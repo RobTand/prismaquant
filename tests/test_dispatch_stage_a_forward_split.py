@@ -315,3 +315,19 @@ def test_the_forward_readahead_depth_looks_up_the_walk():
     depth = readahead_depth({"entries": entries, "read_plan": {"phases": phases}}, 2)
     reach = {row["reading"]: row["reach_bytes"] for row in depth["rows"]}
     assert reach == {"head": 200, "forward-000": 200, "forward-001": 100, "forward-002": 0}
+
+
+def test_forward_prep_refuses_content_with_an_old_seal(tmp_path, monkeypatch):
+    from prismaquant import stage_a_forward_split
+
+    root = tmp_path / "run"
+    space = adjoint_space(root)
+    _run(root, monkeypatch, forward_split={"role": "prep", "ranges": RANGES})
+    path = stage_a_forward_split.prep_record_path(space)
+    record = stage_a_forward_split.read_prep_record(space)
+    record["n_probes"] += 1
+    _json(path, record)
+
+    with pytest.raises(stage_a_forward_split.ForwardSplitRefused) as exc:
+        stage_a_forward_split.read_prep_record(space)
+    assert str(exc.value) == f"{path} does not seal its own content"
