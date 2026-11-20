@@ -304,3 +304,17 @@ def test_a_reference_to_our_capture_opens_only_with_our_canonical_capture(tmp_pa
         assert torch.equal(owner["a"], H["a"])
     with pytest.raises(GrammarError, match="need the producer canonical capture"):
         ReferenceHessians(handoff)
+
+
+def test_reseal_bundle_refuses_strata_that_disagree_with_cells(tmp_path):
+    bundle = {
+        "strata": {"dense": {"TESSERA_E4M3_K1": [896]}},
+        "cells": [{
+            "qname": "model.layers.0.proj",
+            "format_name": "TESSERA_BF16_K1_R896",
+            "kind": "dense",
+            "family": "TESSERA_BF16_K1",
+        }],
+    }
+    with pytest.raises(tessera_campaign_reseal.Refused, match="do not match the strata of its cells"):
+        tessera_campaign_reseal.bundle_coverage(bundle, tmp_path / "proof.json")
