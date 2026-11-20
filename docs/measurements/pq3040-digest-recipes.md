@@ -47,3 +47,5 @@ salvage branch: #3031 `joint-handoff/ledger.json` (15 calls), #3033
 (3) and `INSERTION_ASCII_INDENT2_LAX_DEFAULT_STR` (1). The three `json.dump`
 calls of #3033 use `INSERTION_ASCII_SPACED_LAX.dump`. None of the 62 is a hash
 call. [Parent recipe ledger](../../tests/fixtures/digest_recipes_3031_3033_3036.json)
+
+Flux CPU job `f3ckU72FvZD` on `7dba1628c` (gate venv): the recipe, digest-profile, retention, duplication and census tests, 421 passed, 3 skipped, exit 0; `tools/ci/static_checks.sh --merge-main` exit 0 (graph impact: new edges 0).
