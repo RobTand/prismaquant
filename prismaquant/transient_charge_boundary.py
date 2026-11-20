@@ -204,15 +204,6 @@ def _stack_unit(allocation: Mapping) -> str | None:
     return distinct[0]
 
 
-def _block_extent(allocation: Mapping) -> int | None:
-    observed = allocation.get("allocator_block_bytes_observed")
-    if not isinstance(observed, (list, tuple)) or not observed:
-        return None
-    if not all(type(item) is int and item >= 0 for item in observed):
-        return None
-    return max(observed)
-
-
 def _simultaneous_peak(rows: Sequence[tuple[int, int | None, int]]) -> int:
     """Peak simultaneous sum over ``(allocate_index, free_index, bytes)``;
     frees settle before allocations at the same index."""
@@ -326,10 +317,12 @@ def boundary_identity_refusals(spec: BoundarySpec, report: Mapping, *,
                 member = membership.get(row["allocation_id"])
                 if member is None or member["lifetime_class"] == "resident":
                     continue  # resident rows are check 5's, below
-                extent = _block_extent(row)
-                if extent is None:
+                observed = row.get("allocator_block_bytes_observed")
+                if (not isinstance(observed, (list, tuple)) or not observed
+                        or not all(type(item) is int and item >= 0 for item in observed)):
                     unobserved += 1
                     continue
+                extent = max(observed)
                 transient.append((row["allocate_index"], row["free_completed_index"], extent))
             bound = getattr(resources, "peak_scratch_bytes", None)
             if unobserved:
