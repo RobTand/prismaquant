@@ -96,3 +96,14 @@ def test_process_writers_preserve_both_preloaded_registrations(tmp_path):
                 worker.kill()
                 worker.join(timeout=5)
             worker.close()
+
+
+def test_registry_add_refuses_scalar_json_without_publishing(tmp_path):
+    path = tmp_path / "registry.json"
+    registry = ArtifactRegistry(path)
+    registry.add(_record("existing"))
+    path.write_bytes(b"42")
+    with pytest.raises(ValueError, match="registry JSON must be a list or object"):
+        registry.add(_record("new"))
+    assert path.read_bytes() == b"42"
+    assert _ids(registry) == ["existing"]
