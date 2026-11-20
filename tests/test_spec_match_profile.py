@@ -308,3 +308,14 @@ def test_python_profile_wins_over_a_same_named_spec():
     makes landing the reader a no-op for shipped models."""
     assert not [c for c in _registry.detection_order()
                 if isinstance(c, SpecMatchProfile)]
+
+
+def test_laguna_checkpoint_routes_expert_bias_to_gate():
+    profile = _registry.profile_from_config({"model_type": "laguna"})
+    assert profile.name == "laguna"
+    assert profile.checkpoint_to_live_name(
+        "model.layers.3.mlp.experts.e_score_correction_bias"
+    ) == "model.layers.3.mlp.gate.e_score_correction_bias"
+    assert profile.checkpoint_to_live_name(
+        "model.layers.3.mlp.experts.7.down_proj.weight"
+    ) == "model.layers.3.mlp.experts.7.down_proj.weight"
