@@ -12,9 +12,9 @@ import pytest
 from prismaquant.residency_map import StagedReadRefused
 from prismaquant.residency_shard_reader import await_staged_spans
 from prismaquant.staged_lease import acquire_entry_window
-from prismaquant.staged_manifest import load_staged_manifest
+from prismaquant.staged_manifest import ManifestRefused, load_staged_manifest, publish_staged_json
 from prismaquant.staged_tier_policy import staged_tier_policy_test_context
-from staged_native_fixtures import bind, native_staged_state, publish_inputs
+from staged_native_fixtures import bind, fixture, native_staged_state, publish_inputs
 
 HEADER = b'known-header\x00\xff' * 64
 BODY = b'known-body\x01\xfe' * 64
@@ -84,3 +84,15 @@ def test_native_readiness_checks_exact_declared_spans(tmp_path, monkeypatch):
     assert await_staged_spans(resolver, [*spans, (tmp_path / 'undeclared', 0, 1, 1)]) == RANGE_UNDECLARED
     assert _read(resolver, paths[1], len(BODY)) == BODY
     assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0
+
+
+def test_staged_manifest_rejects_an_empty_phase_identity(tmp_path):
+    _, data, binding, _ = fixture(tmp_path)
+    original = load_staged_manifest(binding['path'], binding['sha256'])
+    assert original.phase_id == 'unit2-fixture'
+
+    target = tmp_path / 'empty-phase.json'
+    digest = publish_staged_json(target, {**data, 'phase_id': ''})
+    with pytest.raises(ManifestRefused) as refusal:
+        load_staged_manifest(target, digest)
+    assert str(refusal.value) == 'phase identity required'
