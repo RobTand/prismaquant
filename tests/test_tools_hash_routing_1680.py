@@ -69,3 +69,24 @@ def test_values_match_hashlib(tmp_path):
     assert PAIR._sha(blob) == want
     assert BUDGET._sha256(target) == want
     assert SPLIT._sha(target) == want
+
+
+def test_budget_cli_refuses_a_plan_without_retained_operator_windows(tmp_path):
+    import pytest
+
+    plan = tmp_path / "retained-budget-fixture-plan.json"
+    prepared = tmp_path / "retained-budget-fixture-prepared.json"
+    census = tmp_path / "retained-budget-fixture-census.json"
+    output = tmp_path / "retained-budget-fixture-output.json"
+    plan.write_text('{"schema":"prismaquant.tessera_joint_aura.plan.v1","execution":{}}')
+    prepared.write_text('{"status":"complete"}')
+
+    with pytest.raises(SystemExit) as error:
+        BUDGET.main([
+            "--plan", str(plan),
+            "--prepared", str(prepared),
+            "--census", str(census),
+            "--out", str(output),
+        ])
+    assert str(error.value) == "plan declares no execution.retained_operator_windows to derive"
+    assert not output.exists()
