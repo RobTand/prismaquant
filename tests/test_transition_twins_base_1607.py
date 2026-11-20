@@ -157,6 +157,13 @@ def test_checkout_resolves_a_loose_ref(tmp_path):
     assert base.checkout_head_commit(root) == commit
 
 
+def test_checkout_resolves_the_exact_packed_ref(tmp_path):
+    commit = "a" * 40
+    packed = f"{'b' * 40} refs/heads/main-old\n{commit} refs/heads/main\n"
+    root = _gitdir(tmp_path, "ref: refs/heads/main", **{"packed-refs": packed})
+    assert base.checkout_head_commit(root) == commit
+
+
 def test_checkout_reads_through_a_gitdir_pointer(tmp_path):
     commit = "c" * 40
     sub = tmp_path / "sub"
