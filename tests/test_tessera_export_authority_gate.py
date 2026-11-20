@@ -82,6 +82,17 @@ def test_the_helper_reads_the_contract_not_a_constant(tmp_path):
         lane.producer_authority_argv(tmp_path / "missing", "/a.py")
 
 
+def test_producer_cli_refuses_invalid_contract_json(tmp_path, capsys):
+    from prismaquant import tessera_producer_interface
+
+    checkout = _checkout(tmp_path / "tessera", NEW_PIN_CONTRACT)
+    (checkout / "src/tessera/serving/runtime_contract.json").write_text("{")
+    assert tessera_producer_interface.main([str(checkout), "/a.py"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Expecting property name" in captured.err
+
+
 def test_run_pipeline_passes_the_authority_only_through_the_helper():
     script = (ROOT / "prismaquant" / "run-pipeline.sh").read_text()
     call = script[script.index("python3 -m tessera.export_serving"):]
