@@ -20,6 +20,7 @@ from safetensors.torch import save_file
 
 from tools.resolve_tessera_dev_pin import resolve_tessera_dev_pin
 
+from prismaquant import tessera_export_lane as export
 from prismaquant import tessera_plan_writer as writer
 from prismaquant.cost_stage_checkpoint import write_unit
 from prismaquant.layer_config import LAYER_CONFIG_META_KEY
@@ -29,7 +30,7 @@ from prismaquant.tessera_census_cache import (
     load_selected_wire_records,
 )
 from prismaquant.tessera_export_lane import (
-    TesseraExportLaneError, _write_plan_assignment, packaged_contract_path,
+    TesseraExportLaneError, packaged_contract_path,
 )
 from prismaquant.tessera_joint_aura import STAGE
 from prismaquant.tessera_serving_runtime_pin import load_tessera_serving_runtime_pin
@@ -126,8 +127,27 @@ def _close(cost, roster, shapes, assignment, metadata, records, *, hash_blobs=Fa
 def _plan(tmp_path, profile, source, assignment):
     path = tmp_path / "layer_config.json"
     path.write_text(json.dumps(assignment))
-    return _write_plan_assignment(path, expected_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-                                  profile=profile, model_path=source)
+    return export._write_plan_assignment(
+        path, expected_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        profile=profile, model_path=source)
+
+
+def test_projection_records_selected_visual_source_geometry(tmp_path):
+    source, profile, tensors = _source(tmp_path)
+    tensors[MERGER + ".weight"] = torch.zeros(3, 2, dtype=torch.bfloat16)
+    save_file(tensors, str(source / "model.safetensors"))
+    fixed = "model.visual.pos_embed"
+    bf16 = {"bits": 16, "data_type": "float"}
+    result = _plan(tmp_path, profile, source, dict.fromkeys((BODY, *VISUALS, fixed), bf16))
+
+    projected = json.loads(Path(result["plan_assignment"]).read_text())
+    audit = projected.pop(LAYER_CONFIG_META_KEY)["tessera_export_assignment"]
+    assert projected == {BODY: "BF16"}
+    assert audit["source_precision_outside_graph"] == sorted((*VISUALS, fixed))
+    assert audit.get("visual_source_precision") == {
+        VISION: {"shape": [2, 2], "visual_root": "model.visual"},
+        MERGER: {"shape": [3, 2], "visual_root": "model.visual"},
+    }
 
 
 def test_visual_selected_cache_preserves_exact_population_and_receipts(tmp_path):
