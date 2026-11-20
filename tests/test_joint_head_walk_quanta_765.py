@@ -237,3 +237,15 @@ def test_join_refuses_gap_tampering_and_an_existing_dest(tmp_path):
     (tmp_path / "taken").mkdir()
     with pytest.raises(ValueError, match="already exists"):
         join_head_walk_journals(shards, dest=tmp_path / "taken", names=names)
+
+
+def test_join_refuses_a_missing_quantum_manifest_before_publication(tmp_path):
+    names = ["unit-00"]
+    (quantum,) = head_walk_quanta(names, max_units_per_quantum=1)
+    shard = tmp_path / "shard"
+    shard.mkdir()
+    dest = tmp_path / "joined"
+    with pytest.raises(ValueError, match="no readable manifest"):
+        join_head_walk_journals(
+            [{"quantum": quantum, "journal_dir": str(shard)}], dest=dest, names=names)
+    assert not dest.exists()
