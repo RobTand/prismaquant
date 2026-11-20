@@ -117,15 +117,6 @@ def incomplete_fused_group_members(names: Iterable[str], profile) -> set[str]:
     return pinned
 
 
-def _enumerate_quantizable_linears(model, profile=None) -> list[str]:
-    from .build_rtn_cache import iter_quantizable_tensors
-
-    names: list[str] = []
-    for full_name, _module, _attr in iter_quantizable_tensors(model, profile):
-        names.append(strip_weight_leaf(full_name))
-    return sorted(set(names))
-
-
 def _shape_of_param(model, qname: str, profile=None) -> tuple[int, ...] | None:
     from .build_rtn_cache import iter_quantizable_tensors
 
@@ -163,7 +154,12 @@ def discover_units(
     if graph_units is not None:
         return graph_units
 
-    qnames = _enumerate_quantizable_linears(model, profile)
+    from .build_rtn_cache import iter_quantizable_tensors
+
+    qnames = sorted({
+        strip_weight_leaf(full_name)
+        for full_name, _module, _attr in iter_quantizable_tensors(model, profile)
+    })
     groups: dict[str, list[str]] = defaultdict(list)
     for qname in qnames:
         groups[fused_group_key(profile, qname)].append(qname)
