@@ -10,6 +10,25 @@ import torch
 from prismaquant import production_weight_cache, stage_a_chain_seed
 
 
+def _observe_digest_updates(monkeypatch, owner):
+    sha256 = hashlib.sha256
+    updates = []
+
+    class ObservedDigest:
+        def __init__(self):
+            self.digest = sha256()
+
+        def update(self, data):
+            updates.append((type(data), memoryview(data).nbytes))
+            self.digest.update(data)
+
+        def hexdigest(self):
+            return self.digest.hexdigest()
+
+    monkeypatch.setattr(owner, "hashlib", SimpleNamespace(sha256=ObservedDigest))
+    return updates
+
+
 @pytest.mark.parametrize("path", ["stage-a", "pwc"])
 def test_tensor_digest_feeds_are_bounded(monkeypatch, path):
     tensor = torch.tensor(
@@ -25,19 +44,6 @@ def test_tensor_digest_feeds_are_bounded(monkeypatch, path):
         assert transposed_digest == "fce5c7856a9b4ae02cb960f4b20fbe335d437a18217005f1c7bb349451f07b4d"
     assert empty_digest == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
-    updates = []
-
-    class ObservedDigest:
-        def __init__(self):
-            self.digest = sha256()
-
-        def update(self, data):
-            updates.append((type(data), memoryview(data).nbytes))
-            self.digest.update(data)
-
-        def hexdigest(self):
-            return self.digest.hexdigest()
-
     if path == "stage-a":
         owner = stage_a_chain_seed
         assert owner.tensor_payload_sha256.__kwdefaults__["chunk_bytes"] == 64 << 20
@@ -47,7 +53,7 @@ def test_tensor_digest_feeds_are_bounded(monkeypatch, path):
         assert owner._TENSOR_DIGEST_CHUNK_BYTES == 8 << 20
         monkeypatch.setattr(owner, "_TENSOR_DIGEST_CHUNK_BYTES", 7)
         expected_updates = [(memoryview, 7)] * 3 + [(memoryview, 3)]
-    monkeypatch.setattr(owner, "hashlib", SimpleNamespace(sha256=ObservedDigest))
+    updates = _observe_digest_updates(monkeypatch, owner)
 
     for data, shape, size, digest, feeds in (
         (tensor, [3, 2], 24, transposed_digest, expected_updates),
@@ -64,3 +70,18 @@ def test_tensor_digest_feeds_are_bounded(monkeypatch, path):
                 "content_sha256": digest,
             }
         assert updates == feeds
+
+
+def test_source_weight_value_identity_bounds_fp32_feeds(monkeypatch):
+    # Use one CPU and allow 64 MiB for this case in addition to imports.
+    full_rows = (16 << 20) // 8
+    weight = torch.tensor([1.5, -2.0], dtype=torch.float64, device="cpu")
+    weight = weight.expand(full_rows + 1, 2)
+    row = struct.pack("<2f", 1.5, -2.0)
+    expected = hashlib.sha256(row * (full_rows + 1)).hexdigest()
+    updates = _observe_digest_updates(monkeypatch, production_weight_cache)
+
+    assert production_weight_cache._source_weight_value_identity(weight) == (
+        [full_rows + 1, 2], expected,
+    )
+    assert [size for _, size in updates] == [16 << 20, 8]
