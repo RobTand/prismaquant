@@ -147,3 +147,18 @@ def test_pairing_refusal_preserves_the_observed_candidate_preflight(campaign, mo
     retained = output.with_name("candidate-serve-pre.json")
     assert retained.exists(), "pairing refusal lost its observed server manifest"
     assert json.loads(retained.read_text()) == observed
+
+
+def test_boundary_contract_refuses_duplicate_prompt_text():
+    contract = {
+        "prompts": [
+            {"text": "9 squared?", "stratum": "numeric"},
+            {"text": "9 squared?", "stratum": "general"},
+        ],
+        "seeds": [0],
+        "temperature": 1.0,
+        "initial_max_tokens": 16,
+        "max_steps": 1,
+    }
+    with pytest.raises(ValueError, match="prompts must be unique"):
+        bc.validate_contract(contract)
