@@ -432,6 +432,20 @@ def test_a_duplicated_anchor_is_refused_too():
         patcher.apply_patches(text)
 
 
+def test_offline_patcher_cli_preserves_output_on_anchor_refusal(tmp_path):
+    source = tmp_path / "source.sh"
+    output = tmp_path / "offline.sh"
+    source.write_text(_stand_in_recipe() + patcher.LAUNCH_ANCHOR)
+    output.write_bytes(b"existing launcher\n")
+
+    run = subprocess.run(
+        [sys.executable, str(PATCHER), str(source), str(output)],
+        capture_output=True, text=True, timeout=60)
+    assert run.returncode == 1, run.stderr
+    assert "anchor matched 2 times" in run.stderr
+    assert output.read_bytes() == b"existing launcher\n"
+
+
 def test_a_lost_worker_exec_is_refused_after_the_patches_apply():
     """The worker must still join as a worker.  Every anchor can match and this
     can still be wrong, so it is checked separately."""
