@@ -61,3 +61,14 @@ def test_migration_pin_keys_route_spaced_lax_profile(monkeypatch):
     row = {"proof_bundle_sha256": "a" * 64, "old_pins": {"é": 1}, "new_pins": None}
     assert journal.merge_identity_migrations({"row": [row]}) == [row]
     assert calls == [row["old_pins"], None]
+
+
+def test_prepare_journal_refuses_a_boolean_worker_count(tmp_path):
+    root = tmp_path / "journal"
+    with pytest.raises(ValueError) as exc:
+        journal.prepare_journal(
+            root, stage="fixture", resume=False, identity={"source": "fixture"},
+            qnames=["unit"], unit_workers=True,
+        )
+    assert str(exc.value) == "journal unit_workers must be a positive integer"
+    assert not root.exists()
