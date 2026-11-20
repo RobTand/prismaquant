@@ -124,6 +124,31 @@ def test_stream_order_budget_and_primary_error_cleanup(tmp_path, case):
     owner.__exit__(None, None, None)
 
 
+def test_incoming_cleanup_error_keeps_the_primary_pass_error(tmp_path, monkeypatch):
+    _space, owner, _refs, _record, incoming = _incoming(tmp_path)
+    try:
+        budget = _Budget(128)
+        original = checkpoints.stream_exact_entry_tensors
+
+        def stream_with_close_error(*args, **kwargs):
+            try:
+                yield from original(*args, **kwargs)
+            except GeneratorExit:
+                raise OSError("close failed") from None
+
+        monkeypatch.setattr(checkpoints, "stream_exact_entry_tensors", stream_with_close_error)
+        primary = KeyError("pass failed")
+        with pytest.raises(KeyError) as caught:
+            with incoming.open(0, max_resident_bytes=budget.cap, residency_check=budget) as stream:
+                stream.take([(0, 0)])
+                raise primary
+        assert caught.value is primary
+        assert getattr(primary, "__notes__", []) == ["incoming stream cleanup failed: OSError: close failed"]
+        assert budget.held == 0
+    finally:
+        owner.__exit__(None, None, None)
+
+
 def test_late_corruption_refuses_without_delivering_bad_tensor(tmp_path):
     _space, owner, refs, _record, incoming = _incoming(tmp_path)
     budget = _Budget(128)
