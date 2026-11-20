@@ -329,7 +329,10 @@ def load_spec(path: Path) -> dict:
                                    spec["campaign_argv"],
                                    where=f"{path}: row class {name!r}"))
     validate_row_classes(spec, where=str(path))
-    _process_baseline_bytes(spec, where=str(path))
+    from prismaquant.autoscale import validate_process_baseline_bytes
+    validate_process_baseline_bytes(
+        spec.get("process_baseline_bytes", DEFAULT_PROCESS_BASELINE_BYTES),
+        where=f"{path}: process_baseline_bytes")
     return spec
 
 
@@ -378,11 +381,6 @@ def process_baseline(spec: dict, *, where="spec") -> "tuple[int, str]":
         where=f"{where}: process_baseline_bytes")
     return value, (BASELINE_POLICY_EXPLICIT_RESERVATION if declared
                    else BASELINE_POLICY_MEASURED_DEFAULT_RESERVATION)
-
-
-def _process_baseline_bytes(spec: dict, *, where="spec") -> int:
-    """The reservation alone, for callers that do not record its origin."""
-    return process_baseline(spec, where=where)[0]
 
 
 def guard_margin_bytes() -> int:
