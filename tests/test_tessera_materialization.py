@@ -30,6 +30,7 @@ from test_tessera_stack_sample_cost import _packed_probe_row
 
 # Fill these SHA-256 digests from main in Flux.
 EXPECTED_DIGESTS = {
+    "dense": "7f9943c40416c736971db8f18b247bba6cb3418d4c2b69730657bddafc8ec17a",
     "solo": "076406db7e7941289c5811e489938521078cc24d495dc195f3dce1e5f296a6f0",
     "peers": "7cbc9dc4cca161f42d14b685d10d7acc620f7289424c6e36db69b932c3e187f7",
     "lfm-TESSERA_BF16_K1_R256": "ad24604f470e2689ec7383ea2357a25f315fc32f96c4a7df014f3de3854b9dad",
@@ -69,7 +70,14 @@ def _two_tier_cost_inputs(stack_count, profile):
 def _cost_table_digest(case_id):
     profile = Lfm2MoeProfile()
     anchors, samples = {}, {}
-    if case_id.startswith("lfm-"):
+    if case_id == "dense":
+        family = "TESSERA_E2M1_K1"
+        anchors[DENSE] = {family: [
+            campaign_table.CampaignAnchor(
+                DENSE, family, f"{family}_R{rate}", rate, loss, 0.0,
+                1024, 4.0, "bfloat16", False, 1100, 1.0)
+            for rate, loss in ((832, 0.25), (960, 0.125), (1088, 0.0625))]}
+    elif case_id.startswith("lfm-"):
         fmt = case_id.removeprefix("lfm-")
         fixture = Path(__file__).parent / "fixtures" / "tessera_stack_lfm_layer18.json"
         data = json.loads(fixture.read_text())
