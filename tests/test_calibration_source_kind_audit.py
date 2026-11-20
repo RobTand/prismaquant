@@ -78,3 +78,16 @@ def test_existing_directory_keeps_the_dataset_adapter_boundary(tmp_path, monkeyp
     ids = load_calibration(_Tokenizer(), str(directory), n_samples=1, seqlen=8)
     assert ids.shape == (1, 8)
     assert calls == [str(directory)] * 2
+
+
+def test_calibration_refuses_a_dataset_row_without_text(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    source = "audit-owner/numeric-calibration"
+
+    def load_dataset(name, **options):
+        return [{"score": 7}]
+
+    monkeypatch.setitem(sys.modules, "datasets", SimpleNamespace(load_dataset=load_dataset))
+    with pytest.raises(ValueError) as exc:
+        load_calibration(_Tokenizer(), source, n_samples=1, seqlen=8)
+    assert str(exc.value) == "Could not find text or messages field in audit-owner/numeric-calibration"
