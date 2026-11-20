@@ -22,3 +22,25 @@ def test_collector_requests_whole_second_window(monkeypatch):
     assert queries
     assert {float(q['after']) for q in queries}=={100.0}
     assert {float(q['before']) for q in queries}=={111.0}
+
+
+def test_collector_refuses_host_without_gpu_power_chart(monkeypatch, capsys):
+    def fetch(host, endpoint):
+        assert (host, endpoint) == ("sparklina", "charts")
+        return {"charts": {
+            "cpu": {"context": "system.cpu"},
+            "ram": {"context": "system.ram"},
+            "io": {"context": "system.io"},
+        }}
+
+    monkeypatch.setattr(collect_row_netdata, "fetch", fetch)
+    try:
+        collect_row_netdata.main(["--after", "100", "--before", "110"])
+    except SystemExit as error:
+        assert error.code == (
+            "required netdata contexts missing on sparklina: "
+            "['nvidia_smi.gpu_power_draw']"
+        )
+    else:
+        raise AssertionError("The collector did not stop.")
+    assert capsys.readouterr().out == ""
