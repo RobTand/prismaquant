@@ -286,3 +286,15 @@ def test_block_is_empty_for_a_stock_table(tmp_path):
     assert allocation_expert_projection_block({"costs": {}, "formats": []}, {}) == {}
     assert allocation_expert_projection_block(
         {"costs": {}, "formats": [], "provenance": {"cost_mode": "x"}}, {}) == {}
+
+
+def test_expert_projection_refuses_an_empty_config_digest():
+    projection = _producer_projection()
+    declared = {STACK: {name: (N, N) for name in _units()}}
+    bound = bind_expert_projection(projection, declared=declared)
+    assert set(bound[STACK]) == set(_units())
+
+    projection["source"]["config_sha256"] = ""
+    with pytest.raises(ExpertProjectionError) as exc:
+        bind_expert_projection(projection, declared=declared)
+    assert str(exc.value) == "producer projection source.config_sha256 must be a sha256"
