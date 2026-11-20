@@ -97,3 +97,16 @@ def test_missing_optional_declarations_are_an_empty_inventory():
     assert probe_inventory.packed_expert_param_name_set(profile) == set()
     assert probe_inventory.packed_expert_parent_for_projection(profile, 'gate_proj') is None
     assert probe_inventory.packed_expert_projection_candidate_names(profile) == ()
+
+
+def test_inventory_records_a_linear_declined_by_its_profile():
+    class SelectiveProfile(DefaultProfile):
+        def should_probe_linear(self, name, mod):
+            return name != '0' and super().should_probe_linear(name, mod)
+
+    model = nn.Sequential(nn.Linear(2, 2, device='meta'),
+                          nn.Linear(2, 2, device='meta'))
+    inventory = probe_inventory.build_probe_inventory(model, SelectiveProfile())
+    assert inventory.linear_names == ('1',)
+    assert inventory.excluded_linears == (
+        probe_inventory.ExcludedProbeLinear('0', 'owner_not_probe_priceable'),)
