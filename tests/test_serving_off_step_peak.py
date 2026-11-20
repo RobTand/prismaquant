@@ -26,3 +26,24 @@ def test_evaluator_includes_the_declared_off_step_placement_peak(peak, expected,
         boundary=BOUNDARIES[BOUNDARY_V1])
     assert verdict.predicted['device_memory_bytes'] == expected
     assert verdict.feasible is feasible
+
+
+def test_evaluator_refuses_overlapping_measured_operator_rows():
+    from prismaquant.serve_constraints import ServeConstraintError
+
+    assignment = {'a': 'FP8', 'b': 'FP8'}
+    left, right = ('left', 'FP8'), ('right', 'FP8')
+    option_assignments = {left: {'a': 'FP8'}, right: {'b': 'FP8'}}
+    inputs = dict(
+        option_assignments=option_assignments,
+        resources={left: resources(prefill_ms=2.0), right: resources(prefill_ms=3.0)},
+        fixed_assignment={}, fixed_resources=resources(),
+        slos=ServeSLOs(), table_identity={'synthetic': True},
+    )
+    verdict = evaluate_measured_assignment(assignment, **inputs)
+    assert verdict.predicted['operator_sum_prefill_ms'] == 5.0
+
+    option_assignments[right]['a'] = 'FP8'
+    with pytest.raises(ServeConstraintError) as exc:
+        evaluate_measured_assignment(assignment, **inputs)
+    assert str(exc.value) == 'measured runtime operator rows overlap'
