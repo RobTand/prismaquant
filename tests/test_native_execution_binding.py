@@ -124,3 +124,13 @@ def test_static_reference_refuses_a_probe_without_a_served_quantizer(probe):
     with pytest.raises(ValueError, match='differs from actual joint quality arithmetic'):
         require_reference_quantizer({'reference_served_quantizer': _registered_record()},
                                     activation, probe)
+
+
+def test_late_binding_refuses_execution_without_admitted_timing():
+    final, raw = fixture()
+    assert bind_execution_receipt(raw, final)['raw_receipt'] == raw
+
+    raw['status'] = 'operator_evidence'
+    with pytest.raises(ValueError) as error:
+        bind_execution_receipt(raw, final)
+    assert str(error.value) == 'late binding requires numerically admitted execution receipt'
