@@ -178,3 +178,18 @@ def test_a_resumed_row_stamped_on_the_research_wire_is_diverted_not_adopted():
     assert cell_measurement.stale_wire_reason(anchor, research, structure="dense") is not None
     # An unreadable receipt is left to the full identity check, which refuses it.
     assert cell_measurement.stale_wire_reason(anchor, {}, structure="routed_moe") is None
+
+
+def test_tessera_batch_refuses_weights_with_different_shapes(monkeypatch):
+    import torch
+    from prismaquant import tessera_render
+
+    def fail_encoder_request():
+        pytest.fail("Do not request the batch encoder.")
+
+    monkeypatch.setattr(tessera_render, "require_tessera_batch_encoder", fail_encoder_request)
+    with pytest.raises(ValueError) as refused:
+        tessera_render.encode_tessera_units(
+            [torch.zeros(32, 64, device="cpu"), torch.zeros(64, 64, device="cpu")],
+            "TESSERA_E4M3_K1_R1024", hessian_required=False)
+    assert str(refused.value) == "batch weights must share shape, dtype and device"
