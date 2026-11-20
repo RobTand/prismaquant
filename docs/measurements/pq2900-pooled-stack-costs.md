@@ -35,6 +35,7 @@ Production wire validation and joint intake need an authenticated campaign artif
 Criteria 1–3 have CPU coverage for pooled pricing and refresh. The stack plan can bind `reference_q256` in the journal identity.
 The refit keeps completed targets in peer fits. Older records still require exactly one census rung.
 Criterion 4 has CPU accounting and journal coverage. Live cross-row refresh and authenticated joint intake remain open.
-Criterion 5 has CPU cases for resume, old records, and byte equality. Flux verdicts and the dense digest from main are pending.
+Criterion 5 has CPU cases for resume, old records, and byte equality. Flux `f3dNJt2YQw1` at `e8d02713a`: 90 passed; the eight byte cases (dense, solo, peers, five LFM subsets) have the same digests on main and on this head (Flux `f3dCiUPoqEX`); the order mutant, the absent-as-present mutant and main's source each fail the cases built against them.
 The inventory found the defect in 0 of 28 readable tables. Four tables were dense. One named table was absent.
 The 14 checkpoints without `cost.pkl` list zero packed units. The live campaign has no two-tier plan generator.
+No producer writes `reference_q256` today: only the tests set it. The pinned path is dormant until a two-tier plan generator emits the field; without it the two-census state refuses as before.

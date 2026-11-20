@@ -1,5 +1,7 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-11-20 for PQ #2900. Source: `tessera_campaign_table.py` (`StackExpertSample.reference_q256`, `_stack_rate_evidence`).
+
 Re-stamped 2026-11-16 for PQ #3720. Source: the v69 pin, reviewed answer, and routed E2M1 admission tests.
 
 Re-stamped 2026-11-15 for P4a. Source: `streaming_production_cache.py`,
