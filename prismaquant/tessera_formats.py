@@ -600,9 +600,15 @@ def tessera_wire_defaults() -> "tuple[int, str]":
     and names :func:`tessera_wire_recipe`.  New code should ask for the recipe
     of the family and rung it is pricing.
     """
+    families = tuple(
+        tessera_family(base, arity)
+        for base in sorted(_HARDWARE_BASES)
+        for arity in (1, 2)
+        if _family_fits_the_anchor_budget(base, arity)
+    )
     recipes = {
         (r.span, scale_plane_name(r.scale_plane), BodyKind(r.body))
-        for r in (tessera_wire_recipe(f) for f in _hardware_families())
+        for r in (tessera_wire_recipe(f) for f in families)
     }
     if len(recipes) != 1:
         raise TesseraFormatError(
@@ -617,21 +623,6 @@ def tessera_wire_defaults() -> "tuple[int, str]":
             "projection cannot state; ask tessera_wire_recipe(family, rung)"
         )
     return int(span), plane
-
-
-def _hardware_families() -> "tuple[TesseraFamily, ...]":
-    """The families whose recipe a global default has to hold for.
-
-    Free (Lloyd-Max) grids are excluded because they are unexportable by
-    construction -- no identifier reproduces their values -- so the exporter
-    never writes a wire for one.
-    """
-    return tuple(
-        tessera_family(base, arity)
-        for base in sorted(_HARDWARE_BASES)
-        for arity in (1, 2)
-        if _family_fits_the_anchor_budget(base, arity)
-    )
 
 
 def _family_fits_the_anchor_budget(base: str, arity: int) -> bool:
