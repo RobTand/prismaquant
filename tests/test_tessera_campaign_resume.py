@@ -636,3 +636,38 @@ def test_non_glm_campaign_with_kv_b_proj_leaf_has_no_direct_cache_charge(
     assert state["anchors"][0]["memory_bytes"] == spec.memory_bytes_for_shape(shape)
     assert price["activation_contract"] == spec.act_dtype_name
     assert price["activation_quantized"] is True
+
+
+def test_resume_refuses_wire_receipt_with_wrong_filename(
+        monkeypatch, tmp_path, priced_campaign):
+    from prismaquant.cost_stage_checkpoint import prepare_journal, unit_path, write_unit
+
+    (campaign, checkpoint, argv, _model, _inputs), _payload = priced_campaign()
+    format_name = "TESSERA_E4M3_K1_R1024"
+    wire = campaign_wire.wire_path(tmp_path / "cache" / "wire", UNIT, format_name)
+    original_wire = wire.read_bytes()
+    root = checkpoint.with_name(checkpoint.name + ".parts")
+    manifest = json.loads(checkpoint.read_text())
+    _, _, states = prepare_journal(
+        root, stage="Tessera campaign", resume=True,
+        identity=manifest["identity"], qnames=[UNIT], manifest_path=checkpoint,
+    )
+    state = states[UNIT]
+    state["wire_records"][format_name]["file"] = "other.tessera"
+    write_unit(root, stage="Tessera campaign", qname=UNIT,
+               identity_sha256=manifest["identity_sha256"], state=state)
+    shard = unit_path(root, UNIT)
+    modified_shard = shard.read_bytes()
+
+    resumed = tmp_path / "resumed.pkl"
+    argv[argv.index("--out") + 1] = str(resumed)
+    _forbid_reencode(monkeypatch, campaign)
+    with pytest.raises(RuntimeError) as exc:
+        campaign.main(argv)
+    assert str(exc.value) == (
+        f"checkpoint cached wire identity refused for {UNIT} {format_name}: "
+        "cached wire filename differs from the priced unit/rung"
+    )
+    assert wire.read_bytes() == original_wire
+    assert shard.read_bytes() == modified_shard
+    assert not resumed.exists()
