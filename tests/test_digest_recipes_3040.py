@@ -15,6 +15,11 @@ from tests.golden_table import outcome
 
 
 LEDGER = json.loads((Path(__file__).parent / "fixtures/digest_recipes_3040.json").read_bytes())
+PARENTS = json.loads(
+    (Path(__file__).parent / "fixtures/digest_recipes_3031_3033_3036.json").read_bytes())
+assert all(LEDGER["json"][route]["kwargs"] == PARENTS["json"][route]["kwargs"]
+           for route in LEDGER["json"].keys() & PARENTS["json"].keys())
+JSON_ROUTES = LEDGER["json"] | PARENTS["json"]
 JSON_CASES = [
     pytest.param({"z": ["é", "😀", -0.0], "a": {10: "ten", 9: "nine"}}, id="order-and-unicode"),
     pytest.param({"z": 1, "a": {1: "number", "1": "text"}}, id="mixed-keys"),
@@ -36,12 +41,20 @@ def test_ledger_maps_all_73_calls():
             assert callable(getattr(api, method) if method else api)
 
 
+def test_parent_ledgers_map_all_62_calls():
+    # PQ #3031 (15), #3033 (26) and #3036 (21): every call has a recipe.
+    ids = [call for group in PARENTS["json"].values() for call in group["calls"]]
+    assert len(ids) == len(set(ids)) == 62
+    assert {issue: sum(call.startswith(f"#{issue} ") for call in ids)
+            for issue in PARENTS["ledgers"]} == {"3031": 15, "3033": 26, "3036": 21}
+
+
 @pytest.mark.parametrize("value", JSON_CASES)
-@pytest.mark.parametrize("route", LEDGER["json"])
+@pytest.mark.parametrize("route", JSON_ROUTES)
 def test_json_recipe_matches_source(route, value):
     profile, method = route.split(".")
     encode = getattr(getattr(digests, profile), method)
-    kwargs = LEDGER["json"][route]["kwargs"].copy()
+    kwargs = JSON_ROUTES[route]["kwargs"].copy()
     if kwargs.get("default") == "str":
         kwargs["default"] = str
     if method == "text":

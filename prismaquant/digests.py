@@ -24,6 +24,7 @@ unless the profile states otherwise:
   lax nonfinite values and ``default=str`` for reseal reports. Publication
   retains its final LF.
 - ``DIRECT_ASCII_INDENT1_LAX``: the same indentation and no fallback serializer.
+- ``DIRECT_ASCII_INDENT1_STRICT``: the same, with strict nonfinite refusal.
 - ``DIRECT_ASCII_INDENT2_LAX``: two-space indentation, ``(",", ": ")``
   separators, ASCII escaping, lax nonfinite values and no fallback serializer.
   File writers retain their own final LF and publication policy.
@@ -363,6 +364,21 @@ INSERTION_ASCII_INDENT2_LAX = JsonProfile(
 INSERTION_UTF8_INDENT2_STRICT = JsonProfile(
     "insertion-utf8-indent2-strict", ensure_ascii=False, allow_nan=False,
     separators=(",", ": "), indent=2, sort_keys=False)
+DIRECT_ASCII_INDENT1_STRICT = JsonProfile(
+    "direct-ascii-indent1-strict", ensure_ascii=True, allow_nan=False,
+    separators=(",", ": "), indent=1)
+DIRECT_ASCII_INDENT2_LAX_DEFAULT_STR = JsonProfile(
+    "direct-ascii-indent2-lax-default-str", ensure_ascii=True, allow_nan=True,
+    separators=(",", ": "), indent=2, default=str)
+INSERTION_ASCII_SPACED_LAX_DEFAULT_STR = JsonProfile(
+    "insertion-ascii-spaced-lax-default-str", ensure_ascii=True, allow_nan=True,
+    separators=(", ", ": "), sort_keys=False, default=str)
+INSERTION_ASCII_INDENT2_STRICT = JsonProfile(
+    "insertion-ascii-indent2-strict", ensure_ascii=True, allow_nan=False,
+    separators=(",", ": "), indent=2, sort_keys=False)
+INSERTION_ASCII_INDENT2_LAX_DEFAULT_STR = JsonProfile(
+    "insertion-ascii-indent2-lax-default-str", ensure_ascii=True, allow_nan=True,
+    separators=(",", ": "), indent=2, sort_keys=False, default=str)
 
 
 class _CheckpointJsonEncoder:
