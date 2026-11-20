@@ -20,3 +20,10 @@ def test_pinned_script_does_not_need_its_directory_on_import_path(tmp_path, mode
     done = subprocess.run([sys.executable, mode, str(script)], cwd=tmp_path, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == resolve_literal_pin(PIN_SOURCE, PIN_NAME)
+
+
+def test_resolve_annotated_literal_pin(tmp_path):
+    pin = '0123456789abcdef0123456789abcdef01234567'
+    source = tmp_path / 'pin.py'
+    source.write_text(f'X: str = "{pin}"\n', encoding='utf-8')
+    assert resolve_literal_pin(source, 'X') == pin
