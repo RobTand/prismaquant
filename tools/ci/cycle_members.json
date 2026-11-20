@@ -11665,7 +11665,6 @@
     "//tests:test_tessera_campaign_fanout_lib",
     "//tests:test_tessera_campaign_head_roster_lib",
     "//tests:test_tessera_campaign_lib",
-    "//tests:test_tessera_campaign_merge_integrity_lib",
     "//tests:test_tessera_campaign_namespace_1986_lib",
     "//tests:test_tessera_campaign_packed_lib",
     "//tests:test_tessera_campaign_pinned_roster_lib",
