@@ -306,6 +306,20 @@ def test_canonical_densify_does_not_publish_anchor_stderr_as_fractional_uncertai
         tessera_pareto_frontier(built, uncertainty_z=1.96)
 
 
+def test_tessera_solver_menu_refuses_mixed_shapes_for_one_unit():
+    from prismaquant.tessera_allocator import tessera_solver_candidate_menu
+    from prismaquant.tessera_formats import TesseraFormatError
+    from prismaquant.tessera_rate_surface import TesseraRateSurface, densify_rate_surface
+
+    surface = TesseraRateSurface("u", "TESSERA_E2M1_K1", "tight", "kl", (256, 512, 768),
+        (4.0, 2.0, 1.0), (0.1, 0.1, 0.1))
+    alphabets = {1: [0] * 4, 2: [0] * 8, 3: [0] * 16}
+    tall, = densify_rate_surface(surface, (96, 256), q256_values=[768], alphabets=alphabets)
+    short, = densify_rate_surface(surface, (64, 256), q256_values=[768], alphabets=alphabets)
+    with pytest.raises(TesseraFormatError, match="unit 'u' mixes tensor shapes"):
+        tessera_solver_candidate_menu((tall, short))
+
+
 @pytest.fixture(params=[joint_aura_rows.JOINT_CURRENCY, "served_kl"])
 def canonical_chord_candidate(monkeypatch, request):
     from prismaquant.tessera_rate_surface import TesseraRateSurface, densify_rate_surface
