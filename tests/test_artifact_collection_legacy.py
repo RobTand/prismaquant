@@ -141,3 +141,14 @@ def test_legacy_file_ledger_rejects_normalization_collisions(tmp_path):
             shapes_path=shapes,
             artifact_root=artifact,
         )
+
+
+def test_legacy_audit_refuses_inconsistent_inventory_total(tmp_path):
+    quant_path, shapes, _ = _write_fixture(tmp_path)
+    quant = json.loads(quant_path.read_text(encoding="utf-8"))
+    quant["provenance"]["artifact_inventory"]["export_directory_bytes"] = 111
+    quant_path.write_text(json.dumps(quant), encoding="utf-8")
+    with pytest.raises(
+        ArtifactCollectionError, match="file_bytes do not sum to export_directory_bytes"
+    ):
+        audit_legacy_export(quant_config_path=quant_path, shapes_path=shapes)
