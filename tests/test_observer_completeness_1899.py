@@ -138,3 +138,21 @@ def test_observer_refuses_unobserved_or_live_completed_workload(seen, alive):
     exec(compile(ast.fix_missing_locations(ast.Module(body=[fn],type_ignores=[])),str(SOURCE),'exec'),space)
     with pytest.raises(RuntimeError,match='completion does not match'):
         space['profile_target_finished'](seen,alive,True)
+
+
+def test_observer_refuses_multiple_matching_targets():
+    tree = ast.parse(SOURCE.read_text())
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'find_target')
+    matching = {'21'}
+    space = {
+        'os': SimpleNamespace(listdir=lambda path: ['self', '21', '34', '55']),
+        'matches': matching.__contains__,
+    }
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), str(SOURCE), 'exec'), space)
+    find_target = space['find_target']
+    pid = find_target()
+    assert type(pid) is int and pid == 21
+    matching.add('34')
+    with pytest.raises(RuntimeError) as error:
+        find_target()
+    assert str(error.value) == 'ambiguous matching row PIDs: [21, 34]'
