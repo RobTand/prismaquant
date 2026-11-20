@@ -35381,6 +35381,10 @@ pq_py_library(
     srcs = [
         "test_tessera_materialization.py",
     ],
+    data = [
+        ":files/fixtures",
+        "test_tessera_materialization.py",
+    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -50104,6 +50108,7 @@ pq_py_test(
     deps = [
         "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
         "//:pqtel/__init__",
+        "//:prismaquant/__init__",
         "//:prismaquant/allocator_cycle",
         "//:prismaquant/aura_additivity_gate",
         "//:prismaquant/build_production_cache",
