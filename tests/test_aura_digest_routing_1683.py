@@ -59,3 +59,14 @@ def test_manifest_encoding_error_preserves_published_bytes(tmp_path, monkeypatch
         aura_checkpoint_journal._write_aura_checkpoint_manifest(tmp_path, {"valid": True}, [])
     assert manifest.read_bytes() == b"retained checkpoint"
     assert list(tmp_path.iterdir()) == [manifest]
+
+
+def test_aura_checkpoint_refuses_a_boolean_byte_limit(tmp_path):
+    writer = aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, "a" * 64)
+    path = cost_stage_checkpoint.unit_path(tmp_path, "unit")
+    writer.publish(qname="unit", state={"value": 1})
+    published = path.read_bytes()
+    with pytest.raises(ValueError) as exc:
+        writer.publish(qname="unit", state={"value": 2}, max_bytes=True)
+    assert str(exc.value) == "checkpoint encoding bytes limit must be a positive integer"
+    assert path.read_bytes() == published
