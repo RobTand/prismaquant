@@ -31,4 +31,7 @@ duplication baseline need no fixture changes.
 python -m pytest -q tests/test_digest_recipes_3040.py
 ```
 
-The Flux test run is pending.
+Flux CPU run `f3cQKH4iXrP` at `dcd757813` (gate venv: Python 3.12.12,
+torch 2.15.0+cpu): 557 passed, 8 skipped, job and payload exit 0. It ran
+this test with the digest-profile, tensor-digest, guarded-read retention,
+duplication, census, graph-impact and Bazel build-file tests.
