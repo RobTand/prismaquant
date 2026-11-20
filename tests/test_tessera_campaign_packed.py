@@ -144,6 +144,21 @@ def test_packed_capture_subset_keeps_the_same_routed_rows_and_hessian():
     assert subset[3][selected] == whole[3][selected] > 0.0
 
 
+def test_packed_capture_refuses_an_undeclared_unit():
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
+
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        model = _RoutedModel()
+    targets = [f"{EXPERT_PREFIX}.0.w1", f"{EXPERT_PREFIX}.2.w1"]
+    with pytest.raises(RuntimeError) as error:
+        capture_activation_statistics(model, targets, _routed_tokens(), 1,
+                                      "cpu", want_hessian=True)
+    assert str(error.value) == (
+        "campaign activation targets are not declared units: "
+        "['model.layers.2.feed_forward.experts.2.w1']")
+
+
 @pytest.mark.parametrize("want_hessian", [False, True])
 def test_packed_capture_refuses_an_unobserved_expert(want_hessian):
     from prismaquant.tessera_calibration_forward import capture_activation_statistics
