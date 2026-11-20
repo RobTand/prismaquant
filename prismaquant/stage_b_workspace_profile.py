@@ -43,10 +43,12 @@ from pathlib import Path
 
 from .digests import bytes_sha256hex
 from .io_spans import MemAvailableFloor, PeriodicSampler, mem_available_bytes
+from .joint_stageb_resources import CAPTURE_WORKSPACE_SCHEMA as SCHEMA
+from .joint_stageb_resources import CHAIN_WORKSPACE_SCHEMA as CHAIN_SCHEMA
+from .joint_stageb_resources import chain_roll_owner_bytes
 
 PROFILE_ENV = "PRISMAQUANT_STAGE_B_WORKSPACE_PROFILE"
 GROUPS_ENV = "PRISMAQUANT_STAGE_B_WORKSPACE_PROFILE_GROUPS"
-SCHEMA = "prismaquant.stage_b_capture_workspace_profile.v1"
 DEFAULT_GROUPS = 16
 MIN_GROUPS = 8
 HOST_SAMPLE_INTERVAL_S = 0.01
@@ -415,7 +417,6 @@ CHAIN_PROFILE_ENV = "PRISMAQUANT_STAGE_B_CHAIN_PROFILE"
 #: A JSON object describing the chain owner the measurement was admitted
 #: under, recorded verbatim in the receipt.
 CHAIN_OWNER_ENV = "PRISMAQUANT_STAGE_B_CHAIN_PROFILE_OWNER"
-CHAIN_SCHEMA = "prismaquant.stage_b_chain_workspace_profile.v1"
 MEMINFO_SAMPLE_INTERVAL_S = 0.1
 
 
@@ -427,36 +428,6 @@ class ChainWorkspaceProfiled(CaptureWorkspaceProfiled):
                                  f"(sha256 {sha256})")
         self.path = str(path)
         self.sha256 = str(sha256)
-
-
-def chain_roll_owner_bytes(roll):
-    """The owner bytes one measured chain roll states (PQ #1163).
-
-    ``bytes`` is the roll's device workspace: the larger of the allocated
-    and reserved deltas over the CUDA allocator's reading right after the
-    roll's admission released the cache, which is what the guard charges
-    before the roll. ``device_resident_bytes`` is the CUDA reservation that
-    admission read, and ``host_committed_bytes`` the larger of the cgroup's
-    committed bytes at that admission and at the roll's cgroup peak
-    (:func:`prismaquant.memory_management.committed_cgroup_bytes`). Together
-    they are every owner resident in the chain phase as the guard reads it.
-    The workspace includes the successor source bytes that land on the
-    device during the roll: the chain leaves that read in flight (PQ #1166).
-    """
-    from .memory_management import committed_cgroup_bytes
-
-    layer = roll["layer"]
-    admission, host = roll.get("admission"), roll.get("host")
-    if admission is None:
-        raise ValueError(f"chain roll of layer {layer} has no admission reading, so its "
-                         "resident owners were not measured")
-    if host is None:
-        raise ValueError(f"chain roll of layer {layer} has no cgroup reading, so its "
-                         "host committed bytes were not measured")
-    at_peak = committed_cgroup_bytes(int(host["peak_current_bytes"]), host["peak_stat_all"])
-    return {"bytes": max(int(roll["allocated_delta_bytes"]), int(roll["reserved_delta_bytes"])),
-            "device_resident_bytes": int(admission["cuda_reserved_bytes"]),
-            "host_committed_bytes": max(int(admission["cgroup_committed_bytes"]), at_peak)}
 
 
 class ChainRollProfile:
