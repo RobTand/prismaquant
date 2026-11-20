@@ -33,3 +33,10 @@ def test_stock_row_is_not_reclassified_as_tessera_by_a_prefix_guess():
     # The actual grammar, not startswith("TESSERA"), owns membership.
     payload = {"costs": {"unit": {"TESSERA_unrelated": {"output_mse": 1e-4}}}}
     assert require_run_currency(payload)["tessera_rows"] == 0
+
+
+def test_currency_gate_refuses_a_list_as_the_cost_payload():
+    from prismaquant.cost_currency import CostCurrencyError, require_run_currency
+
+    with pytest.raises(CostCurrencyError, match="cost payload is not a mapping"):
+        require_run_currency([])
