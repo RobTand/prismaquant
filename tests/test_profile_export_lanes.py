@@ -437,3 +437,17 @@ def test_no_declared_lane_run_becomes_illegal():
 # `nvfp4_cb` and moved to archive/gridbook_lane_2026-09-02/ with the rest of
 # the lane, so the sweep had nothing left to check. The retired-lane refusal
 # it exercised is pinned above by the `RETIRED_EXPORT_LANES` test.
+
+
+def test_hyv3_dispatch_rewrites_shared_mlp_and_router():
+    from prismaquant.model_profiles.hy_v3 import HyV3Profile
+
+    profile = HyV3Profile()
+    prefix = "model.layers.1.mlp."
+    for source, target in (
+        ("shared_mlp.gate_up_proj", "gate_up_proj"),
+        ("shared_experts.down_proj", "down_proj"),
+        ("router.gate", "gate"),
+        ("experts.0.down_proj", "experts.0.down_proj"),
+    ):
+        assert profile.to_vllm_internal_name(prefix + source) == prefix + target
