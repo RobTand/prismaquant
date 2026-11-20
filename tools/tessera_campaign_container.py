@@ -425,35 +425,26 @@ def _native_import_candidates(directory: Path, stem: str) -> list[Path]:
                   or (path.name.startswith(stem + ".") and path.name.endswith(".so")))
 
 
-def _refuse_import_shadow(root: Path) -> None:
-    """Conservative opt-in candidates, never an interpreter/ABI simulation.
-
-    A source package wins over same-entry source/sourceless modules. Native
-    package initializers may supersede its __init__.py; any native-looking
-    initializer is ambiguous without the container's suffix authority.
-    """
-    try:
-        package = root / "prismaquant"
-        native_initializers = _native_import_candidates(package, "__init__")
-        candidates = [(path, "ambiguous native initializer")
-                      for path in native_initializers]
-        if not _source_package(root):
-            candidates += [(package / "__init__.pyc", "sourceless package shadow"),
-                           (root / "prismaquant.py", "source module shadow"),
-                           (root / "prismaquant.pyc", "sourceless module shadow")]
-            candidates += [(path, "ambiguous native module shadow")
-                           for path in _native_import_candidates(root, "prismaquant")]
-        for path, reason in candidates:
-            if path.is_file():
-                raise RuntimeError(f"namespace guarded imports {reason}: {path}")
-    except OSError as exc:
-        raise RuntimeError(f"namespace guarded imports cannot inspect root: {root}") from exc
-
-
 def _package_root(roots: list, *, refuse_shadows: bool = False) -> tuple[str, Path] | None:
     for entry, root in roots:
         if refuse_shadows:
-            _refuse_import_shadow(root)
+            # Reject native initializers without checking the container ABI.
+            try:
+                package = root / "prismaquant"
+                native_initializers = _native_import_candidates(package, "__init__")
+                candidates = [(path, "ambiguous native initializer")
+                              for path in native_initializers]
+                if not _source_package(root):
+                    candidates += [(package / "__init__.pyc", "sourceless package shadow"),
+                                   (root / "prismaquant.py", "source module shadow"),
+                                   (root / "prismaquant.pyc", "sourceless module shadow")]
+                    candidates += [(path, "ambiguous native module shadow")
+                                   for path in _native_import_candidates(root, "prismaquant")]
+                for path, reason in candidates:
+                    if path.is_file():
+                        raise RuntimeError(f"namespace guarded imports {reason}: {path}")
+            except OSError as exc:
+                raise RuntimeError(f"namespace guarded imports cannot inspect root: {root}") from exc
         if _source_package(root):
             return entry, root
     return None
