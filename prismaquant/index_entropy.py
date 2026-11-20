@@ -74,7 +74,6 @@ def index_entropy(indices: torch.Tensor, k: int) -> dict:
         h_prev = _empirical_entropy_bits(prev_counts)
         h_conditional = max(h_joint - h_prev, 0.0)
     else:
-        n_uniq = int(uniq.numel())
         h_conditional = h_marginal
 
     return {
