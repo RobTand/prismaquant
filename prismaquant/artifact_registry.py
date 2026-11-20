@@ -282,16 +282,6 @@ class ArtifactRegistry:
                 tmp.unlink()
 
 
-def _missing_metric(candidate: float | None, baseline: float | None) -> dict:
-    return {
-        "candidate": candidate,
-        "baseline": baseline,
-        "delta": None,
-        "relative_delta": None,
-        "passed": False,
-    }
-
-
 def _compare_metric(
     metric: str,
     candidate: float | None,
@@ -304,7 +294,13 @@ def _compare_metric(
     )
     decision = evaluation.decisions[0] if evaluation.decisions else None
     if decision is None or candidate is None or baseline is None:
-        return _missing_metric(candidate, baseline)
+        return {
+            "candidate": candidate,
+            "baseline": baseline,
+            "delta": None,
+            "relative_delta": None,
+            "passed": False,
+        }
     delta = float(candidate) - float(baseline)
     rel = delta / abs(float(baseline)) if baseline else delta
     return {
