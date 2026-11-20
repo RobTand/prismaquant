@@ -923,3 +923,12 @@ def test_a_binding_naming_no_route_family_is_not_a_served_price(operator_route):
                           binding=SimpleNamespace(as_dict=lambda: {"operator_route": operator_route}))
     with pytest.raises(RuntimePriceError, match="names no served route family"):
         _require_served_route_family(row, {"TESSERA_BF16"})
+
+
+def test_native_rows_refuse_duplicate_receipt_binding(native_intake):
+    _, table, relation = native_intake
+    table.native_receipt_bindings.append(table.native_receipt_bindings[0].copy())
+    with pytest.raises(RuntimePriceError) as exc:
+        admit_native_rows(table, relation)
+    assert str(exc.value) == "duplicate native row receipt binding"
+    assert "wire_source_framing" not in relation
