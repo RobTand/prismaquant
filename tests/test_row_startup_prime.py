@@ -28,6 +28,16 @@ def _stream(monkeypatch, tmp_path, *, check=None):
     return stream, state
 
 
+def test_row_stream_refuses_partial_expected_receipts(monkeypatch, tmp_path):
+    stream, _ = _stream(monkeypatch, tmp_path)
+    try:
+        with pytest.raises(ValueError) as exc:
+            stream.expect_identities({UNITS[0]: {"weight": {}, "scoring_rows": {}, "hessian": {}}})
+        assert str(exc.value) == "expected receipts must cover exactly the stream's units"
+    finally:
+        stream.close()
+
+
 def test_prime_starts_a_reserved_read_without_collecting_or_rereading(monkeypatch, tmp_path):
     checks, reads = [], Counter()
     started = threading.Event()
