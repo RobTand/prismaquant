@@ -219,6 +219,114 @@ def test_measurement_manifest_binds_topology_and_helper_source(monkeypatch, runn
     assert result["serve_manifest"]["gold_engine_configuration"]["nnodes"] == 2
 
 
+@pytest.mark.parametrize("runner", RUNNERS)
+@pytest.mark.parametrize("source", ["text_file", "datasets"])
+def test_wikitext_corpus_base_bytes(monkeypatch, tmp_path, runner, source):
+    module = importlib.import_module(runner)
+    full_kl = runner == RUNNERS[0]
+    text = "\ufeffcafé 😀\x00" if source == "text_file" else "café 😀\n\n fin "
+    raw = text.encode("utf-8")
+    path = tmp_path / "corpus.txt"
+    path.write_bytes(raw)
+    monkeypatch.chdir(tmp_path)
+    kwargs = {"cache_dir": "cache"}
+    if source == "text_file":
+        kwargs["text_file"] = path.name
+    else:
+        class Dataset(list):
+            _fingerprint = "révision-fixe"
+
+        rows = Dataset({"text": row} for row in ("café 😀", "", " \t", " fin "))
+        if not full_kl:
+            rows.insert(1, {"text": 123})
+        monkeypatch.setitem(sys.modules, "datasets",
+                            types.SimpleNamespace(load_dataset=lambda *a, **kw: rows))
+
+    def tokenize(observed, **options):
+        assert observed == text
+        assert options == {"return_tensors": "pt", "add_special_tokens": False}
+        ids = module.torch.tensor([[11, 12, 13, 14, 15]], device="cpu")
+        return types.SimpleNamespace(input_ids=ids)
+
+    # Compare the in-memory digests with the reviewed file digest recipe.
+    sha256 = importlib.import_module(RUNNERS[0])._file_sha256(path)
+    if full_kl:
+        result = module._load_wikitext_calibration(
+            tokenize, n_samples=2, seqlen=2, window_seed=42, **kwargs)
+        origin = ({"path": path.name} if source == "text_file" else
+                  {"cache_dir": "cache", "datasets_fingerprint": "révision-fixe"})
+        corpus = {"source": source, **origin, "bytes": len(raw),
+                  "corpus_sha256": sha256, "total_tokens": 5}
+        assert result == ([[13, 14], [11, 12]], [2, 0], 5, corpus)
+        print(repr((result, module._strict_json_text({"corpus": result[3]}))))
+    else:
+        result = module._load_ids(tokenize, split="test", n_tokens=4, **kwargs)
+        fingerprint = f"file:sha256:{sha256}" if source == "text_file" else "révision-fixe"
+        ids, evidence = result
+        assert result == ([11, 12, 13, 14], {"fingerprint": fingerprint,
+                          "corpus_sha256": sha256, "total_tokens": 5})
+        contract = module._ppl_calibration_contract(
+            args=types.SimpleNamespace(n_tokens=4, seqlen=2, split="test"),
+            ids=ids, dataset_evidence=evidence, tokenizer_identity_sha256="a" * 64,
+            chunks=[[11, 12], [13, 14]], n_tokens_scored=2)
+        assert contract["dataset"]["fingerprint"] == fingerprint
+        assert contract["dataset"]["corpus_sha256"] == sha256
+        contract_sha = module._canonical_sha256(contract)
+        profile = sys.modules["prismaquant.digests"].DIRECT_UTF8_STRICT
+        print(repr((result, profile.encoded(contract), contract_sha)))
+
+
+@pytest.mark.parametrize("runner", RUNNERS)
+@pytest.mark.parametrize("present", [False, True], ids=["missing", "invalid_utf8"])
+def test_wikitext_corpus_refusal(monkeypatch, tmp_path, runner, present):
+    module = importlib.import_module(runner)
+    monkeypatch.chdir(tmp_path)
+    if present:
+        (tmp_path / "corpus.txt").write_bytes(b"\xff")
+
+    def tokenize(*args, **kwargs):
+        pytest.fail("Tokenizer received a refused corpus")
+
+    kwargs = {"cache_dir": "cache", "text_file": "corpus.txt"}
+    error_type = UnicodeDecodeError if present else FileNotFoundError
+    with pytest.raises(error_type) as error:
+        if runner == RUNNERS[0]:
+            module._load_wikitext_calibration(tokenize, n_samples=1, seqlen=2, **kwargs)
+        else:
+            module._load_ids(tokenize, split="test", n_tokens=2, **kwargs)
+    assert type(error.value) is error_type
+    assert error.value.__cause__ is None
+    if present:
+        assert (error.value.encoding, error.value.object, error.value.start) == ("utf-8", b"\xff", 0)
+    else:
+        assert (error.value.errno, error.value.filename) == (2, "corpus.txt")
+    print({"raised": f"{error_type.__module__}.{error_type.__qualname__}",
+           "text": str(error.value), "cause": None})
+
+
+@pytest.mark.parametrize("runner", RUNNERS)
+def test_gold_json_rejects_nonfinite(runner):
+    module = importlib.import_module(runner)
+    value = {"loss": float("nan")}
+    if runner == RUNNERS[0]:
+        with pytest.raises(RuntimeError, match="non-finite full-KL evidence") as error:
+            module._strict_json_text(value)
+        assert isinstance(error.value.__cause__, ValueError)
+    else:
+        with pytest.raises(ValueError, match="Out of range float values"):
+            module._canonical_sha256(value)
+
+
+@pytest.mark.parametrize("field", ["n_tokens", "seqlen"])
+@pytest.mark.parametrize("value", [1, True, 2.0])
+def test_ppl_refuses_invalid_workload(field, value):
+    module = importlib.import_module(RUNNERS[1])
+    args = types.SimpleNamespace(n_tokens=2, seqlen=2)
+    setattr(args, field, value)
+    with pytest.raises(ValueError, match=f"--{field.replace('_', '-')} must be an integer >= 2"):
+        module._validate_workload_args(args)
+
+
 # --- the fabric a multi-node number crossed ---------------------------------
 
 @pytest.mark.parametrize("environment,transport", [
