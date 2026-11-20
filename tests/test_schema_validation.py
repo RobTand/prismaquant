@@ -104,3 +104,15 @@ def test_layer_config_rejects_malformed_dict_entry():
 def test_the_unused_cost_entry_type_stays_deleted():
     from prismaquant import schemas
     assert not hasattr(schemas, "CostEntry")
+
+
+def test_probe_payload_rejects_a_boolean_router_active_count():
+    counts = {0: True}
+    payload = {"stats": {}, "router_active_counts": {"layer.gate": counts}}
+    with pytest.raises(SchemaValidationError) as error:
+        validate_probe_payload(payload, "probe.pkl")
+    assert str(error.value) == (
+        "probe.pkl:.router_active_counts['layer.gate'][0]: expected a non-negative integer"
+    )
+    counts[0] = 1
+    assert validate_probe_payload(payload, "probe.pkl") is payload
