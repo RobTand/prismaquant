@@ -153,3 +153,12 @@ def test_plain_float_weight_requires_no_scale_or_quantization_config(tmp_path):
     report = completeness.check_artifact_completeness(root)
     assert report.ok, report.failure_text()
     completeness.assert_artifact_complete(root)
+
+
+def test_completeness_cli_accepts_a_static_channel_scale(tmp_path, capsys):
+    root = tmp_path / "artifact"
+    _quantized_artifact(root, encoding="fp8_channel", fused=False, with_scale=True)
+    status = completeness.main([str(root)])
+    output = capsys.readouterr().out
+    assert status == 0
+    assert output.splitlines()[-1:] == ["COMPLETE: every scale-bearing weight has a decoder"]
