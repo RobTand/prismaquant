@@ -422,6 +422,19 @@ def test_render_sample_refuses_an_invalid_manifest_before_payload(render_sample,
     assert opened == []
 
 
+def test_render_sample_refuses_a_missing_later_render_before_hashing(render_sample, monkeypatch):
+    run, _, paths, opened = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    missing = paths[-1]
+    missing.unlink()
+    monkeypatch.setattr(bridge, "_synthesize_render_from_wire",
+                        lambda *a, **k: pytest.fail("The loader tried to synthesize a render."))
+    with pytest.raises(ValueError, match="prepared render is missing"):
+        run()
+    assert opened == []
+    assert not missing.exists()
+
+
 def test_render_sample_refuses_a_render_link_to_a_wire(render_sample, tmp_path):
     run, manifest, paths, opened = render_sample
     assert run is not None, "The tool has no render sample reader."
