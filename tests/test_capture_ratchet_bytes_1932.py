@@ -186,3 +186,20 @@ def test_capture_layout_public_contracts(tmp_path):
     assert chain.generation_directory(prep) == tmp_path / "windows/generation-\u00e9"
     assert chain.owner_status_path(prep, 1, 12) == (
         tmp_path / "windows/generation-\u00e9/owners/capture-001-012.json")
+
+
+def test_capture_chain_seal_refuses_a_census_for_another_model(tmp_path):
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps({
+        "model": "source-model",
+        "campaign_argv": ["--streaming"],
+        "cwd": str(tmp_path),
+        "python": "python3",
+        "env": {},
+    }))
+    (tmp_path / "census.json").write_text(json.dumps({"model": "other-model"}))
+    with pytest.raises(dispatch.ChainDispatchRefused) as refused:
+        dispatch.seal(spec, tmp_path, ranges="0:1", boundary_storage={},
+                      timeout_s=60, bookend_timeout_s=60)
+    assert str(refused.value) == "capture census and spec name different models"
+    assert not dispatch.round_directory(tmp_path).exists()
