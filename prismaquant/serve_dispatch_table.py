@@ -440,11 +440,6 @@ class ServeDispatchTable:
                 return row
         return None
 
-    def regimes_for_phase(self, phase: str) -> tuple[str, ...]:
-        return tuple(
-            arena.m_regime for arena in self.arenas if arena.phase == phase
-        )
-
     def families(self) -> tuple[str, ...]:
         return tuple(sorted({row.format_family for row in self.rows}))
 
