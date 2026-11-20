@@ -12,18 +12,23 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 
-def _journal(tmp_path):
+def _journal(tmp_path, row_id="row", *, states=None, sampling=None):
     from prismaquant.cost_stage_checkpoint import prepare_journal, write_unit, unit_path
 
-    row = tmp_path / "row"
+    row = tmp_path / row_id
     manifest = row / "cost.anchors.json"
+    if states is None:
+        states = {"a": {"measured": {"rung": 1.0}}}
+    identity = {"units": {name: {"weight": "w" + name} for name in states}}
+    if sampling is not None:
+        identity["stack_sampling_identity"] = sampling
     parts, digest, _ = prepare_journal(
         row / "cost.anchors.json.parts", stage="Tessera campaign", resume=True,
-        identity={"units": {"a": {"weight": "wa"}}}, qnames=["a"],
-        manifest_path=manifest)
-    write_unit(parts, stage="Tessera campaign", qname="a", identity_sha256=digest,
-               state={"measured": {"rung": 1.0}})
-    return row, manifest, unit_path(parts, "a")
+        identity=identity, qnames=sorted(states), manifest_path=manifest)
+    for name, state in states.items():
+        write_unit(parts, stage="Tessera campaign", qname=name, identity_sha256=digest,
+                   state=state)
+    return row, manifest, unit_path(parts, next(iter(states)))
 
 
 POLICY = {"schema": "prismaquant.tessera_campaign_family_restriction.v1",
@@ -141,27 +146,94 @@ def test_merge_refuses_a_manifest_that_drops_an_identity_unit(tmp_path):
         campaign_table.merge_checkpoint({"row-0000": str(row)}, tmp_path / "merged.json")
 
 
-def test_valid_merged_journal_resumes_through_the_owned_reader(tmp_path):
+def _resume_merged(out, merged):
     from prismaquant.cost_stage_checkpoint import prepare_journal
 
+    _, _, states = prepare_journal(
+        out.with_name(out.name + ".parts"), stage="Tessera campaign", resume=True,
+        identity=merged["identity"], qnames=sorted(merged["identity"]["units"]),
+        manifest_path=out)
+    return states
+
+
+def test_valid_merged_journal_resumes_through_the_owned_reader(tmp_path):
     row, _, _ = _journal(tmp_path)
     out = tmp_path / "merged" / "cost.anchors.json"
     merged = campaign_table.merge_checkpoint({"row-0000": str(row)}, out)
-    _, _, states = prepare_journal(
-        out.with_name(out.name + ".parts"), stage="Tessera campaign", resume=True,
-        identity=merged["identity"], qnames=["a"], manifest_path=out)
-    assert states == {"a": {"measured": {"rung": 1.0}}}
+    assert _resume_merged(out, merged) == {"a": {"measured": {"rung": 1.0}}}
+
+
+def _anchor_rows(name, family, points):
+    from test_tessera_stack_sample_cost import _anchor
+
+    return [_anchor(name, family, f"{family}_R{rate}", rate, loss)
+            for rate, loss in points]
+
+
+def test_authenticated_row_journal_union_prices_like_one_campaign(tmp_path):
+    family = "TESSERA_E2M1_K1"
+    rows, states = {}, {}
+    samples = {}
+    for layer in (7, 8):
+        module = f"model.layers.{layer}.feed_forward.experts"
+        packed = f"{module}.down_proj"
+        experts = (0, 1, 2, 3)
+        sample = campaign_table.StackExpertSample(
+            packed_qname=packed, packed_experts_module=module, packed_param="down_proj",
+            num_experts=4, stack_h_trace=4.0, h_trace_per_expert=(1.0,) * 4,
+            sampled_experts=experts, inclusion_prob=dict.fromkeys(experts, 1.0),
+            members={e: (f"{module}.{e}.w2",) for e in experts}, seed=3,
+            design="census", transfer_law_experts=(0, 1, 2))
+        samples[packed] = sample
+        row_states = {}
+        for expert, (name,) in sample.members.items():
+            points = [(960, expert + 1.0)]
+            if expert < 3:
+                points.append((832, 2.0 * (expert + 1.0)))
+            anchors = _anchor_rows(name, family, points)
+            row_states[name] = {
+                "anchors": [vars(anchor) for anchor in anchors],
+                "wire_records": {anchor.format_name: {"file": f"{name}.{anchor.format_name}",
+                                                       "blob_bytes": anchor.wire_bytes}
+                                 for anchor in anchors},
+            }
+        row_id = f"row-{layer}"
+        rows[row_id], _, _ = _journal(tmp_path, row_id, states=row_states,
+                                      sampling={packed: {"transfer_law_experts": [0, 1, 2]}})
+        states.update(row_states)
+
+    def price(evidence):
+        anchors = {name: {family: [campaign_table.CampaignAnchor(**a)
+                                   for a in state["anchors"]]}
+                   for name, state in evidence.items()}
+        return campaign_table.campaign_cost_payload(
+            anchors, {}, loo={}, provenance={}, stack_samples=samples)
+
+    whole = price(states)
+    assert set(whole["costs"]) == set(samples)
+    for packed, formats in whole["costs"].items():
+        target = formats[f"{family}_R832"]
+        assert target["output_mse"] == pytest.approx(5.0)
+        assert target["transfer_law"]["held_out"] == packed
+        assert target["transfer_law"]["pooled_stacks"] == sorted(samples.keys() - {packed})
+
+    for index, row_order in enumerate((rows, dict(reversed(list(rows.items()))))):
+        out = tmp_path / f"merged-{index}" / "cost.anchors.json"
+        merged = campaign_table.merge_checkpoint(row_order, out)
+        assert set(merged["identity"]["stack_sampling_identity"]) == set(samples)
+        resumed = _resume_merged(out, merged)
+        assert resumed == states
+        assert price(resumed) == whole
 
 
 def test_refusal_order_does_not_depend_on_anchor_insertion_order():
-    from test_tessera_stack_sample_cost import _anchor
     from prismaquant import tessera_campaign as campaign
 
     def payload(names):
+        family = "TESSERA_BF16_K1"
         return campaign_table.campaign_cost_payload(
-            {name: {"TESSERA_BF16_K1": [
-                _anchor(name, "TESSERA_BF16_K1", "TESSERA_BF16_K1_R1792",
-                        1792, 1.0)]} for name in names}, {}, loo={}, provenance={})
+            {name: {family: _anchor_rows(name, family, [(1792, 1.0)])}
+             for name in names}, {}, loo={}, provenance={})
 
     assert payload(["b", "a"])["non_interpolable"] == payload(["a", "b"])["non_interpolable"]
 

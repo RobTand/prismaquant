@@ -103,6 +103,13 @@ def _stack(module, *, offset, anchors):
     return sample, reference
 
 
+def _payload(anchors, samples):
+    return campaign.campaign_cost_payload(
+        anchors, {}, loo={},
+        provenance={"provenance": {"hessian": {"supplied": True}}},
+        stack_samples=samples)
+
+
 @pytest.fixture
 def payload():
     """Two two-tier stacks, so each can be predicted by a law that held it out."""
@@ -111,11 +118,7 @@ def payload():
     for index, module in enumerate((MODULE_A, MODULE_B)):
         sample, _ = _stack(module, offset=1.4 * index, anchors=anchors)
         samples[sample.packed_qname] = sample
-    built = campaign.campaign_cost_payload(
-        anchors, {}, loo={},
-        provenance={"provenance": {"hessian": {"supplied": True}}},
-        stack_samples=samples)
-    return built
+    return _payload(anchors, samples)
 
 
 def _rows(payload, module):
@@ -149,10 +152,7 @@ def test_a_drawn_rung_keeps_the_sampled_cost_source():
         f"{MODULE_A}.gate_up_proj", _probe_row(MODULE_A, h), _profile(),
         sampled_experts=[0, 1, 2, 3],
         inclusion_prob={0: 1.0, 1: 0.5, 2: 0.5, 3: 1.0}, seed=3)
-    built = campaign.campaign_cost_payload(
-        anchors, {}, loo={},
-        provenance={"provenance": {"hessian": {"supplied": True}}},
-        stack_samples={sample.packed_qname: sample})
+    built = _payload(anchors, {sample.packed_qname: sample})
     row = built["costs"][f"{MODULE_A}.gate_up_proj"][
         f"TESSERA_E2M1_K1_R{REFERENCE}"]
     assert row["cost_source"] == "tessera_campaign_measured_stack_sample"
@@ -225,10 +225,7 @@ def test_incomplete_rung_keeps_transfer_law_after_extra_expert(extra_module):
                 qname = f"{module}.1.{role}"
                 value = 2.0 ** (intercept + slope * math.log2(reference[1, role]))
                 anchors[qname]["TESSERA_E2M1_K1"].append(_anchor(qname, 832, value))
-    built = campaign.campaign_cost_payload(
-        anchors, {}, loo={},
-        provenance={"provenance": {"hessian": {"supplied": True}}},
-        stack_samples=samples)
+    built = _payload(anchors, samples)
     row = _rows(built, MODULE_A).get("TESSERA_E2M1_K1_R832")
     assert row is not None
     assert row["cost_source"] == "tessera_campaign_interpolated"
@@ -239,6 +236,57 @@ def test_incomplete_rung_keeps_transfer_law_after_extra_expert(extra_module):
     for field in ("estimator", "variance_estimator", "dloss_stderr", "dloss_stderr_currency"):
         assert field not in row
         assert field not in row["sampled_experts"]
+
+
+def test_a_stack_without_a_peer_only_prices_its_reference():
+    anchors = {}
+    sample, _ = _stack(MODULE_A, offset=0.0, anchors=anchors)
+    built = _payload(anchors, {sample.packed_qname: sample})
+    assert set(_rows(built, MODULE_A)) == {"TESSERA_E2M1_K1_R960"}
+    refusals = built["non_interpolable"]
+    assert any(r["qname"] == sample.packed_qname
+               and r["reason"] == "stack_transfer_law_population_too_small"
+               for r in refusals)
+    assert {r["format_name"] for r in refusals
+            if r["reason"] == "stack_transfer_law_absent"} == {
+        "TESSERA_E2M1_K1_R832", "TESSERA_E2M1_K1_R1088"}
+
+
+@pytest.mark.parametrize("completed", TARGETS)
+def test_completed_target_replaces_prediction_and_keeps_reference(completed):
+    anchors = {}
+    samples = {}
+    for module, offset in ((MODULE_A, 0.0), (MODULE_B, 1.4)):
+        sample, _ = _stack(module, offset=offset, anchors=anchors)
+        samples[sample.packed_qname] = sample
+    before = _payload(anchors, samples)
+    completed_key = f"TESSERA_E2M1_K1_R{completed}"
+    remaining_key = next(f"TESSERA_E2M1_K1_R{rung}" for rung in TARGETS
+                         if rung != completed)
+    before_rows = _rows(before, MODULE_A)
+    assert before_rows[completed_key]["tessera_provenance"] == "interpolated"
+
+    for expert in sorted(set(range(EXPERTS)) - set(LAW_EXPERTS)):
+        for role in ("w1", "w3"):
+            name = f"{MODULE_A}.{expert}.{role}"
+            anchors[name]["TESSERA_E2M1_K1"].append(_anchor(name, completed, 0.125))
+    after = _payload(anchors, samples)
+    after_rows = _rows(after, MODULE_A)
+    measured = after_rows[completed_key]
+    assert measured["cost_source"] == "tessera_campaign_measured"
+    assert measured["tessera_provenance"] == "measured"
+    assert measured["output_mse_measured"] is True
+    assert measured["output_mse"] > before_rows[completed_key]["output_mse"]
+    assert "transfer_law" not in measured
+    assert "interpolated_from" not in measured["sampled_experts"]
+    assert len(measured["sampled_experts"]["members"]) == EXPERTS
+    assert set(after_rows) == set(before_rows)
+    remaining = after_rows[remaining_key]
+    assert remaining["output_mse"] == before_rows[remaining_key]["output_mse"]
+    assert remaining["transfer_law"]["reference_q256"] == REFERENCE
+    assert "dloss_stderr" not in remaining
+    assert "estimator" not in remaining["sampled_experts"]
+    assert _rows(after, MODULE_B) == _rows(before, MODULE_B)
 
 
 def test_the_interpolated_surface_row_also_carries_no_estimator():
