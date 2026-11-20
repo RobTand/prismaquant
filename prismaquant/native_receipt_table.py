@@ -179,21 +179,6 @@ def _json(path: Path, what: str) -> Any:
         raise RuntimePriceError(f"{what} is not readable JSON: {path}: {exc}") from exc
 
 
-def load_relation(path: Path) -> tuple[Mapping, dict]:
-    """The relation the context names; its identity is the context's runtime_sha256.
-
-    Only existence and schema are checked here. Whether the relation is a
-    complete, exact, same-device account is ``load_runtime_relation``'s
-    verdict, reported by the loader rather than pre-empted by this emitter.
-    """
-    if not path.is_file():
-        raise RuntimePriceError(f"runtime provenance relation is missing: {path}")
-    relation = _json(path, "runtime provenance relation")
-    if not isinstance(relation, Mapping) or relation.get("schema") != RELATION_SCHEMA:
-        raise RuntimePriceError(f"runtime provenance relation schema is not {RELATION_SCHEMA}")
-    return relation, {"path": None, "sha256": file_sha256(path)}
-
-
 def load_cost_payload(path: Path) -> tuple[Mapping, str]:
     """Our own pickled cost payload; the digest is over the exact file bytes.
 
@@ -666,8 +651,14 @@ def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None:
         raise RuntimePriceError("now must have a timezone")
-    relation_payload, relation_ref = load_relation(_resolve(relation, manifest_dir))
-    relation_ref["path"] = _table_path(_resolve(relation, manifest_dir), table_dir)
+    relation_path = _resolve(relation, manifest_dir)
+    if not relation_path.is_file():
+        raise RuntimePriceError(f"runtime provenance relation is missing: {relation_path}")
+    relation_payload = _json(relation_path, "runtime provenance relation")
+    if not isinstance(relation_payload, Mapping) or relation_payload.get("schema") != RELATION_SCHEMA:
+        raise RuntimePriceError(f"runtime provenance relation schema is not {RELATION_SCHEMA}")
+    relation_sha256 = file_sha256(relation_path)
+    relation_ref = {"path": _table_path(relation_path, table_dir), "sha256": relation_sha256}
     cost_payload, cost_sha256 = load_cost_payload(_resolve(costs, manifest_dir))
     if not isinstance(receipts, list) or not receipts:
         raise RuntimePriceError("receipt manifest must list at least one native receipt binding")
