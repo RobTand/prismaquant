@@ -212,3 +212,19 @@ def test_diagnostic_root_cannot_be_adopted_by_ordinary_capture(tmp_path, monkeyp
          selected_row_diagnostic=_spec(draw(), execution))
     with pytest.raises(stage_a.AdjointIdentityRefused, match="diagnostic root"):
         _run(root, monkeypatch, execution=execution)
+
+
+def test_diagnostic_spec_refuses_nonfinite_json_constant(tmp_path):
+    from prismaquant.stage_a_selected_row_diagnostic import (
+        SelectedRowDiagnosticRefused,
+        load_diagnostic_spec,
+    )
+
+    path = tmp_path / "spec.json"
+    raw = b'{"selected_global_row": NaN}'
+    path.write_bytes(raw)
+    with pytest.raises(SelectedRowDiagnosticRefused) as exc:
+        load_diagnostic_spec(path, hashlib.sha256(raw).hexdigest())
+    assert str(exc.value) == (
+        "selected-row diagnostic spec refused: diagnostic nonfinite constant NaN"
+    )
