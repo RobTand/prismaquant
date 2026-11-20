@@ -244,6 +244,21 @@ def test_an_allocator_candidate_is_priced_at_its_own_tensor(flipped_e4m3):
     assert seen[1] > seen[0]
 
 
+def test_allocator_candidate_refuses_a_path_separator_in_variant_label():
+    with pytest.raises(tfm.TesseraFormatError, match="variant_label must match"):
+        build_tessera_allocator_candidate(
+            "model.layers.0.mlp.down_proj",
+            (256, 256),
+            family="TESSERA_E4M3_K1",
+            layout="tight",
+            body_rate_q256=256,
+            predicted_dloss=8.0,
+            schedule=None,
+            alphabets=None,
+            variant_label="first/second",
+        )
+
+
 def test_an_assignment_footprint_prices_the_unit_at_its_shape(flipped_e4m3):
     """The model-level accountant inherits the fix through one funnel.
 
