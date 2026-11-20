@@ -1,5 +1,6 @@
 """Exact authenticated acquisition work on the existing campaign renderer seam."""
 
+import errno
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -19,6 +20,28 @@ from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 
 FAMILY = "TESSERA_E4M3_K1"
 DEFERRED = "TESSERA_BF16_K1"
+
+
+def test_seed_wire_copies_bytes_when_hard_link_crosses_filesystems(tmp_path, monkeypatch):
+    seed = tmp_path / "seed"
+    destination = tmp_path / "destination"
+    seed.mkdir()
+    destination.mkdir()
+    filename = "layer__weight__FMT.tessera"
+    data = b"\x00\x80\xff"
+    (seed / filename).write_bytes(data)
+
+    def fail_link(link_source, link_target):
+        assert link_source == seed / filename
+        assert link_target == destination / filename
+        raise OSError(errno.EXDEV, "The link crosses filesystems.")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(campaign_wire.os, "link", fail_link)
+        campaign_wire.link_seed_wire(seed, destination, filename, qname="layer.weight", format_name="FMT")
+
+    assert (destination / filename).read_bytes() == data
+    assert (seed / filename).read_bytes() == data
 
 
 def arguments(**changes):
