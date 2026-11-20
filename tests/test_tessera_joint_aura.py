@@ -1092,6 +1092,49 @@ def test_a_scoped_read_walks_only_its_units_and_is_refused_as_a_campaign_input(t
         bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=(0, 5))
 
 
+def test_scoped_intake_refuses_a_render_that_disappears_at_resolution(tmp_path, monkeypatch):
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, *_ = fixture(tmp_path)
+    resolve = bridge._resolve_render_origin
+
+    def remove_then_resolve(render, **kwargs):
+        Path(render).unlink()
+        return resolve(render, **kwargs)
+
+    def synthesize(render, **kwargs):
+        Path(render).touch()
+        return "synthesized_from_wire"
+
+    monkeypatch.setattr(bridge, "_resolve_render_origin", remove_then_resolve)
+    monkeypatch.setattr(bridge, "_synthesize_render_from_wire", synthesize)
+    with pytest.raises(ValueError, match="prepared render is missing"):
+        bridge.load_measured_anchor_input(config, unit_scope=(0, 1),
+                                          verify_payloads=False, require_existing_renders=True)
+
+
+def test_stat_only_scoped_intake_does_not_open_payloads(tmp_path, monkeypatch):
+    import builtins
+    import io
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.render_cache_paths import cache_weight_filename
+
+    config, names, fmt, *_ = fixture(tmp_path)
+    payload_names = {leaf for name in names
+                     for leaf in (cache_weight_filename(name, fmt), name + ".tessera")}
+    real_open = builtins.open
+
+    def open_metadata(file, *args, **kwargs):
+        assert Path(str(file)).name not in payload_names, f"Opened payload: {file}"
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", open_metadata)
+    monkeypatch.setattr(io, "open", open_metadata)
+    data = bridge.load_measured_anchor_input(config, unit_scope=(0, 1), head_walk_workers=1,
+                                             verify_payloads=False, require_existing_renders=True)
+    assert set(data.cells) == {(min(names), fmt)}
+
+
 @pytest.mark.parametrize("spec,expected", [("0:4", (0, 4)), (":4", (0, 4)), ("2:", (2, 7)),
                                            (None, None)])
 def test_a_unit_range_is_read_off_the_sorted_census_roster(spec, expected):
