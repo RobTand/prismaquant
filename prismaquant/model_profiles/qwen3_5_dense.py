@@ -60,19 +60,14 @@ class Qwen3_5DenseProfile(Qwen3_5Profile):
         "Qwen3.5ForCausalLM", "Qwen3.6ForCausalLM",
     })
 
-    def _is_text_only(self) -> bool:
-        archs = self.declared_architectures()
-        return bool(archs) and all(
-            a in self.TEXT_ONLY_ARCHITECTURES for a in archs
-        )
-
     def vllm_architecture_class(self) -> str | None:
         # Which class vLLM will build decides `packed_modules_mapping` and the
         # prefix map, so it must follow the checkpoint's own declaration. A
         # checkpoint that declares nothing (hand-built profile, older caller)
         # keeps the historical answer, so every artifact shipped before this
         # branch existed derives exactly as it did.
-        if self._is_text_only():
+        archs = self.declared_architectures()
+        if archs and all(a in self.TEXT_ONLY_ARCHITECTURES for a in archs):
             return "Qwen3_5ForCausalLM"
         return "Qwen3_5ForConditionalGeneration"
 
