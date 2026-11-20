@@ -569,7 +569,8 @@ def _synthesize_render_from_wire(render, *, wire, record, name, fmt, shape, read
     return "synthesized_from_wire"
 
 
-def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, device="cpu"):
+def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, device="cpu",
+                           require_existing_renders=False):
     """Name where this rung's decoded PWC shard came from, never guess it.
 
     The campaign journals fresh and resumed wires through one receipt grammar
@@ -591,6 +592,8 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
         _same(stamp.get("wire_sha256"), record["blob_sha256"],
               f"{name}@{fmt}: synthesized render names another wire")
         return "synthesized_from_wire"
+    _require(not require_existing_renders,
+             f"{name}@{fmt}: prepared render is missing. The loader will not synthesize it.")
     _require(Path(wire).is_file(), f"{name}@{fmt}: original decoded PWC shard missing")
     return _synthesize_render_from_wire(render, wire=wire, record=record, name=name,
                                         fmt=fmt, shape=shape, reader=reader, device=device)
@@ -1212,13 +1215,11 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             # measuring run can never replace the campaign's own bytes.
             target = (render if mirror_root is None
                       else mirror_root / render.relative_to(render.root))
-            present = Path(target).is_file()
-            if require_existing_renders and not present:
-                raise ValueError(f"{name}@{fmt}: prepared render is missing; selected cache will not synthesize it")
-            if present:
+            if require_existing_renders or target.is_file():
                 origin = _resolve_render_origin(target, wire=wire, record=record, name=name,
                                                 fmt=fmt, shape=census["unit_shapes"][name],
-                                                reader=reader, device=synthesis_device)
+                                                reader=reader, device=synthesis_device,
+                                                require_existing_renders=require_existing_renders)
             else:
                 # The one thread-unsafe step in the walk: synthesis decodes
                 # through the bound reader, which is proven single-threaded
