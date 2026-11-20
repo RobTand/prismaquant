@@ -138,6 +138,17 @@ def scoped_walk_intake(config, *, scope, workers, metadata_memo=None):
     this mode reads no payload. ``metadata_memo`` lets a sweep read the
     census-wide metadata once.
     """
+    data, started = _load_scoped_walk(config, scope, workers, metadata_memo)
+    low, high = scope
+    return {"marks": {"anchor_input_s": time.monotonic() - started},
+            "scope": [low, high], "scope_units": high - low,
+            "candidate_overlay_left_out": "candidate_overlay" in config["inputs"],
+            "head_walk_workers": data.head_walk_workers,
+            "measured_cells": len(data.cells),
+            "units_with_cells": len({name for name, _ in data.cells})}
+
+
+def _load_scoped_walk(config, scope, workers, metadata_memo=None):
     from prismaquant.tessera_joint_aura import load_measured_anchor_input
     from prismaquant.tessera_reader import load_declared_reader
 
@@ -159,12 +170,104 @@ def scoped_walk_intake(config, *, scope, workers, metadata_memo=None):
         unit_scope=(low, high), head_walk_workers=workers,
         historical_encoder_reuse=config.get("historical_encoder_reuse"),
         metadata_memo=metadata_memo)
-    return {"marks": {"anchor_input_s": time.monotonic() - started},
-            "scope": [low, high], "scope_units": high - low,
-            "candidate_overlay_left_out": "candidate_overlay" in config["inputs"],
-            "head_walk_workers": data.head_walk_workers,
-            "measured_cells": len(data.cells),
-            "units_with_cells": len({name for name, _ in data.cells})}
+    return data, started
+
+
+def render_sample_intake(config, *, manifest, scope, workers, hash_workers, trials,
+                         max_trials, max_files, max_bytes):
+    """Admit campaign metadata and hash only the renders in the manifest.
+
+    Pass a parsed v1 manifest with the input bindings, scope, and sorted cells.
+    Pass the same scope as a pair of integers. Start the deadline and stop
+    reporter before input reads. Keep the stop reporter independent of the
+    readers. Do not load a prepared head or create a scratch directory.
+    Do not read other payloads. Publish the sample report only after this
+    call returns. The report does not authenticate the full campaign.
+    """
+    from stat import S_ISREG
+
+    from prismaquant import digests
+    from prismaquant.cost_stage_checkpoint import MAX_UNIT_IO_WORKERS, _drive_ordered_units
+    from prismaquant.file_identity import file_stat_signature
+    from prismaquant.stage_inputs import require
+
+    for name, limit in (("max_trials", max_trials), ("max_files", max_files),
+                        ("max_bytes", max_bytes)):
+        require(type(limit) is int and limit > 0, f"{name} must be a positive integer")
+    require(type(trials) is int and 0 < trials <= max_trials, "trials must fit max_trials")
+    for name, width in (("workers", workers), ("hash_workers", hash_workers)):
+        require(type(width) is int and 0 < width <= MAX_UNIT_IO_WORKERS,
+                f"{name} must be in 1:{MAX_UNIT_IO_WORKERS}")
+    require(isinstance(scope, (tuple, list)) and len(scope) == 2
+            and all(type(index) is int for index in scope), "render sample scope needs two integers")
+    scope = tuple(scope)
+    manifest = digests.canonical_json(manifest, where="render sample manifest")
+    require(isinstance(manifest, dict) and set(manifest) == {"schema", "scope", "inputs", "cells"}
+            and manifest["schema"] == "prismaquant.render_sample.v1"
+            and manifest["scope"] == list(scope)
+            and all(type(index) is int for index in manifest["scope"]),
+            "invalid render sample manifest schema or scope")
+    cells = manifest["cells"]
+    require(isinstance(cells, list) and cells and all(
+        isinstance(cell, list) and len(cell) == 2 and all(isinstance(key, str) for key in cell)
+        for cell in cells), "invalid render sample manifest cells")
+    pairs = [tuple(cell) for cell in cells]
+    require(pairs == sorted(set(pairs)), "render sample manifest cells must be unique and sorted")
+    require(len(pairs) * trials <= max_files, "render sample plan exceeds max_files")
+
+    data, started = _load_scoped_walk(config, scope, workers)
+    require(digests.canonical_json_bytes(manifest["inputs"], where="manifest inputs") ==
+            digests.canonical_json_bytes(data.inputs, where="admitted inputs"),
+            "render sample manifest does not match admitted inputs")
+    require(all(pair in data.cells for pair in pairs), "render sample manifest names an unadmitted cell")
+    manifest_sha256 = digests.canonical_json_sha256(manifest, where="render sample manifest")
+    plan = []
+    for pair in pairs:
+        path = Path(data.cells[pair]["render"])
+        info = path.lstat()
+        require(S_ISREG(info.st_mode), f"render is not a regular file: {path}")
+        plan.append((pair, path, file_stat_signature(info)))
+    require(sum(signature[2] for _, _, signature in plan) * trials <= max_bytes,
+            "render sample plan exceeds max_bytes")
+
+    def measure(item):
+        pair, path, signature = item
+        remaining = signature[2]
+        changed = f"render changed: {path}"
+        try:
+            flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
+            with os.fdopen(os.open(path, flags), "rb", buffering=0) as handle:
+                require(file_stat_signature(os.fstat(handle.fileno())) ==
+                        file_stat_signature(path.lstat()) == signature, changed)
+
+                def chunks():
+                    nonlocal remaining
+                    while remaining:
+                        chunk = handle.read(min(remaining, digests.FILE_BLOCK_BYTES))
+                        require(bool(chunk), f"render is short: {path}")
+                        remaining -= len(chunk)
+                        yield chunk
+
+                sha256 = digests.chunks_sha256hex(chunks())
+                require(file_stat_signature(os.fstat(handle.fileno())) ==
+                        file_stat_signature(path.lstat()) == signature, changed)
+        except FileNotFoundError as exc:
+            raise ValueError(f"render changed or is missing: {path}") from exc
+        return {"cell": list(pair), "sha256": sha256, "bytes": signature[2] - remaining}
+
+    hash_started = time.monotonic()
+    results = []
+    for _ in range(trials):
+        rows = []
+        _drive_ordered_units(plan, measure, lambda _, row: rows.append(row), workers=hash_workers)
+        results.append(rows)
+    return {"manifest_sha256": manifest_sha256, "inputs": manifest["inputs"],
+            "verification": "sample-only", "scope": list(scope),
+            "head_walk_workers": data.head_walk_workers, "hash_workers": hash_workers,
+            "trials": results, "payload_files": sum(map(len, results)),
+            "payload_bytes": sum(row["bytes"] for rows in results for row in rows),
+            "marks": {"anchor_input_s": hash_started - started,
+                      "render_hash_s": time.monotonic() - hash_started}}
 
 
 def sweep_plan(start: int, slice_units: int, workers_order) -> list:
