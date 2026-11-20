@@ -27,6 +27,6 @@ It checks receipt equality, draw acceptance, and input preservation at `test_mtp
 `test_mtp_census_reader_refuses_different_draw:79` checks both digest failures.
 `test_mtp_census_without_optional_receipt_keeps_legacy_draw:89` checks draw acceptance, the absent key, and input preservation.
 
-The lead must regenerate BUILD for the new test file and run both requested modules on CPU in Flux. The new cases need one worker and process a 64-byte token tensor per case.
+Flux CPU job `f3dFks5bkwi` at `1fa478d10` (gate venv): the new module with `test_glm_mtp_capture.py`, `test_tessera_campaign_calibration_input.py` and `test_tessera_campaign_fanout.py`, 101 passed, exit 0; `tools/ci/static_checks.sh --merge-main` exit 0. With main's `glm_mtp_capture.py`, 5 of the 6 new cases fail (the legacy case passes, as intended). Existing MTP census files and their digests do not change; only a NEW census built from a base census that carries `calibration_input` gains that key in its identity.
 The test-only commit is expected to fail when it checks the missing receipt. No test ran in this worktree.
 Historical regeneration still needs the pinned 512 by 512 seed-0 artifact, source authentication, and the original GPU route.
