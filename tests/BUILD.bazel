@@ -1956,6 +1956,16 @@ pq_py_library(
     ],
 )
 
+pq_py_test(
+    name = "test_digest_recipes_3040",
+    path = "tests/test_digest_recipes_3040.py",
+    library = ":test_digest_recipes_3040_lib",
+    deps = [
+        ":conftest",
+    ],
+    timeout = "moderate",
+)
+
 pq_py_library(
     name = "test_profile_observer_bootstrap_1942_lib",
     srcs = [
@@ -47107,6 +47117,26 @@ pq_py_library(
         "//:prismaquant/render_cache_paths",
         "//:prismaquant/tessera_publication",
         ":test_packed_expert_cross_domain_gate_lib",
+        "@pq_pip//pytest",
+        "@pq_pip//torch",
+    ],
+)
+
+pq_py_library(
+    name = "test_digest_recipes_3040_lib",
+    srcs = [
+        "test_digest_recipes_3040.py",
+    ],
+    data = [
+        "fixtures/digest_recipes_3040.json",
+        "test_digest_recipes_3040.py",
+    ],
+    deps = [
+        "//:prismaquant/__init__",
+        "//:prismaquant/digests",
+        "//:prismaquant/tensor_digests",
+        ":golden_table",
+        "@pq_pip//numpy",
         "@pq_pip//pytest",
         "@pq_pip//torch",
     ],

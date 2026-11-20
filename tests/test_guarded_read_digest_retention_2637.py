@@ -47,6 +47,8 @@ MANIFEST_SOURCE_BLOBS = {
 # digests: bounded chunks_sha256hex owner supports the native byte writer.
 # The diagnostic JSON profile does not change the guarded-read recipes.
 # tensor_digests: the additive retained token owner route from 58a2db300.
+# PQ #3040 adds JSON profiles, unframed SHA-256, and a tensor payload view.
+# The six guarded callers still own their read, write, and seed contracts.
 # perturbed_x_cache, PQ #3421: the unreachable landing wait, ram branches and
 # declared_size are deleted; the five retained raw-hashlib calls are unchanged.
 # G3 re-review against main f6c99e8ed: the six SCOPES/IDS and their raw
@@ -55,10 +57,10 @@ MANIFEST_SOURCE_BLOBS = {
 # Future changed pins require a per-file --reason and print the source diff.
 CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('27653aa3feb5f4d14b6cca1651bd232f23f601f0',
                                       '15993e22c339d1cbb7c157d69d904dff031a535bee09bb35797cbbe654f693ce'),
- 'prismaquant/digests.py': ('64598f61c367cd789bf3edf9e11d31ba13929587',
-                            '9b9e179069b47aefb61a3bf57acfe29d4d0478c34c5b2568753529c49892de0f'),
- 'prismaquant/tensor_digests.py': ('0777758650869edc365cbf545280250e6fa175f2',
-                                   '8baeaf7541a23481b9d233a7c65ee5f679f4fcc248c004e83ad0ca16ea8ee50a'),
+ 'prismaquant/digests.py': ('db97a2a0e7d8dc839613a49cfa068807e52f8a80',
+                            '1062b36c03ed5e50c1a52d88d48b1452a0ef029b113a5473febec2ea50b0b679'),
+ 'prismaquant/tensor_digests.py': ('9f9d37ddda938868f2a71ea33b4ea1b8f1596f09',
+                                   '4535fa85e1665d2186996f8e258c6491f319abaedc97d5679a1663abed8ec0c1'),
  'prismaquant/tessera_census_cache.py': ('2f8143e6af37a0c49ec223b14873cdbdc8f9d44d',
                                           '7ba5d7ba64fb617910fdaa16ee1923189454b5b26d9c198abd13cbef0414c143')}
 

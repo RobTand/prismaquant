@@ -7,7 +7,7 @@ spelling here, and every site that hashes, stores or compares with that
 recipe uses it. A site whose bytes differ from every profile keeps its own
 code; it is never moved onto a profile whose bytes are "close enough".
 
-JSON profiles, all with sorted keys. Separators are compact ``(",", ":")``
+JSON profiles use sorted keys unless named ``INSERTION_*``. Separators are compact ``(",", ":")``
 unless the profile states otherwise:
 
 - ``DIRECT_ASCII_SPACED_LAX``: default-spaced ``(", ", ": ")`` separators,
@@ -23,6 +23,7 @@ unless the profile states otherwise:
 - ``DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR``: one-space indentation, ASCII,
   lax nonfinite values and ``default=str`` for reseal reports. Publication
   retains its final LF.
+- ``DIRECT_ASCII_INDENT1_LAX``: the same indentation and no fallback serializer.
 - ``DIRECT_ASCII_INDENT2_LAX``: two-space indentation, ``(",", ": ")``
   separators, ASCII escaping, lax nonfinite values and no fallback serializer.
   File writers retain their own final LF and publication policy.
@@ -43,14 +44,19 @@ unless the profile states otherwise:
   ``allow_nan=True``, so ``NaN`` and ``Infinity`` are written, not refused.
 - ``DIRECT_ASCII_LAX_DEFAULT_STR``: ``DIRECT_ASCII_LAX`` with ``default=str``.
 
-Byte profiles, lowercase-hex SHA-256 except the native Git SHA-1 profile:
+``JsonProfile.dump`` writes the same chunks as ``json.dump``. The caller owns
+the stream and any final LF.
+
+Byte profiles:
 
 - ``git_blob_sha1hex``: native Git blob SHA1 over its ASCII type/length/NUL
   header and exact owned payload, for independently published auxiliary IDs.
 - ``bytes_sha256hex``: the bytes as given (``bytes``, ``bytearray`` or
   ``memoryview``).
+- ``bytes_sha256digest``: the same input and a 32-byte SHA-256 result.
 - ``chunks_sha256hex``: caller-ordered byte chunks as one unframed stream,
   without collecting the chunks in memory.
+- ``IncrementalSha256``: the same unframed stream with caller-controlled updates.
 - ``text_sha256hex``: the text encoded as strict UTF-8, so a lone surrogate
   raises ``UnicodeEncodeError``.
 - ``newline_utf8_bytes`` / ``newline_utf8_sha256``: strings in caller order,
@@ -109,7 +115,7 @@ import math
 import operator
 import os
 import re
-from typing import BinaryIO, Protocol
+from typing import BinaryIO, Protocol, TextIO
 
 
 # A regex checks the underlying text, not a str subclass's Python length or
@@ -264,7 +270,7 @@ def canonical_json_sha256_normalized(value: object, *, where: str) -> str:
 
 @dataclass(frozen=True)
 class JsonProfile:
-    """One direct JSON encoding: sorted keys and exactly these options.
+    """One direct JSON encoding with exactly these options.
 
     Separators default to compact; a spaced profile must name its own pair.
     """
@@ -275,11 +281,12 @@ class JsonProfile:
     default: Callable[[object], object] | None = None
     separators: tuple[str, str] = (",", ":")
     indent: int | None = None
+    sort_keys: bool = True
 
     def _encoder(self) -> json.JSONEncoder:
         """The stdlib encoder with exactly this profile's options."""
         return json.JSONEncoder(
-            sort_keys=True,
+            sort_keys=self.sort_keys,
             separators=self.separators,
             indent=self.indent,
             ensure_ascii=self.ensure_ascii,
@@ -289,6 +296,11 @@ class JsonProfile:
 
     def text(self, value: object) -> str:
         return self._encoder().encode(value)
+
+    def dump(self, value: object, stream: TextIO) -> None:
+        """Write each encoder chunk to the caller's text stream."""
+        for chunk in self._encoder().iterencode(value):
+            stream.write(chunk)
 
     def encoded(self, value: object) -> bytes:
         return self.text(value).encode("utf-8")
@@ -327,12 +339,30 @@ DIRECT_ASCII_SPACED_STRICT = JsonProfile(
 DIRECT_UTF8_INDENT2_STRICT = JsonProfile(
     "direct-utf8-indent2-strict", ensure_ascii=False, allow_nan=False,
     separators=(",", ": "), indent=2)
+DIRECT_ASCII_INDENT1_LAX = JsonProfile(
+    "direct-ascii-indent1-lax", ensure_ascii=True, allow_nan=True,
+    separators=(",", ": "), indent=1)
 DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR = JsonProfile(
     "direct-ascii-indent1-lax-default-str", ensure_ascii=True, allow_nan=True,
     separators=(",", ": "), indent=1, default=str)
 DIRECT_ASCII_INDENT2_LAX = JsonProfile(
     "direct-ascii-indent2-lax", ensure_ascii=True, allow_nan=True,
     separators=(",", ": "), indent=2)
+INSERTION_ASCII_SPACED_LAX = JsonProfile(
+    "insertion-ascii-spaced-lax", ensure_ascii=True, allow_nan=True,
+    separators=(", ", ": "), sort_keys=False)
+INSERTION_ASCII_INDENT1_LAX = JsonProfile(
+    "insertion-ascii-indent1-lax", ensure_ascii=True, allow_nan=True,
+    separators=(",", ": "), indent=1, sort_keys=False)
+INSERTION_ASCII_INDENT1_LAX_DEFAULT_STR = JsonProfile(
+    "insertion-ascii-indent1-lax-default-str", ensure_ascii=True, allow_nan=True,
+    separators=(",", ": "), indent=1, sort_keys=False, default=str)
+INSERTION_ASCII_INDENT2_LAX = JsonProfile(
+    "insertion-ascii-indent2-lax", ensure_ascii=True, allow_nan=True,
+    separators=(",", ": "), indent=2, sort_keys=False)
+INSERTION_UTF8_INDENT2_STRICT = JsonProfile(
+    "insertion-utf8-indent2-strict", ensure_ascii=False, allow_nan=False,
+    separators=(",", ": "), indent=2, sort_keys=False)
 
 
 class _CheckpointJsonEncoder:
@@ -527,6 +557,23 @@ def git_blob_sha1hex(data: bytes | bytearray | memoryview) -> str:
 
 def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def bytes_sha256digest(data: bytes | bytearray | memoryview) -> bytes:
+    return hashlib.sha256(data).digest()
+
+
+class IncrementalSha256:
+    """Hash caller-ordered bytes across callbacks."""
+
+    def __init__(self) -> None:
+        self._digest = hashlib.sha256()
+
+    def update(self, data: bytes | bytearray | memoryview) -> None:
+        self._digest.update(data)
+
+    def hexdigest(self) -> str:
+        return self._digest.hexdigest()
 
 
 def chunks_sha256hex(chunks: Iterable[bytes | bytearray | memoryview]) -> str:
