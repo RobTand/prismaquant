@@ -71,6 +71,30 @@ def test_full_selected_bundle_includes_dense_and_expert(tmp_path):
     assert manifest["units"][DENSE]["identity"]["schema"] == "tessera.encoding_inputs.v1"
 
 
+def test_research_export_refuses_a_stale_assignment_digest():
+    from prismaquant.tessera_research_proposal import (
+        SCHEMA, require_research_proposal_assignment, selected_assignment_sha256,
+    )
+
+    assignment = {DENSE: FMT}
+    proposal = {
+        'schema': SCHEMA,
+        'status': 'research_proposal',
+        'production_export_authority': False,
+        'validation_export_eligible': None,
+        'research_validation_permitted': True,
+        'pilot': {'status': 'diagnostic_pilot'},
+        'expanded_assignment': assignment,
+        'selected_assignment_sha256': selected_assignment_sha256(assignment),
+    }
+    binding = require_research_proposal_assignment(proposal, assignment, dict)
+    assert binding['selected_assignment_sha256'] == proposal['selected_assignment_sha256']
+
+    proposal['selected_assignment_sha256'] = selected_assignment_sha256({DENSE: 'BF16'})
+    with pytest.raises(ValueError, match='assignment differs from expanded sampled proposal'):
+        require_research_proposal_assignment(proposal, assignment, dict)
+
+
 def test_sampled_research_bundle_keeps_same_source_hessian_encoder_and_wire_gates(tmp_path):
     from prismaquant.tessera_research_proposal import SCHEMA, selected_assignment_sha256
     source, names, records, handoff, metadata, data = fixture(tmp_path)
