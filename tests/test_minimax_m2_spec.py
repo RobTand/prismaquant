@@ -302,3 +302,10 @@ def test_fp8_rewrite_bypass_is_false_without_a_config(tmp_path):
     from prismaquant.streaming_model import _bypass_hf_fp8_module_rewrite
 
     assert _bypass_hf_fp8_module_rewrite(str(tmp_path)) is False
+
+
+def test_minimax_spec_instance_claims_without_a_class_match(spec_only):
+    model_type = "minimax_m2"
+    architectures = ["MiniMaxM2ForCausalLM"]
+    assert spec_only.claims(model_type, architectures)
+    assert SpecMatchProfile.matches(model_type, architectures) is False
