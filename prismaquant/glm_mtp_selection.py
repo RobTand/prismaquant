@@ -307,16 +307,6 @@ def _mtp_probe(payload) -> tuple[str, dict]:
     return digests.pop(), last_row["probe_identity"]
 
 
-def _unit_storage(payload, unit):
-    """Admit exact storage counts before eligibility can hide a malformed row."""
-    wire = {
-        rung: _STORAGE.integer(value, where=f"wire_bytes[{unit}][{rung}]", minimum=1)
-        for rung, value in payload["wire_bytes"].get(unit, {}).items()
-    }
-    params = _STORAGE.integer(payload["params"][unit], where=f"params[{unit}]", minimum=1)
-    return wire, params
-
-
 def add_mtp_scope_arguments(parser) -> None:
     """Declare the MTP workload independently of the body's workload."""
     parser.add_argument("--mtp-regime", type=int, default=None,
@@ -363,7 +353,11 @@ def _unit_rows(payload, eligible=None, *, rung_allowability=None, quality_prices
         raise ValueError("MTP groups must partition the priced units")
     rows, unattested = {}, {}
     for unit in units:
-        wire, params = _unit_storage(payload, unit)
+        wire = {
+            rung: _STORAGE.integer(value, where=f"wire_bytes[{unit}][{rung}]", minimum=1)
+            for rung, value in payload["wire_bytes"].get(unit, {}).items()
+        }
+        params = _STORAGE.integer(payload["params"][unit], where=f"params[{unit}]", minimum=1)
         measured = payload["costs"][unit]
         proposals = (quality_prices or {}).get(unit, {})
         if set(wire) != set(measured) and rung_allowability is None and not proposals:
