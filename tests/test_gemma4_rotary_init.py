@@ -76,3 +76,14 @@ def test_export_uses_shared_rotary_init_with_dispatch():
         "import streaming_model's canonical one")
     assert "init_rotaries" in inspect.getsource(_init_rotary_inplace), (
         "canonical _init_rotary_inplace lost its profile-driven dispatch")
+
+
+def test_gemma4_rotary_defers_without_rope_parameters():
+    cfg = _Cfg()
+    rot = _MultiLayerRotary(cfg, device=torch.device("meta"))
+    original = rot.full_attention_inv_freq
+    cfg.rope_parameters = None
+
+    ok = Gemma4Profile().init_rotaries(rot, cfg, torch.device("cpu"), torch.float32)
+    assert ok is False
+    assert dict(rot.named_buffers()).get("full_attention_inv_freq") is original
