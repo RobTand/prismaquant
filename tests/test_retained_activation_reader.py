@@ -73,3 +73,19 @@ def test_prefetched_verified_activation_keeps_directory_and_identity_fences(
                 stream.take(0)
     finally:
         index.close()
+
+
+def test_verified_activation_index_refuses_uncommitted_file(committed_activation):
+    fixture, directory, path, _ = committed_activation
+    qname = fixture['qname']
+    (directory / 'uncommitted.pt').write_bytes(path.read_bytes())
+    index = ActivationIndex(directory, [qname, 'uncommitted'],
+                            verification_contract=fixture['verification_contract'])
+    try:
+        assert qname in index
+        assert 'uncommitted' not in index
+        with pytest.raises(KeyError) as error:
+            index.load_blob('uncommitted')
+        assert error.value.args == ('uncommitted',)
+    finally:
+        index.close()
