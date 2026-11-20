@@ -83,6 +83,36 @@ def _inputs(tmp_path, monkeypatch, *, added=None, activation_formats=None):
 LIMITS = dict(host_bytes=16 << 20, physical_bytes=64 << 20, gpu_bytes=48 << 20)
 
 
+def test_resource_cli_writes_bound_policy_and_refuses_replacement(tmp_path, monkeypatch, capsys):
+    from prismaquant.joint_stageb_resources import main
+
+    inputs, _, _ = _inputs(tmp_path, monkeypatch)
+    inputs_path = tmp_path / "inputs.json"
+    inputs_path.write_text(json.dumps(inputs), encoding="utf-8")
+    out = tmp_path / "policy.json"
+    argv = [
+        "--inputs", str(inputs_path),
+        "--out", str(out),
+        "--host-bytes", str(LIMITS["host_bytes"]),
+        "--physical-bytes", str(LIMITS["physical_bytes"]),
+        "--gpu-bytes", str(LIMITS["gpu_bytes"]),
+    ]
+
+    main(argv)
+    raw = out.read_bytes()
+    policy = json.loads(raw)
+    assert policy["inputs"] == inputs
+    assert policy["limits"] == LIMITS
+    report = json.loads(capsys.readouterr().out)
+    assert report["out"] == str(out)
+    assert report["sha256"] == hashlib.sha256(raw).hexdigest()
+
+    out.write_bytes(b"existing policy")
+    with pytest.raises(ValueError, match="policy output already exists"):
+        main(argv)
+    assert out.read_bytes() == b"existing policy"
+
+
 @pytest.fixture
 def resource_fixture(tmp_path, monkeypatch):
     inputs, plan, _names = _inputs(tmp_path, monkeypatch)
