@@ -30,3 +30,11 @@ def test_older_producer_path_preserves_exact_report(monkeypatch):
     monkeypatch.setattr(footprint, "_build_plane_extents", None)
     monkeypatch.setattr(footprint, "_build_terminal_extent", None)
     assert footprint.tessera_tensor_payload_breakdown((2048, 4096), **kwargs) == expected
+
+
+def test_footprint_refuses_an_anchor_table_with_too_few_codes():
+    with pytest.raises(footprint.TesseraFormatError, match=(
+        r"rate 4: alphabet has 2 anchors, \|A_R\| = 2\^\(R\+1\) = 32$"
+    )):
+        footprint.tessera_tensor_payload_breakdown(
+            (32, 128), family="TESSERA_E4M3_K1", body_rate_q256=1024, alphabets={4: (0, 1)})
