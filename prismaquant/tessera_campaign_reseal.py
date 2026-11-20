@@ -136,10 +136,6 @@ def arm_engagement(result, comparison, *, where):
     return dict(expects=expects, **{name: summary[name] for name in ENGAGEMENT_COUNTS})
 
 
-def _arm_comparison(result):
-    return result.get('comparison', result)
-
-
 def _require_requested_setting_drops(comparison, pins, *, where):
     """Match the arm's removed settings to the requested settings."""
     declared = tuple(sorted(comparison.get('dropped_settings') or ()))
@@ -167,7 +163,7 @@ def load_bundle(path, pins):
         if actual != arm['result_sha256']:
             raise Refused(f'{path}: arm result {arm["result"]} changed since the bundle was assembled')
         result = json.loads(Path(arm['result']).read_text())
-        comparison = _arm_comparison(result)
+        comparison = result.get('comparison', result)
         scope = arm_pin_scope(comparison.get('old_pins'), comparison.get('new_pins'), pins, where=f'{path}: {arm["result"]}')
         if arm.get('pin_scope') not in (None, scope):
             raise Refused(f'{path}: arm {arm["result"]} is recorded as {arm["pin_scope"]}, but its pins make it {scope}')
