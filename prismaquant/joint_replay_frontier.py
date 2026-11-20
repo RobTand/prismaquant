@@ -93,10 +93,6 @@ def replay_phase_name(index: int) -> str:
     return f"{REPLAY_PHASE_PREFIX}{index:04d}"
 
 
-def is_replay_phase(name: object) -> bool:
-    return isinstance(name, str) and name.startswith(REPLAY_PHASE_PREFIX)
-
-
 def replay_read_items(
     roster: Iterable[str], cells_by_unit: Mapping[str, Iterable[str]]
 ) -> list[tuple[str, str, str | None]]:
@@ -212,7 +208,7 @@ def _parts(roster: Sequence[str], phase_start_units: Mapping[str, str]) -> dict[
     last = -1
     for name in roster:
         phase = starts[name]
-        if not is_replay_phase(phase):
+        if not isinstance(phase, str) or not phase.startswith(REPLAY_PHASE_PREFIX):
             raise ValueError("a replayed unit starts in a replay phase")
         index = int(phase[len(REPLAY_PHASE_PREFIX):])
         if index < last:
