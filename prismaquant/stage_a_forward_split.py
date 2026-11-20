@@ -203,40 +203,6 @@ def write_fragment(space, samples, *, session: dict, boundary_entries: dict) -> 
     return path
 
 
-def _read_fragment(space, start, stop, *, session, num_layers) -> dict:
-    path = fragment_path(space, start, stop)
-    try:
-        document = json.loads(path.read_bytes())
-    except (OSError, ValueError) as exc:
-        raise ForwardSplitRefused(f"range {start}:{stop} wrote no entry records") from exc
-    if (document.get("schema") != FRAGMENT_SCHEMA
-            or document.get("samples") != [start, stop]
-            or document.get("session") != session):
-        raise ForwardSplitRefused(f"{path} is not range {start}:{stop}'s record of this run")
-    entries = document.get("boundary_entries")
-    if not isinstance(entries, dict) or set(entries) != {
-            str(boundary) for boundary in range(int(num_layers))}:
-        raise ForwardSplitRefused(f"{path} does not name every forward boundary")
-    for boundary, rows in entries.items():
-        if len(rows) != stop - start:
-            raise ForwardSplitRefused(
-                f"{path} names {len(rows)} entries at boundary {boundary}, not {stop - start}")
-        for batch, row in zip(range(start, stop), rows):
-            identity = row["metadata"]["identity"]
-            if (identity["session"] != session or identity["kind"] != "boundary"
-                    or identity["coordinates"] != {"batch": batch, "boundary": int(boundary),
-                                                   "probe": None}):
-                raise ForwardSplitRefused(
-                    f"{path} names {row['name']} for batch {batch} at boundary {boundary}")
-            try:
-                size = Path(row["path"]).stat().st_size
-            except OSError as exc:
-                raise ForwardSplitRefused(f"{row['path']} is missing") from exc
-            if size != int(row["file_bytes"]):
-                raise ForwardSplitRefused(f"{row['path']} is not the size its record names")
-    return entries
-
-
 # -- the join ------------------------------------------------------------------
 
 def join_forward_split(space) -> dict:
@@ -280,8 +246,35 @@ def join_forward_split(space) -> dict:
                 "complete owner of this run's generation")
     entries = {str(boundary): [] for boundary in range(num_layers)}
     for start, stop in ranges:
-        fragment = _read_fragment(space, start, stop, session=session,
-                                  num_layers=num_layers)
+        path = fragment_path(space, start, stop)
+        try:
+            document = json.loads(path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise ForwardSplitRefused(f"range {start}:{stop} wrote no entry records") from exc
+        if (document.get("schema") != FRAGMENT_SCHEMA
+                or document.get("samples") != [start, stop]
+                or document.get("session") != session):
+            raise ForwardSplitRefused(f"{path} is not range {start}:{stop}'s record of this run")
+        fragment = document.get("boundary_entries")
+        if not isinstance(fragment, dict) or set(fragment) != set(entries):
+            raise ForwardSplitRefused(f"{path} does not name every forward boundary")
+        for boundary, rows in fragment.items():
+            if len(rows) != stop - start:
+                raise ForwardSplitRefused(
+                    f"{path} names {len(rows)} entries at boundary {boundary}, not {stop - start}")
+            for batch, row in zip(range(start, stop), rows):
+                identity = row["metadata"]["identity"]
+                if (identity["session"] != session or identity["kind"] != "boundary"
+                        or identity["coordinates"] != {"batch": batch, "boundary": int(boundary),
+                                                       "probe": None}):
+                    raise ForwardSplitRefused(
+                        f"{path} names {row['name']} for batch {batch} at boundary {boundary}")
+                try:
+                    size = Path(row["path"]).stat().st_size
+                except OSError as exc:
+                    raise ForwardSplitRefused(f"{row['path']} is missing") from exc
+                if size != int(row["file_bytes"]):
+                    raise ForwardSplitRefused(f"{row['path']} is not the size its record names")
         for boundary, rows in fragment.items():
             entries[boundary].extend(rows)
     tail = join_split_checkpoint(space, num_layers, n_probes=int(prep["n_probes"]),
