@@ -74,7 +74,6 @@ class ProducedRenderPublication(BoundaryProducedPublication):
     """
 
     DEFAULT_SLOT = "renders"
-    REQUIRED_SLOT_CLASS = "payload"
     REQUIRES_READBACK = True
 
     def render_batch_id_for(self, qname: str, fmt: str) -> str:
