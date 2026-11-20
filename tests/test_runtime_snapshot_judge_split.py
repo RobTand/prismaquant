@@ -251,3 +251,15 @@ def test_the_two_gate_files_of_this_very_change_are_allowed(tmp_path: Path) -> N
     })
     with pytest.raises(snapshot_tool.SnapshotError, match="export_something.sh"):
         snapshot_tool.judge_divergence(runtime, moved_producer)
+
+
+def test_snapshot_materialize_refuses_a_file_source_root(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.write_text("source", encoding="utf-8")
+    cache = tmp_path / "cache"
+
+    with pytest.raises(snapshot_tool.SnapshotError) as exc:
+        snapshot_tool.materialize_snapshot(source, cache, commit=_COMMIT_A)
+
+    assert str(exc.value) == f"source root is not a directory: {source.resolve()}"
+    assert not cache.exists()
