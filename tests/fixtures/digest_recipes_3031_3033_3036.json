@@ -1,0 +1,138 @@
+{
+ "ledgers": {
+  "3031": "tests/fixtures/digest_1301/joint-handoff/ledger.json",
+  "3033": "tests/fixtures/digest_1301/research-reports/ledger.json",
+  "3036": "tests/fixtures/digest_1301/t4-qualification/residuals.json"
+ },
+ "source": "origin/tl-salvage/prismaquant-957f21325a23-wp1",
+ "json": {
+  "INSERTION_ASCII_INDENT2_LAX.text": {
+   "kwargs": {
+    "indent": 2
+   },
+   "calls": [
+    "#3031 supplemental-json:tools/build_stagea_forward_recovery_package.py::main@194:45",
+    "#3033 supplemental-json:tools/paired_trade_report_proof.py::main@189:44",
+    "#3033 supplemental-json:tools/pq_block_decode_estimate.py::main@159:10",
+    "#3033 supplemental-json:tools/pq_block_feasibility_intake.py::main@139:24",
+    "#3033 supplemental-json:tools/pq_row_profile_observer.py::<module>@94:60",
+    "#3033 supplemental-json:tools/prove_glm_source_adoption.py::<module>@26:50",
+    "#3033 supplemental-json:tools/tp2_budget_plan.py::main@997:23",
+    "#3033 supplemental-json:tools/tp_decode_feasibility.py::_write_json@412:20",
+    "#3036 supplemental-json:tools/audit_tessera_selected_cache_slice.py::main@56:24",
+    "#3036 supplemental-json:tools/pilot_existing_t4.py::main@36:63"
+   ]
+  },
+  "INSERTION_ASCII_SPACED_LAX.text": {
+   "kwargs": {},
+   "calls": [
+    "#3031 supplemental-json:tools/build_stagea_forward_recovery_package.py::recovery_manifest@133:26",
+    "#3031 supplemental-json:tools/build_stagea_forward_recovery_package.py::recovery_manifest@85:26",
+    "#3031 supplemental-json:tools/prepare_extended_joint_quanta.py::prepare@380:10",
+    "#3031 supplemental-json:tools/dispatch_joint_quanta.py::_container_wrap@1850:28",
+    "#3031 supplemental-json:tools/dispatch_stage_a_split.py::main@796:18",
+    "#3031 supplemental-json:tools/dispatch_stage_a_split.py::main@811:18",
+    "#3031 supplemental-json:tools/dispatch_stage_a_split.py::main@816:22",
+    "#3031 supplemental-json:tools/dispatch_stage_a_split.py::main@831:22",
+    "#3031 supplemental-json:tools/dispatch_stage_a_split.py::row_template@214:26",
+    "#3033 supplemental-json:tools/freeze_refactor_checkout.py::main@49:10",
+    "#3033 supplemental-json:tools/paired_trade_report_proof.py::fixture@87:45",
+    "#3033 supplemental-json:tools/pq_block_concentration.py::main@284:14",
+    "#3033 supplemental-json:tools/pq_block_concentration.py::main@287:10",
+    "#3033 supplemental-json:tools/pq_block_feasibility_intake.py::main@140:10",
+    "#3033 supplemental-json:tools/pq_block_schedule_cost.py::main@944:10",
+    "#3033 supplemental-json:tools/pq_block_trial.py::run_preflight@762:10",
+    "#3033 supplemental-json:tools/pq_block_trial.py::run_encode@878:10",
+    "#3033 supplemental-json:tools/pq_block_trial.py::run_score@1245:10",
+    "#3033 supplemental-json:tools/pq_row_profile_observer.py::event@60:16",
+    "#3033 supplemental-json:tools/pq_row_profile_observer.py::collect_netdata@125:28",
+    "#3033 supplemental-json:tools/pq_row_profile_observer.py::<module>@186:35",
+    "#3033 supplemental-json:tools/pq_row_profile_observer.py::<module>@212:53",
+    "#3033 supplemental-json:tools/pq_row_profile_observer.py::<module>@243:35",
+    "#3036 supplemental-json:tools/assemble_t4_overlay.py::main@271:10",
+    "#3036 supplemental-json:tools/audit_t4_render_paths.py::main@28:113",
+    "#3036 supplemental-json:tools/audit_tessera_selected_cache_slice.py::main@60:10",
+    "#3036 supplemental-json:tools/build_t4_logical_request.py::main@149:10",
+    "#3036 supplemental-json:tools/build_t4_overlay_catalog.py::main@325:10",
+    "#3036 supplemental-json:tools/build_t4_recovery_request.py::main@33:95",
+    "#3036 supplemental-json:tools/check_t4_overlay_prepare.py::main@102:10",
+    "#3036 supplemental-json:tools/check_t4_overlay_prepare.py::main@113:10",
+    "#3036 supplemental-json:tools/check_t4_overlay_prepare.py::main@135:10",
+    "#3036 supplemental-json:tools/extract_layer8_native_metadata.py::main@39:148",
+    "#3036 supplemental-json:tools/inspect_t4_binding.py::main@18:306",
+    "#3036 supplemental-json:tools/pilot_existing_t4.py::main@36:103",
+    "#3036 supplemental-json:tools/qualify_t4_overlay.py::main@67:8",
+    "#3036 supplemental-json:tools/qualify_t4_overlay.py::main.commit_task@84:8",
+    "#3036 supplemental-json:tools/rebind_t4_qualified_results.py::main@153:10"
+   ]
+  },
+  "DIRECT_ASCII_INDENT1_STRICT.text": {
+   "kwargs": {
+    "indent": 1,
+    "sort_keys": true,
+    "allow_nan": false
+   },
+   "calls": [
+    "#3031 sorted-json:tools/regenerate_joint_quanta.py::_pretty@166:12"
+   ]
+  },
+  "DIRECT_ASCII_INDENT1_LAX.text": {
+   "kwargs": {
+    "indent": 1,
+    "sort_keys": true
+   },
+   "calls": [
+    "#3031 sorted-json:tools/stage_b_preparation_submission.py::write_submission@199:22",
+    "#3031 sorted-json:tools/stage_b_preparation_submission.py::write_submission@228:9"
+   ]
+  },
+  "DIRECT_ASCII_INDENT2_LAX_DEFAULT_STR.text": {
+   "kwargs": {
+    "indent": 2,
+    "sort_keys": true,
+    "default": "str"
+   },
+   "calls": [
+    "#3031 sorted-json:tools/check_readset_coverage.py::main@132:11",
+    "#3031 sorted-json:tools/dispatch_joint_quanta.py::check_source_coverage@3223:14"
+   ]
+  },
+  "INSERTION_ASCII_SPACED_LAX.dump": {
+   "kwargs": {},
+   "calls": [
+    "#3033 supplemental-json:tools/pq_admitted_profile.py::run_observed@49:12",
+    "#3033 supplemental-json:tools/pq_profile_artifact.py::finish_profile_status@40:8",
+    "#3033 supplemental-json:tools/pq_profile_child.py::run_profile_workload@34:8"
+   ]
+  },
+  "INSERTION_ASCII_INDENT2_STRICT.text": {
+   "kwargs": {
+    "indent": 2,
+    "allow_nan": false
+   },
+   "calls": [
+    "#3033 supplemental-json:tools/pq_block_concentration.py::main@286:22",
+    "#3033 supplemental-json:tools/pq_block_trial_math.py::write_trial_json@21:20"
+   ]
+  },
+  "INSERTION_ASCII_SPACED_LAX_DEFAULT_STR.text": {
+   "kwargs": {
+    "default": "str"
+   },
+   "calls": [
+    "#3036 supplemental-json:tools/audit_existing_t4.py::main@24:20",
+    "#3036 supplemental-json:tools/audit_existing_t4.py::main@29:17",
+    "#3036 supplemental-json:tools/inspect_t4_binding.py::main@17:61"
+   ]
+  },
+  "INSERTION_ASCII_INDENT2_LAX_DEFAULT_STR.text": {
+   "kwargs": {
+    "indent": 2,
+    "default": "str"
+   },
+   "calls": [
+    "#3036 supplemental-json:tools/audit_existing_t4.py::main@30:63"
+   ]
+  }
+ }
+}

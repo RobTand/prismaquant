@@ -35,3 +35,15 @@ Flux CPU run `f3cQKH4iXrP` at `dcd757813` (gate venv: Python 3.12.12,
 torch 2.15.0+cpu): 557 passed, 8 skipped, job and payload exit 0. It ran
 this test with the digest-profile, tensor-digest, guarded-read retention,
 duplication, census, graph-impact and Bazel build-file tests.
+
+## Follow-up: the parents' own calls (PQ #3031, #3033, #3036)
+
+The #3040 calls do not overlap the three parents' ledgers on the retained
+salvage branch: #3031 `joint-handoff/ledger.json` (15 calls), #3033
+`research-reports/ledger.json` (26) and #3036 `t4-qualification/residuals.json`
+(21). Main after #5188 covered 53 of the 62. Five JSON profiles complete them:
+`DIRECT_ASCII_INDENT1_STRICT` (1 call), `DIRECT_ASCII_INDENT2_LAX_DEFAULT_STR`
+(2), `INSERTION_ASCII_INDENT2_STRICT` (2), `INSERTION_ASCII_SPACED_LAX_DEFAULT_STR`
+(3) and `INSERTION_ASCII_INDENT2_LAX_DEFAULT_STR` (1). The three `json.dump`
+calls of #3033 use `INSERTION_ASCII_SPACED_LAX.dump`. None of the 62 is a hash
+call. [Parent recipe ledger](../../tests/fixtures/digest_recipes_3031_3033_3036.json)
