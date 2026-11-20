@@ -1,23 +1,18 @@
 # Static tautology guard (D-32)
 
-Decision D-32 forbids tautological tests, including historical tests. The
-standard-library-only scanner is adapted as
-`prismaquant/tautology.py` from `RobTand/prismagraph`:
+Decision D-32 forbids tautological tests, including historical tests.
+`prismaquant/vendored/tautology.py` is the unchanged scanner from PrismaGraph.
 
 - Work: `PG-UPLIFT-001-SB156`.
 - Source branch: `pg/PG-UPLIFT-001-SB156/PG-UPLIFT-001-SB156.a1`.
 - Source revision: `b905a80d838bb3d743be29889f54e8567bbc12cf`.
-- Source path: `prismagraph/tautology.py`.
+- [Source file](https://github.com/RobTand/prismagraph/blob/b905a80d838bb3d743be29889f54e8567bbc12cf/prismagraph/tautology.py).
 - Git blob: `3f2c21d0ad75fe7f8c67bf375a857d5b2a552f76`.
 
 The source issue names
 `docs/prismagraph/bootstrap/contracts/SB156-static-tautology-guard.md`.
 That contract was not available at the source revision or on upstream main
 when retrieved on 2026-10-28; it is not reconstructed here. The source revision and blob above identify the imported implementation.
-PrismaQuant renames `scan` to `scan_tautologies` and `_literal` to
-`_assertion_literal` to avoid collisions with semantically different helpers
-under its existing duplication guard. Callers migrate in the same commit;
-the detection rules and traversal behavior are unchanged.
 
 `tests/test_no_tautological_tests.py` scans the entire repository, including
 archived test trees, using the upstream filename and test-function discovery
@@ -31,7 +26,7 @@ python -m pytest -q tests/test_no_tautological_tests.py tests/test_tautology.py
 The scanner can also run without importing PrismaQuant or third-party packages:
 
 ```sh
-python -I -S prismaquant/tautology.py .
+python -I -S prismaquant/vendored/tautology.py .
 ```
 
 The three mechanical rules are `self_compare`, `constant`, and `swallowed`.
