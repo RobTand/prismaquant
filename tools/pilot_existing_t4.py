@@ -3,11 +3,11 @@
 Runs only as a script; nothing executes at import. The output path (pilot.json in the
 campaign root when it was first written) is an argument and must not exist.
 """
-import argparse
-import json,pickle,hashlib,time
+import argparse, hashlib, pickle, time
 from pathlib import Path
 import torch
 from tessera.cached_unit import verify_cached_unit
+from prismaquant.digests import INSERTION_ASCII_INDENT2_LAX, INSERTION_ASCII_SPACED_LAX
 from prismaquant.tessera_joint_aura import _decode_wire
 from prismaquant.production_weight_cache import _canonical_rendered_weight_tensor
 
@@ -32,7 +32,7 @@ def main():
  assert torch.equal(decoded,value),(decoded.dtype,value.dtype,decoded.shape,value.shape)
  assert (render.stat().st_ino,render.stat().st_size,render.stat().st_mtime_ns)==(st.st_ino,st.st_size,st.st_mtime_ns)
  result={'qname':q,'format':fmt,'wire_sha256':r['blob_sha256'],'shared_source_identity':shared,'render_equal':True,'shape':list(decoded.shape),'dtype':str(decoded.dtype),'decode_seconds':elapsed,'device':torch.cuda.get_device_name(),'gpu_peak_bytes':torch.cuda.max_memory_allocated(),'render_stat':{'inode':st.st_ino,'bytes':st.st_size,'mtime_ns':st.st_mtime_ns},'scope':'one current decoder consumption witness; no new encoding, no general per-cell digest claims'}
- out=Path(args.out);assert not out.exists(),out;out.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result),flush=True)
+ out=Path(args.out);assert not out.exists(),out;out.write_text(INSERTION_ASCII_INDENT2_LAX.text(result)+'\n');print(INSERTION_ASCII_SPACED_LAX.text(result),flush=True)
 
 
 if __name__ == '__main__':

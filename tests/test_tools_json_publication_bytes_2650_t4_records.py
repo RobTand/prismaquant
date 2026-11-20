@@ -235,7 +235,7 @@ def test_t4_records_profile_calls(tmp_path, monkeypatch):
     _check_setup(tmp_path / "b", monkeypatch)
     calls.clear()
     check.main()
-    results = [call for call in calls if isinstance(call[1], dict) and call[1].get("status") == "passed"]
-    assert [name for name, _ in results] == ["direct-ascii-indent2-lax"]
-    assert _canon(results[0][1]) == _canon(json.loads(CHECK_FILE))
+    assert [(name, _canon(value)) for name, value in calls if isinstance(value, dict) and value.get("status") == "passed"] == [
+        ("direct-ascii-indent2-lax", _canon(json.loads(CHECK_FILE))),
+        ("insertion-ascii-spaced-lax", _canon(json.loads(CHECK_STDOUT.splitlines()[-1])))]
 
