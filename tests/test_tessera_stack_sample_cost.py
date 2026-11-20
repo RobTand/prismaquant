@@ -454,3 +454,15 @@ def test_fixture_records_the_probe_it_was_distilled_from():
     assert len(sources[probe]["sha256"]) == 64
     assert "not the campaign's own calibration draw" in data["note"].replace(
         "NOT", "not")
+
+
+def test_topology_restamp_refuses_a_table_with_existing_restamp_provenance():
+    from prismaquant import tessera_serving_scope as scope
+
+    profile = _profile()
+    payload = {"stats": {f"{STEM}.gate_up_proj": _packed_probe_row(1, [1.0])}}
+    stamped, summary = scope.restamp_unit_topology(payload, profile)
+    with pytest.raises(ValueError) as error:
+        scope.restamp_unit_topology(stamped, profile)
+    assert str(error.value) == "table already carries a unit topology restamp"
+    assert stamped["provenance"]["unit_topology_restamp"] == summary
