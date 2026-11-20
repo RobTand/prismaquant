@@ -8,6 +8,7 @@ import pytest
 from prismaquant.artifact_collection import (
     ArtifactCollectionError,
     CANDIDATE_SCHEMA,
+    CONTRACT_SCHEMA,
     TARGET_SCHEMA,
     assignment_byte_breakdown,
     load_record,
@@ -473,3 +474,21 @@ def test_candidate_unknown_identity_field_is_rejected():
     ).hexdigest()
     with pytest.raises(ArtifactCollectionError, match="field set differs"):
         verify_record(candidate)
+
+
+def test_measure_receipt_refuses_a_variant_key():
+    fields = dict(
+        collection_contract=_reference("collection", schema=CONTRACT_SCHEMA),
+        stage="measure",
+        outcome="accepted",
+        inputs=[_reference("probe")],
+        outputs=[_reference("measurements")],
+        evidence=[_reference("inventory")],
+        producer=_reference("producer"),
+    )
+    receipt = make_stage_receipt(variant_key=None, **fields)
+    assert receipt["payload"]["variant_key"] is None
+    with pytest.raises(
+        ArtifactCollectionError, match="measure receipts must bind the common campaign"
+    ):
+        make_stage_receipt(variant_key="16gb-balanced", **fields)
