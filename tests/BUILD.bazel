@@ -4629,10 +4629,12 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/allocator_cycle",
         "//:prismaquant/cost_stage_checkpoint",
         "//:prismaquant/layer_config",
         "//:tools/__init__",
         "//:tools/resolve_tessera_dev_pin",
+        ":test_glm_mtp_selection_lib_cycle",
         ":test_tessera_census_cache_lib",
         ":test_tessera_expert_projection_lib",
         "@pq_pip//pytest",

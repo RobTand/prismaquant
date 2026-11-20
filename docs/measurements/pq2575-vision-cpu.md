@@ -1,0 +1,25 @@
+# #2575 vision CPU evidence
+
+Flux CPU job `f3cTbFU6s27` on `aecdd5285` passed 689 tests and 59 subtests across 36 files. Exit status was 0.
+The gate environment used Python 3.12.12 and torch 2.15.0+cpu.
+The run covered `test_vision_*.py`, `test_visual_allocator_*.py`, and `test_allocator_*.py`.
+It also covered `test_tessera_census_cache.py`, `test_tessera_export_lane.py`, `test_tessera_expert_projection.py`,
+`test_glm_mtp_selection.py`, `test_prismaquant_visual_format.py`, and `test_prismaquant_visual_phase2.py`.
+
+| #2575 criterion | Verdict | Evidence |
+| --- | --- | --- |
+| 1. Give each measured vision row a legal DP rank. Refuse an incomplete set. | MOOT | `7786cfbf2` removed the multimodal probe. The allocator now applies one `VISUAL_FORMAT` outside the DP. Real multimodal capture is a product decision under #2812. |
+| 2. Keep invented text-only Fisher, costs, rates, and uniform swaps out of the DP. | COVERED | The CPU controls exercise missing visual cost rows, source-only visual rows, and body-only accounting. |
+| 3. Record each canonical source name and profile root with a pinned serving cell or explicit refusal. | PARTLY | The roster and export audit cover names and roots. Per-entry audit coverage still needs a serving cell or refusal for each entry. |
+| 4. Match each emitted vision name to a pinned cell or refuse export. | PARTLY | Tests cover BF16 shard names and explicit refusal. The pinned-cell check for emitted low-bit vision names remains open. |
+| 5. Refuse incomplete or invalid rows and wire proof. | COVERED | The cache checks the exact unit set and original wire receipts. The #2809 refusal cases cover invalid inputs. |
+| 6. Keep the body and MTP plans equivalent with vision off and on. | COVERED IN SOURCE. FLUX PENDING. | `test_body_and_mtp_plans_are_equivalent_with_vision` checks the body assignment, MTP selection, selected cache, and BF16 export projection. The NVFP4 case checks allocation and both refusals. |
+
+| #2809 item | Verdict | Evidence |
+| --- | --- | --- |
+| Absent units | COVERED | The cache refuses a missing vision, merger, or body assignment. |
+| Wrong shapes | COVERED | Intake refuses shape differences for vision and merger units, including differences in checkpoint headers. |
+| Unsupported names and roles | COVERED | Cache and projection refuse out-of-roster wires, unowned names, role tags, and missing BF16 source names. |
+| Missing or mismatched original wire receipts | COVERED | Tests cover missing receipts and files, unmeasured rows, wrong sizes, and changed bytes, including same-size substitutions. |
+| Source and recipe identity mismatches | COVERED | Intake refuses mismatched source and encoder hashes, recipe ranks, and receipt names. |
+| BF16 passthrough and the independent GLM source-precision pin | COVERED | Tests read the BF16 shard names, types, and values. GLM preflight preserves source precision and refuses low-bit vision. |
