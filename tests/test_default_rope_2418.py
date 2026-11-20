@@ -40,3 +40,14 @@ def test_missing_theta_is_not_a_fallback_value():
     del config.rope_parameters["rope_theta"]
     with pytest.raises((KeyError, ValueError)):
         ROPE_INIT_FUNCTIONS["default"](config, device="cpu")
+
+
+def test_default_rope_uses_the_requested_layer_type():
+    config = SimpleNamespace(
+        hidden_size=8, num_attention_heads=2,
+        rope_parameters={"full_attention": {"rope_theta": 256.0},
+                         "sliding_attention": {"rope_theta": 16.0}},
+    )
+    actual, scaling = ROPE_INIT_FUNCTIONS["default"](config, device="cpu", layer_type="sliding_attention")
+    assert torch.equal(actual, torch.tensor([1.0, 0.25], dtype=torch.float32, device="cpu"))
+    assert scaling == 1.0
