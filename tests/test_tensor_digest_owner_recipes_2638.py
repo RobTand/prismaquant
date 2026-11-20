@@ -126,11 +126,12 @@ def test_the_hessian_wrapper_delegates_to_the_owner(monkeypatch):
     assert len(calls) == 1 and calls[0] is batches
 
 
-def test_only_the_retained_token_recipe_extends_the_owner_surface():
+def test_tensor_owner_exports_only_the_reviewed_recipes():
     owner = ast.parse((REPO / "prismaquant/tensor_digests.py").read_text())
     assert {n.name for n in owner.body if isinstance(n, ast.FunctionDef)} == {
         "_host", "_raw", "tensor_host_bytes", "tensor_identity",
         "tensor_value_stamp", "tensor_sha256", "tensor_hash_update", "token_ids_int32_sha256",
+        "tensor_payload_buffer",
     }
 
 

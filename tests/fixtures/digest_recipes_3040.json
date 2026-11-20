@@ -1,0 +1,115 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "json": {
+    "DIRECT_ASCII_INDENT1_LAX.text": {
+      "kwargs": {"indent": 1, "sort_keys": true},
+      "calls": [
+        "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@178:15",
+        "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@192:29",
+        "sorted-json:tools/derive_retained_window_budget.py::main@179:24",
+        "sorted-json:tools/device_envelope_probe.py::main@59:14",
+        "sorted-json:tools/device_envelope_probe.py::main@93:10",
+        "sorted-json:tools/joint_prepare_startup_probe.py::main@83:10",
+        "sorted-json:tools/measure_wire_rehash_readers.py::main@124:30",
+        "sorted-json:tools/render_window_bench.py::_renders@90:40",
+        "sorted-json:tools/render_window_bench.py::cmd_analyze@438:39",
+        "sorted-json:tools/render_window_bench.py::cmd_child@357:33",
+        "sorted-json:tools/staged_exact_read_bench.py::driver_main@1001:41",
+        "sorted-json:tools/staged_exact_read_bench.py::driver_main@1020:20",
+        "sorted-json:tools/staged_exact_read_bench.py::driver_main@994:41",
+        "sorted-json:tools/unit_journal_bench.py::cmd_child@278:33",
+        "sorted-json:tools/unit_journal_bench.py::cmd_host@405:38"
+      ]
+    },
+    "INSERTION_ASCII_INDENT1_LAX.dump": {
+      "kwargs": {"indent": 1},
+      "calls": [
+        "supplemental-json:tools/staged_read_stream_ab.py::main@235:12"
+      ]
+    },
+    "INSERTION_ASCII_INDENT1_LAX.text": {
+      "kwargs": {"indent": 1},
+      "calls": [
+        "supplemental-json:tools/chain_roll_bench.py::cmd_analyze@670:37",
+        "supplemental-json:tools/chain_roll_bench.py::cmd_child@476:33",
+        "supplemental-json:tools/chain_roll_bench.py::cmd_drive@283:44",
+        "supplemental-json:tools/chain_roll_bench.py::cmd_manifest@179:30",
+        "supplemental-json:tools/derive_retained_window_budget.py::main@180:10",
+        "supplemental-json:tools/profile_produced_group_lookup.py::main@117:10",
+        "supplemental-json:tools/pwc_window_load_bench.py::run_ab@610:9",
+        "supplemental-json:tools/pwc_window_load_bench.py::run_quantum@312:35",
+        "supplemental-json:tools/pwc_window_load_bench.py::run_setup@153:39",
+        "supplemental-json:tools/pwc_window_load_bench.py::run_window@234:35",
+        "supplemental-json:tools/render_identity.py::main@115:14",
+        "supplemental-json:tools/render_window_bench.py::cmd_host@156:35",
+        "supplemental-json:tools/unit_journal_bench.py::cmd_host@406:19"
+      ]
+    },
+    "INSERTION_ASCII_INDENT1_LAX_DEFAULT_STR.text": {
+      "kwargs": {"default": "str", "indent": 1},
+      "calls": [
+        "supplemental-json:tools/pwc_window_load_bench.py::run_ab@609:38",
+        "supplemental-json:tools/pwc_window_load_bench.py::run_identity@496:39"
+      ]
+    },
+    "INSERTION_ASCII_INDENT2_LAX.text": {
+      "kwargs": {"indent": 2},
+      "calls": [
+        "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@58:52",
+        "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@131:45",
+        "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@94:49"
+      ]
+    },
+    "INSERTION_ASCII_SPACED_LAX.text": {
+      "kwargs": {},
+      "calls": [
+        "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@59:10",
+        "supplemental-json:tools/benchmarks/joint_validation_pair.py::main.sample@109:37",
+        "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@132:18",
+        "supplemental-json:tools/chain_roll_bench.py::cmd_child@477:19",
+        "supplemental-json:tools/chain_roll_bench.py::cmd_host@226:19",
+        "supplemental-json:tools/derive_retained_window_budget.py::main@124:42",
+        "supplemental-json:tools/derive_retained_window_budget.py::main@125:13",
+        "supplemental-json:tools/measure_boundary_control.py::main@163:10",
+        "supplemental-json:tools/measure_container_cache_quantum_row.py::_run_complete_row@354:45",
+        "supplemental-json:tools/profile_stage_b_head.py::main.on_stop@442:52",
+        "supplemental-json:tools/profile_stage_b_head.py::main.sigterm_report@452:52",
+        "supplemental-json:tools/render_window_bench.py::cmd_child@358:19",
+        "supplemental-json:tools/render_window_bench.py::cmd_host@122:19",
+        "supplemental-json:tools/render_window_bench.py::cmd_host@126:19",
+        "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@305:38",
+        "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@327:30",
+        "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@367:42",
+        "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@481:10",
+        "supplemental-json:tools/stagea_produced_live_cycle.py::main@559:14",
+        "supplemental-json:tools/stagea_produced_live_cycle.py::main@576:14",
+        "supplemental-json:tools/stagea_produced_live_cycle.py::main@665:14",
+        "supplemental-json:tools/stagea_produced_live_cycle.py::main@740:26",
+        "supplemental-json:tools/stagea_produced_live_cycle.py::main@767:26",
+        "supplemental-json:tools/stagea_produced_live_cycle.py::main@847:10",
+        "supplemental-json:tools/staged_exact_read_bench.py::driver_main@1017:22",
+        "supplemental-json:tools/staged_exact_read_bench.py::driver_main@985:41",
+        "supplemental-json:tools/staged_read_stream_ab.py::main@236:10",
+        "supplemental-json:tools/unit_journal_bench.py::cmd_host@344:19",
+        "supplemental-json:tools/unit_journal_bench.py::cmd_host@397:27",
+        "supplemental-json:tools/unit_journal_bench.py::cmd_host@400:35",
+        "supplemental-json:tools/unit_journal_bench.py::cmd_host@403:31"
+      ]
+    },
+    "INSERTION_UTF8_INDENT2_STRICT.dump": {
+      "kwargs": {"allow_nan": false, "ensure_ascii": false, "indent": 2},
+      "calls": [
+        "supplemental-json:tools/measure_boundary_control.py::main@161:8",
+        "supplemental-json:tools/measure_boundary_control.py::main@86:8"
+      ]
+    }
+  },
+  "sha256": {
+    "binary": {"owners": ["bytes_sha256digest"], "calls": ["hashlib:tools/band_serial_handoff_live_pair.py::prepare@154:15"]},
+    "write_interleaved": {"owners": ["chunks_sha256hex"], "calls": ["hashlib:tools/bench_fence_rehash.py::_write_drifted_wires@56:17"]},
+    "tensor_leaf": {"owners": ["chunks_sha256hex", "tensor_payload_buffer"], "calls": ["hashlib:tools/pwc_window_load_bench.py::_leaves@325:17"]},
+    "array_leaf": {"owners": ["chunks_sha256hex"], "calls": ["hashlib:tools/pwc_window_load_bench.py::_leaves@330:17"]},
+    "metadata_tensor": {"owners": ["chunks_sha256hex", "DIRECT_ASCII_SPACED_LAX.encoded", "tensor_payload_buffer"], "calls": ["hashlib:tools/pwc_window_load_bench.py::run_window@204:25"]},
+    "projection_callback": {"owners": ["IncrementalSha256"], "calls": ["hashlib:tools/render_window_bench.py::cmd_child@303:13"]}
+  }
+}

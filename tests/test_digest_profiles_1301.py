@@ -297,7 +297,7 @@ def test_round_trip_and_direct_order_integer_keys_differently():
 def test_profile_names_are_unique():
     profiles = [value for value in vars(digests).values() if isinstance(value, JsonProfile)]
     # A digest profile is a byte identity: adding one updates this count.
-    assert len(profiles) == 11
+    assert len(profiles) == 17
     assert len({profile.name for profile in profiles}) == len(profiles)
 
 

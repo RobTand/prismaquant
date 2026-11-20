@@ -1,4 +1,4 @@
-"""Tensor digests: one recipe for a tensor's host bytes (PQ #1384).
+"""Tensor digests: exact recipes for a tensor's host bytes.
 
 A tensor digest is an identity stored in receipts, cache manifests and
 checkpoint identities, so every site must hash the same bytes. The bytes are
@@ -14,6 +14,7 @@ Profiles:
 - ``tensor_hash_update``: feeds ``str(tuple(shape))``, ``str(dtype)`` and the
   bytes into a running hash object (the calibration content hash).
 - ``tensor_host_bytes``: the bytes alone, for a site that frames them itself.
+- ``tensor_payload_buffer``: a view of an already contiguous CPU tensor.
 - ``token_ids_int32_sha256``: caller-ordered int32 batches with no delimiter,
   shape or dtype header (PQ #2638). The cast and per-batch fold stay here.
 
@@ -42,6 +43,11 @@ def _raw(host: torch.Tensor) -> bytes:
 def tensor_host_bytes(tensor: torch.Tensor) -> bytes:
     """The tensor's host bytes, C-contiguous."""
     return _raw(_host(tensor))
+
+
+def tensor_payload_buffer(host: torch.Tensor) -> memoryview:
+    """View the bits of a contiguous CPU tensor without making a bytes copy."""
+    return memoryview(host.view(torch.uint8).numpy())
 
 
 def tensor_sha256(tensor: torch.Tensor) -> str:
