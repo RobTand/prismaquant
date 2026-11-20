@@ -385,3 +385,11 @@ def test_results_json_carries_the_top_level_dev_stamp(tmp_path, monkeypatch):
     assert stamp["producer_source_sha256"] == _production_cache_source_sha256(
         ROOT / "prismaquant")
     assert "timestamp" in stamp
+
+
+def test_transition_router_refuses_bound_malformed_json(tmp_path):
+    path = tmp_path / "transition.json"
+    path.write_bytes(b'{"version":')
+    receipt = {"path": str(path), "sha256": file_sha256hex(path)}
+    with pytest.raises(ValueError, match="^joint source transition: unknown transition version None$"):
+        transitions.load_transition(receipt)
