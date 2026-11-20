@@ -89,3 +89,18 @@ def test_contradictory_actual_proof_refuses_as_integrity(tmp_path, monkeypatch):
     # A refused alternative cannot replace the already authenticated input.
     assert _read(resolver, sources[1], len(payloads[1])) == payloads[1]
     assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0
+
+
+def test_staged_manifest_refuses_an_unknown_lifetime_mode(tmp_path):
+    from staged_native_fixtures import fixture
+
+    source, data, binding, _ = fixture(tmp_path)
+    manifest = load_staged_manifest(binding['path'], binding['sha256'])
+    assert manifest.extents[0].source_path == str(source)
+
+    data['lifetime']['mode'] = 'unknown'
+    changed = tmp_path / 'unknown-lifetime.json'
+    digest = publish_staged_json(changed, data)
+    with pytest.raises(ManifestRefused) as exc:
+        load_staged_manifest(changed, digest)
+    assert str(exc.value) == 'unsupported lifetime'
