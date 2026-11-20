@@ -164,6 +164,14 @@ def test_indexed_checkpoint_reports_index_name_source(tmp_path):
                    GLM_QUANT, "model.visual", "checkpoint_index")
 
 
+def test_strict_visual_roster_refuses_a_missing_checkpoint(tmp_path):
+    profile = _write_case(tmp_path, *GLM_CONFIG, _tensors(GLM_QUANT, {}))
+    missing = tmp_path / "missing"
+    with pytest.raises(FileNotFoundError, match="visual source checkpoint does not exist") as exc:
+        profile.visual_linear_roster(str(missing))
+    assert str(missing) in str(exc.value)
+
+
 def test_text_only_qwen3_has_empty_roster(tmp_path):
     profile = _write_case(tmp_path, "qwen3", "Qwen3ForCausalLM",
                            {"model.layers.0.mlp.gate_proj.weight": _w(16, 16)})
