@@ -61,26 +61,6 @@ def _nonbf16_mtp_assignment(
     return out
 
 
-def _cache_dir_for_append(
-    cache: ProductionWeightCache,
-    cache_dir: str | Path | None,
-) -> Path | None:
-    cache_path = Path(cache.cache_dir) if cache.cache_dir else None
-    requested_path = Path(cache_dir) if cache_dir is not None else None
-    if cache_path is not None and requested_path is not None:
-        if cache_path.resolve() != requested_path.resolve():
-            raise RuntimeError(
-                "MTP production render cache-dir mismatch: existing cache "
-                f"uses {cache_path}, append requested {requested_path}"
-            )
-    path = requested_path or cache_path
-    if path is not None:
-        path.mkdir(parents=True, exist_ok=True)
-        if cache.cache_dir is None:
-            cache.cache_dir = str(path)
-    return path
-
-
 def _existing_render_score_records(
     cache: ProductionWeightCache,
 ) -> tuple[dict[str, object], dict[str, dict[str, object]]]:
@@ -411,7 +391,19 @@ def fill_profile_mtp_production_cache(
             for fmt in fmts
         }
 
-        cache_dir_path = _cache_dir_for_append(cache, cache_dir)
+        cache_path = Path(cache.cache_dir) if cache.cache_dir else None
+        requested_path = Path(cache_dir) if cache_dir is not None else None
+        if cache_path is not None and requested_path is not None:
+            if cache_path.resolve() != requested_path.resolve():
+                raise RuntimeError(
+                    "MTP production render cache-dir mismatch: existing cache "
+                    f"uses {cache_path}, append requested {requested_path}"
+                )
+        cache_dir_path = requested_path or cache_path
+        if cache_dir_path is not None:
+            cache_dir_path.mkdir(parents=True, exist_ok=True)
+            if cache.cache_dir is None:
+                cache.cache_dir = str(cache_dir_path)
         # #2231: this append streams shards under the same mangled leaf as
         # every other producer, and the first residency read that would
         # catch a collision arrives only after the overwriting write. Refuse
