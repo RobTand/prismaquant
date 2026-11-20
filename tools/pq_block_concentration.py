@@ -20,7 +20,7 @@ import time
 import numpy as np
 import torch
 from safetensors import safe_open
-from prismaquant.digests import bytes_sha256hex, file_sha256hex
+from prismaquant.digests import INSERTION_ASCII_INDENT2_STRICT, INSERTION_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex
 from prismaquant.tensor_digests import tensor_sha256
 from tessera.fused import parse_fused
 from tessera.manifest import BodyKind, ScalePlaneKind
@@ -281,11 +281,11 @@ def main() -> None:
     for qname in args.qname:
         row = measure(args, qname, captures, source_map, export_map)
         result["units"].append(row)
-        print(json.dumps({"provisional": True, "unit": row}), flush=True)
+        print(INSERTION_ASCII_SPACED_LAX.text({"provisional": True, "unit": row}), flush=True)
     output = args.out_dir / "result.json"
-    output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
-    print(json.dumps({"out": str(output), "sha256": file_sha256hex(output, block_size=1 << 20),
-                      "provisional": True, "units_measured": len(result["units"])}), flush=True)
+    output.write_text(INSERTION_ASCII_INDENT2_STRICT.text(result) + "\n")
+    print(INSERTION_ASCII_SPACED_LAX.text({"out": str(output), "sha256": file_sha256hex(output, block_size=1 << 20),
+                                         "provisional": True, "units_measured": len(result["units"])}), flush=True)
 
 
 if __name__ == "__main__":

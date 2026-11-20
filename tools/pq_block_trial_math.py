@@ -6,19 +6,18 @@ an encoder: parent rungs use Tessera's existing ActivationSource/export path.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 import numpy as np
 import torch
 
-from prismaquant.digests import bytes_sha256hex
+from prismaquant.digests import INSERTION_ASCII_INDENT2_STRICT, bytes_sha256hex
 
 
 def write_trial_json(path: Path, document: dict) -> None:
     """Write strict ASCII JSON in insertion order with one final newline."""
-    path.write_text(json.dumps(document, indent=2, allow_nan=False) + "\n")
+    path.write_text(INSERTION_ASCII_INDENT2_STRICT.text(document) + "\n")
 
 
 def validate_sample_split(fit_samples, heldout_samples) -> dict:

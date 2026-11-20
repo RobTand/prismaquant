@@ -13,7 +13,7 @@ import time
 
 from tools.pq_profile_artifact import (  # noqa: F401
     PROFILE_LOCAL_ROOT, profile_row_parts, profiled_row_command,
-    profiled_workload_parts, profile_local_destination,
+    profiled_workload_parts, profile_local_destination, profile_digests,
 )
 
 
@@ -49,9 +49,9 @@ def run_observed(command, observer_command, observations: Path, *, target_out,
             observer_error = str(error)
         qualified = row_rc == 0 and observer_rc == 0 and observer_error is None
         with (observations / 'observer_result.json').open('x') as handle:
-            json.dump({'schema': 'prismaquant.profile_observer_result.v1',
-                       'workload_returncode': row_rc, 'returncode': observer_rc,
-                       'error': observer_error, 'qualified': qualified}, handle)
+            profile_digests.INSERTION_ASCII_SPACED_LAX.dump({
+                'schema': 'prismaquant.profile_observer_result.v1', 'workload_returncode': row_rc,
+                'returncode': observer_rc, 'error': observer_error, 'qualified': qualified}, handle)
         # Qualification failure cannot turn the original failed row into some
         # unrelated exception exit. Cleanup still joins/stops our observer only.
         if row_rc:

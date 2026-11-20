@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from safetensors import safe_open
-from prismaquant.digests import bytes_sha256hex, file_sha256hex
+from prismaquant.digests import INSERTION_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex
 from pq_block_trial_math import write_trial_json
 
 import pq_block_reference_wire as wire
@@ -941,15 +941,14 @@ def main() -> None:
                     "conditional_models": _ESTIMATE_SOURCE},
     }
     write_trial_json(args.output, summary)
-    print(json.dumps({"schema": SCHEMA, "output": str(args.output),
-                      "sha256": file_sha256hex(args.output, block_size=1 << 20),
-                      "handoff_form": handoff["form"],
-                      "candidate_order": handoff["candidate_order"],
-                      "issue_tiles": summary["geometry"]["issue_tile"]["total"],
-                      "distinct_parents_selected":
-                          summary["classes"]["distinct_parents_selected"],
-                      "total_bytes": summary["stored_bytes"]["total_bytes"]}),
-          flush=True)
+    print(INSERTION_ASCII_SPACED_LAX.text({
+        "schema": SCHEMA, "output": str(args.output),
+        "sha256": file_sha256hex(args.output, block_size=1 << 20),
+        "handoff_form": handoff["form"],
+        "candidate_order": handoff["candidate_order"],
+        "issue_tiles": summary["geometry"]["issue_tile"]["total"],
+        "distinct_parents_selected": summary["classes"]["distinct_parents_selected"],
+        "total_bytes": summary["stored_bytes"]["total_bytes"]}), flush=True)
 
 
 if __name__ == "__main__":

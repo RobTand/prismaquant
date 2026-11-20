@@ -9,7 +9,7 @@ import argparse
 import json
 from pathlib import Path
 
-from prismaquant.digests import bytes_sha256hex
+from prismaquant.digests import INSERTION_ASCII_INDENT2_LAX, bytes_sha256hex
 
 
 def main() -> None:
@@ -156,7 +156,7 @@ def main() -> None:
         "quality_gate_measured": False,
         "speed_neutral_combination_qualified": False,
     }
-    print(json.dumps(result, indent=2), flush=True)
+    print(INSERTION_ASCII_INDENT2_LAX.text(result), flush=True)
 
 
 if __name__ == "__main__":
