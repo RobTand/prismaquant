@@ -1,6 +1,8 @@
 """The actual adaptive proposal must serialize its canonical surface."""
 import json
 
+import pytest
+
 from prismaquant.tessera_allocator import (
     adaptive_trellis_rate_surface, build_tessera_allocator_candidate,
 )
@@ -20,3 +22,15 @@ def test_adaptive_proposal_serializes_the_existing_canonical_surface():
     assert result['surface'] == json.loads(proposal.surface.identity())
     assert result['surface']['proposed_q256']
     assert len(result['identity_sha256']) == 64
+
+
+def test_tessera_candidate_refuses_boolean_loss():
+    from prismaquant.tessera_allocator import TesseraFormatError
+
+    with pytest.raises(TesseraFormatError) as error:
+        build_tessera_allocator_candidate(
+            'u', (256, 256), family='TESSERA_E4M3_K1', body_rate_q256=256,
+            layout='tight', schedule=None, alphabets=None,
+            predicted_dloss=True, target_profile='research',
+        )
+    assert str(error.value) == 'predicted_dloss must be a finite number'
