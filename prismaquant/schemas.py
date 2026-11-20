@@ -126,10 +126,6 @@ def _is_mapping(value) -> bool:
     return isinstance(value, Mapping)
 
 
-def _is_number(value) -> bool:
-    return isinstance(value, Real) and not isinstance(value, bool)
-
-
 def _as_non_negative_int(value, path: str | None, where: str) -> int:
     if isinstance(value, bool):
         _fail(path, where, "expected a non-negative integer")
@@ -143,7 +139,7 @@ def _as_non_negative_int(value, path: str | None, where: str) -> int:
 
 
 def _as_number(value, path: str | None, where: str) -> float:
-    if not _is_number(value):
+    if not isinstance(value, Real) or isinstance(value, bool):
         _fail(path, where, "expected a number")
     return float(value)
 
