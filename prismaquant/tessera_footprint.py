@@ -128,41 +128,6 @@ def _recipe_identity(breakdown: Mapping[str, object]) -> str:
     return DIRECT_ASCII_LAX_DEFAULT_STR.sha256(body)
 
 
-def _alphabet_bytes(
-    spec: TesseraFamily, alphabets: "Mapping[int, Sequence[int]] | None",
-    cap: "int | None" = None,
-) -> int:
-    """Bytes for the anchor tables, one entry per code in the grid's width.
-
-    The width is ``PayloadGrid.code_bytes`` -- Tessera's own answer, one byte
-    up to 256 codes and two up to 65536, refusing anything wider as a schema
-    change.  It used to be a local ``1 or 4``, which is a second spelling of a
-    wire fact and disagreed with the grid above 256 codes; no shipping figure
-    moves (every family that reaches this path is a byte-coded one), and the
-    disagreement is gone.  The tables are per *rate*, because a rate's anchor
-    set is ``2^(R+1)`` codes and a unit that mixes rates carries a table for
-    each rate it uses.
-    """
-    if not alphabets:
-        return 0
-    cap = spec.rate_cap if cap is None else int(cap)
-    width = spec.code_bytes
-    total = 0
-    for rate, codes in alphabets.items():
-        if not 1 <= rate <= cap:
-            raise TesseraFormatError(
-                f"{spec.name}: alphabet given for rate {rate}, outside 1..{cap}"
-            )
-        expected = 1 << (rate + 1)
-        if len(codes) != expected:
-            raise TesseraFormatError(
-                f"{spec.name} rate {rate}: alphabet has {len(codes)} anchors, "
-                f"|A_R| = 2^(R+1) = {expected}"
-            )
-        total += len(codes) * width
-    return total
-
-
 @lru_cache(maxsize=1)
 def _max_ratio_bytes() -> int:
     """The widest ``ratio`` the canonical codec can write, from its own writer.
@@ -465,9 +430,23 @@ def tessera_tensor_payload_breakdown(
     # footprint carries; `alphabets` is the table itself.  Revalidating a report
     # must use the recorded count, or it re-prices a different unit.
     if alphabet_bytes is None:
-        alphabet_bytes = (
-            _alphabet_bytes(spec, alphabets, cap) if alphabets else forest_alphabet
-        )
+        if alphabets:
+            width = spec.code_bytes
+            alphabet_bytes = 0
+            for rate, codes in alphabets.items():
+                if not 1 <= rate <= cap:
+                    raise TesseraFormatError(
+                        f"{spec.name}: alphabet given for rate {rate}, outside 1..{cap}"
+                    )
+                expected_anchors = 1 << (rate + 1)
+                if len(codes) != expected_anchors:
+                    raise TesseraFormatError(
+                        f"{spec.name} rate {rate}: alphabet has {len(codes)} anchors, "
+                        f"|A_R| = 2^(R+1) = {expected_anchors}"
+                    )
+                alphabet_bytes += len(codes) * width
+        else:
+            alphabet_bytes = forest_alphabet
     elif type(alphabet_bytes) is not int or alphabet_bytes < 0:
         raise TesseraFormatError("alphabet_bytes must be a nonnegative integer")
     if body is BodyKind.TCQ and alphabet_bytes != forest_alphabet:
