@@ -1919,3 +1919,12 @@ def test_a_malformed_admission_block_refuses_structurally(tmp_path):
     del report["derived"]["admission"]["domains"]["history_join"]
     with pytest.raises(RuntimePriceError, match="expected exactly fields"):
         consume(tmp_path, report)
+
+
+def test_report_refuses_a_repeated_partition_allocation(tmp_path):
+    report = closed_report()
+    membership = report["partition"]["membership"]
+    membership.append(membership[0].copy())
+    with pytest.raises(RuntimePriceError) as exc:
+        consume(tmp_path, report)
+    assert str(exc.value) == "report partition: an allocation is partitioned more than once"
