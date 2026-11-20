@@ -139,3 +139,18 @@ def test_telemetry_write_failure_does_not_mask_workload_failure(tmp_path):
     failure = RuntimeError("primary entry failure")
     observed.__exit__(type(failure), failure, None)
     assert "campaign wait telemetry failed" in failure.__notes__[0]
+
+
+def test_row_stream_refuses_a_noncallable_wait_observer(tmp_path):
+    def clock():
+        pytest.fail("The constructor called the clock.")
+
+    with pytest.raises(TypeError) as refused:
+        tessera_row_stream.RowStream(
+            capture_path=tmp_path / "missing.json",
+            expected_sha256=None, expected_identity={}, census={}, names=[],
+            policy=None, weights={}, hessian_identity={}, bind=None,
+            threads=1, batch_size=1, device="cpu", memo_capacity=1,
+            clock=clock, wait_sink=42,
+        )
+    assert str(refused.value) == "row stream wait observer must be callable"
