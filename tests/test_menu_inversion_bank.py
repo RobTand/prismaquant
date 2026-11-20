@@ -6,13 +6,13 @@ import pytest
 from experiments.alloc_lead_asd.analyze_menu_inversion_bank import FAMILIES, RATES, UNITS, inspect_bank
 
 
-def _bank():
+def _bank(layer1_r960=(1., 2., 3., 4.)):
     bank = {'units': {}}
     for unit in UNITS:
         formats = {}
         for family in FAMILIES:
             for rate in RATES:
-                signed = [1., 2., 3., 4.]
+                signed = list(layer1_r960 if unit == UNITS[1] and rate == 960 else (1., 2., 3., 4.))
                 squared = [x*x for x in signed]
                 mean = sum(squared) / 4
                 formats[f'{family}_R{rate}'] = dict(
@@ -40,6 +40,32 @@ def test_screen_keeps_published_field_equality_separate_from_source_admission():
                 assert comparison['descriptive_paired_signal_to_se'] is None
                 assert comparison['positive_on_every_supplied_probe'] is False
                 assert 'cost_currency' not in comparison
+
+
+def test_report_preserves_consistent_inversion_with_historical_scope(monkeypatch, tmp_path):
+    analyzer = inspect_bank.__globals__
+    output = tmp_path / 'report.json'
+    bank = analyzer['json'].dumps(_bank(layer1_r960=[2., 3., 4., 5.])).encode()
+    monkeypatch.setattr('sys.argv', ['analyze_menu_inversion_bank', '--payload', str(tmp_path / 'bank'),
+                                    '--data-manifest-sha256', 'a' * 64, '--output', str(output)])
+    monkeypatch.setitem(analyzer, 'activate_staged_tier_policy', lambda _: None)
+    monkeypatch.setitem(analyzer, 'bind_residency_manifest', lambda _: None)
+    monkeypatch.setitem(analyzer, 'read_staged_whole_file',
+                        lambda *args, **kwargs: b'=====L1ID-BEGIN=====\n' + bank + b'\n=====L1ID-END=====\n')
+    monkeypatch.setitem(analyzer, 'residency_report', dict)
+    analyzer['main']()
+
+    report = analyzer['json'].loads(output.read_text())
+    assert report['scope'] == 'Historical three-unit/four-probe rung screen; no cost admission'
+    assert 'nested identities are truncated; equality concerns published fields only' in report['limitations']
+    assert 'does not cover the other three old >2sigma outliers or all menu drops' in report['limitations']
+    for family in FAMILIES:
+        comparison = next(row for row in report['units'][UNITS[1]][family]['comparisons']
+                          if (row['higher_rate'], row['lower_rate']) == (960, 832))
+        assert comparison['difference_per_probe'] == [1.5, 2.5, 3.5, 4.5]
+        assert comparison['mean_difference'] == 3.
+        assert comparison['paired_standard_error'] == pytest.approx(math.sqrt(5 / 12))
+        assert comparison['positive_on_every_supplied_probe'] is True
 
 
 @pytest.mark.parametrize('mutation', ['probe_ids', 'source_weight', 'hessian', 'coordinate',
