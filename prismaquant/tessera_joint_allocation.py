@@ -263,7 +263,28 @@ def handoff(*, joint_binding, plan_binding, output_path):
     _require('joint_eval' not in plan,
              'diagnostic joint evaluation requires a separate sampled-proposal path or validated promotion; ordinary allocation/export remains closed')
     if joint.get('provenance', {}).get('join_schema') is not None:
-        joint = bind_joined_anchors(joint, plan, plan_binding=plan_binding)
+        provenance = joint['provenance']
+        _same(provenance.get('join_schema'), JOINED_RESULTS_SCHEMA, 'joint join schema')
+        coverage = provenance.get('coverage', {})
+        _require(coverage.get('status') == 'complete' and not coverage.get('gaps'),
+                 'joint join is gapped; complete all quanta before allocation handoff')
+        _same(provenance.get('plan_sha256'), plan_binding['sha256'], 'joined plan binding')
+        prepared_binding = provenance.get('prepared')
+        prepared = json.loads(_read_bound(prepared_binding, 'joined prepared completion'))
+        _same(prepared_binding['sha256'], provenance.get('prepared_sha256'), 'joined preparation binding')
+        _same(prepared.get('plan_sha256'), plan_binding['sha256'], 'joined prepared plan')
+        _same(prepared.get('schema'), PREPARED_SCHEMA, 'joined prepared schema')
+        _same(prepared.get('status'), 'complete', 'joined prepared status')
+        _same(set(joint.get('stats', {})), set(prepared['formats_by_qname']), 'joined statistics roster')
+        joint = copy.deepcopy(joint)
+        _add(joint['provenance'], 'tessera_joint_anchors', {
+            'plan_sha256': plan_binding['sha256'], 'prepared': prepared_binding,
+            'inputs': copy.deepcopy(plan['inputs']),
+            'calibration_input': copy.deepcopy(prepared['calibration_input']),
+            'measured_cells': prepared['measured_cells'],
+            'wire_validation': HISTORICAL_WIRE_VALIDATION,
+            **{key: copy.deepcopy(prepared[key]) for key in ('render_origins', 'render_comparisons')},
+        }, 'joined provenance')
     evidence = joint['provenance']['tessera_joint_anchors']
     _same(evidence['plan_sha256'], plan_binding['sha256'], 'joint plan binding')
     _same(evidence['inputs'], plan['inputs'], 'joint plan original inputs')
@@ -300,39 +321,6 @@ def handoff(*, joint_binding, plan_binding, output_path):
     atomic_write_bytes(receipt_path,
                        DIRECT_ASCII_INDENT2_LAX.encoded(receipt) + b'\n')
     return receipt
-
-
-def bind_joined_anchors(joint, plan, *, plan_binding):
-    """Restore the ordinary handoff from bound preparation, never row guesses.
-
-    The distributed join preserves measured statistics and every quantum's
-    provenance. Its shared anchor metadata is the same plan/preparation pair
-    the monolithic producer carries; read that pair by digest and let the
-    existing handoff validate every source, render, calibration and wire.
-    """
-    provenance = joint['provenance']
-    _same(provenance.get('join_schema'), JOINED_RESULTS_SCHEMA, 'joint join schema')
-    coverage = provenance.get('coverage', {})
-    _require(coverage.get('status') == 'complete' and not coverage.get('gaps'),
-             'joint join is gapped; complete all quanta before allocation handoff')
-    _same(provenance.get('plan_sha256'), plan_binding['sha256'], 'joined plan binding')
-    prepared_binding = provenance.get('prepared')
-    prepared = json.loads(_read_bound(prepared_binding, 'joined prepared completion'))
-    _same(prepared_binding['sha256'], provenance.get('prepared_sha256'), 'joined preparation binding')
-    _same(prepared.get('plan_sha256'), plan_binding['sha256'], 'joined prepared plan')
-    _same(prepared.get('schema'), PREPARED_SCHEMA, 'joined prepared schema')
-    _same(prepared.get('status'), 'complete', 'joined prepared status')
-    _same(set(joint.get('stats', {})), set(prepared['formats_by_qname']), 'joined statistics roster')
-    result = copy.deepcopy(joint)
-    _add(result['provenance'], 'tessera_joint_anchors', {
-        'plan_sha256': plan_binding['sha256'], 'prepared': prepared_binding,
-        'inputs': copy.deepcopy(plan['inputs']),
-        'calibration_input': copy.deepcopy(prepared['calibration_input']),
-        'measured_cells': prepared['measured_cells'],
-        'wire_validation': HISTORICAL_WIRE_VALIDATION,
-        **{key: copy.deepcopy(prepared[key]) for key in ('render_origins', 'render_comparisons')},
-    }, 'joined provenance')
-    return result
 
 
 def main(argv=None):
