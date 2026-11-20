@@ -203,22 +203,6 @@ def _byte_axis(candidates, max_memory_bytes: int) -> tuple[str, dict[str, int], 
     return axis, unit_max, slack_bound
 
 
-def _exact_option_costs(candidates, time_ms, w_d: float, w_t: float) -> dict:
-    """Every option's ``w_d·Δloss + w_t·time`` as an exact integer, one scale.
-
-    Weights, Δloss and time are float64 values, so each product and each sum
-    is an exact dyadic rational; ``exact_integer_costs`` scales all of them by
-    one power of two. Nothing is rounded, so no tie and no strict difference
-    depends on float rounding.
-    """
-    wd, wt = Fraction(w_d), Fraction(w_t)
-    scaled, _denominator = exact_integer_costs({
-        (unit, c.fmt): wd * Fraction(float(c.predicted_dloss))
-        + wt * Fraction(float(time_ms[(unit, c.fmt)]))
-        for unit in candidates for c in candidates[unit]})
-    return scaled
-
-
 def _solve_weighted(candidates, time_ms, w_d: float, w_t: float, *, byte_axis: str,
                     max_memory_bytes: int, max_states: int, max_transitions: int,
                     hints: Sequence[Mapping[str, str]] = ()) -> tuple[dict[str, str], dict]:
@@ -235,7 +219,11 @@ def _solve_weighted(candidates, time_ms, w_d: float, w_t: float, *, byte_axis: s
     ends); they only tighten the live probe's bound and never change its answer,
     so a replay without them re-derives the same assignment.
     """
-    cost = _exact_option_costs(candidates, time_ms, w_d, w_t)
+    wd, wt = Fraction(w_d), Fraction(w_t)
+    cost, _ = exact_integer_costs({
+        (unit, c.fmt): wd * Fraction(float(c.predicted_dloss))
+        + wt * Fraction(float(time_ms[(unit, c.fmt)]))
+        for unit in candidates for c in candidates[unit]})
     if byte_axis == BYTE_AXIS_SLACK:
         assignment = {}
         for unit in sorted(candidates):
