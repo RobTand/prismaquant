@@ -136,3 +136,15 @@ def test_measurement_failure_closes_read_ahead(tmp_path, monkeypatch):
             "cpu", torch.float32, chunk_size=1,
         )
     assert created and all(stream._closed for stream in created)
+
+
+def test_activation_prefetch_refuses_an_empty_file(tmp_path):
+    cache, _ = _cache(tmp_path)
+    path = tmp_path / "a.pt"
+    size = cache.prefetch_bytes("a")
+    assert size == path.stat().st_size
+    assert size > 0
+    path.write_bytes(b"")
+    with pytest.raises(ValueError) as exc:
+        cache.prefetch_bytes("a")
+    assert str(exc.value) == "a: activation prefetch needs a nonempty file"
