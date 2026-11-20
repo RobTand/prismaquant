@@ -262,3 +262,33 @@ def test_equality_linkage_both_producer_fields_uses_job_id(tmp_path, boundary_ve
     else:
         assert problems == []
         assert len(boundary_verifier) == 1
+
+
+def test_window_ingest_refuses_nonstring_route_source_phase(tmp_path, boundary_verifier):
+    from prismaquant.release_receipts import ingest_receipts
+    from prismaquant.shipcard import write_shipcard
+
+    model, card, record, _ = graph_card(tmp_path)
+    card["slots"]["native_export.graph"] = None
+    path = model / "shipcard.json"
+    write_shipcard(path, card)
+    records = tmp_path / "records"
+    records.mkdir()
+    (records / "native_export.graph.json").write_text(json.dumps(record))
+    window = tmp_path / "window.json"
+    window.write_text(json.dumps({
+        "schema": "prismaquant.pact_u4.arm/1",
+        "artifact": str(model),
+        "route_trace_full_config": {"source_phase": 2},
+    }))
+    before = path.read_bytes()
+    report = ingest_receipts(path, window=window, records_dir=records, apply=True)
+
+    assert report["status"] == "refused"
+    assert report["input_problems"] == [
+        "route.trace: full-config trace source_phase must be a string",
+    ]
+    assert "native_export.graph" in report["prepared_slots"]
+    assert report["preflight_problems"] == []
+    assert report["applied_slots"] == []
+    assert path.read_bytes() == before
