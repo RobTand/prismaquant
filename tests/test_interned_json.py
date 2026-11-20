@@ -331,3 +331,17 @@ def test_the_published_hook_is_the_whole_reader(tmp_path):
     assert first["menu"][0] is second["menu"][0]
     # And it is the same value the reader returns.
     assert found == load_json_file(path)
+
+
+def test_json_list_memo_stops_at_its_limit(tmp_path):
+    expected = {
+        "first": ["retained menu name", "retained menu option"],
+        "second": ["unretained menu name", "unretained menu option"],
+        "first_repeat": ["retained menu name", "retained menu option"],
+        "second_repeat": ["unretained menu name", "unretained menu option"],
+    }
+    path = _write(tmp_path, json.dumps(expected))
+    found = load_json_file(path, string_memo_limit=0, list_memo_limit=1)
+    assert found == expected
+    assert all(a is b for a, b in zip(found["first"], found["first_repeat"], strict=True))
+    assert all(a is not b for a, b in zip(found["second"], found["second_repeat"], strict=True))
