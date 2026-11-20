@@ -70,3 +70,14 @@ def test_mixed_context_roundtrips_with_all_operator_contexts_and_refuses_relabel
     with pytest.raises(RuntimePriceError):parse_runtime_context(bad)
     bad=copy.deepcopy(context);bad['operator_routes']['moe'][rows[1]['format']]='{}'
     with pytest.raises(RuntimePriceError,match='route'):parse_runtime_context(bad)
+
+
+def test_native_cohort_rejects_mismatched_operator_key():
+    from prismaquant.native_runtime_cohort import validate_cohort
+
+    cohort = bind_cohort([panel("dense")])
+    assert validate_cohort(cohort) is cohort
+    contexts = cohort["operator_contexts"]
+    contexts["other@TESSERA_E4M3_K1_R1024"] = contexts.pop("dense@TESSERA_E4M3_K1_R1024")
+    with pytest.raises(RuntimePriceError, match="operator context key differs"):
+        validate_cohort(cohort)
