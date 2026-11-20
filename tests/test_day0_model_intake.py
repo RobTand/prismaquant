@@ -130,6 +130,18 @@ def test_inconsistent_source_refuses_before_runtime(tmp_path, change, error):
     assert "docker" not in run.stderr.lower()
 
 
+def test_intake_refuses_non_object_text_config(tmp_path):
+    root = tmp_path / "source"
+    config, _ = checkpoint(root, wrapper=True)
+    config["text_config"] = []
+    (root / "config.json").write_text(json.dumps(config))
+    out = tmp_path / "out"
+    run = cli("--checkpoint", root, "--output", out)
+    assert run.returncode == 1, run.stderr + run.stdout
+    assert "config.text_config must be an object" in run.stderr
+    assert not out.exists()
+
+
 def test_cpu_preflight_uses_real_tp2_entry_point(tmp_path):
     root = tmp_path / "source"
     checkpoint(root)
