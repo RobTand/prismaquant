@@ -20909,6 +20909,7 @@ pq_py_library(
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/cost_stage_checkpoint",
         ":test_tessera_campaign_expert_partitions_lib",
+        "@pq_pip//pytest",
     ],
 )
 
