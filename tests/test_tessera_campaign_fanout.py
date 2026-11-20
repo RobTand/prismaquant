@@ -763,6 +763,20 @@ def test_a_sample_without_inclusion_probabilities_is_refused(tmp_path):
         load_unit_selection(path)
 
 
+def test_campaign_selection_refuses_an_audit_outside_its_sample(tmp_path):
+    from prismaquant.tessera_campaign_selection import load_unit_selection
+
+    path = tmp_path / "units.json"
+    path.write_text(json.dumps({
+        "schema": "prismaquant.tessera_campaign_units.v2",
+        "model": "m", "layer_stride": 1,
+        "groups": [{"key": "s:a", "members": ["a", "b"], "sampled": ["a"],
+                    "inclusion_probability": {"a": 0.5}, "audit": ["b"]}],
+    }))
+    with pytest.raises(RuntimeError, match="audits units it did not sample"):
+        load_unit_selection(path)
+
+
 def test_the_sample_narrows_what_is_priced_but_not_what_the_group_is(tmp_path):
     from prismaquant.tessera_campaign_table import select_anchor_groups
     from prismaquant.tessera_campaign_selection import load_unit_selection, selection_priced_units
