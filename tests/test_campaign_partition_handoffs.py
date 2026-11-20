@@ -62,3 +62,26 @@ def test_partition_journal_union_matches_actual_whole_unit_identity(tmp_path, mo
     assert resumed == states
     assert {name: unit["menu"] for name, unit in merged["identity"]["units"].items()} == {
         name: sorted(formats) for name in names}
+
+
+def test_checkpoint_wire_refuses_size_that_differs_from_the_anchor(tmp_path, monkeypatch):
+    import pytest
+    def make_unit_record(blob, identity, *, filename):
+        return {"file": filename, "blob_bytes": len(blob)}
+
+    monkeypatch.setattr(
+        campaign_wire, "require_checkpoint_identity_api",
+        lambda: SimpleNamespace(make_unit_record=make_unit_record),
+    )
+    (tmp_path / "layer__proj__TESSERA_E4M3_K1_R1024.tessera").write_bytes(b"abc")
+    anchor = SimpleNamespace(
+        qname="layer.proj", format_name="TESSERA_E4M3_K1_R1024", wire_bytes=3,
+    )
+    campaign_wire.checkpoint_wire_record(anchor, tmp_path, {})
+    anchor.wire_bytes = 4
+    with pytest.raises(RuntimeError) as exc:
+        campaign_wire.checkpoint_wire_record(anchor, tmp_path, {})
+    assert str(exc.value) == (
+        "checkpoint cached wire identity refused for layer.proj TESSERA_E4M3_K1_R1024: "
+        "cached wire length differs from the measured anchor"
+    )
