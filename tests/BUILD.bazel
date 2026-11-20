@@ -3690,6 +3690,7 @@ pq_py_library(
         "//:tools/band_serial_handoff_live_pair",
         "//:tools/derive_retained_window_budget",
         "//:tools/dispatch_stage_a_split",
+        "@pq_pip//pytest",
     ],
 )
 
