@@ -171,6 +171,13 @@ def test_already_widened_input_is_refused():
         mxfp4_source_to_mxfp8(weight, scale)
 
 
+def test_mxfp4_widen_rejects_rank_one_element_plane():
+    packed = torch.zeros(16, dtype=torch.uint8)
+    scale = torch.tensor([127], dtype=torch.uint8)
+    with pytest.raises(ValueError, match="element plane must be at least 2-D"):
+        mxfp4_source_to_mxfp8(packed, scale)
+
+
 # --- real checkpoint slices --------------------------------------------------
 
 
