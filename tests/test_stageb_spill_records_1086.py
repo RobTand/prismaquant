@@ -124,3 +124,15 @@ def test_packed_records_policy_refuses_non_boolean(value):
 def test_default_record_storage_stays_a_list(tmp_path, monkeypatch):
     with _captured(tmp_path, monkeypatch) as session:
         assert isinstance(session._windows[0].records, list)
+
+
+def test_packed_read_plan_refuses_mismatched_gradients():
+    plan = spill.PackedReadPlan(("a",), max_parts=2)
+    with pytest.raises(ValueError, match="spill chunk record/gradient count differs"):
+        plan.append(("a", ((3, 4), ((0, 8),), ((8, 16),), 16)))
+    assert len(plan) == 0
+    plan.append(("a", ((7,), ((16, 24),), ((24, 32),), 16)))
+    plan.freeze()
+    owner, (records, inputs, gradients, used) = plan[0]
+    assert (owner, tuple(records), tuple(inputs), tuple(gradients), used) == (
+        "a", (7,), ((16, 24),), ((24, 32),), 16)
