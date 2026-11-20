@@ -1600,12 +1600,6 @@ def _union_weight_filename(key: tuple[str, str], content_sha256: str) -> str:
     return f"{key_sha256}-{content_sha256}.pt"
 
 
-def _union_backing_records(
-    cache: ProductionWeightCache, *, cache_dir: Path
-) -> list[dict[str, object]]:
-    return _backing_records(cache, cache_dir=cache_dir)
-
-
 def union_shard_manifests(
     manifest_paths: Sequence[str | Path],
     *,
@@ -1739,9 +1733,7 @@ def union_shard_manifests(
         cache_path = temporary_root / "production_weight_cache.pkl"
         atomic_write_bytes(cache_path, cache_bytes)
         union_cache.relocate(weights_dir)
-        backing_records = _union_backing_records(
-            union_cache, cache_dir=weights_dir
-        )
+        backing_records = _backing_records(union_cache, cache_dir=weights_dir)
         union_payload = {
             "schema": UNION_MANIFEST_PAYLOAD_SCHEMA,
             "campaign_identity": campaign,
