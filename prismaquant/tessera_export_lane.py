@@ -2490,6 +2490,13 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
                 "body or selected MTP source scope; source existence does not "
                 "establish a supported serving cell")
         projected[name] = entry
+    visual_source_precision = {}
+    if outside_graph and model_path is not None and profile.visual_root_prefixes():
+        roster = profile.visual_linear_roster(model_path)
+        visual_source_precision = {
+            name: {"shape": roster[name]["shape"], "visual_root": roster[name]["visual_root"]}
+            for name in outside_graph if name in roster
+        }
     projected["__prismaquant__"] = {
         **metadata,
         "tessera_export_assignment": {
@@ -2498,6 +2505,7 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
             "source_sha256": expected_sha256,
             "member_owners": dict(sorted(owners.items())),
             "source_precision_outside_graph": outside_graph,
+            **({"visual_source_precision": visual_source_precision} if visual_source_precision else {}),
         },
     }
     output = source_path.with_name(source_path.stem + ".tessera-source-units.json")
