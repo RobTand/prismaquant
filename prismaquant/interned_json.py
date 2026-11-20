@@ -131,8 +131,13 @@ class _Interner:
             self._stats[counter] = self._stats.get(counter, 0) + 1
 
 
-def _interning_pairs_hook(user_hook, interner: _Interner):
-    """The hook the decoder builds objects with: share, then hand over."""
+def _sharing_hook(object_pairs_hook, *, intern_strings: bool, string_memo_limit: int,
+                  list_memo_limit: int, stats: dict | None):
+    """``(object_pairs_hook, interner)``: the sharing the reader is built on."""
+    if not intern_strings:
+        return object_pairs_hook, None
+    interner = _Interner(stats=stats, string_limit=string_memo_limit,
+                         list_limit=list_memo_limit)
 
     def hook(pairs):
         for index, (key, value) in enumerate(pairs):
@@ -143,21 +148,11 @@ def _interning_pairs_hook(user_hook, interner: _Interner):
             elif type(value) is list:
                 interner.sequence(value)
             pairs[index] = (key, value)
-        if user_hook is not None:
-            return user_hook(pairs)
+        if object_pairs_hook is not None:
+            return object_pairs_hook(pairs)
         return dict(pairs)
 
-    return hook
-
-
-def _sharing_hook(object_pairs_hook, *, intern_strings: bool, string_memo_limit: int,
-                  list_memo_limit: int, stats: dict | None):
-    """``(object_pairs_hook, interner)``: the sharing the reader is built on."""
-    interner = (_Interner(stats=stats, string_limit=string_memo_limit,
-                          list_limit=list_memo_limit) if intern_strings else None)
-    if interner is None:
-        return object_pairs_hook, None
-    return _interning_pairs_hook(object_pairs_hook, interner), interner
+    return hook, interner
 
 
 def interning_pairs_hook(*, object_pairs_hook=None, intern_strings: bool = True,
