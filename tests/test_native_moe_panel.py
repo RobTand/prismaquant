@@ -1267,3 +1267,14 @@ def test_native_source_execution_owner_keeps_strict_json_error(leaf):
         require_native_source_execution(value, unit='u')
     assert str(current.value) == str(previous.value)
     assert current.value.__cause__ is None
+
+
+def test_raw_moe_execution_refuses_timed_preflight(joined):
+    from prismaquant.native_moe_execution_binding import freeze_execution_panel
+
+    inputs, preflight, _ = joined
+    timed_preflight = preflight.copy()
+    timed_preflight["status"] = "timing_admissible"
+    with pytest.raises(ValueError) as caught:
+        freeze_execution_panel(inputs, timed_preflight, source_sha256="4" * 64)
+    assert str(caught.value) == "whole MoE preflight must precede timing"
