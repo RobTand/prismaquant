@@ -105,13 +105,6 @@ class ScreenCaps:
             if type(value) is not int or value < 1:
                 _fail(f"{name} must be a positive int; got {value!r}")
 
-    def as_dict(self) -> dict[str, int]:
-        return {
-            "max_retained_candidates": self.max_retained_candidates,
-            "max_composite_options": self.max_composite_options,
-            "max_tasks_per_phase": self.max_tasks_per_phase,
-        }
-
 
 @dataclass(frozen=True)
 class ScreenCandidate:
