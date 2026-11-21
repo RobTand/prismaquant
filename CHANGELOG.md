@@ -24,6 +24,12 @@
   `ReadStream.paused()` no longer returns while a worker still holds that value.
 
 ### Added
+- Add a local render sample reader for the head profiler. It checks only the
+  manifest's selected renders. It does not authenticate the whole campaign.
+  The CLI must start the deadline and an independent stop reporter before intake.
+  CPU fixture check: `python -m py_compile prismaquant/tessera_joint_aura.py tools/profile_stage_b_head.py tests/test_profile_scoped_walk_1492.py && python -m pytest -q tests/test_profile_scoped_walk_1492.py`.
+  Compilation succeeded. The fixture file passed all 55 tests. This check does
+  not qualify GPU or served behavior.
 - Record GGUF assignment identity parity (#2541). Check the owner against the
   original assignment bytes and digest. Check the published artifact against
   the original artifact hash. Leave the deprecated exporter unchanged.

@@ -366,12 +366,26 @@ def render_sample(tmp_path, monkeypatch):
     for module in (builtins, io, os):
         monkeypatch.setattr(module, "open", watch(module.open))
 
-    def run(**changes):
-        return sample(config, **({"manifest": manifest, "scope": (0, 2), "workers": 1,
-                                  "hash_workers": 1, "trials": 2, "max_trials": 2,
-                                  "max_files": 4, "max_bytes": 16} | changes))
+    def run(*, reader=None, **changes):
+        return sample(config | {"reader": reader},
+                      **({"manifest": manifest, "scope": (0, 2), "workers": 1,
+                          "hash_workers": 1, "trials": 2, "max_trials": 2,
+                          "max_files": 4, "max_bytes": 16} | changes))
 
     return run, manifest, paths, opened
+
+
+def test_render_sample_does_not_load_declared_reader(render_sample, monkeypatch):
+    from prismaquant import tessera_reader
+
+    run, _, _, _ = render_sample
+    assert run is not None, "The tool has no render sample reader."
+
+    def check_reader(record):
+        assert record is None, "The sample tried to load the declared wire reader."
+
+    monkeypatch.setattr(tessera_reader, "load_declared_reader", check_reader)
+    assert run(reader={"path": "unused"})["payload_files"] == 4
 
 
 def test_render_sample_reports_stable_measured_digests(render_sample, tmp_path, monkeypatch):
@@ -398,6 +412,16 @@ def test_render_sample_reports_stable_measured_digests(render_sample, tmp_path, 
     assert first["marks"] == {"anchor_input_s": 2, "render_hash_s": 2}
     assert opened == paths * 4
     assert {path: file_stat_signature(path.stat()) for path in tmp_path.rglob("*")} == before
+
+
+def test_render_sample_reads_only_the_selected_cell(render_sample):
+    run, manifest, paths, opened = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    selected = manifest["cells"][1:]
+    report = run(manifest={**manifest, "cells": selected}, max_files=2, max_bytes=10)
+    assert [trial[0]["cell"] for trial in report["trials"]] == selected * 2
+    assert report["payload_files"] == 2 and report["payload_bytes"] == 10
+    assert opened == paths[1:] * 2
 
 
 @pytest.mark.parametrize("budget", ["max_files", "max_bytes", "max_trials"])
@@ -435,6 +459,27 @@ def test_render_sample_refuses_a_missing_later_render_before_hashing(render_samp
     assert not missing.exists()
 
 
+def test_render_sample_refuses_an_unselected_render_removed_at_resolution(render_sample, monkeypatch):
+    from pathlib import Path
+
+    run, manifest, paths, opened = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    resolve = bridge._resolve_render_origin
+
+    def remove_before_resolve(render, **kwargs):
+        if Path(render) == paths[-1]:
+            paths[-1].unlink()
+        return resolve(render, **kwargs)
+
+    monkeypatch.setattr(bridge, "_resolve_render_origin", remove_before_resolve)
+    monkeypatch.setattr(bridge, "_synthesize_render_from_wire",
+                        lambda *a, **k: pytest.fail("The loader tried to synthesize a render."))
+    with pytest.raises(ValueError, match="prepared render is missing"):
+        run(manifest={**manifest, "cells": manifest["cells"][:1]})
+    assert opened == []
+    assert not paths[-1].exists()
+
+
 def test_render_sample_refuses_a_render_link_to_a_wire(render_sample, tmp_path):
     run, manifest, paths, opened = render_sample
     assert run is not None, "The tool has no render sample reader."
@@ -442,6 +487,17 @@ def test_render_sample_refuses_a_render_link_to_a_wire(render_sample, tmp_path):
     paths[0].unlink()
     paths[0].symlink_to(tmp_path / "merged/cache/wire" / (name + ".tessera"))
     with pytest.raises(ValueError, match="not a regular file"):
+        run(max_bytes=128)
+    assert opened == []
+
+
+def test_render_sample_refuses_a_render_hard_link_to_a_wire(render_sample, tmp_path):
+    run, manifest, paths, opened = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    name, _ = manifest["cells"][-1]
+    paths[-1].unlink()
+    paths[-1].hardlink_to(tmp_path / "merged/cache/wire" / (name + ".tessera"))
+    with pytest.raises(ValueError, match="hard link"):
         run(max_bytes=128)
     assert opened == []
 
