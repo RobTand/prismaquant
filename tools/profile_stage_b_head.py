@@ -175,14 +175,12 @@ def _load_scoped_walk(config, scope, workers, metadata_memo=None):
 
 def render_sample_intake(config, *, manifest, scope, workers, hash_workers, trials,
                          max_trials, max_files, max_bytes):
-    """Admit campaign metadata and hash only the renders in the manifest.
-
-    Pass a parsed v1 manifest with the input bindings, scope, and sorted cells.
-    Pass the same scope as a pair of integers. Start the deadline and stop
-    reporter before input reads. Keep the stop reporter independent of the
-    readers. Do not load a prepared head or create a scratch directory.
-    Do not read other payloads. Publish the sample report only after this
-    call returns. The report does not authenticate the full campaign.
+    """Admit the campaign roster. Hash only the selected renders.
+    Pass the parsed v1 manifest, its scope, and limits for all trials combined.
+    Start the deadline and stop reporter before input reads.
+    Keep the stop reporter independent of the readers.
+    Do not load a prepared head, create scratch, or read other payloads.
+    Publish the sample-only report after a successful return.
     """
     from stat import S_ISREG
 
@@ -215,7 +213,9 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
     require(pairs == sorted(set(pairs)), "render sample manifest cells must be unique and sorted")
     require(len(pairs) * trials <= max_files, "render sample plan exceeds max_files")
 
-    data, started = _load_scoped_walk(config, scope, workers)
+    data, started = _load_scoped_walk(
+        {key: config[key] for key in ("inputs", "historical_encoder_reuse") if key in config},
+        scope, workers)
     require(digests.canonical_json_bytes(manifest["inputs"], where="manifest inputs") ==
             digests.canonical_json_bytes(data.inputs, where="admitted inputs"),
             "render sample manifest does not match admitted inputs")
@@ -226,6 +226,7 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
         path = Path(data.cells[pair]["render"])
         info = path.lstat()
         require(S_ISREG(info.st_mode), f"render is not a regular file: {path}")
+        require(info.st_nlink == 1, f"render has a hard link: {path}")
         plan.append((pair, path, file_stat_signature(info)))
     require(sum(signature[2] for _, _, signature in plan) * trials <= max_bytes,
             "render sample plan exceeds max_bytes")
