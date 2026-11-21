@@ -53,18 +53,6 @@ def _group_key(qname: str) -> str:
     return f"unit:{qname}"
 
 
-def _entry_work(entry: Mapping[str, object]) -> int:
-    """Shape-weighted render work proxy used only for load balancing.
-
-    GPTQ's dominant covariance/solve work grows with the input width as well
-    as parameter count.  The product is deliberately integer and hardware
-    independent; observed pilot timings can replace it in a future schema.
-    """
-    n_params = int(entry.get("n_params", 0) or 0)
-    in_features = int(entry.get("in_features", 0) or 0)
-    return n_params * max(in_features, 1)
-
-
 def plan_stripes(
     stats: Mapping[str, Mapping[str, object]],
     *,
@@ -111,7 +99,11 @@ def plan_stripes(
     for group, members_raw in groups.items():
         members = tuple(sorted(members_raw))
         params = sum(int(stats[name].get("n_params", 0) or 0) for name in members)
-        work = sum(_entry_work(stats[name]) for name in members)
+        work = sum(
+            int(entry.get("n_params", 0) or 0)
+            * max(int(entry.get("in_features", 0) or 0), 1)
+            for entry in (stats[name] for name in members)
+        )
         weighted_groups.append((work, params, group, members))
     weighted_groups.sort(key=lambda row: (-row[0], -row[1], row[2]))
 
