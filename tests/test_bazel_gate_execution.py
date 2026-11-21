@@ -880,6 +880,37 @@ def test_inventory_progress_does_not_change_successful_duplicate_or_mixed_source
     assert len(calls) == 2
 
 
+def test_an_aborted_shard_names_its_bazel_exit_and_error_class_and_no_private_text(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    sentinel = 'private-value-must-never-be-logged'
+    upload = tmp_path / 'upload'
+    manifest = {'mode': 'pr', 'base': 'b' * 40, 'head': 'a' * 40, 'branch': 'probe', 'architecture': 'amd64',
+                'index': 0, 'targets': [LABEL], 'tests': [LABEL], 'require_execution': False}
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    monkeypatch.setenv('PQ_BAZEL_SHARD', '{}')
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', sentinel)
+    monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
+    output = tmp_path / 'output.zip'
+    output.write_bytes(inventory_zip({'nodes': {}}))
+
+    def native(command, stdout, **kwargs):  # Bazel stops before the test has a result (gate 44185397406)
+        stdout.write(f'ERROR: remote execution failed: UNAVAILABLE: io exception --remote_header={sentinel}\n'
+                     f'INFO: exec env - TOKEN={sentinel} DEADLINE_EXCEEDED\n')
+        path = Path(next(word.split('=', 1)[1] for word in command if word.startswith('--build_event_json_file=')))
+        path.write_text(events(output_event(output.as_uri())))
+        return SimpleNamespace(returncode=38)
+
+    execute = gate.execute_shard
+    monkeypatch.setattr(gate, 'execute_shard', lambda document: execute(
+        document, root=tmp_path, runner=native, fetch=lambda uri: output.read_bytes()))
+    assert gate.main(['shard']) == 75
+    captured = capsys.readouterr()
+    assert captured.err == ('shard refused at result-validation; category=invalid-evidence; '
+                            'bazel_exit=38; error_class=UNAVAILABLE; upload refused\n')
+    assert sentinel not in captured.out + captured.err
+
+
 def test_manifest_transport_refusal_keeps_manifest_phase(tmp_path, monkeypatch, capsys):
     upload = tmp_path / 'upload'
     sentinel = 'private-manifest-transport'
