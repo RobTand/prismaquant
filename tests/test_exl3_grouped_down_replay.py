@@ -642,3 +642,16 @@ def test_the_record_serializes_and_refuses_a_non_finite_value():
     record["replays"][0]["vs_original"]["fp32_max_abs_delta"] = float("nan")
     with pytest.raises(ValueError):
         replay_mod.result_json(record)
+
+
+def test_failed_replay_install_removes_only_its_own_hooks():
+    ext = _Ext(_deterministic)
+    model = _Model(_Boundary(ext, _args()))
+    handle = model.mlp.register_forward_pre_hook(lambda _module, _args: None)
+    del ext.exl3_fat_moe_down
+
+    with pytest.raises(AttributeError, match="exl3_fat_moe_down"):
+        replay_mod.install(model, ext, _Capture(), module_name="mlp")
+
+    assert list(model.mlp._forward_pre_hooks) == [handle.id]
+    assert not model.mlp._forward_hooks
