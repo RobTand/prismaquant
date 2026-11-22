@@ -569,6 +569,31 @@ def _synthesize_render_from_wire(render, *, wire, record, name, fmt, shape, read
     return "synthesized_from_wire"
 
 
+def _read_render_origin_marker(render):
+    marker = _render_origin_marker_path(render)
+    try:
+        before = marker.lstat()
+    except FileNotFoundError:
+        return None
+    label = f"{marker}: render origin marker"
+    _require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1,
+             f"render origin marker must be an unlinked regular file: {marker}")
+    signature = _stat_signature(before)
+    try:
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+        with os.fdopen(os.open(marker, flags), "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            _require(opened.st_nlink == 1, f"{label} has a hard link")
+            _same(_stat_signature(opened), signature, label)
+            data = handle.read(before.st_size)
+            _same(len(data), before.st_size, label)
+            _same(_stat_signature(os.fstat(handle.fileno())), signature, label)
+        _same(_stat_signature(marker.lstat()), signature, label)
+    except OSError as exc:
+        raise ValueError(f"{label} changed during intake") from exc
+    return data
+
+
 def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, device="cpu",
                            require_existing_renders=False):
     """Name where this rung's decoded PWC shard came from, never guess it.
@@ -579,26 +604,11 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
     place that fact can live, and its absence beside an existing shard is the
     campaign's own render.
     """
-    render, marker = Path(render), _render_origin_marker_path(render)
+    render = Path(render)
     if render.is_file():
-        origin = "encoded"
-        if marker.is_file() or (require_existing_renders and marker.is_symlink()):
-            if require_existing_renders:
-                info = marker.lstat()
-                _require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1,
-                         f"render origin marker must be an unlinked regular file: {marker}")
-                flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
-                with os.fdopen(os.open(marker, flags), "rb", buffering=0) as handle:
-                    signature = _stat_signature(info)
-                    changed = f"render origin marker changed: {marker}"
-                    _same(_stat_signature(os.fstat(handle.fileno())), signature, changed)
-                    raw = handle.read(info.st_size)
-                    _same(len(raw), info.st_size, changed)
-                    _same(_stat_signature(os.fstat(handle.fileno())), signature, changed)
-                    _same(_stat_signature(marker.lstat()), signature, changed)
-                stamp = json.loads(raw)
-            else:
-                stamp = json.loads(marker.read_text())
+        marker = _read_render_origin_marker(render)
+        if marker is not None:
+            stamp = json.loads(marker.decode("utf-8"))
             _same(stamp.get("schema"), RENDER_ORIGIN_SCHEMA, f"{name}@{fmt}: render origin schema")
             _same(stamp.get("render_origin"), "synthesized_from_wire",
                   f"{name}@{fmt}: marked render origin")
@@ -606,9 +616,8 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
             _same(stamp.get("format_name"), fmt, f"{name}@{fmt}: marked render format")
             _same(stamp.get("wire_sha256"), record["blob_sha256"],
                   f"{name}@{fmt}: synthesized render names another wire")
-            origin = "synthesized_from_wire"
         if not require_existing_renders or render.is_file():
-            return origin
+            return "encoded" if marker is None else "synthesized_from_wire"
     _require(not require_existing_renders,
              f"{name}@{fmt}: prepared render is missing. The loader will not synthesize it.")
     _require(Path(wire).is_file(), f"{name}@{fmt}: original decoded PWC shard missing")
@@ -1121,9 +1130,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                     if _stat_signature(Path(row["render"]).stat()) != tuple(
                             fence.get("render_signature") or ()):
                         return False
-                    marker = _render_origin_marker_path(row["render"])
-                    digest = (None if not marker.is_file()
-                              else bytes_sha256hex(marker.read_bytes()))
+                    marker = _read_render_origin_marker(row["render"])
+                    digest = None if marker is None else bytes_sha256hex(marker)
                     if digest != fence.get("marker_sha256"):
                         return False
                 return True
@@ -1256,11 +1264,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             # next load that these bytes are the bytes this row was banked
             # from, at stat-and-digest cost rather than a re-walk.
             if head_root is not None:
-                marker = _render_origin_marker_path(target)
+                marker = _read_render_origin_marker(target)
                 fences[fmt] = {"wire_size": wire_stat.st_size,
                                "render_signature": list(_stat_signature(Path(target).stat())),
-                               "marker_sha256": (None if not marker.is_file()
-                                                 else bytes_sha256hex(marker.read_bytes()))}
+                               "marker_sha256": None if marker is None else bytes_sha256hex(marker)}
         formats_row = (*sorted(anchors), "BF16")
         result = {"formats": formats_row, "cells": unit_cells, "synthesized_events": events}
         if head_root is not None:
