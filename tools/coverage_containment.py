@@ -44,11 +44,11 @@ def text(spans):
     return ','.join(f'{first}' if first == last else f'{first}-{last}' for first, last in spans)
 
 
-def parse(spans):
+def parse_spans(spans):
     return [(int(first), int(last or first)) for first, _, last in (span.partition('-') for span in spans.split(','))]
 
 
-def build(data_file, out, outcomes_file=None):
+def build_line_ranges(data_file, out, outcomes_file=None):
     data = coverage.CoverageData(basename=str(data_file))
     data.read()
     covered = defaultdict(lambda: defaultdict(list))  # test -> file -> lines
@@ -69,7 +69,7 @@ def build(data_file, out, outcomes_file=None):
                 rows.write(f'{test}\t{path}\t{text(runs(sorted(lines)))}\n')
 
 
-def load(ranges):
+def load_line_ranges(ranges):
     """{test: {file: [(first, last), ...]}} for measured tests, and {test: outcome} for the others."""
     measured, unmeasured = defaultdict(dict), {}
     with gzip.open(ranges, 'rt') as rows:
@@ -77,7 +77,7 @@ def load(ranges):
             if path == NOT_MEASURED:
                 unmeasured[test] = spans
             else:
-                measured[test][path] = parse(spans)
+                measured[test][path] = parse_spans(spans)
     return measured, unmeasured
 
 
@@ -85,7 +85,7 @@ def count(files):
     return sum(last - first + 1 for spans in files.values() for first, last in spans)
 
 
-def inside(small, large):
+def spans_within(small, large):
     """True when each run of small lies in one run of large (both sorted and maximal)."""
     position = 0
     for first, last in small:
@@ -97,7 +97,7 @@ def inside(small, large):
 
 
 def query(ranges, names, show_lines=False, out=sys.stdout):
-    measured, unmeasured = load(ranges)
+    measured, unmeasured = load_line_ranges(ranges)
     by_file = defaultdict(set)
     for test, files in measured.items():
         for path in files:
@@ -119,7 +119,7 @@ def query(ranges, names, show_lines=False, out=sys.stdout):
                     print(f'range\t{test}\t{path}\t{text(spans)}', file=out)
             candidates = set.intersection(*(by_file[path] for path in sorted(files, key=lambda p: len(by_file[p]))))
             for other in sorted(candidates - {test}):
-                if all(inside(spans, measured[other][path]) for path, spans in files.items()):
+                if all(spans_within(spans, measured[other][path]) for path, spans in files.items()):
                     print(f'contained-by\t{test}\t{other}\t{count(measured[other])}', file=out)
 
 
@@ -136,6 +136,6 @@ if __name__ == '__main__':
     asker.add_argument('--lines', action='store_true')
     arguments = parser.parse_args()
     if arguments.command == 'build':
-        build(arguments.data_file, arguments.ranges, arguments.outcomes)
+        build_line_ranges(arguments.data_file, arguments.ranges, arguments.outcomes)
     else:
         query(arguments.ranges, arguments.tests, arguments.lines)
