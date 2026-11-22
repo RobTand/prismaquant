@@ -998,6 +998,30 @@ def test_a_scoped_read_walks_only_its_units_and_is_refused_as_a_campaign_input(t
         bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=(0, 5))
 
 
+def test_stat_only_scope_accepts_missing_payloads_outside_the_scope(tmp_path):
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, names, fmt, payload, states = fixture(tmp_path)
+    selected, omitted = sorted(names)
+    render = _unlink_render(tmp_path, omitted, fmt)
+    wire = Path(payload["provenance"]["wire_dir"]) / states[omitted]["wire_records"][fmt]["file"]
+    wire.unlink()
+
+    data = bridge.load_measured_anchor_input(config, unit_scope=(0, 1), verify_payloads=False)
+
+    assert set(data.cells) == {(selected, fmt)}
+    assert not render.exists()
+
+
+def test_scoped_payload_verification_refuses_before_campaign_intake(tmp_path):
+    from prismaquant import tessera_joint_aura as bridge
+
+    config, *_ = fixture(tmp_path)
+    Path(config["merged_cost"]["path"]).unlink()
+    with pytest.raises(ValueError, match="cannot also verify the complete campaign payload"):
+        bridge.load_measured_anchor_input(config, unit_scope=(0, 1), verify_payloads=True)
+
+
 def test_scoped_intake_refuses_a_render_that_disappears_at_resolution(tmp_path, monkeypatch):
     from prismaquant import tessera_joint_aura as bridge
 
@@ -1039,6 +1063,43 @@ def test_stat_only_scoped_intake_does_not_open_payloads(tmp_path, monkeypatch):
     data = bridge.load_measured_anchor_input(config, unit_scope=(0, 1), head_walk_workers=1,
                                              verify_payloads=False, require_existing_renders=True)
     assert set(data.cells) == {(min(names), fmt)}
+
+
+def test_stat_only_scoped_intake_reads_a_render_marker_without_opening_payloads(tmp_path, monkeypatch):
+    import builtins
+    import io
+    import os
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.render_cache_paths import cache_weight_filename
+
+    config, names, fmt, _, states = fixture(tmp_path)
+    name = min(names)
+    record = states[name]["wire_records"][fmt]
+    render = tmp_path / "campaign/rows/row-0000/cache" / cache_weight_filename(name, fmt)
+    bridge._render_origin_marker_path(render).write_text(json.dumps({
+        "schema": bridge.RENDER_ORIGIN_SCHEMA,
+        "render_origin": "synthesized_from_wire",
+        "unit": name,
+        "format_name": fmt,
+        "wire_file": record["file"],
+        "wire_sha256": record["blob_sha256"],
+    }))
+
+    def guard(real_open):
+        def open_metadata(file, *args, **kwargs):
+            if not isinstance(file, int):
+                assert Path(os.fsdecode(file)).suffix not in {".pt", ".tessera"}, (
+                    f"The scoped walk opened a payload: {file}")
+            return real_open(file, *args, **kwargs)
+        return open_metadata
+
+    for module in (builtins, io, os):
+        monkeypatch.setattr(module, "open", guard(module.open))
+
+    data = bridge.load_measured_anchor_input(config, unit_scope=(0, 1), verify_payloads=False,
+                                             require_existing_renders=True)
+
+    assert data.cells[name, fmt]["render_origin"] == "synthesized_from_wire"
 
 
 @pytest.mark.parametrize("spec,expected", [("0:4", (0, 4)), (":4", (0, 4)), ("2:", (2, 7)),
