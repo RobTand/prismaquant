@@ -10869,6 +10869,16 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "tools/coverage_containment",
+    srcs = [
+        "tools/coverage_containment.py",
+    ],
+    deps = [
+        "@pq_pip//coverage",
+    ],
+)
+
+pq_py_library(
     name = "archive/respinquant_2026-05-13/prismaquant/respinquant",
     srcs = [
         "archive/respinquant_2026-05-13/prismaquant/respinquant.py",
