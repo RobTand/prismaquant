@@ -41628,6 +41628,30 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "test_2806_test_pruning_ledger_lib",
+    srcs = [
+        "test_2806_test_pruning_ledger.py",
+    ],
+    data = [
+        "//:docs/measurements/2806-test-line-ranges-afac07dfbcfe.tsv.gz",
+        "//:tools/coverage_containment.py",
+        "test_2806_test_pruning_ledger.py",
+        "test_io_engine_sealed_memory.py",
+        "test_own_process_child_exit_audit.py",
+        "test_own_process_isolation.py",
+        "test_own_process_measurement.py",
+        "test_prismaquant_export_native_compressed.py",
+        "test_reclaim_readings_gb10.py",
+        "test_retired_codebook_refusals_1304.py",
+        "test_stage_settings_guard.py",
+        "test_tessera_row_stream.py",
+    ],
+    deps = [
+        "//:tools/coverage_containment",
+    ],
+)
+
+pq_py_library(
     name = "test_glm_full_capture_profile_lib",
     srcs = [
         "test_glm_full_capture_profile.py",
@@ -55937,6 +55961,16 @@ pq_py_library(
         "@pq_pip//torch",
         "@pq_pip//transformers",
     ],
+)
+
+pq_py_test(
+    name = "test_2806_test_pruning_ledger",
+    path = "tests/test_2806_test_pruning_ledger.py",
+    library = ":test_2806_test_pruning_ledger_lib",
+    deps = [
+        ":conftest",
+    ],
+    timeout = "moderate",
 )
 
 pq_py_test(
