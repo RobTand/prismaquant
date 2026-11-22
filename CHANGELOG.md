@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Use `DIRECT_UTF8_STRICT.text` for the selector's resolved assignment payload digest (#5268, #2651).
+
 - Route ten byte digests through `bytes_sha256hex` (#4716, #2646).
 - Use `diagnostic_json_bytes` for diagnostic fingerprints (#2541).
   Keep the original ASCII escapes and text fallback.

@@ -3519,6 +3519,35 @@ pq_py_test(
 )
 
 pq_py_test(
+    name = "test_json_profile_route_2651_frontier_selector",
+    path = "tests/test_json_profile_route_2651_frontier_selector.py",
+    library = ":test_json_profile_route_2651_frontier_selector_lib",
+    deps = [
+        "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
+        "//:pqtel/__init__",
+        "//:prismaquant/lane_shipcard",
+        "//:prismaquant/shipcard_cli",
+        "//:tools/build_streamed_full_kl_teacher",
+        "//:tools/dsv4_wikitext_inputs",
+        "//:tools/full_kl_teacher_payload",
+        "//:tools/g3job/g3_pq_policy/__init__",
+        "//:tools/gold_engine_options",
+        "//:tools/gold_measurement_fidelity",
+        "//:tools/measure_served_gold",
+        "//:tools/measure_vllm_full_kl",
+        "//:tools/measure_vllm_wikitext_ppl",
+        "//:tools/pq_profile_child",
+        "//:tools/prepare_dsv4_wikitext_inputs",
+        "//:tools/prismaquant_source_bootstrap",
+        "//:tools/spec_decode_guard",
+        "//:tools/tessera_campaign_container",
+        "//:tools/tessera_fleet/__init__",
+        ":conftest",
+    ],
+    timeout = "moderate",
+)
+
+pq_py_test(
     name = "test_stage_b_head_slice",
     path = "tests/test_stage_b_head_slice.py",
     library = ":test_stage_b_head_slice_lib",
@@ -13482,6 +13511,18 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+    ],
+)
+
+pq_py_library(
+    name = "test_json_profile_route_2651_frontier_selector_lib",
+    srcs = [
+        "test_json_profile_route_2651_frontier_selector.py",
+    ],
+    deps = [
+        "//:prismaquant/__init__",
+        "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/digests",
     ],
 )
 
@@ -23905,6 +23946,7 @@ pq_py_library(
         "//:prismaquant/allocator.py",
         "//:prismaquant/io_engine.py",
         "//:prismaquant/joint_forward_resume.py",
+        "//:prismaquant/select_validated_frontier.py",
         "//:prismaquant/tensor_digests.py",
         "//:prismaquant/tessera_census_cache.py",
         "//:prismaquant/tessera_hessian.py",

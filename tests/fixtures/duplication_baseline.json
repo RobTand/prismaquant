@@ -132,7 +132,6 @@
   "sorted-json:prismaquant/pipeline.py::_record_unverified_reuse",
   "sorted-json:prismaquant/pipeline.py::main",
   "sorted-json:prismaquant/prefill_frontier.py::main",
-  "sorted-json:prismaquant/select_validated_frontier.py::main",
   "sorted-json:prismaquant/stage_a_chain_resume.py::apply_chain_resume",
   "sorted-json:prismaquant/stage_a_chain_split.py::main",
   "sorted-json:prismaquant/stage_a_retirement.py::apply_retirement",
