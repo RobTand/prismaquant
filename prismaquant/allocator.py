@@ -42,11 +42,8 @@ and the curve is tiny so the dependency would not pay for itself.)
 """
 from __future__ import annotations
 
-
-
 import argparse
 import csv
-import hashlib
 import json
 import math
 import pickle
@@ -4839,7 +4836,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 else record["assignment"]
             )
             digest_src = DIRECT_ASCII_LAX.text(assignment)
-            digest = hashlib.sha256(digest_src.encode()).hexdigest()[:12]
+            digest = bytes_sha256hex(digest_src.encode())[:12]
             if digest in seen_payloads:
                 continue
             seen_payloads.add(digest)

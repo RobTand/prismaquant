@@ -138749,5 +138749,9 @@
       "tests/test_duplication_baseline.py": "Pass.",
       "command_exit": "The local box command exited with status 0. PrismaBuild did not run."
     }
-  }
+  },
+  "live_byte_consumers_2646": {"route": "prismaquant.digests.bytes_sha256hex", "fixture_sha256": "18a216544bbe780f48b2163c67d505c72b563103af4df87938bbfbc60bb30e9c", "test": "tests/test_live_byte_consumers_2646.py", "live_primitive_scopes": {"before": 174, "after": 168}, "records": [
+    {"hex_width": 12, "sha256": "cb6a899d95e77aca843849c279e8212e479efc67e2ddea6ec358eb308df874e2", "historical_ids": ["hashlib:prismaquant/allocator.py::main@5513:21"]},
+    {"hex_width": 64, "sha256": "69fd082555691010f9ed26e81eb5cf2a79a01b75f017427508e23825b41d38ae", "historical_ids": ["hashlib:tools/build_glm_derivative_image.py::main@100:24", "hashlib:tools/build_glm_derivative_image.py::main@123:15", "hashlib:tools/build_glm_derivative_image.py::main@125:15", "hashlib:tools/build_glm_derivative_image.py::main@145:27", "hashlib:tools/build_glm_derivative_image.py::main@85:19", "hashlib:tools/capture_glm_routed_layers.py::main.publish@128:55", "hashlib:tools/capture_glm_routing_replay.py::main@99:85", "hashlib:tools/glm_mtp_capture.py::projection_phase@227:62", "hashlib:tools/materialize_wikitext_corpus.py::main@82:22"]}
+  ]}
 }

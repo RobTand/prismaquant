@@ -32,8 +32,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import sys
 from pathlib import Path
 
 WIKITEXT_DATASET = "wikitext"
@@ -59,6 +59,7 @@ def main() -> int:
     args = ap.parse_args()
 
     from datasets import load_dataset
+    from prismaquant.digests import bytes_sha256hex
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -79,7 +80,7 @@ def main() -> int:
         entry = {
             "path": str(path),
             "bytes": len(raw),
-            "sha256": hashlib.sha256(raw).hexdigest(),
+            "sha256": bytes_sha256hex(raw),
             "dataset": WIKITEXT_DATASET,
             "config": WIKITEXT_CONFIG,
             "revision": args.revision,
@@ -99,4 +100,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     raise SystemExit(main())

@@ -10,7 +10,6 @@ the complete 512x512 calibration; neither grants full-draw quality or prices.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import io
 import json
 import os
@@ -48,6 +47,7 @@ def main(argv=None):
 
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant.cost_stage_checkpoint import publish_new_bytes
+    from prismaquant.digests import bytes_sha256hex
     from prismaquant.streamed_model_identity import validate_cached_streamed_model_identity
     from prismaquant.glm_routing_capture import capture_streamed_glm_routes
     from prismaquant.joint_aura import source_execution_identity
@@ -125,7 +125,7 @@ def main(argv=None):
         if not publish_new_bytes(target, raw):
             raise ValueError(f"routed capture output already exists: {target}")
         entries.append({"layer": layer, "unit": result["metadata"]["unit"],
-                        "path": str(target), "sha256": hashlib.sha256(raw).hexdigest(),
+                        "path": str(target), "sha256": bytes_sha256hex(raw),
                         "bytes": len(raw)})
         log_progress(len(entries), "capture", unit=result["metadata"]["unit"])
         print(json.dumps({"captured": layer, "count": len(entries),

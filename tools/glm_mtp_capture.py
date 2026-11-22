@@ -42,7 +42,6 @@ Run inside the campaign container (the plan's source derivative needs it)::
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 import time
@@ -202,6 +201,7 @@ def _text_config(model_path):
 
 def projection_phase(args):
     from prismaquant import glm_mtp, glm_mtp_capture as cap
+    from prismaquant.digests import bytes_sha256hex
     from prismaquant.model_profiles import detect_profile
 
     started = time.monotonic()
@@ -228,7 +228,7 @@ def projection_phase(args):
         raise RuntimeError(f"{path} exists; the projection publishes once")
     return {
         "phase": "projection",
-        "projection": {"path": str(path.resolve()), "sha256": hashlib.sha256(raw).hexdigest()},
+        "projection": {"path": str(path.resolve()), "sha256": bytes_sha256hex(raw)},
         "plan": {"path": str(Path(args.plan).resolve()), "sha256": plan_sha256},
         "stacks": sorted(carried["stacks"]),
         "units": sum(len(units) for units in carried["stacks"].values()),
