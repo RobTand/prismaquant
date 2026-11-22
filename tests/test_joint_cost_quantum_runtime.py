@@ -1648,9 +1648,10 @@ def test_quantum_requires_dev_mode(identity_files, monkeypatch):
               "--output-root", str(identity_files["output_root"])])
 
 
-def test_publish_quantum_outputs_writes_exactly_the_contract_shapes(tmp_path):
+def test_publish_quantum_outputs_writes_exactly_the_contract_shapes(tmp_path, monkeypatch):
     from prismaquant.joint_cost_quantum import publish_quantum_outputs
 
+    monkeypatch.setattr("prismaquant.joint_cost_quantum.time.time", lambda: 123.0)
     output_root = tmp_path / "campaign"
     # Producer-shaped: indices only (D2) -- the unit count arrives with the
     # resolved windows' names, not the record.
@@ -1659,6 +1660,7 @@ def test_publish_quantum_outputs_writes_exactly_the_contract_shapes(tmp_path):
         windows=[{"window_index": 0}],
         total_bytes=100, plan_sha=_hex("d"), prepared_sha=_hex("e"),
         adjoint_sha=_hex("f"))
+    record["identity_sha256"] = _hex("a")
 
     def tree(root):
         return {str(p.relative_to(root)) for p in Path(root).rglob("*")}
@@ -1679,6 +1681,10 @@ def test_publish_quantum_outputs_writes_exactly_the_contract_shapes(tmp_path):
     assert status["status"] == "complete"
     assert status["units"] == [1, 1]
     assert status["schema"] == "prismaquant.joint_layer_quantum.status.v1"
+    assert (space / "status.json").read_bytes() == (
+        b'{"identity_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", '
+        b'"quantum_id": "layer-000", "schema": "prismaquant.joint_layer_quantum.status.v1", '
+        b'"status": "complete", "units": [1, 1], "unix": 123.0}\n')
     # The fallback counts the payload when the caller omits the total.
     fallback = publish_quantum_outputs(
         record, payload={"costs": {"a": {}, "b": {}}},
