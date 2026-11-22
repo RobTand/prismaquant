@@ -3432,6 +3432,25 @@ pq_py_test(
     timeout = "moderate",
 )
 
+pq_py_library(
+    name = "test_live_byte_consumers_2646_lib",
+    srcs = [
+        "test_live_byte_consumers_2646.py",
+    ],
+    deps = [
+        "//:prismaquant/__init__",
+        "//:prismaquant/allocator_cycle",
+        "//:prismaquant/digests",
+        "//:tools/__init__",
+        "//:tools/build_glm_derivative_image",
+        "//:tools/capture_glm_routed_layers",
+        "//:tools/capture_glm_routing_replay",
+        "//:tools/glm_mtp_capture",
+        "//:tools/materialize_wikitext_corpus",
+        "@pq_pip//pytest",
+    ],
+)
+
 pq_py_test(
     name = "test_row_startup_encoder_seal",
     path = "tests/test_row_startup_encoder_seal.py",
@@ -16106,6 +16125,35 @@ pq_py_library(
 )
 
 pq_py_test(
+    name = "test_live_byte_consumers_2646",
+    path = "tests/test_live_byte_consumers_2646.py",
+    library = ":test_live_byte_consumers_2646_lib",
+    deps = [
+        "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
+        "//:pqtel/__init__",
+        "//:prismaquant/lane_shipcard",
+        "//:prismaquant/shipcard_cli",
+        "//:tools/build_streamed_full_kl_teacher",
+        "//:tools/dsv4_wikitext_inputs",
+        "//:tools/full_kl_teacher_payload",
+        "//:tools/g3job/g3_pq_policy/__init__",
+        "//:tools/gold_engine_options",
+        "//:tools/gold_measurement_fidelity",
+        "//:tools/measure_served_gold",
+        "//:tools/measure_vllm_full_kl",
+        "//:tools/measure_vllm_wikitext_ppl",
+        "//:tools/pq_profile_child",
+        "//:tools/prepare_dsv4_wikitext_inputs",
+        "//:tools/prismaquant_source_bootstrap",
+        "//:tools/spec_decode_guard",
+        "//:tools/tessera_campaign_container",
+        "//:tools/tessera_fleet/__init__",
+        ":conftest",
+    ],
+    timeout = "moderate",
+)
+
+pq_py_test(
     name = "test_allocator_source_kinds_row_namespace",
     path = "tests/test_allocator_source_kinds_row_namespace.py",
     library = ":test_allocator_source_kinds_row_namespace_lib",
@@ -23854,11 +23902,17 @@ pq_py_library(
         "test_tensor_digest_owner_recipes_2638.py",
     ],
     data = [
+        "//:prismaquant/allocator.py",
         "//:prismaquant/io_engine.py",
         "//:prismaquant/joint_forward_resume.py",
         "//:prismaquant/tensor_digests.py",
         "//:prismaquant/tessera_census_cache.py",
         "//:prismaquant/tessera_hessian.py",
+        "//:tools/build_glm_derivative_image.py",
+        "//:tools/capture_glm_routed_layers.py",
+        "//:tools/capture_glm_routing_replay.py",
+        "//:tools/glm_mtp_capture.py",
+        "//:tools/materialize_wikitext_corpus.py",
         "//:tools/stagea_produced_live_cycle.py",
         "fixtures/digest_main_scopes_2638.json",
         "fixtures/duplication_baseline.json",
@@ -23868,9 +23922,15 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/allocator_cycle",
         "//:prismaquant/io_engine",
         "//:prismaquant/tensor_digests",
         "//:prismaquant/tessera_hessian",
+        "//:tools/build_glm_derivative_image",
+        "//:tools/capture_glm_routed_layers",
+        "//:tools/capture_glm_routing_replay",
+        "//:tools/glm_mtp_capture",
+        "//:tools/materialize_wikitext_corpus",
         "//:tools/stagea_produced_live_cycle",
         ":test_guarded_read_digest_retention_2637_lib",
         "@pq_pip//pytest",
