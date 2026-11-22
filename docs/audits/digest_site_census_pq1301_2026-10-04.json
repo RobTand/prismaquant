@@ -36919,7 +36919,7 @@
     "ratcheted": true,
     "disposition": "migrate-exact-route",
     "eligible": true,
-    "disposition_reason": "Use the exact owner route without changes to consumer policy.",
+    "disposition_reason": "The publisher uses DIRECT_ASCII_SPACED_STRICT.text(status_record).",
     "retention_evidence": null,
     "epic_key": "k2",
     "epic": "prismaquant#2541",

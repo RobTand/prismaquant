@@ -39,7 +39,7 @@ from types import SimpleNamespace
 
 import torch
 
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
 from .joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA as QUANTUM_RECORD_SCHEMA,
                                    require_quantum_identity, require_quantum_campaign)
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
@@ -3735,9 +3735,7 @@ def publish_quantum_outputs(record, *, payload, result, counters,
     }
     root = Path(record["output_space"]["root"])
     status_path = Path(record["output_space"].get("status", str(root / "status.json")))
-    atomic_write_bytes(
-        status_path,
-        (json.dumps(status_record, sort_keys=True, allow_nan=False) + "\n").encode())
+    atomic_write_bytes(status_path, (DIRECT_ASCII_SPACED_STRICT.text(status_record) + "\n").encode())
     return status_record
 
 
