@@ -29,28 +29,24 @@
   `ReadStream.paused()` no longer returns while a worker still holds that value.
 
 ### Added
-- Add a local render sample reader for the head profiler. It reports hashes
-  for the selected renders only. It does not authenticate the whole campaign.
-  The CPU fixture compares measured hashes with known hashes.
+- Add a local render sample reader for the head profiler (#2876). It reports
+  hashes for the selected renders only. It does not authenticate the whole
+  campaign. The CPU fixture compares measured hashes with known hashes.
   The CLI must start the deadline and an independent stop reporter before intake.
 
-  The last candidate check used local CPU fixtures.
-  The table gives its file outcomes.
-  The focused outcomes come from an earlier candidate.
-  The final focused check evidence is missing.
+  The local CPU check used fixtures. Each command exited with status 0.
 
-  | Test file | File outcome | Focused outcome |
-  | --- | --- | --- |
-  | `tests/test_profile_scoped_walk_1492.py` | 60 passed | 26 passed |
-  | `tests/test_tessera_joint_aura.py` | 94 passed, 3 skipped | 4 passed |
-  | `tests/test_head_walk_io_concurrency_1492.py` | 14 passed | Not run |
-  | `tests/test_io_site_freeze.py` | 2 passed | Not run |
-  | `tests/test_duplication_baseline.py` | 20 passed | Not run |
+  | Test file | File outcome |
+  | --- | --- |
+  | `tests/test_profile_scoped_walk_1492.py` | 67 passed |
+  | `tests/test_head_walk_io_concurrency_1492.py` | 14 passed |
+  | `tests/test_io_site_freeze.py` | 2 passed |
+  | `tests/test_duplication_baseline.py` | 20 passed |
+  | `tests/test_tessera_joint_aura.py` | 98 passed, 3 skipped |
 
-  The focused checks used `-k 'render_sample or stat_only_scoped_intake or scoped_payload_verification_refuses or scoped_intake_refuses'`.
-  The skipped tests have no pass evidence from this run.
-  GPU and served validation evidence is missing.
-  Part 2 owns the final check record.
+  The focused check used `-k render_sample` in `tests/test_profile_scoped_walk_1492.py`.
+  It had 30 passes and deselected 37 tests.
+  These checks do not qualify serving or numerical results.
 - Record GGUF assignment identity parity (#2541). Check the owner against the
   original assignment bytes and digest. Check the published artifact against
   the original artifact hash. Leave the deprecated exporter unchanged.

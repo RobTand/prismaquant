@@ -177,6 +177,7 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
                          max_trials, max_files, max_bytes):
     """Admit the campaign roster. Hash only the selected renders.
     Pass the parsed v1 manifest, its scope, and limits for all trials combined.
+    To verify the sample, supply one independent expected_sha256 per cell in manifest order.
     Start the deadline and stop reporter before input reads.
     Keep the stop reporter independent of the readers.
     Do not load a prepared head, create scratch, or read other payloads.
@@ -200,7 +201,8 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
             and all(type(index) is int for index in scope), "render sample scope needs two integers")
     scope = tuple(scope)
     manifest = digests.canonical_json(manifest, where="render sample manifest")
-    require(isinstance(manifest, dict) and set(manifest) == {"schema", "scope", "inputs", "cells"}
+    require(isinstance(manifest, dict)
+            and manifest.keys() - {"expected_sha256"} == {"schema", "scope", "inputs", "cells"}
             and manifest["schema"] == "prismaquant.render_sample.v1"
             and manifest["scope"] == list(scope)
             and all(type(index) is int for index in manifest["scope"]),
@@ -211,6 +213,13 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
         for cell in cells), "invalid render sample manifest cells")
     pairs = [tuple(cell) for cell in cells]
     require(pairs == sorted(set(pairs)), "render sample manifest cells must be unique and sorted")
+    expected = {}
+    if "expected_sha256" in manifest:
+        hashes = manifest["expected_sha256"]
+        require(isinstance(hashes, list) and len(hashes) == len(pairs)
+                and all(digests.is_sha256hex(value) for value in hashes),
+                "expected_sha256 must give one SHA-256 per manifest cell")
+        expected = dict(zip(pairs, hashes, strict=True))
     require(len(pairs) * trials <= max_files, "render sample plan exceeds max_files")
 
     data, started = _load_scoped_walk(
@@ -254,6 +263,7 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
                         file_stat_signature(path.lstat()) == signature, changed)
         except FileNotFoundError as exc:
             raise ValueError(f"render changed or is missing: {path}") from exc
+        require(not expected or sha256 == expected[pair], f"render digest mismatch: {path}")
         return {"cell": list(pair), "sha256": sha256, "bytes": signature[2] - remaining}
 
     hash_started = time.monotonic()
@@ -264,6 +274,7 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
         results.append(rows)
     return {"manifest_sha256": manifest_sha256, "inputs": manifest["inputs"],
             "verification": "sample-only", "scope": list(scope),
+            "digest_verification": "verified" if expected else "not-requested",
             "head_walk_workers": data.head_walk_workers, "hash_workers": hash_workers,
             "trials": results, "payload_files": sum(map(len, results)),
             "payload_bytes": sum(row["bytes"] for rows in results for row in rows),
