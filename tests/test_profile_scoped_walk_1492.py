@@ -474,6 +474,24 @@ def test_render_sample_reports_stable_measured_digests(render_sample, tmp_path, 
     assert {path: file_stat_signature(path.stat()) for path in tmp_path.rglob("*")} == before
 
 
+def test_render_sample_checks_supplied_digests(render_sample):
+    run, manifest, paths, opened = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    assert run().get("digest_verification") == "not-requested"
+    opened.clear()
+    expected = ["ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"]
+    with pytest.raises(ValueError, match="expected_sha256"):
+        run(manifest=manifest | {"expected_sha256": expected[:1]})
+    assert opened == []
+    report = run(manifest=manifest | {"expected_sha256": expected})
+    assert report["verification"] == "sample-only"
+    assert report["digest_verification"] == "verified"
+    assert opened == paths * 2
+    with pytest.raises(ValueError, match="render digest mismatch"):
+        run(manifest=manifest | {"expected_sha256": expected[::-1]})
+
+
 def test_render_sample_reads_only_the_selected_cell(render_sample):
     run, manifest, paths, opened = render_sample
     assert run is not None, "The tool has no render sample reader."
