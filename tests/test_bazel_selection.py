@@ -16,6 +16,7 @@ SPEC = importlib.util.spec_from_file_location('pq_bazel_selection', ROOT / 'tool
 selection = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(selection)
 TESTS = {'//tests:test_consumer', '//tests:test_unrelated'}
+BUILD_CHECK = [sys.executable, 'tools/bazel/build_files.py', '--check']
 
 
 def decision(changed, *, impacted=frozenset(), used=frozenset(), deleted=frozenset(), error=None):
@@ -565,9 +566,21 @@ def test_impacted_quarantined_rule_is_excluded_but_hosted_and_unknown_routes_are
 
 
 @pytest.fixture
-def planning_history(tmp_path, request):
-    """Make base and head revisions for the planner."""
+def planning_history(tmp_path, request, monkeypatch):
+    """Make base and head revisions. Stub the BUILD check for selection tests."""
     extra = getattr(request, 'param', None)
+    if extra != 'stale_build':
+        plan = selection.plan_revisions
+
+        def plan_with_current_builds(*args, runner=subprocess.run, **kwargs):
+            def planning_command(command, **options):
+                if command == BUILD_CHECK:
+                    return SimpleNamespace(returncode=0)
+                return runner(command, **options)
+
+            return plan(*args, runner=planning_command, **kwargs)
+
+        monkeypatch.setattr(selection, 'plan_revisions', plan_with_current_builds)
     root = tmp_path / 'repo'
     def git(*args):
         return subprocess.run(['git', *args], cwd=root, check=True,
@@ -615,6 +628,33 @@ def planning_history(tmp_path, request):
             'commit', '--quiet', '-m', content.strip())
         revisions.append(git('rev-parse', 'HEAD'))
     return root, revisions
+
+
+@pytest.mark.parametrize('planning_history', ['stale_build'], indirect=True)
+def test_plan_refuses_stale_build_before_query(tmp_path, planning_history, monkeypatch):
+    root, (_, head) = planning_history
+    calls = []
+
+    def planning_command(command, **kwargs):
+        calls.append(command)
+        if command == BUILD_CHECK:
+            assert kwargs['cwd'] == root
+            assert kwargs['env'] == selection.child_environment()
+            return SimpleNamespace(returncode=1, stderr='Generated files are stale: BUILD.bazel\n')
+        return subprocess.run(command, **kwargs)
+
+    population = selection.query_population([
+        {'rule': {'name': '//tests:test_consumer', 'ruleClass': 'py_test'}},
+    ], 'amd64')
+    def query(*args, **kwargs):
+        calls.append(['bazel', 'query'])
+        return {'population': population}
+
+    monkeypatch.setattr(selection, 'query_revision', query)
+    with pytest.raises(selection.SelectionError, match='Generated files are stale: BUILD.bazel'):
+        selection.plan_revisions(root, tmp_path / 'private', base=head, head=head, mode='pr',
+                                 runner=planning_command)
+    assert calls == [['git', 'rev-parse', 'HEAD'], BUILD_CHECK]
 
 
 @pytest.mark.parametrize('timed', [False, True])

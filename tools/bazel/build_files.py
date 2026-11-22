@@ -1424,17 +1424,37 @@ def main(argv=None):
         generated = generate(args.root, extra=extra)
     except GenerationError as error:
         sys.exit(f'Cannot generate BUILD files: {error}')
-    stale = []
-    for package, text in sorted(generated.items()) + sorted(extra.items()):
-        path = args.root / package / ('' if package in extra else 'BUILD.bazel')
-        if path.exists() and path.read_text() == text:
+    outputs = {(PurePosixPath(package) / 'BUILD.bazel').as_posix(): text
+               for package, text in generated.items()} | extra
+    stale = set()
+    for name, text in outputs.items():
+        path = args.root / name
+        if path.is_file() and path.read_text() == text:
             continue
         if args.check:
-            stale.append(str(path.relative_to(args.root)))
+            stale.add(name)
         else:
             path.write_text(text)
+    if args.check and not stale:
+        expected_paths = outputs.keys()
+        inventory = subprocess.run(
+            ['git', 'ls-files', '-zt', '--cached', '--others', '--', ':(glob)**/BUILD.bazel', *expected_paths],
+            cwd=args.root, capture_output=True, check=True).stdout.decode().split('\0')
+        tracked_generated_paths = set()
+        header = HEADER.encode()
+        for entry in filter(None, inventory):
+            status, name = entry[0], entry[2:]
+            if name not in expected_paths:
+                path = args.root / name
+                if name == HANDWRITTEN[0] + 'BUILD.bazel' or not path.is_file():
+                    continue
+                with path.open('rb') as stream:
+                    if stream.read(len(header)) != header:
+                        continue
+            (stale if status == '?' else tracked_generated_paths).add(name)
+        stale |= expected_paths ^ tracked_generated_paths
     if stale:
-        sys.exit('Generated files are stale: ' + ', '.join(stale) + f'\nFix: {FIX}')
+        sys.exit('Generated files are stale: ' + ', '.join(sorted(stale)) + f'\nFix: {FIX}')
     return 0
 
 

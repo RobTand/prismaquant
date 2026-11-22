@@ -9931,6 +9931,7 @@ pq_py_library(
         ".github/workflows/bazel-hosted.yml",
         ".github/workflows/gate.yml",
         "//tests:BUILD.bazel",
+        "//tools/bazel:build_files.py",
         "BUILD.bazel",
         "MODULE.bazel",
         "MODULE.bazel.lock",

@@ -557,6 +557,14 @@ def test_two_targets_with_one_name_refuse_generation():
         build_files.render_package('tests', [('x_lib', 'pq_py_library', {}), ('x_lib', 'pq_py_library', {})])
 
 
+def write_current_build_outputs(root):
+    write(root, {'tools/bazel/BUILD.bazel': '# Handwritten.\n', build_files.CYCLE_FILE: '{}\n'})
+    git(root, 'add', 'tools/bazel/BUILD.bazel', build_files.CYCLE_FILE)
+    assert build_files.main(['--root', str(root)]) == 0
+    git(root, 'add', 'BUILD.bazel', 'tests/BUILD.bazel')
+    assert build_files.main(['--check', '--root', str(root)]) == 0
+
+
 def test_check_names_each_stale_build_file_and_the_fix(tmp_path, monkeypatch):
     (tmp_path / 'tests').mkdir()
     (tmp_path / 'tests/BUILD.bazel').write_text('old\n')
@@ -568,6 +576,34 @@ def test_check_names_each_stale_build_file_and_the_fix(tmp_path, monkeypatch):
     assert build_files.CYCLE_FILE in str(stopped.value)
     assert 'tools/bazel/generate.sh' in str(stopped.value)
     assert (tmp_path / 'tests/BUILD.bazel').read_text() == 'old\n'
+
+
+@pytest.mark.parametrize('tracked', [True, False], ids=['tracked', 'untracked'])
+def test_check_rejects_retired_generated_build(indexed_repository, tracked):
+    root = indexed_repository
+    write_current_build_outputs(root)
+    path = 'retired/BUILD.bazel'
+    write(root, {path: build_files.HEADER})
+    if tracked:
+        git(root, 'add', path)
+    with pytest.raises(SystemExit, match=path):
+        build_files.main(['--check', '--root', str(root)])
+
+
+def test_check_rejects_untracked_current_output(indexed_repository):
+    root = indexed_repository
+    write_current_build_outputs(root)
+    git(root, 'rm', '--cached', 'tests/BUILD.bazel')
+    with pytest.raises(SystemExit, match='tests/BUILD.bazel'):
+        build_files.main(['--check', '--root', str(root)])
+
+
+def test_check_reports_generation_error(indexed_repository):
+    root = indexed_repository
+    write(root, {'tools/bazel/test_inputs.bzl': 'TEST_INPUTS = {\n    "//tests:test_scan": struct(\n'
+                 '        modules = ["tools/missing.py"],\n    ),\n}\n'})
+    with pytest.raises(SystemExit, match='Cannot generate BUILD files: .*tools/missing.py'):
+        build_files.main(['--check', '--root', str(root)])
 
 
 def test_a_target_that_reads_every_test_file_takes_one_glob_and_targets_are_in_hash_order():
