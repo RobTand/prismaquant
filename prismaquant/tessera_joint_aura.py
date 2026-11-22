@@ -581,17 +581,34 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
     """
     render, marker = Path(render), _render_origin_marker_path(render)
     if render.is_file():
-        if not marker.is_file():
-            return "encoded"
-        stamp = json.loads(marker.read_text())
-        _same(stamp.get("schema"), RENDER_ORIGIN_SCHEMA, f"{name}@{fmt}: render origin schema")
-        _same(stamp.get("render_origin"), "synthesized_from_wire",
-              f"{name}@{fmt}: marked render origin")
-        _same(stamp.get("unit"), name, f"{name}@{fmt}: marked render unit")
-        _same(stamp.get("format_name"), fmt, f"{name}@{fmt}: marked render format")
-        _same(stamp.get("wire_sha256"), record["blob_sha256"],
-              f"{name}@{fmt}: synthesized render names another wire")
-        return "synthesized_from_wire"
+        origin = "encoded"
+        if marker.is_file() or (require_existing_renders and marker.is_symlink()):
+            if require_existing_renders:
+                info = marker.lstat()
+                _require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1,
+                         f"render origin marker must be an unlinked regular file: {marker}")
+                flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                with os.fdopen(os.open(marker, flags), "rb", buffering=0) as handle:
+                    signature = _stat_signature(info)
+                    changed = f"render origin marker changed: {marker}"
+                    _same(_stat_signature(os.fstat(handle.fileno())), signature, changed)
+                    raw = handle.read(info.st_size)
+                    _same(len(raw), info.st_size, changed)
+                    _same(_stat_signature(os.fstat(handle.fileno())), signature, changed)
+                    _same(_stat_signature(marker.lstat()), signature, changed)
+                stamp = json.loads(raw)
+            else:
+                stamp = json.loads(marker.read_text())
+            _same(stamp.get("schema"), RENDER_ORIGIN_SCHEMA, f"{name}@{fmt}: render origin schema")
+            _same(stamp.get("render_origin"), "synthesized_from_wire",
+                  f"{name}@{fmt}: marked render origin")
+            _same(stamp.get("unit"), name, f"{name}@{fmt}: marked render unit")
+            _same(stamp.get("format_name"), fmt, f"{name}@{fmt}: marked render format")
+            _same(stamp.get("wire_sha256"), record["blob_sha256"],
+                  f"{name}@{fmt}: synthesized render names another wire")
+            origin = "synthesized_from_wire"
+        if not require_existing_renders or render.is_file():
+            return origin
     _require(not require_existing_renders,
              f"{name}@{fmt}: prepared render is missing. The loader will not synthesize it.")
     _require(Path(wire).is_file(), f"{name}@{fmt}: original decoded PWC shard missing")
@@ -1238,17 +1255,20 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             # The resume fence for this cell: enough identity to prove on the
             # next load that these bytes are the bytes this row was banked
             # from, at stat-and-digest cost rather than a re-walk.
-            marker = _render_origin_marker_path(target)
-            fences[fmt] = {"wire_size": wire_stat.st_size,
-                           "render_signature": list(_stat_signature(Path(target).stat())),
-                           "marker_sha256": (None if not marker.is_file()
-                                             else bytes_sha256hex(marker.read_bytes()))}
+            if head_root is not None:
+                marker = _render_origin_marker_path(target)
+                fences[fmt] = {"wire_size": wire_stat.st_size,
+                               "render_signature": list(_stat_signature(Path(target).stat())),
+                               "marker_sha256": (None if not marker.is_file()
+                                                 else bytes_sha256hex(marker.read_bytes()))}
         formats_row = (*sorted(anchors), "BF16")
-        return {"formats": formats_row, "cells": unit_cells, "synthesized_events": events,
-                "bank": {"schema": HEAD_WALK_STATE_SCHEMA,
-                         "journal_file_sha256": _sha(unit_path(parts, name)),
-                         "formats": list(formats_row), "cells": unit_cells,
-                         "unit_files": fences}}
+        result = {"formats": formats_row, "cells": unit_cells, "synthesized_events": events}
+        if head_root is not None:
+            result["bank"] = {"schema": HEAD_WALK_STATE_SCHEMA,
+                              "journal_file_sha256": _sha(unit_path(parts, name)),
+                              "formats": list(formats_row), "cells": unit_cells,
+                              "unit_files": fences}
+        return result
 
     pending_bank = []
     last_bank = time.monotonic()

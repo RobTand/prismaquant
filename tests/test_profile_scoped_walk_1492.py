@@ -330,34 +330,59 @@ def test_sigterm_stops_a_process_with_blocked_workers_after_one_report(tmp_path)
 
 @pytest.fixture
 def render_sample(tmp_path, monkeypatch):
+    return _make_render_sample(tmp_path, monkeypatch)
+
+
+def _make_render_sample(tmp_path, monkeypatch, variant=None):
     sample = getattr(head, "render_sample_intake", None)
     if sample is None:
         return None, None, None, None
 
     import builtins
     import io
+    import json
     import os
     from pathlib import Path
 
     from tests import campaign_sample_fixtures
     from prismaquant.render_cache_paths import cache_weight_filename
 
-    inputs, names, fmt, *_ = campaign_sample_fixtures.fixture(tmp_path)
+    inputs, names, fmt, payload, states = campaign_sample_fixtures.fixture(tmp_path)
     cells = [[name, fmt] for name in sorted(names)]
     paths = [tmp_path / "campaign/rows/row-0000/cache" / cache_weight_filename(name, fmt)
              for name, fmt in cells]
-    for path, payload in zip(paths, (b"abc", b"hello")):
-        path.write_bytes(payload)
+    for path, body in zip(paths, (b"abc", b"hello"), strict=True):
+        path.write_bytes(body)
+    name = cells[0][0]
+    record = states[name]["wire_records"][fmt]
+    marker = bridge._render_origin_marker_path(paths[0])
+    wire = Path(payload["provenance"]["wire_dir"]) / record["file"]
+    if variant == "symlink":
+        marker.symlink_to(wire)
+    elif variant == "hardlink":
+        marker.hardlink_to(wire)
+    elif variant in {"marked", "missing"}:
+        marker.write_text(json.dumps({
+            "schema": bridge.RENDER_ORIGIN_SCHEMA, "render_origin": "synthesized_from_wire",
+            "unit": name, "format_name": fmt, "wire_file": record["file"],
+            "wire_sha256": record["blob_sha256"],
+        }))
+    scope = (0, len(paths))
     manifest = {"schema": "prismaquant.render_sample.v1", "inputs": inputs,
-                "scope": [0, 2], "cells": cells}
+                "scope": list(scope), "cells": cells}
     config = {"inputs": {**inputs, "candidate_overlay": {"path": str(tmp_path / "absent")}}}
     opened = []
 
     def watch(real_open):
         def record(path, *args, **kwargs):
-            if isinstance(path, (str, Path)):
-                path = Path(path)
+            if not isinstance(path, int):
+                path = Path(os.fsdecode(path))
                 assert path.suffix != ".tessera", "The reader opened a wire payload."
+                if path == marker:
+                    if variant == "missing":
+                        paths[0].unlink(missing_ok=True)
+                    if path.exists():
+                        assert not path.samefile(wire), "The marker opened a wire payload."
                 if path in paths:
                     opened.append(path)
             return real_open(path, *args, **kwargs)
@@ -368,11 +393,46 @@ def render_sample(tmp_path, monkeypatch):
 
     def run(*, reader=None, **changes):
         return sample(config | {"reader": reader},
-                      **({"manifest": manifest, "scope": (0, 2), "workers": 1,
+                      **({"manifest": manifest, "scope": scope, "workers": 1,
                           "hash_workers": 1, "trials": 2, "max_trials": 2,
                           "max_files": 4, "max_bytes": 16} | changes))
 
     return run, manifest, paths, opened
+
+
+def test_render_sample_admits_marker_metadata_before_hashing(tmp_path, monkeypatch):
+    run, manifest, paths, opened = _make_render_sample(tmp_path, monkeypatch, "marked")
+    assert run is not None, "The tool has no render sample reader."
+    with pytest.raises(ValueError, match="manifest does not match admitted inputs"):
+        run(manifest={**manifest, "inputs": {}})
+    assert opened == []
+    with pytest.raises(ValueError, match="max_bytes"):
+        run(max_bytes=15)
+    assert opened == []
+    result = run()
+    assert result["trials"][0][0]["sha256"] == (
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    assert opened == paths * 2
+
+
+def test_render_sample_refuses_a_marker_link_to_wire_before_reading(tmp_path, monkeypatch):
+    for link in ("symlink", "hardlink"):
+        with monkeypatch.context() as patch:
+            run, _, _, opened = _make_render_sample(tmp_path / link, patch, link)
+            assert run is not None, "The tool has no render sample reader."
+            with pytest.raises(ValueError, match="render origin marker must be an unlinked regular file"):
+                run()
+            assert opened == []
+
+
+def test_render_sample_refuses_disappearance_while_reading_a_marker(tmp_path, monkeypatch):
+    run, manifest, paths, opened = _make_render_sample(tmp_path, monkeypatch, "missing")
+    assert run is not None, "The tool has no render sample reader."
+    with pytest.raises((ValueError, FileNotFoundError)) as refusal:
+        run(manifest={**manifest, "cells": manifest["cells"][1:]})
+    assert "prepared render is missing" in str(refusal.value)
+    assert opened == []
+    assert not paths[0].exists()
 
 
 def test_render_sample_does_not_load_declared_reader(render_sample, monkeypatch):
@@ -561,6 +621,83 @@ def test_render_sample_overlaps_reads_within_the_hash_worker_limit(render_sample
     result = run(hash_workers=2)
     assert widths == [2, 2] and peak == 2
     assert [[row["cell"] for row in trial] for trial in result["trials"]] == [manifest["cells"]] * 2
+
+
+def test_render_sample_queues_a_read_until_a_hash_slot_is_free(tmp_path, monkeypatch):
+    import os
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    sample = getattr(head, "render_sample_intake", None)
+    assert sample is not None, "The tool has no render sample reader."
+    paths = [tmp_path / name for name in ("a", "b", "c")]
+    for path, body in zip(paths, (b"abc", b"hello", b"x")):
+        path.write_bytes(body)
+    inputs = {"fixture": "admitted"}
+    cells = {(path.name, "F"): {"render": str(path)} for path in paths}
+    manifest = {"schema": "prismaquant.render_sample.v1", "inputs": inputs,
+                "scope": [0, 3], "cells": [list(cell) for cell in cells]}
+    data = SimpleNamespace(cells=cells, inputs=inputs, head_walk_workers=3)
+    monkeypatch.setattr(head, "_load_scoped_walk", lambda *args: (data, time.monotonic()))
+    slots = {path.stat().st_ino: slot for slot, path in enumerate(paths)}
+    entered = [threading.Event() for _ in paths]
+    release = [threading.Event() for _ in paths[:2]]
+    lock = threading.Lock()
+    active = peak = 0
+    fdopen, submit = os.fdopen, ThreadPoolExecutor.submit
+
+    @contextmanager
+    def hold_reads(*args, **kwargs):
+        with fdopen(*args, **kwargs) as handle:
+            slot = slots.get(os.fstat(handle.fileno()).st_ino)
+            if slot is None:
+                yield handle
+                return
+
+            def read(size):
+                nonlocal active, peak
+                with lock:
+                    active += 1
+                    peak = max(peak, active)
+                try:
+                    body = handle.read(size)
+                    entered[slot].set()
+                    if slot < len(release):
+                        assert release[slot].wait(10), "The test did not release the read."
+                    return body
+                finally:
+                    with lock:
+                        active -= 1
+
+            stream = Mock(wraps=handle)
+            stream.read.side_effect = read
+            yield stream
+
+    def check_queue(pool, walk, item):
+        if not isinstance(item, tuple) or item[0] != tuple(manifest["cells"][2]):
+            return submit(pool, walk, item)
+        try:
+            assert entered[0].wait(10) and entered[1].wait(10)
+            queued = submit(pool, walk, item)
+            assert pool._max_workers == 2
+            assert not queued.running() and not queued.done() and not entered[2].is_set()
+            release[1].set()
+            assert entered[2].wait(10), "The queued read did not start."
+            queued.result(timeout=10)
+            return queued
+        finally:
+            for event in release:
+                event.set()
+
+    monkeypatch.setattr(os, "fdopen", hold_reads)
+    monkeypatch.setattr(ThreadPoolExecutor, "submit", check_queue)
+    report = sample({"inputs": inputs}, manifest=manifest, scope=(0, 3), workers=3,
+                    hash_workers=2, trials=1, max_trials=1, max_files=3, max_bytes=9)
+    assert peak == 2
+    assert [row["cell"] for row in report["trials"][0]] == manifest["cells"]
 
 
 @pytest.mark.parametrize("change", ["extend", "replace"])
