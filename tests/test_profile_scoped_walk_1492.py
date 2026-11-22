@@ -484,6 +484,58 @@ def test_render_sample_reads_only_the_selected_cell(render_sample):
     assert opened == paths[1:] * 2
 
 
+@pytest.mark.parametrize("case", ["valid", "invalid_manifest", "over_budget",
+                                  "wire_symlink", "wire_hardlink", "render_symlink"])
+def test_render_sample_separates_marker_metadata_from_payload(render_sample, tmp_path, monkeypatch, case):
+    import builtins
+    import hashlib
+    import io
+    import json
+    import os
+    from pathlib import Path
+
+    run, manifest, paths, opened = render_sample
+    cell = manifest["cells"][0]
+    name, fmt = cell
+    wire = tmp_path / "merged/cache/wire" / (name + ".tessera")
+    marker = bridge._render_origin_marker_path(paths[0])
+    if case == "wire_symlink":
+        marker.symlink_to(wire)
+    elif case == "wire_hardlink":
+        marker.hardlink_to(wire)
+    elif case == "render_symlink":
+        marker.symlink_to(paths[0])
+    else:
+        marker.write_text(json.dumps({"schema": bridge.RENDER_ORIGIN_SCHEMA,
+            "render_origin": "synthesized_from_wire", "unit": name, "format_name": fmt,
+            "wire_file": wire.name, "wire_sha256": hashlib.sha256(f"inert {name}".encode()).hexdigest()}))
+
+    def guard(real_open):
+        def open_file(path, *args, **kwargs):
+            if not isinstance(path, int) and Path(os.fsdecode(path)) == marker:
+                assert case in {"valid", "invalid_manifest", "over_budget"}, (
+                    "The sample opened a payload through the marker.")
+            return real_open(path, *args, **kwargs)
+        return open_file
+
+    for module in (builtins, io, os):
+        monkeypatch.setattr(module, "open", guard(module.open))
+
+    selected = [[name, "unadmitted"]] if case == "invalid_manifest" else [cell]
+    limits = dict(manifest={**manifest, "cells": selected}, max_files=1, trials=1,
+                  max_bytes=2 if case == "over_budget" else 3)
+    if case == "valid":
+        assert run(**limits)["trials"] == [[{"cell": cell, "bytes": 3,
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]]
+        assert opened == paths[:1]
+    else:
+        message = {"invalid_manifest": "manifest", "over_budget": "max_bytes"}.get(
+            case, "render origin marker")
+        with pytest.raises(ValueError, match=message):
+            run(**limits)
+        assert opened == []
+
+
 def test_render_sample_stops_reading_at_the_planned_size(render_sample, monkeypatch):
     import os
     from contextlib import contextmanager
