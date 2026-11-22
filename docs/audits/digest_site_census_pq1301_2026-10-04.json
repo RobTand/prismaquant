@@ -38822,7 +38822,8 @@
     "retention_evidence": null,
     "epic_key": "k2",
     "epic": "prismaquant#2541",
-    "cohort": "json-publication:sorted-json:prismaquant/select_validated_frontier.py::main@1173:49"
+    "cohort": "json-publication:sorted-json:prismaquant/select_validated_frontier.py::main@1173:49",
+    "implemented_route": "prismaquant.digests.DIRECT_UTF8_STRICT.text"
    },
    {
     "id": "sorted-json:prismaquant/select_validated_frontier.py::main@1286:33",

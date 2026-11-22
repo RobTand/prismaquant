@@ -25,7 +25,7 @@ from prismaquant.footprint import (
     assignment_serialization_sha256,
     whole_artifact_budget_from_assignment_payload,
 )
-from .digests import DIRECT_ASCII_INDENT2_LAX, text_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, DIRECT_UTF8_STRICT, text_sha256hex
 
 
 def _load_json(path: str | Path):
@@ -1209,13 +1209,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     resolved_payload = selected.get("resolved_assignment_payload")
     if isinstance(resolved_payload, Mapping):
         selected_payload = dict(resolved_payload)
-        resolved_payload_sha256 = text_sha256hex(json.dumps(
-                selected_payload,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-                allow_nan=False,
-            ))
+        resolved_payload_sha256 = text_sha256hex(
+            DIRECT_UTF8_STRICT.text(selected_payload)
+        )
         if selected.get("resolved_assignment_payload_sha256") != (
             resolved_payload_sha256
         ):
