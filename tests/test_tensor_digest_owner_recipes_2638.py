@@ -30,7 +30,7 @@ TOKEN_SCOPE = "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256"
 # Canonical JSON identity after the token route, native migration, and sealed
 # buffer digest consolidation. Retained byte-contract goldens stay fixed.
 # #3457 drops three same-name helper entries of its deleted modules.
-TOKEN_ONLY_BASELINE_SHA256 = "970f7cb5e10603bd2b32f21f709e1660ddced9119d5a85b7345d918846435f4b"
+TOKEN_ONLY_BASELINE_SHA256 = "96493e176e07574f1ae48b858db32e3fa958cbc6f3fa30dcf37a23c8c50fe034"
 # Supplied main 6d8288ad had 277 primitive scopes. The migration removed
 # retired PB tooling in 8c336f2e3, 728a6e8fd, a4cf01ccc, adaf3d9f6,
 # 989eaa5fc and cb07374d5. 3ffa08ae7 consolidated SealedBuffer.seal;
@@ -39,6 +39,11 @@ TOKEN_ONLY_BASELINE_SHA256 = "970f7cb5e10603bd2b32f21f709e1660ddced9119d5a85b734
 # #3448 drops the four scopes of its deleted probe-resume modules.
 MAIN_SCOPES_SHA256 = "3fc8e85296ae0bf9e0f3b7861cbc346d855efa082fab64d3c444a24eab9f1c21"
 MIGRATION_REMOVED_SCOPES = {
+    "hashlib:prismaquant/allocator.py::main", "hashlib:tools/build_glm_derivative_image.py::main",
+    "hashlib:tools/capture_glm_routed_layers.py::main.publish",
+    "hashlib:tools/capture_glm_routing_replay.py::main",
+    "hashlib:tools/glm_mtp_capture.py::projection_phase",
+    "hashlib:tools/materialize_wikitext_corpus.py::main",
     'hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob',
     "hashlib:prismaquant/io_engine.py::SealedBuffer.seal",
     "hashlib:prismaquant/joint_forward_resume.py::_read",
@@ -160,7 +165,7 @@ def test_token_route_removes_only_enumerated_main_baseline_scopes():
     removals = {TOKEN_SCOPE, *MIGRATION_REMOVED_SCOPES}
     assert removals <= set(main_sites)
     assert set(baseline['primitive_digest_sites']) == set(main_sites) - removals
-    assert len(baseline['primitive_digest_sites']) == 223
+    assert len(baseline['primitive_digest_sites']) == 217
     canonical = json.dumps(baseline, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(canonical).hexdigest() == TOKEN_ONLY_BASELINE_SHA256, (
         "regenerate the reviewed native baseline after classifying source removals; "

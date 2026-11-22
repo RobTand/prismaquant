@@ -3,7 +3,6 @@ import pickle
 import sys
 from hashlib import sha256
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import torch
@@ -154,12 +153,13 @@ def _records(case):
 
 def test_allocator_publication_recorded_values(case, monkeypatch, capsysbinary):
     compact = []
+    original = allocator.bytes_sha256hex
 
     def record_sha256(data):
         compact.append(data)
-        return sha256(data)
+        return original(data)
 
-    monkeypatch.setattr(allocator, "hashlib", SimpleNamespace(sha256=record_sha256))
+    monkeypatch.setattr(allocator, "bytes_sha256hex", record_sha256)
     inputs = set(Path().rglob("*"))
     _run(case)
     captured = capsysbinary.readouterr()

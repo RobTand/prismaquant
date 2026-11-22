@@ -2367,6 +2367,7 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/calibration_data",
         ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/digests",
         ":prismaquant/glm_routing_replay",
         ":prismaquant/joint_cost_quantum",
         ":prismaquant/matmul_arithmetic",
@@ -4359,6 +4360,7 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/calibration_data",
         ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/digests",
         ":prismaquant/joint_cost_quantum",
         ":prismaquant/model_runtime",
         "@pq_pip//torch",
@@ -10212,7 +10214,12 @@ pq_py_library(
     srcs = [
         "tools/materialize_wikitext_corpus.py",
     ],
+    data = [
+        "tools/materialize_wikitext_corpus.py",
+    ],
     deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
         "@pq_pip//datasets",
     ],
 )
