@@ -51060,6 +51060,7 @@ pq_py_library(
         "//:pytest.ini",
         "//:tools/tessera_campaign_container.py",
         "//:uv.lock",
+        "//tools/bazel:build_files.py",
         "//tools/bazel:runtime.py",
         "BUILD.bazel",
         "test_bazel_selection.py",
@@ -63644,6 +63645,7 @@ pq_py_library(
     data = [
         "//:BUILD.bazel",
         "//:files",
+        "//tools/bazel:BUILD.bazel",
         "//tools/bazel:files",
         ":files",
         "BUILD.bazel",

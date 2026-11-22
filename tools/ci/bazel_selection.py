@@ -401,6 +401,10 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
 
     if git('rev-parse', 'HEAD').strip() != head:
         raise SelectionError('planner checkout has the wrong head')
+    result = runner([sys.executable, 'tools/bazel/build_files.py', '--check'],
+        cwd=root, env=child_environment(), text=True, capture_output=True, check=False)
+    if result.returncode:
+        raise SelectionError(f'BUILD check failed: {result.stderr.strip()}')
     status, direct = None, False
     if mode == 'pr':
         try:
