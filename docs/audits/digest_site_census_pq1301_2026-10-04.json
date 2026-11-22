@@ -1174,6 +1174,7 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "_cb_cache_tensor_identity",
    "site": "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity",
+   "note": "See the #2638 retention for hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13.",
    "usage": "arg:hexdigest;persist"
   },
   {
@@ -1188,6 +1189,7 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "_source_weight_value_identity",
    "site": "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity",
+   "note": "See the #2638 retention for hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13.",
    "usage": "arg:hexdigest;persist"
   },
   {
@@ -1444,6 +1446,7 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "tensor_payload_sha256",
    "site": "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256",
+   "note": "See the #2638 retention for hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13.",
    "usage": "arg:hexdigest;persist"
   },
   {
@@ -13483,13 +13486,16 @@
     },
     "contract_kind": "tensor-view-stream",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Keep the bounded byte views and the four-field loader receipt.",
+    "retention_evidence": {
+     "reference": "tests/test_render_identity_once_1192.py::test_the_loader_hash_equals_the_main_thread_hash",
+     "contract": "The receipt contains shape, dtype, logical_bytes, and content_sha256. SHA-256 reads flattened CPU memoryviews in 8 MiB windows. Empty input feeds no bytes."
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "tensor-view-stream:hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13",
@@ -13577,13 +13583,16 @@
     },
     "contract_kind": "fp32-tensor-stream",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Keep the bounded FP32 conversion and the shape and digest tuple.",
+    "retention_evidence": {
+     "reference": "tests/test_tensor_digest_retention_2638.py::test_source_weight_digest_recurses_before_fp32_conversion",
+     "contract": "The iterator recurses in C order if a leading slice is too large. Each CPU FP32 conversion receives at most 4,194,304 elements. The digest reads little-endian f4 bytes in C order. The function returns shape and digest as a tuple."
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "fp32-tensor-stream:hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/proposal_validation.py::_bootstrap_differences@502:21",
@@ -14551,13 +14560,16 @@
     },
     "contract_kind": "device-tensor-chunks",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Keep the caller's CPU window size and the payload-only digest.",
+    "retention_evidence": {
+     "reference": "tests/test_stage_a_chain_seed.py::test_the_plane_distance_of_two_seeds",
+     "contract": "Flatten contiguous data. Divide the caller's byte limit by the element size and use a minimum step of one element. The default limit is 64 MiB. Feed CPU windows as NumPy byte views. Do not allocate a whole-payload bytes object."
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "device-tensor-chunks:hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/stage_b_prep_io.py::_hash_range@100:13",
@@ -133327,22 +133339,6 @@
     ]
    },
    {
-    "id": "tensor-view-stream:hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/production_weight_cache.py",
-    "calls": [
-     "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13"
-    ]
-   },
-   {
-    "id": "fp32-tensor-stream:hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/production_weight_cache.py",
-    "calls": [
-     "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13"
-    ]
-   },
-   {
     "id": "json-publication:supplemental-json:prismaquant/production_weight_cache.py::fill_packed_expert_cache_entries._persist_expert_sidecar@7622:23",
     "epic": "prismaquant#2542",
     "module": "prismaquant/production_weight_cache.py",
@@ -133588,14 +133584,6 @@
     "module": "prismaquant/stage_a_chain_resume.py",
     "calls": [
      "sorted-json:prismaquant/stage_a_chain_resume.py::apply_chain_resume@570:15"
-    ]
-   },
-   {
-    "id": "device-tensor-chunks:hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/stage_a_chain_seed.py",
-    "calls": [
-     "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13"
     ]
    },
    {
@@ -138366,6 +138354,150 @@
     "result": "292 passed, 1 CUDA-only skip. Baseline regeneration is unchanged: 1 near-duplicate pair, 142 same-name groups, 304 gated primitive digest sites. GPU behavior was not verified.",
     "test_evidence": "[Test evidence {\"artifacts\":{\"stderr\":{\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"stdout\":{\"digest\":\"0bb47c35e7fe6d8be9c09f742709683bf49c15ba384e4a926548c91c14265615\",\"size\":1949}},\"operation\":\"56dec618979c825f65dc8629d7e5433637cba38e949ef65a7b71049571a4700f\",\"receipt\":\"eba9a53189903bdd5bbf6cffbe6a005622eb8a35823f9f863212489f7c238c16\"}]"
    },
+   "tensor_retention_2638": {
+    "issue": "prismaquant#3020",
+    "inspected_commit": "ac54a9572ea886429d92f2f71cfe785bb2fda663",
+    "scope": "Recheck only these eight calls against the integrated checkout. Keep the #2540 source identities and coordinates as historical evidence. Do not use them as a current freshness check. This recheck does not regenerate the repository census.",
+    "snapshot_source_sha256": "fda716aca2ed601ea1652b42fdbedc1e27f289f1867e3e2878091e56ada47ab9",
+    "owner_comparison": "tensor_identity acquires one contiguous CPU tensor and makes whole-payload host bytes. It returns dtype, shape, and sha256. tensor_hash_update adds shape and dtype text before the payload. Neither preserves the retained acquisition and result contracts. The source weight FP32 conversion and the token int32 conversion already exist. This audit adds no conversion or owner recipe.",
+    "base_failure": "tests/test_tensor_digest_retention_2638.py::test_current_tensor_retention_decisions failed with AssertionError: Add the current tensor revalidation.",
+    "validation": {
+     "candidate": "310 tests passed in the pinned CUDA box. One Tessera test skipped because this pin publishes the seal and the unavailable-API case does not apply.",
+     "token_node": "tests/test_tessera_campaign.py::test_the_token_sha_identifies_the_calibration_draw passed.",
+     "cuda_recheck": "All five CUDA cases selected by -k cuda in tests/test_tensor_digests_1384.py passed. No selected case skipped.",
+     "baseline": "The baseline writer completed. All 20 baseline tests passed after regeneration. The regenerated scan added no entries to the integrated baseline. It dropped 26 helper entries and 49 primitive site entries. The audit keeps the integrated baseline to exclude those unrelated reductions."
+    },
+    "qualification": "The audit changes no runtime pin or algorithm. It does not qualify serving or numerical performance.",
+    "source_evidence": {
+     "stage-a": {
+      "definitions": {"prismaquant/stage_a_chain_seed.py": ["tensor_payload_sha256"]},
+      "ast_sha256": "c66e01577e29c08e32776230774d7af61081d0b62756dbac08a8a3bcdd6144f8"
+     },
+     "codebook": {
+      "definitions": {"prismaquant/production_weight_cache.py": ["_cb_cache_tensor_identity", "_TENSOR_DIGEST_CHUNK_BYTES"]},
+      "ast_sha256": "47ccdc6561b47201be14d5bd1b106ac30b628b0dce55727b74243f919dca82a1"
+     },
+     "source-weight": {
+      "definitions": {"prismaquant/production_weight_cache.py": ["_source_weight_value_identity"]},
+      "ast_sha256": "fb831b5d1f763c0e4ce76fbf6c088596567945819b21c5fb7ca604288834d225"
+     },
+     "export": {
+      "definitions": {"prismaquant/tessera_export_lane.py": ["hessian_capture_sha256", "HESSIAN_CAPTURE_SHA256_SCHEMA", "PRICED_HESSIAN_IDENTITY_FIELDS", "CAPTURE_CONTEXT_FIELDS", "_capture_context_fields", "_tessera_capture_context", "_require_capture_context_roster", "_is_hessian_reference", "_tessera_capture_seal", "_crosscheck_capture_seal"]},
+      "ast_sha256": "66e725e3e2380eb42c27b4e6a7f26b5b43aa0478abef44904e5c3125e102e31c"
+     },
+     "token": {
+      "definitions": {"prismaquant/tessera_hessian.py": ["token_ids_sha256"]},
+      "ast_sha256": "869dab83ac6210205ca49c655240813168b0ba7a5e27b9c8f356c3adf46e4186"
+     },
+     "tensor-comparison": {
+      "definitions": {
+       "prismaquant/tensor_digests.py": ["tensor_identity", "tensor_hash_update", "_host", "_raw"],
+       "prismaquant/digests.py": ["bytes_sha256hex"]
+      },
+      "ast_sha256": "cbfcdfa8dd673b7731df5e66fa595909042f525db7800329a10a53b9955d438e"
+     },
+     "host-bytes": {
+      "definitions": {"prismaquant/tensor_digests.py": ["tensor_host_bytes", "_host", "_raw"]},
+      "ast_sha256": "5ba86dd0fa30860a28c3196a933fb2db682ff3e14a36c7c29a035125b197f244"
+     },
+     "token-int32": {
+      "definitions": {"prismaquant/tensor_digests.py": ["token_ids_int32_sha256"]},
+      "ast_sha256": "48b5e4ef459862745c3a8d647451b38bd3b138d4b44ad846c7e78d20879acd21"
+     }
+    },
+    "calls": [
+     {
+      "historical_id": "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13",
+      "caller": "stage-a",
+      "owner": "tensor-comparison",
+      "disposition": "retain",
+      "owner_route": null,
+      "checks": [
+       "tests/test_stage_a_chain_seed.py::test_the_plane_distance_of_two_seeds",
+       "tests/test_tensor_digest_feeds_2638.py::test_tensor_digest_feeds_are_bounded",
+       "tests/test_tensor_digest_owner_recipes_2638.py::test_the_chunked_payload_matches_its_golden_at_any_chunk_width"
+      ]
+     },
+     {
+      "historical_id": "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13",
+      "caller": "codebook",
+      "owner": "tensor-comparison",
+      "disposition": "retain",
+      "owner_route": null,
+      "checks": [
+       "tests/test_render_identity_once_1192.py::test_the_loader_hash_equals_the_main_thread_hash",
+       "tests/test_pwc_file_load_receipts.py::test_receipt_hashes_exact_single_read_and_tensor",
+       "tests/test_tensor_digest_feeds_2638.py::test_tensor_digest_feeds_are_bounded",
+       "tests/test_tensor_digest_owner_recipes_2638.py::test_the_view_stream_identity_matches_its_golden",
+       "tests/test_tensor_digest_owner_recipes_2638.py::test_the_view_stream_identity_covers_the_empty_tensor"
+      ]
+     },
+     {
+      "historical_id": "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13",
+      "caller": "source-weight",
+      "owner": "tensor-comparison",
+      "disposition": "retain",
+      "owner_route": null,
+      "checks": [
+       "tests/test_streamed_cost_checkpoints.py::test_production_anchor_stock_plan_binds_source_identity_lazily",
+       "tests/test_tensor_digest_retention_2638.py::test_source_weight_digest_recurses_before_fp32_conversion",
+       "tests/test_tensor_digest_feeds_2638.py::test_source_weight_value_identity_bounds_fp32_feeds",
+       "tests/test_tensor_digest_owner_recipes_2638.py::test_the_fp32_stream_matches_its_golden"
+      ]
+     },
+     {
+      "historical_id": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1605:13",
+      "caller": "export",
+      "owner": "host-bytes",
+      "disposition": "retain",
+      "payload_route": "prismaquant.tensor_digests.tensor_host_bytes",
+      "contract": "Fold units in sorted name order. Put a NUL before and after each name. Feed the ASCII unit hexdigest after the second NUL. Reference captures check provenance and seal the committed units. Refuse a roster mismatch. Refuse disagreement with the independent Tessera seal when the API is available.",
+      "checks": [
+       "tests/test_tensor_digest_retention_2638.py::test_export_capture_hash_matches_the_framed_bytes",
+       "tests/test_tessera_hessian_reference_handoff.py::test_row_handoff_has_exact_old_seal_and_no_h_sidecar",
+       "tests/test_tessera_priced_export_inputs.py::test_a_capture_with_the_wrong_identity_refuses",
+       "tests/test_tessera_priced_export_inputs.py::test_a_capture_context_field_our_roster_lacks_refuses",
+       "tests/test_tessera_priced_export_inputs.py::test_a_drift_between_the_two_seal_rules_refuses",
+       "tests/test_tessera_priced_export_inputs.py::test_the_digest_rule_is_tesseras_capture_seal",
+       "tests/test_tessera_priced_export_inputs.py::test_the_crosscheck_is_reported_unavailable_at_a_pre_seal_pin"
+      ]
+     },
+     {
+      "historical_id": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1611:15",
+      "caller": "export",
+      "owner": "host-bytes",
+      "disposition": "retain",
+      "payload_route": "prismaquant.tensor_digests.tensor_host_bytes",
+      "contract": "Hash each framed unit payload separately. Delegate the contiguous payload bytes to tensor_host_bytes.",
+      "checks": ["tests/test_tensor_digest_retention_2638.py::test_export_capture_hash_matches_the_framed_bytes", "tests/test_tessera_priced_export_inputs.py::test_the_digest_rule_covers_content_and_capture_context"]
+     },
+     {
+      "historical_id": "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1606:18",
+      "caller": "export",
+      "owner": "host-bytes",
+      "disposition": "retain",
+      "contract": "Start the capture hash with sorted JSON for the schema and capture identity. Use default=str.",
+      "checks": ["tests/test_tensor_digest_retention_2638.py::test_export_capture_hash_matches_the_framed_bytes", "tests/test_tessera_priced_export_inputs.py::test_the_digest_rule_covers_content_and_capture_context"]
+     },
+     {
+      "historical_id": "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1612:20",
+      "caller": "export",
+      "owner": "host-bytes",
+      "disposition": "retain",
+      "contract": "Start each unit hash with sorted dtype and shape JSON. Feed one NUL before the payload.",
+      "checks": ["tests/test_tensor_digest_retention_2638.py::test_export_capture_hash_matches_the_framed_bytes", "tests/test_tessera_priced_export_inputs.py::test_the_digest_rule_covers_content_and_capture_context"]
+     },
+     {
+      "historical_id": "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256@114:13",
+      "caller": "token",
+      "owner": "token-int32",
+      "disposition": "existing-owner-route",
+      "owner_route": "prismaquant.tensor_digests.token_ids_int32_sha256",
+      "contract": "The caller passes the original batches. The owner converts each batch to int32. It hashes unframed bytes in caller order. #3012 supplies this route. The historical token gap and cohort stay in the snapshot.",
+      "checks": ["tests/test_tessera_campaign.py::test_the_token_sha_identifies_the_calibration_draw"]
+     }
+    ]
+   },
    "limit": "The audit records source contracts. It does not qualify migration bytes, GPU work, serving, or performance."
   },
   "summary": {
@@ -138383,12 +138515,12 @@
    },
    "supplemental_calls": 275,
    "mutable_modules": 203,
-   "eligible_cohorts": 646,
+   "eligible_cohorts": 643,
    "calls_by_disposition": {
     "migrate-exact-route": 270,
-    "retain": 31,
+    "retain": 34,
     "owner-implementation": 16,
-    "add-exact-owner-recipe": 103
+    "add-exact-owner-recipe": 100
    },
    "modules_by_epic": {
     "k2": 124,
