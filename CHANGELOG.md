@@ -25,12 +25,28 @@
   `ReadStream.paused()` no longer returns while a worker still holds that value.
 
 ### Added
-- Add a local render sample reader for the head profiler. It checks only the
-  manifest's selected renders. It does not authenticate the whole campaign.
+- Add a local render sample reader for the head profiler. It reports hashes
+  for the selected renders only. It does not authenticate the whole campaign.
+  The CPU fixture compares measured hashes with known hashes.
   The CLI must start the deadline and an independent stop reporter before intake.
-  CPU fixture check: `python -m py_compile prismaquant/tessera_joint_aura.py tools/profile_stage_b_head.py tests/test_profile_scoped_walk_1492.py && python -m pytest -q tests/test_profile_scoped_walk_1492.py`.
-  Compilation succeeded. The fixture file passed all 55 tests. This check does
-  not qualify GPU or served behavior.
+
+  The last candidate check used local CPU fixtures.
+  The table gives its file outcomes.
+  The focused outcomes come from an earlier candidate.
+  The final focused check evidence is missing.
+
+  | Test file | File outcome | Focused outcome |
+  | --- | --- | --- |
+  | `tests/test_profile_scoped_walk_1492.py` | 60 passed | 26 passed |
+  | `tests/test_tessera_joint_aura.py` | 94 passed, 3 skipped | 4 passed |
+  | `tests/test_head_walk_io_concurrency_1492.py` | 14 passed | Not run |
+  | `tests/test_io_site_freeze.py` | 2 passed | Not run |
+  | `tests/test_duplication_baseline.py` | 20 passed | Not run |
+
+  The focused checks used `-k 'render_sample or stat_only_scoped_intake or scoped_payload_verification_refuses or scoped_intake_refuses'`.
+  The skipped tests have no pass evidence from this run.
+  GPU and served validation evidence is missing.
+  Part 2 owns the final check record.
 - Record GGUF assignment identity parity (#2541). Check the owner against the
   original assignment bytes and digest. Check the published artifact against
   the original artifact hash. Leave the deprecated exporter unchanged.
