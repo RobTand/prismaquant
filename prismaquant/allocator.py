@@ -103,6 +103,7 @@ from .digests import (
     DIRECT_ASCII_LAX,
     DIRECT_ASCII_SPACED_LAX,
     DIRECT_UTF8_STRICT,
+    INSERTION_ASCII_INDENT2_LAX,
     bytes_sha256hex,
     file_digest_sha256hex,
 )
@@ -1204,7 +1205,7 @@ def _write_bit_attribution_reports(
         }
         path = Path(json_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2) + "\n")
+        path.write_text(INSERTION_ASCII_INDENT2_LAX.text(payload) + "\n")
         print(f"[alloc] bit attribution (per block/role) → {path}", flush=True)
 
     if csv_path:
@@ -4100,11 +4101,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         out.parent.mkdir(parents=True, exist_ok=True)
         if replay is not None:
             from .cost_stage_checkpoint import publish_new_bytes
-            if not publish_new_bytes(out, json.dumps(layer_cfg, indent=2).encode("utf-8")):
+            if not publish_new_bytes(out, INSERTION_ASCII_INDENT2_LAX.text(layer_cfg).encode("utf-8")):
                 raise ValueError(f"prefill frontier replay: refusing to overwrite {out}")
         else:
             with open(out, "w") as f:
-                json.dump(layer_cfg, f, indent=2)
+                f.write(INSERTION_ASCII_INDENT2_LAX.text(layer_cfg))
 
         counts = defaultdict(int)
         for fmt in assignment_expanded.values():
