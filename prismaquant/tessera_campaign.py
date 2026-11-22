@@ -4328,10 +4328,10 @@ def _main(argv, *, source_scope, waits) -> int:
             # set first, so the row names what did.
             print(f"[campaign] row head: load-all ({row_head_dependency})", flush=True)
             from .cost_stage_checkpoint import atomic_write_bytes
-            atomic_write_bytes(cache_dir / EXECUTION_FILENAME, (json.dumps(dict(
+            atomic_write_bytes(cache_dir / EXECUTION_FILENAME, (DIRECT_ASCII_INDENT2_LAX.text(dict(
                 schema=EXECUTION_SCHEMA, row_head=ROW_HEAD_LOAD_ALL,
-                dependency=row_head_dependency, memory_plan=MEMORY_PLANS[ROW_HEAD_LOAD_ALL]),
-                indent=2, sort_keys=True) + "\n").encode())
+                dependency=row_head_dependency,
+                memory_plan=MEMORY_PLANS[ROW_HEAD_LOAD_ALL])) + "\n").encode())
 
     source_authentication = None
     selected_guard = None
@@ -4568,12 +4568,11 @@ def _main(argv, *, source_scope, waits) -> int:
                 from .cost_stage_checkpoint import atomic_write_bytes
                 atomic_write_bytes(
                     cache_dir/'selected-anchor-memory-refusal.json',
-                    (json.dumps(dict(detail, plan=plan_key,
-                                     memory_guard=selected_guard.snapshot()),
-                                indent=2, sort_keys=True)+'\n').encode())
+                    (DIRECT_ASCII_INDENT2_LAX.text(dict(
+                        detail, plan=plan_key, memory_guard=selected_guard.snapshot()))+'\n').encode())
                 raise RuntimeError(
                     'selected anchor cgroup budget is smaller than its checked '
-                    'phase plan: ' + json.dumps(detail, sort_keys=True))
+                    'phase plan: ' + DIRECT_ASCII_SPACED_LAX.text(detail))
     if args.capture_calibration_out or args.calibration_cache:
         from . import tessera_calibration_cache as calibration_store
         hi, lo = census_token_counts(census, {})

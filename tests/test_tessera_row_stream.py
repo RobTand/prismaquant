@@ -178,6 +178,29 @@ def stream_fixture(monkeypatch, tmp_path):
     return campaign, argv, state
 
 
+def test_selected_load_all_uses_bound_json_profiles(monkeypatch, tmp_path):
+    from prismaquant import digests
+
+    calls = []
+    original = digests.JsonProfile.text
+
+    def recording_text(profile, value):
+        if isinstance(value, dict):
+            if value.get("schema") == "prismaquant.row_head_execution.v1":
+                calls.append(("execution", profile))
+            elif "slack_bytes" in value:
+                calls.append(("refusal file" if "memory_guard" in value else "refusal message", profile))
+        return original(profile, value)
+
+    monkeypatch.setattr(digests.JsonProfile, "text", recording_text)
+    test_selected_load_all_writes_exact_execution_and_refusal_bytes(monkeypatch, tmp_path)
+    assert calls == [
+        ("execution", digests.DIRECT_ASCII_INDENT2_LAX),
+        ("refusal file", digests.DIRECT_ASCII_INDENT2_LAX),
+        ("refusal message", digests.DIRECT_ASCII_SPACED_LAX),
+    ]
+
+
 def produced(root):
     """Every file the row wrote, except the row head's own execution record."""
     from prismaquant.tessera_row_stream import EXECUTION_FILENAME
