@@ -424,6 +424,31 @@ def test_render_sample_reads_only_the_selected_cell(render_sample):
     assert opened == paths[1:] * 2
 
 
+def test_render_sample_stops_reading_at_the_planned_size(render_sample, monkeypatch):
+    import os
+    from contextlib import contextmanager
+    from unittest.mock import Mock, call
+
+    from prismaquant import digests
+
+    run, manifest, _, _ = render_sample
+    assert run is not None, "The tool has no render sample reader."
+    fdopen = os.fdopen
+    reads = []
+
+    @contextmanager
+    def record_reads(*args, **kwargs):
+        with fdopen(*args, **kwargs) as handle:
+            stream = Mock(wraps=handle)
+            reads.append(stream.read)
+            yield stream
+
+    monkeypatch.setattr(os, "fdopen", record_reads)
+    monkeypatch.setattr(digests, "FILE_BLOCK_BYTES", 2)
+    run(manifest={**manifest, "cells": manifest["cells"][:1]}, trials=1, max_bytes=3)
+    assert [read.call_args_list for read in reads] == [[call(2), call(1)]]
+
+
 @pytest.mark.parametrize("budget", ["max_files", "max_bytes", "max_trials"])
 @pytest.mark.parametrize("limit", ["absent", "too_low"])
 def test_render_sample_refuses_over_budget_before_payload(render_sample, budget, limit):
