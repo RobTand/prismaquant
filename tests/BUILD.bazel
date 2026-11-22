@@ -8797,6 +8797,16 @@ pq_py_library(
     ],
 )
 
+pq_py_test(
+    name = "test_coverage_containment",
+    path = "tests/test_coverage_containment.py",
+    library = ":test_coverage_containment_lib",
+    deps = [
+        ":conftest",
+    ],
+    timeout = "moderate",
+)
+
 pq_py_library(
     name = "test_interned_json_loader_lib",
     srcs = [
@@ -9217,6 +9227,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -9586,6 +9597,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -21442,6 +21454,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -22004,6 +22017,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -23437,6 +23451,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -24538,6 +24553,20 @@ pq_py_test(
 )
 
 pq_py_library(
+    name = "test_coverage_containment_lib",
+    srcs = [
+        "test_coverage_containment.py",
+    ],
+    data = [
+        "test_coverage_containment.py",
+    ],
+    deps = [
+        "//:tools/coverage_containment",
+        "@pq_pip//coverage",
+    ],
+)
+
+pq_py_library(
     name = "test_bitrate_select_lib",
     srcs = [
         "test_bitrate_select.py",
@@ -25053,6 +25082,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -26181,6 +26211,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -30021,6 +30052,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -36915,6 +36947,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -38231,6 +38264,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -39896,6 +39930,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -42683,6 +42718,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -45681,6 +45717,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -46290,6 +46327,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -52912,6 +52950,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -54348,6 +54387,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -54892,6 +54932,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate",
         "//:tools/compare_stage_a_checkpoints",
         "//:tools/cost_layer0_identity_gate",
+        "//:tools/coverage_containment",
         "//:tools/day0_model_intake",
         "//:tools/derive_retained_window_budget",
         "//:tools/device_envelope_probe",
@@ -58845,6 +58886,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
@@ -60326,6 +60368,7 @@ pq_py_test(
         "//:tools/compare_joint_layer_gate.py",
         "//:tools/compare_stage_a_checkpoints.py",
         "//:tools/cost_layer0_identity_gate.py",
+        "//:tools/coverage_containment.py",
         "//:tools/day0_model_intake.py",
         "//:tools/derive_retained_window_budget.py",
         "//:tools/device_envelope_probe.py",
