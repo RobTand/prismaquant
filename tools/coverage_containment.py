@@ -19,6 +19,7 @@ with --lines, and each measured test that covers all of its lines.
 import argparse
 import csv
 import gzip
+import io
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -60,7 +61,8 @@ def build_line_ranges(data_file, out, outcomes_file=None):
     outcomes = dict.fromkeys(covered, 'passed')
     if outcomes_file:
         outcomes |= dict(csv.reader(Path(outcomes_file).open(), delimiter='\t'))
-    with gzip.open(out, 'wt', compresslevel=9) as rows:
+    # No name and no time in the gzip header, so a rebuild from the same database gives the same bytes.
+    with open(out, 'wb') as raw, io.TextIOWrapper(gzip.GzipFile('', 'wb', 9, raw, mtime=0), 'utf-8') as rows:
         for test, outcome in sorted(outcomes.items()):
             if outcome != 'passed' or test not in covered:
                 rows.write(f'{test}\t{NOT_MEASURED}\t{outcome}\n')

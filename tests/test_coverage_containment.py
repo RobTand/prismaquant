@@ -22,6 +22,7 @@ def test_three_tests_give_known_ranges_and_containment(tmp_path):
     (tmp_path / 'outcomes.tsv').write_text('t.py::small\tpassed\nt.py::big\tpassed\nt.py::child\tpassed\n')
     ranges = tmp_path / 'ranges.tsv.gz'
     coverage_containment.build_line_ranges(tmp_path / '.coverage', ranges, tmp_path / 'outcomes.tsv')
+    assert ranges.read_bytes()[3:8] == bytes(5)  # gzip header: no file name, time 0
     assert gzip.open(ranges, 'rt').read() == (
         't.py::big\ta.py\t1-3\nt.py::big\tb.py\t5,7\nt.py::child\tNOT MEASURED\tpassed\nt.py::small\ta.py\t1,3\n')
     answer = io.StringIO()
