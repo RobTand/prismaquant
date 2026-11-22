@@ -1102,6 +1102,29 @@ def test_stat_only_scoped_intake_reads_a_render_marker_without_opening_payloads(
     assert data.cells[name, fmt]["render_origin"] == "synthesized_from_wire"
 
 
+def test_required_render_origin_refuses_disappearance_during_marker_intake(tmp_path, monkeypatch):
+    from prismaquant import tessera_joint_aura as bridge
+
+    render = tmp_path / "render.pt"
+    render.write_bytes(b"render")
+    marker = bridge._render_origin_marker_path(render)
+    marker.write_text(json.dumps({"schema": bridge.RENDER_ORIGIN_SCHEMA,
+        "render_origin": "synthesized_from_wire", "unit": "unit", "format_name": "format",
+        "wire_sha256": "a" * 64}))
+    loads = bridge.json.loads
+
+    def remove_render(data):
+        render.unlink()
+        return loads(data)
+
+    monkeypatch.setattr(bridge.json, "loads", remove_render)
+    with pytest.raises(ValueError, match="prepared render is missing"):
+        bridge._resolve_render_origin(render, wire=tmp_path / "wire.tessera",
+            record={"blob_sha256": "a" * 64}, name="unit", fmt="format", shape=(1, 1),
+            reader=None, require_existing_renders=True)
+    assert not render.exists()
+
+
 @pytest.mark.parametrize("spec,expected", [("0:4", (0, 4)), (":4", (0, 4)), ("2:", (2, 7)),
                                            (None, None)])
 def test_a_unit_range_is_read_off_the_sorted_census_roster(spec, expected):
@@ -1503,6 +1526,38 @@ def test_joint_aura_refuses_measured_aliases_before_the_walk(
     assert all(name in message for name in names)
     assert fmt in message
     assert cache_weight_filename(names[0], fmt) in message
+
+
+@pytest.mark.parametrize("kind", ["metadata", "symlink", "hardlink"])
+def test_render_marker_reader_refuses_payload_aliases(tmp_path, monkeypatch, kind):
+    import os
+    from prismaquant import tessera_joint_aura as bridge
+
+    read_marker = getattr(bridge, "_read_render_origin_marker", None)
+    assert callable(read_marker), "The loader needs a metadata-only marker reader."
+    render = tmp_path / "render.pt"
+    wire = tmp_path / "wire.tessera"
+    wire.write_bytes(b"wire payload")
+    marker = bridge._render_origin_marker_path(render)
+    if kind == "metadata":
+        marker.write_bytes(b'{"schema":"fixture"}')
+        assert read_marker(render) == b'{"schema":"fixture"}'
+    else:
+        if kind == "symlink":
+            marker.symlink_to(wire)
+        else:
+            marker.hardlink_to(wire)
+        opened = []
+        real_open = os.open
+
+        def record_open(path, *args, **kwargs):
+            opened.append(path)
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", record_open)
+        with pytest.raises(ValueError, match="render origin marker"):
+            read_marker(render)
+        assert opened == [], "The loader opened a payload alias."
 
 
 from cpu_staged_fixtures import (  # noqa: E402,F401
