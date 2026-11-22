@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from prismaquant.allocator import (
     _build_bit_attribution,
     _parse_role_from_qname,
@@ -119,17 +117,50 @@ def test_write_bit_attribution_reports_emit_files(tmp_path):
         assignment_expanded=assignment, candidates=candidates,
         stats_entry_for=stats.get, format_specs={})
 
-    payload = json.loads(jpath.read_text())
-    assert payload["schema"] == "prismaquant.allocator.bit_attribution.v2"
-    assert payload["body_bits_per_param"] == exact_bpp
-    # The codebook sidecar total left with the retired codebook lane
-    # (archived 2026-09-25, #1304); it was always 0 on a live menu.
-    assert "body_shared_cb_sidecar_bits" not in payload
-    assert payload["n_body_linears"] == 2
-    assert len(payload["buckets"]) == 2
-    csv_text = cpath.read_text()
-    assert "qname,block_id,role,format,bits,bpp,n_params,predicted_dloss" in csv_text
-    assert "q_proj" in csv_text
+    assert jpath.read_bytes() == b'''{
+  "schema": "prismaquant.allocator.bit_attribution.v2",
+  "target_bits": 5.0,
+  "achieved_bits": 6.6875,
+  "body_bits_per_param": 6.6875,
+  "body_assignment_payload_bits": 20544.0,
+  "body_tensor_payload_bits": 20544.0,
+  "body_quantizable_params": 3072,
+  "n_body_linears": 2,
+  "buckets": [
+    {
+      "block_id": "model.layers.0",
+      "role": "down_proj",
+      "n_linears": 1,
+      "bits_total": 16384.0,
+      "n_params_total": 2048,
+      "mean_bpp": 8.0,
+      "format_counts": {
+        "FP8_E4M3": 1
+      },
+      "sum_predicted_dloss": 0.002,
+      "predicted_dloss_coverage": "1/1"
+    },
+    {
+      "block_id": "model.layers.0",
+      "role": "q_proj",
+      "n_linears": 1,
+      "bits_total": 4160.0,
+      "n_params_total": 1024,
+      "mean_bpp": 4.0625,
+      "format_counts": {
+        "NVFP4": 1
+      },
+      "sum_predicted_dloss": 0.01,
+      "predicted_dloss_coverage": "1/1"
+    }
+  ]
+}
+'''
+    assert cpath.read_bytes() == (
+        b"qname,block_id,role,format,bits,bpp,n_params,predicted_dloss\r\n"
+        b"model.layers.0.mlp.down_proj,model.layers.0,down_proj,FP8_E4M3,16384,8,2048,0.002\r\n"
+        b"model.layers.0.self_attn.q_proj,model.layers.0,q_proj,NVFP4,4160,4.0625,1024,0.01\r\n"
+    )
 
 
 def test_write_bit_attribution_noop_when_no_paths():
