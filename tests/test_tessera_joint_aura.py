@@ -1102,6 +1102,60 @@ def test_stat_only_scoped_intake_reads_a_render_marker_without_opening_payloads(
     assert data.cells[name, fmt]["render_origin"] == "synthesized_from_wire"
 
 
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+@pytest.mark.parametrize("target", ["metadata", "wire", "render"])
+def test_stat_only_scoped_intake_accepts_linked_marker_metadata(tmp_path, monkeypatch, link, target):
+    import builtins
+    import io
+    import os
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.render_cache_paths import cache_weight_filename
+
+    config, names, fmt, _, states = fixture(tmp_path)
+    name, omitted = sorted(names)
+    record = states[name]["wire_records"][fmt]
+    cache = tmp_path / "campaign/rows/row-0000/cache"
+    marker = bridge._render_origin_marker_path(cache / cache_weight_filename(name, fmt))
+    metadata = tmp_path / "origin.json"
+    metadata.write_text(json.dumps({"schema": bridge.RENDER_ORIGIN_SCHEMA,
+        "render_origin": "synthesized_from_wire", "unit": name, "format_name": fmt,
+        "wire_file": record["file"], "wire_sha256": record["blob_sha256"]}))
+    targets = {"metadata": metadata, "wire": tmp_path / "merged/cache/wire" /
+               states[omitted]["wire_records"][fmt]["file"],
+               "render": cache / cache_weight_filename(omitted, fmt)}
+    if link == "symlink":
+        marker.symlink_to(targets[target])
+    else:
+        marker.hardlink_to(targets[target])
+    payloads = [*cache.glob("*.pt"), *targets["wire"].parent.iterdir()]
+
+    def guard(real_open):
+        def open_metadata(file, *args, **kwargs):
+            if not isinstance(file, int):
+                path = Path(os.fsdecode(file))
+                assert not path.exists() or not any(path.samefile(p) for p in payloads), (
+                    "The scoped walk opened a payload.")
+            return real_open(file, *args, **kwargs)
+        return open_metadata
+
+    for module in (builtins, io, os):
+        monkeypatch.setattr(module, "open", guard(module.open))
+
+    def load():
+        return bridge.load_measured_anchor_input(config, unit_scope=(0, 1), verify_payloads=False,
+                                                 require_existing_renders=True)
+
+    if target != "metadata":
+        with pytest.raises(ValueError, match="render origin marker"):
+            load()
+    else:
+        try:
+            data = load()
+        except ValueError as exc:
+            pytest.fail(f"The scoped walk refused linked marker metadata: {exc}")
+        assert data.cells[name, fmt]["render_origin"] == "synthesized_from_wire"
+
+
 def test_required_render_origin_refuses_disappearance_during_marker_intake(tmp_path, monkeypatch):
     from prismaquant import tessera_joint_aura as bridge
 
