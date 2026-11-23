@@ -48,7 +48,7 @@ import torch
 
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .dev_mode import NOT_COMPUTED, dev_mode_enabled, seal_check
-from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex, indent2_json_file_bytes
+from .digests import DIRECT_ASCII_INDENT2_LAX, INSERTION_ASCII_SPACED_LAX, bytes_sha256hex, indent2_json_file_bytes
 from .stage_a_selected_row_diagnostic import (
     RECEIPT_SCHEMA as DIAGNOSTIC_RECEIPT_SCHEMA,
     SelectedRowDiagnosticRefused, bind_diagnostic_draw, diagnostic_marker_path,
@@ -3402,7 +3402,7 @@ def main(argv=None) -> int:
                     "diagnostic": (None if args.selected_row_diagnostic is None else
                         load_diagnostic_spec(args.selected_row_diagnostic,
                                              args.selected_row_diagnostic_sha256))})
-            print(json.dumps(report))
+            print(INSERTION_ASCII_SPACED_LAX.text(report))
             return EXIT_OK
         result = run_adjoint_capture(
             config, plan_sha256=args.plan_sha256,
@@ -3426,7 +3426,7 @@ def main(argv=None) -> int:
     except (AdjointIdentityRefused, SelectedRowDiagnosticRefused) as exc:
         print(f"adjoint_identity_refused: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED
-    print(json.dumps({key: result[key] for key in (
+    print(INSERTION_ASCII_SPACED_LAX.text({key: result[key] for key in (
         "command", "passed", "stride", "checkpoints", "plane_comparison",
         "split_receipt") if key in result}))
     return EXIT_OK if result["passed"] else EXIT_FAILURE
