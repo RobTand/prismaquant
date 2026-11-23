@@ -7748,9 +7748,32 @@ fifteen full-size elementwise ops, including an int64 code tensor.
   `require_matching_served_quantizer` for retained render scores, and
   `native_execution_binding.require_reference_quantizer` for a native
   reference against a joint row, which hashed the whole record before. A
-  native reference or a Stage B row recorded before the field existed
-  therefore still binds a row that carries it, while a difference on any
-  reuse axis still refuses.
+  native reference or Stage B row without `dequant_kernel` can still bind
+  a row that carries it. A difference on any reuse axis prevents binding.
+
+- **Preparation.** `prepare_native_inputs` computes reference QDQ with the
+  selected format. It writes the top-level `reference_served_quantizer` stamp
+  only for a measured-as-served static activation contract. It records the
+  identity from `effective_served_quantizer_identity` for that contract.
+  An explicit contract binding takes priority over the process binding.
+
+- **Ordinary freeze.** `freeze_native_panel` requires a stamp with backend
+  `registered_scaled_fp4_quant` for a measured-as-served static reference.
+  The stamp must match the validated joint AURA probe arithmetic on `schema`
+  and the reuse axes, not `dequant_kernel`. Freeze carries the stamp into
+  the panel unchanged.
+
+- **Execution-first freeze.** `freeze_execution_panel` requires the
+  `registered_scaled_fp4_quant` stamp for the same static path. It carries
+  the stamp into the execution panel unchanged. There is no joint quality row
+  yet, so it does not compare arithmetic.
+
+- **Receipt admission.** Direct admission checks the expected panel's stamp
+  against its final joint arithmetic. Late-bound admission resolves the
+  binding first. The binding must preserve the measured execution panel,
+  including the stamp.
+  Admission then makes the same comparison. Both paths refuse an unstamped
+  measured-as-served static reference.
 
 - **One Triton trap, caught by the raw-bit comparison.** Triton's unary minus
   is `0 - x`, so `-(+0.0)` is `+0.0`, while Torch's `-magnitude` gives `-0.0`

@@ -29,6 +29,28 @@ MISSING = "static native references require their registered served quantizer id
 DIFFERS = "native reference quantizer differs from actual joint quality arithmetic"
 
 
+def test_design_note_and_architecture_describe_the_shipped_stamp():
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    note = (docs / "design/native_panel_served_quantizer_identity_2026-09-19.md").read_text(encoding="utf-8")
+    assert "**Status: shipped.**" in note, "The design note must identify the stamp as shipped."
+    assert f"`{STAMP}`" in note
+    architecture = (docs / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    for label, terms in (
+        ("Preparation", (STAMP, "only for a measured-as-served static", "effective_served_quantizer_identity",
+                         "contract binding takes priority over the process binding")),
+        ("Ordinary freeze", ("must match the validated joint AURA probe arithmetic", "carries the stamp")),
+        ("Execution-first freeze", ("registered_scaled_fp4_quant", "no joint quality row",
+                                    "does not compare arithmetic", "carries the stamp")),
+        ("Receipt admission", ("Direct admission checks", "Late-bound admission resolves the binding first",
+                               "final joint arithmetic", "makes the same comparison", "refuse an unstamped")),
+    ):
+        _, found, text = architecture.partition(f"- **{label}.**")
+        assert found, label
+        paragraph = " ".join(text.split("\n\n", 1)[0].split())
+        for term in terms:
+            assert term in paragraph, f"{label}: Include {term}."
+
+
 def test_reference_quantizer_preserves_recorded_outcomes():
     assert hashlib.sha256(RECORDS).hexdigest() == "8b37bb4e2ea60ec9bd2cddae7f999ce973bf0a9d2b9ebebe7c719a5848751cb8"
     for name, digest in zip(CASES, (
