@@ -10088,7 +10088,12 @@ pq_py_library(
     srcs = [
         "prismaquant/index_entropy.py",
     ],
+    data = [
+        "prismaquant/index_entropy.py",
+    ],
     deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
         "@pq_pip//torch",
     ],
 )
