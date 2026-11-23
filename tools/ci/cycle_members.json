@@ -13405,6 +13405,7 @@
   "prismaquant/tessera_legal_domain.py": {
    "importers": [
     "//:experiments/tessera_full_domain_acquisition",
+    "//:tools/ci/bazel_selection",
     "//tests:prismabuild_scan",
     "//tests:test_aura_checkpoint_resume_identity_lib",
     "//tests:test_bazel_build_files_lib",
@@ -14123,6 +14124,7 @@
     "//:experiments/glm_native_dense_acquire",
     "//:experiments/glm_native_wire_screen",
     "//:prismaquant/native_execution_binding_cycle",
+    "//:tools/ci/bazel_selection",
     "//:tools/ci/gate_select",
     "//:tools/provision_tessera_pin",
     "//:tools/resolve_tessera_dev_pin",
@@ -14140,6 +14142,7 @@
     "//tests:test_bazel_build_files_lib",
     "//tests:test_bazel_inputs_lib",
     "//tests:test_bazel_parity",
+    "//tests:test_bazel_selection_lib",
     "//tests:test_bazel_workflow",
     "//tests:test_bound_publication_digest_routing_2639_lib",
     "//tests:test_boundary_control",
@@ -14282,6 +14285,7 @@
   },
   "prismaquant/tessera_serving_runtime_pin.py": {
    "importers": [
+    "//:tools/ci/bazel_selection",
     "//tests:prismabuild_scan",
     "//tests:tessera_metadata_fixture",
     "//tests:tessera_serving_identity_snapshot",
@@ -14289,6 +14293,7 @@
     "//tests:test_aura_checkpoint_resume_identity_lib",
     "//tests:test_bazel_build_files_lib",
     "//tests:test_bazel_inputs_lib",
+    "//tests:test_bazel_selection",
     "//tests:test_bound_publication_digest_routing_2639_lib",
     "//tests:test_boundary_control",
     "//tests:test_boundary_stack_contract",

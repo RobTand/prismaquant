@@ -598,9 +598,14 @@ def planning_history(tmp_path, request, monkeypatch):
     durations = root / selection.DURATIONS_PATH
     if extra == 'test_shards':
         durations.parent.mkdir(parents=True)
+    pin = root / extra if extra and extra.startswith('prismaquant/') else None
+    if pin:
+        pin.parent.mkdir(parents=True, exist_ok=True)
     revisions = []
     for content in ('base\n', 'head\n'):
         source.write_text('base\n' if extra == 'test_shards' else content)
+        if pin:
+            pin.write_text(content)
         if extra == 'test_shards':
             shards = '    shard_count = 8,\n' if content == 'base\n' else ''
             (root / 'tests/BUILD.bazel').write_text(
@@ -803,6 +808,43 @@ def test_modified_only_diff_selects_the_head_reverse_closure_without_bazel_diff(
     assert found['rules'] == {'prismaquant/core.py': 'whole target (no test within two imports): 1 tests'}
     assert found['shadow_v1'] == ['//tests:test_consumer']
     assert queries == [selection.MAIN_QUERY]
+
+
+@pytest.mark.parametrize('planning_history', [
+    'prismaquant/tessera_runtime/tessera_serving_runtime_pin.json',
+    'prismaquant/tessera_runtime_contract.py',
+], ids=['serving', 'development'], indirect=True)
+def test_tessera_pin_change_requires_v12_scope_proof_in_pr_plan(
+        tmp_path, planning_history, request, monkeypatch):
+    root, (base, head) = planning_history
+    pin = request.node.callspec.params['planning_history']
+    lane = '//tests:test_tessera_lane_v12'
+    consumer = '//tests:test_consumer'
+    rows = [
+        {'sourceFile': {'name': '//prismaquant:core.py'}},
+        {'sourceFile': {'name': '//' + pin.replace('/', ':', 1)}},
+        {'rule': {'name': consumer, 'ruleClass': 'py_test', 'ruleInput': ['//prismaquant:core.py']}},
+    ]
+    table = root / selection.CYCLE_PATH
+    table.parent.mkdir(parents=True)
+    table.write_text('{"members": {}}')
+
+    def plan(kind=None, tags=()):
+        targets = rows + ([{'rule': {'name': lane, 'ruleClass': kind,
+            'attribute': [{'name': 'tags', 'stringListValue': list(tags)}]}}] if kind else [])
+        population = selection.query_population(targets, 'amd64')
+        monkeypatch.setattr(selection, 'query_revision', lambda *args, **kwargs: {'population': population})
+        return selection.plan_revisions(root, tmp_path / 'private', base=base, head=head, mode='pr')
+
+    document = plan('py_test')
+    assert document['selection'] == 'impacted'
+    row = document['architectures']['amd64']
+    assert row['tests'] == [consumer, lane]
+    assert any(lane in shard for shard in row['shards'])
+    for kind, tags in [(None, ()), ('py_library', ()), ('py_test', ('manual',)),
+                       ('py_test', ('manual', 'gate-lane-hosted'))]:
+        with pytest.raises(selection.SelectionError, match=lane):
+            plan(kind, tags)
 
 
 @pytest.mark.parametrize('planning_history', ['added_test'], indirect=True)

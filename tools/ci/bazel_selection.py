@@ -474,6 +474,17 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
                                           java=java, jar=jar, root=root, bazel=bazel, runner=runner)
         except (SelectionError, OSError, ValueError, TypeError, subprocess.SubprocessError):
             decision = everything(['source or graph evidence unavailable'], population['tests'])
+    pin_change = mode == 'pr' and bool((changed | deleted) & {
+        'prismaquant/tessera_runtime/tessera_serving_runtime_pin.json',
+        'prismaquant/tessera_serving_runtime_pin.py',
+        'prismaquant/tessera_legal_domain.py',
+        'prismaquant/tessera_runtime_contract.py',
+    })
+    scope_test = '//tests:test_tessera_lane_v12'
+    if pin_change and scope_test in population['tests']:
+        decision['selected'] = sorted(set(decision['selected']) | {scope_test})
+        if decision['selection'] == 'irrelevant':
+            decision['selection'] = 'impacted'
     populations = {'amd64': population}
     if mode == 'main':
         populations['arm64'] = query_population(
@@ -484,8 +495,13 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
         files = json.loads(timing_file.read_text())['files']
         durations = {label: files[path] for label in population['tests']
                      if (path := label[2:].replace(':', '/') + '.py') in files}
-    return selection_manifest(decision, populations, hosted=population['hosted'],
+    document = selection_manifest(decision, populations, hosted=population['hosted'],
         hosted_arm64=population['hosted_arm64'], base=base, head=head, mode=mode, durations=durations)
+    if pin_change:
+        row = document['architectures']['amd64']
+        if scope_test not in row['tests'] or not any(scope_test in shard for shard in row['shards']):
+            raise SelectionError(f'A Tessera pin change requires a runnable test: {scope_test}')
+    return document
 
 
 def verdict_of(selected, statuses):
