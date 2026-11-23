@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Use `DIRECT_ASCII_INDENT1_STRICT.text` for the Stage A retirement record (#5354). Part of #2651.
+  At base `5a61e595897654b533fab33bb71be21cf8e49235`, `tests/test_stage_a_retirement_1073.py::test_retirement_record_uses_strict_indent1_text` failed at `assert calls == [digests.DIRECT_ASCII_INDENT1_STRICT]`.
+  The call list was empty. The same test passed with the shared encoder.
+  These cases passed before and after the change:
+  - `tests/test_stage_a_retirement_1073.py::test_interrupted_retirement_resumes_only_its_immutable_targets`
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[False]`
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[True]`
+
+  `tests/test_tensor_digest_owner_recipes_2638.py::test_token_route_removes_only_enumerated_main_baseline_scopes` passed with the updated baseline.
 - Put the checkout root after the standard library on the three graph tools' import paths (#5323). Part of #4684.
   The local import-path measurement used the new test with safe-path startup and with early checkout entries.
   Refusal stopped all six cases. Removing early checkout entries and appending the root passed all six cases.

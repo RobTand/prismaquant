@@ -134,7 +134,6 @@
   "sorted-json:prismaquant/prefill_frontier.py::main",
   "sorted-json:prismaquant/stage_a_chain_resume.py::apply_chain_resume",
   "sorted-json:prismaquant/stage_a_chain_split.py::main",
-  "sorted-json:prismaquant/stage_a_retirement.py::apply_retirement",
   "sorted-json:prismaquant/stage_b_pass_profile.py::PassProfileSession.__exit__",
   "sorted-json:prismaquant/stage_b_workspace_profile.py::write_profile",
   "sorted-json:prismaquant/streamed_boundary_artifacts.py::StreamedBoundaryArtifacts._publish_status",
