@@ -4,6 +4,7 @@
 
 - Use `INSERTION_ASCII_SPACED_LAX.text` for ten JSON calls. Keep the output bytes unchanged (#5284, #2651).
 - Use `DIRECT_UTF8_STRICT.text` for the selector's resolved assignment payload digest (#5268, #2651).
+- Use `DIRECT_ASCII_INDENT2_LAX.text` for registry, pipeline spec, and prepriced cost report files (#5285, #2651).
 
 - Route nine joint and Tessera JSON calls through `INSERTION_ASCII_SPACED_LAX.text` (#5283).
   Keep the output bytes unchanged. Part of #2651.

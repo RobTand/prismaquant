@@ -19,7 +19,7 @@ import re
 import tempfile
 from typing import Any
 
-from .digests import DIRECT_ASCII_SPACED_LAX, is_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, DIRECT_ASCII_SPACED_LAX, is_sha256hex
 
 
 REPORT_SCHEMA = "prismaquant.prepriced_cost_input.v1"
@@ -411,8 +411,7 @@ def _write_report(path: Path, report: Mapping) -> None:
     try:
         with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=f".{path.name}.", delete=False) as handle:
             temporary = Path(handle.name)
-            json.dump(report, handle, sort_keys=True, indent=2)
-            handle.write("\n")
+            handle.write(DIRECT_ASCII_INDENT2_LAX.text(report) + "\n")
         os.replace(temporary, path)
     finally:
         if temporary is not None:
