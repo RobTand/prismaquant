@@ -1156,6 +1156,49 @@ def test_stat_only_scoped_intake_accepts_linked_marker_metadata(tmp_path, monkey
         assert data.cells[name, fmt]["render_origin"] == "synthesized_from_wire"
 
 
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+def test_stat_only_scoped_intake_accepts_linked_marker_metadata_in_the_wire_directory(tmp_path, link):
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.render_cache_paths import cache_weight_filename
+
+    config, names, fmt, payload, states = fixture(tmp_path)
+    name = min(names)
+    record = states[name]["wire_records"][fmt]
+    render = tmp_path / "campaign/rows/row-0000/cache" / cache_weight_filename(name, fmt)
+    marker = bridge._render_origin_marker_path(render)
+    target = Path(payload["provenance"]["wire_dir"]) / "origin.json"
+    target.write_text(json.dumps({"schema": bridge.RENDER_ORIGIN_SCHEMA,
+        "render_origin": "synthesized_from_wire", "unit": name, "format_name": fmt,
+        "wire_file": record["file"], "wire_sha256": record["blob_sha256"]}))
+    if link == "symlink":
+        marker.symlink_to(target)
+    else:
+        marker.hardlink_to(target)
+
+    try:
+        data = bridge.load_measured_anchor_input(config, unit_scope=(0, 1), verify_payloads=False,
+                                                 require_existing_renders=True)
+    except ValueError as exc:
+        raise AssertionError("The scoped walk refused the metadata link.") from exc
+    assert data.cells[name, fmt]["render_origin"] == "synthesized_from_wire"
+
+
+def test_stat_only_scoped_intake_treats_a_dangling_marker_link_as_no_marker(tmp_path):
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.render_cache_paths import cache_weight_filename
+
+    config, names, fmt, _, _ = fixture(tmp_path)
+    name = min(names)
+    render = tmp_path / "campaign/rows/row-0000/cache" / cache_weight_filename(name, fmt)
+    bridge._render_origin_marker_path(render).symlink_to(tmp_path / "absent.json")
+    try:
+        data = bridge.load_measured_anchor_input(config, unit_scope=(0, 1), verify_payloads=False,
+                                                 require_existing_renders=True)
+    except ValueError as exc:
+        raise AssertionError("The scoped walk refused the dangling link.") from exc
+    assert data.cells[name, fmt]["render_origin"] == "encoded"
+
+
 def test_required_render_origin_refuses_disappearance_during_marker_intake(tmp_path, monkeypatch):
     from prismaquant import tessera_joint_aura as bridge
 
