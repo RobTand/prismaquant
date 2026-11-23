@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import gzip
 import io
-import json
 import os
 import stat
 import zlib
@@ -17,7 +16,7 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_INDENT1_STRICT, bytes_sha256hex
 from .schemas import strict_json_loads
 from .staged_manifest import read_document, open_regular, open_directory, unlink_owned
 from .file_identity import file_stat_signature
@@ -480,7 +479,7 @@ def apply_retirement(plan):
     if fresh.record != record:
         raise RetirementRefused('retirement changed between planning and apply')
     path = retirement_record_path(plan.space)
-    payload = (json.dumps(record, sort_keys=True, indent=1, allow_nan=False) + '\n').encode()
+    payload = (DIRECT_ASCII_INDENT1_STRICT.text(record) + '\n').encode('utf-8')
     if not publish_new_bytes(path, payload) and read_document(path, BINDING_MAX_BYTES)[0] != payload:
         raise RetirementRefused('another retirement already sealed this space')
     for row in record['targets']:

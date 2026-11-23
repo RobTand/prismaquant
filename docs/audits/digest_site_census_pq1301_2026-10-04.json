@@ -39358,28 +39358,15 @@
      "refusal_behavior": "Preserve stdlib key, cycle, fallback, and nonfinite behavior for the exact options. Keep caller catches and Unicode encoding unchanged."
     },
     "owner": {
-     "route": null,
-     "gap": "No public named owner reproduces these exact JSON options and result interface.",
-     "exact_options": {
-      "skipkeys": false,
-      "ensure_ascii": true,
-      "check_circular": true,
-      "allow_nan": false,
-      "cls": null,
-      "indent": 1,
-      "separators": [
-       ",",
-       ": "
-      ],
-      "default": null,
-      "sort_keys": true
-     }
+     "route": "prismaquant.digests.DIRECT_ASCII_INDENT1_STRICT.text",
+     "gap": null,
+     "constraints": "Keep input preparation, UTF-8 conversion, final LF, publication, and exceptions at the consumer."
     },
     "contract_kind": "json-publication",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
+    "disposition": "migrate-exact-route",
     "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
+    "disposition_reason": "Use the exact owner route without changes to consumer policy.",
     "retention_evidence": null,
     "epic_key": "k2",
     "epic": "prismaquant#2541",
@@ -138063,10 +138050,10 @@
    "mutable_modules": 203,
    "eligible_cohorts": 643,
    "calls_by_disposition": {
-    "migrate-exact-route": 270,
+    "migrate-exact-route": 271,
     "retain": 34,
     "owner-implementation": 16,
-    "add-exact-owner-recipe": 100
+    "add-exact-owner-recipe": 99
    },
    "modules_by_epic": {
     "k2": 124,

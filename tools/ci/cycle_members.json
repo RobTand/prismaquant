@@ -10887,6 +10887,7 @@
     "//tests:test_strict_json_keeps_1660",
     "//tests:test_strict_json_keeps_1660_lib",
     "//tests:test_strict_json_tools_1605",
+    "//tests:test_tensor_digest_owner_recipes_2638_lib",
     "//tests:test_tensor_digest_retention_2638_lib",
     "//tests:test_tessera_campaign_namespace_1986_lib",
     "//tests:test_tessera_public_metadata_api_lib",
