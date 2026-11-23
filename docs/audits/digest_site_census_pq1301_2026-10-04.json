@@ -62987,22 +62987,7 @@
      "refusal_behavior": "Preserve stdlib key, cycle, fallback, and nonfinite behavior for the exact options. Keep caller catches and Unicode encoding unchanged."
     },
     "owner": {
-     "route": null,
-     "gap": "No public named owner reproduces these exact JSON options and result interface.",
-     "exact_options": {
-      "skipkeys": false,
-      "ensure_ascii": true,
-      "check_circular": true,
-      "allow_nan": true,
-      "cls": null,
-      "indent": null,
-      "separators": [
-       ", ",
-       ": "
-      ],
-      "default": null,
-      "sort_keys": false
-     }
+     "route": "prismaquant.digests.INSERTION_ASCII_SPACED_LAX.text"
     },
     "contract_kind": "json-publication",
     "ratcheted": false,
@@ -63078,22 +63063,7 @@
      "refusal_behavior": "Preserve stdlib key, cycle, fallback, and nonfinite behavior for the exact options. Keep caller catches and Unicode encoding unchanged."
     },
     "owner": {
-     "route": null,
-     "gap": "No public named owner reproduces these exact JSON options and result interface.",
-     "exact_options": {
-      "skipkeys": false,
-      "ensure_ascii": true,
-      "check_circular": true,
-      "allow_nan": true,
-      "cls": null,
-      "indent": null,
-      "separators": [
-       ", ",
-       ": "
-      ],
-      "default": null,
-      "sort_keys": false
-     }
+     "route": "prismaquant.digests.INSERTION_ASCII_SPACED_LAX.text"
     },
     "contract_kind": "json-publication",
     "ratcheted": false,
@@ -63167,22 +63137,7 @@
      "refusal_behavior": "Preserve stdlib key, cycle, fallback, and nonfinite behavior for the exact options. Keep caller catches and Unicode encoding unchanged."
     },
     "owner": {
-     "route": null,
-     "gap": "No public named owner reproduces these exact JSON options and result interface.",
-     "exact_options": {
-      "skipkeys": false,
-      "ensure_ascii": true,
-      "check_circular": true,
-      "allow_nan": true,
-      "cls": null,
-      "indent": 1,
-      "separators": [
-       ",",
-       ": "
-      ],
-      "default": null,
-      "sort_keys": false
-     }
+     "route": "prismaquant.digests.INSERTION_ASCII_INDENT1_LAX.text"
     },
     "contract_kind": "json-publication",
     "ratcheted": false,
