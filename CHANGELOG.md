@@ -22,6 +22,19 @@
   - `tests/test_campaign_acquisition_scheduler.py::test_tiered_campaign_encodes_only_uncovered_requested_cells`
   - `tests/test_tessera_campaign_resume.py::test_main_resumes_identical_cost_and_wire_without_reencoding`
 
+- Use the exact indent-1 JSON profiles for the three receipt table files (#5355). Part of #2651.
+  At base `ef7ea25910a3feaf810d230c87a5f4ee0b47ed59`, `tests/test_native_receipt_table.py::test_emission_uses_exact_indent1_profiles` failed at `assert writes == [(profile.name, raw) for profile, raw in zip(profiles, actual)]`.
+  The owner call list was empty.
+  The merged baseline has 214 scopes. The Stage A retirement change also removed one scope (#5354).
+  Its canonical SHA-256 is `16e92f386c21b7f8b5c9eeb3cce55e6d76246f0ce745847267863134209a38ad`.
+  The local pytest check passed each test below:
+  - `tests/test_native_receipt_table.py::test_emission_uses_exact_indent1_profiles`: PASSED
+  - `tests/test_native_receipt_table.py::test_emitted_table_is_admitted_by_admit_native_rows_and_refused_only_at_fixed_resources`: PASSED
+  - `tests/test_native_receipt_table.py::test_a_table_the_loader_refuses_outright_prices_nothing`: PASSED
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[False]`: PASSED
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[True]`: PASSED
+  - `tests/test_tensor_digest_owner_recipes_2638.py::test_token_route_removes_only_enumerated_main_baseline_scopes`: PASSED
+
 - Put the checkout root after the standard library on the three graph tools' import paths (#5323). Part of #4684.
   The local import-path measurement used the new test with safe-path startup and with early checkout entries.
   Refusal stopped all six cases. Removing early checkout entries and appending the root passed all six cases.
