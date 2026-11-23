@@ -543,6 +543,56 @@ def test_unreadable_test_log_keeps_the_fail_verdict_and_its_publication(tmp_path
     assert found['verdict'] == 'fail' and found['excerpts'] == {LABEL: 'excerpt unavailable'}
 
 
+@pytest.mark.parametrize('mode,refuse', [('main', False), ('pr', False), ('main', True)],
+                         ids=['main', 'pr', 'scan-refusal'])
+def test_failed_test_excerpt_reaches_only_the_main_shard_log(tmp_path, monkeypatch, capsys, mode, refuse):
+    from types import SimpleNamespace
+    upload = tmp_path / 'upload'
+    manifest = {'mode': mode, 'base': 'b' * 40, 'head': 'a' * 40, 'branch': 'probe',
+                'architecture': 'arm64', 'index': 0, 'targets': [LABEL], 'tests': [LABEL],
+                'require_execution': False}
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    monkeypatch.setenv('PQ_BAZEL_SHARD', json.dumps({'manifest_sha256': 'c' * 64,
+                                                     'partition_sha256': 'd' * 64}))
+    secret = 'shard-excerpt-secret-sentinel'
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', secret)
+    monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(gate.artifacts, 'scan_runtime_available', lambda: True)
+    monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
+
+    def native(command, *, stdout, **_):
+        stdout.write('Private Bazel diagnostic.\n')
+        path = Path(next(word.split('=', 1)[1] for word in command
+                         if word.startswith('--build_event_json_file=')))
+        path.write_text(events(log_event(LABEL, 'bytestream://own-log'), summary('FAILED')))
+        return SimpleNamespace(returncode=3)
+
+    def fetch(uri, limit):
+        log = 'E   AssertionError: Test failed.\n::notice::Test output.'
+        return (log + ('\n' + secret if refuse else '')).encode()
+
+    execute = gate.execute_shard
+    monkeypatch.setattr(gate, 'execute_shard', lambda document: execute(
+        document, root=tmp_path, runner=native, fetch=fetch))
+    code = gate.main(['shard'])
+    out, err = capsys.readouterr()
+    if refuse:
+        assert code == 75 and not list(upload.iterdir())
+        assert 'shard refused at publication' in err
+        assert 'Test failed.' not in out + err and secret not in out + err
+        return
+    published = json.loads((upload / 'gate-result.json').read_text())
+    expected = ['E   AssertionError: Test failed.', ': :notice: :Test output.']
+    assert code == 1 and published['verdict'] == 'fail'
+    assert published['excerpts'] == {LABEL: '\n'.join(expected)}
+    assert not err
+    if mode == 'main':
+        assert out.splitlines() == [f'::error::failed test {LABEL} on arm64',
+                                    *['| ' + line for line in published['excerpts'][LABEL].splitlines()]]
+    else:
+        assert not out
+
+
 SIX = [f'//tests:test_{index}' for index in range(6)]
 
 

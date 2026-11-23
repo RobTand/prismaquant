@@ -573,7 +573,6 @@ def main(argv=None):
         phase = 'publication'
         artifacts.publish_json(upload, {
             'gate-result.json': DIRECT_ASCII_SPACED_LAX.encoded(result) + b'\n'}, keys)
-        return 0 if result['verdict'] == 'pass' else 1
     except (GateError, ValueError, TypeError, KeyError, OSError, RuntimeError) as error:
         if upload.is_symlink():
             upload.unlink()
@@ -595,6 +594,12 @@ def main(argv=None):
             print(f'inventory sources: local={local} remote={remote}; '
                   f'failed at index {index} of {total}', file=sys.stderr)
         return 75
+    if result['mode'] == 'main' and result['verdict'] == 'fail':
+        for label in result['failed']:
+            print(f"::error::failed test {label} on {result['architecture']}")
+            for line in result['excerpts'].get(label, '').splitlines():
+                print('| ' + line)
+    return 0 if result['verdict'] == 'pass' else 1
 
 
 if __name__ == '__main__':
