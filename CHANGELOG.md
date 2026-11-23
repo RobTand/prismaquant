@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Start the first wire read during identity binding for the admitted qualification unit (#5310). Part of #2923.
+  On the unchanged checkout, `tests/test_joint_qualification_windows.py::test_prepare_overlaps_current_unit_identity_and_drains_before_release`
+  failed with `The wire read did not start before identity work ended.`
+  The test box did not confirm that the production file matched `92f66cab`.
+
 - Use `INSERTION_ASCII_INDENT1_LAX.text` for the AURA additivity JSON report (#5297, #2651).
 - Use the shared JSON profile for two staging configuration writes (#5298). Part of #2651.
 - Use `INSERTION_ASCII_SPACED_LAX.text` for ten JSON calls. Keep the output bytes unchanged (#5284, #2651).
