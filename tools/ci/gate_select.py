@@ -15,7 +15,9 @@ import subprocess
 
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path[:] = [entry for entry in sys.path if Path(entry).resolve() != ROOT]
+sys.path.append(str(ROOT))
 from prismaquant.digests import DIRECT_ASCII_LAX
 
 
