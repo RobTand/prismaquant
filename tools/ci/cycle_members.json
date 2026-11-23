@@ -13184,6 +13184,7 @@
     "//tests:test_prefetch_note_plan_window_1134_lib",
     "//tests:test_prefill_load_sweep_lib",
     "//tests:test_prepare_file_read_bound_1247_lib",
+    "//tests:test_profile_render_sample_lib",
     "//tests:test_profile_scoped_walk_1492_lib",
     "//tests:test_quantum_chain_readset_lib",
     "//tests:test_quantum_failure_counters_lib",
