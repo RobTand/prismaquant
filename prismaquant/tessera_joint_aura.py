@@ -33,6 +33,7 @@ from .cost_stage_checkpoint import (
     _drive_ordered_units as _drive_ordered_walk,
 )
 from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning, seal_check
+from . import io_engine
 from .interned_json import load_json_file
 from .joint_head_walk_quanta import HEAD_WALK_JOURNAL_SCHEMA, HEAD_WALK_STAGE, HEAD_WALK_STATE_SCHEMA, check_quantum_for_roster
 from .residency_map import (
@@ -1499,7 +1500,7 @@ def calibrated_maxima(data, profile):
 def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_source,
                          projected_unit, static_scales, bound_unit=None, reader=None,
                          release_file_pages=False, wire_blob=None, wire_sha256=None,
-                         encoder_source_reuse=None, profile=None):
+                         encoder_source_reuse=None, profile=None, render_receipt=None):
     """Re-derive encoder inputs from actual source/H and compare decoded bytes.
 
     Two legs, and they do not establish the same thing. ``verify_cached_unit``
@@ -1600,7 +1601,8 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
         release_activation_cache_file_pages(wire_path, expected_stat=wire_stat)
     return {"source_weight": (_cb_cache_tensor_identity(source_weight)
                               if source_receipt is None else source_receipt),
-            "rendered_weight": _cb_cache_tensor_identity(rendered_weight),
+            "rendered_weight": (_cb_cache_tensor_identity(rendered_weight)
+                                if bound_unit is None or render_receipt is None else render_receipt),
             "encoding_identity_sha256": canonical_json_sha256(expected, where="joint anchor encoding"),
             # Present only when the encoder source seal was substituted. The
             # digest this run's own package derives is retained beside the one
@@ -1873,9 +1875,13 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     from .joint_aura import activation_identity, prefetch_joint_cache
     from .joint_prewarm_phases import HEAD_PHASE, phase_name
     from .memory_management import reserve_allocation
-    from .production_weight_cache import ProductionWeightCache
+    from .production_weight_cache import ProductionWeightCache, _cb_cache_tensor_identity
     from .routed_experts import PackedExpertProjection, refresh_packed_expert_projections
     from . import format_registry as fr
+
+    def run_host_hash(call):
+        with cc._on_io_engine({"identity": call}) as result:
+            return result("identity")
 
     _require(type(max_render_bytes) is int and max_render_bytes > 0, "positive PWC residency budget required")
     _require(file_load_workers is None or
@@ -2171,7 +2177,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                        wire_reader.submit(_read_verified_wire_blob, data.cells[windows[0][0]]))
                             bound_unit = unit.enter_context(tc.bind_checkpoint_unit_identity(
                                 anchors, source_weight=source_weight, calibration_source=calibration_source,
-                                projected_unit=projected.get(name), static_scales=scales))
+                                projected_unit=projected.get(name), static_scales=scales,
+                                run_host_hash=run_host_hash))
                             # Drain the first read before render window entry can fail.
                             if pending is not None:
                                 wait((pending,))
@@ -2182,6 +2189,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                 with owner as window_receipt:
                                     if window_receipt is not None:
                                         layer_stats.append(dict(unit=name, **window_receipt))
+                                    render_hash = None
                                     try:
                                         for index, (_, fmt) in enumerate(window):
                                             cell = data.cells[name, fmt]
@@ -2199,12 +2207,19 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                             if "render_file_sha256" in cell:
                                                 _same(receipt["sha256"], cell["render_file_sha256"], f"{name}: original render file changed")
                                             cell["render_file_sha256"] = receipt["sha256"]
+                                            signature = cache._file_tensor_guard(resident)
+                                            render_hash = io_engine.ENGINE.submit(
+                                                _cb_cache_tensor_identity, resident.detach().cpu())
                                             rendered = resident.to(runner.device)
+                                            render_receipt = render_hash.result()
+                                            _same(cache._file_tensor_guard(resident), signature,
+                                                  f"{name}@{fmt}: resident render tensor changed")
                                             record = verify_anchor_render(cell, source_weight, rendered,
                                                 calibration_source=calibration_source,
                                                 projected_unit=projected.get(name), static_scales=scales,
                                                 bound_unit=bound_unit, reader=reader, wire_blob=blob,
                                                 wire_sha256=wire_sha256, profile=runner.profile,
+                                                render_receipt=render_receipt,
                                                 # ``MeasuredAnchorInput`` always carries this;
                                                 # a caller that hands this seam a duck-typed
                                                 # roster is treated as naming no reuse, which
@@ -2220,8 +2235,10 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                             verified[name, fmt] = record
                                             resident = rendered = blob = None
                                     finally:
-                                        if pending is not None and not pending.cancel():
-                                            wait((pending,))
+                                        for future in (render_hash, pending):
+                                            if future is not None and not future.cancel():
+                                                wait((future,))
+                                        future = render_hash = resident = rendered = None
                                     if guard is not None:
                                         guard.check('after_joint_qualification_window:' + name)
                 finally:

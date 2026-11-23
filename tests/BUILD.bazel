@@ -18492,6 +18492,7 @@ pq_py_library(
         "//:prismaquant/joint_replay_frontier",
         "//:prismaquant/tessera_hessian",
         "@pq_pip//pytest",
+        "@pq_pip//tessera_quant",
         "@pq_pip//torch",
     ],
 )
