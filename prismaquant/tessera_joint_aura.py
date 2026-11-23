@@ -39,7 +39,7 @@ from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
 )
 from .digests import (
-    DIRECT_UTF8_STRICT, bytes_sha256hex, file_digest_sha256hex,
+    DIRECT_UTF8_STRICT, INSERTION_ASCII_SPACED_LAX, bytes_sha256hex, file_digest_sha256hex,
     file_sha256hex, indent2_json_file_bytes, newline_utf8_sha256,
     length_framed_bytes_sha256,
 )
@@ -2168,8 +2168,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                prewarm_phase_starts is not None else 'qualification', unit=name)
             stats = layer_stats[0] if policy is None else {'windows': layer_stats}
             telemetry.append({"layer": layer, **stats})
-            print(json.dumps({"qualified_layer": layer, "qualified_cells": len(verified),
-                              "total_cells": len(data.cells), "prefetch": stats}), flush=True)
+            print(INSERTION_ASCII_SPACED_LAX.text({"qualified_layer": layer, "qualified_cells": len(verified),
+                                                 "total_cells": len(data.cells), "prefetch": stats}), flush=True)
         finally:
             cache.compact_for_pickle()
             runner.context.unload(layer)
@@ -3329,7 +3329,7 @@ def main(argv=None):
         # The CPU-only quantum: no plan, lease, runner or device (PQ #1374).
         if args.model is None or args.out is None or args.plan is not None:
             parser.error("identity takes --model and --out, and no --plan")
-        print(json.dumps(build_source_digest_cache(args.model, args.out)))
+        print(INSERTION_ASCII_SPACED_LAX.text(build_source_digest_cache(args.model, args.out)))
         return 0
     if args.plan is None or args.plan_sha256 is None:
         parser.error("--plan and --plan-sha256 are required")
@@ -3362,7 +3362,7 @@ def main(argv=None):
                                     device=args.device, log_every=args.log_every,
                                     mirror_root=args.mirror_root, compare=args.compare,
                                     authorized=args.i_am_authorized, receipt=args.receipt)
-        print(json.dumps({key: record[key] for key in (
+        print(INSERTION_ASCII_SPACED_LAX.text({key: record[key] for key in (
             "units_read", "cells", "renders_synthesized_now", "seconds", "render_origins")}))
         return 0
     result = execute(args.command, config, plan_sha256=args.plan_sha256,
@@ -3378,9 +3378,8 @@ def main(argv=None):
         **({"source_transition": {"path": str(args.source_transition),
                                   "sha256": args.source_transition_sha256}}
            if args.source_transition is not None else {}))
-    print(json.dumps({key: result[key] for key in ("command", "passed", "units",
-                                                   "measured_cells", "render_origins",
-                                                   "render_comparisons")}))
+    print(INSERTION_ASCII_SPACED_LAX.text({key: result[key] for key in (
+        "command", "passed", "units", "measured_cells", "render_origins", "render_comparisons")}))
     return 0
 
 

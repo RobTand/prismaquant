@@ -65,7 +65,7 @@ import re
 import weakref
 
 from .digests import (
-    DIRECT_UTF8_STRICT, LengthFramedSourceSha256, bytes_sha256hex, file_sha256hex,
+    DIRECT_UTF8_STRICT, INSERTION_ASCII_SPACED_LAX, LengthFramedSourceSha256, bytes_sha256hex, file_sha256hex,
 )
 from .joint_aura_transition_base import (
     _COMMIT,
@@ -519,7 +519,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     bindings = {name: {"path": str(getattr(args, name).resolve()), "sha256": getattr(args, name + "_sha256")}
                 for name in _INPUT_LABELS}
-    print(json.dumps(create_transition(bindings=bindings, output=args.output)))
+    print(INSERTION_ASCII_SPACED_LAX.text(create_transition(bindings=bindings, output=args.output)))
     return 0
 
 

@@ -39,7 +39,7 @@ from types import SimpleNamespace
 
 import torch
 
-from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
+from .digests import DIRECT_ASCII_SPACED_STRICT, INSERTION_ASCII_SPACED_LAX, bytes_sha256hex
 from .joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA as QUANTUM_RECORD_SCHEMA,
                                    require_quantum_identity, require_quantum_campaign)
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
@@ -4396,7 +4396,7 @@ def main(argv=None) -> int:
             (Path(record["output_space"]["root"]) / "profile.txt").write_text(
                 text.getvalue())
     completion = quantum_completion_record(result, record_path=args.quantum, record_bytes=record_bytes)
-    print(json.dumps(completion))
+    print(INSERTION_ASCII_SPACED_LAX.text(completion))
     counters_path = Path(completion["counters"]["path"])
     # Only a pilot (counters carrying a pilot binding) is published, and only by a native job.
     if (os.environ.get("FLUX_JOB_ID") and os.environ.get("OUT")
