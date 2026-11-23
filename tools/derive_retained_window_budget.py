@@ -64,6 +64,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     import torch  # noqa: F401  (the format registry and meta modules need it)
+    from prismaquant import digests
     from prismaquant import format_registry as fr
     from prismaquant.joint_retained_window_plan import (
         DECLARED_BUDGET_FIELDS, RetainedWindowBudget, derive_retained_window_budget,
@@ -121,8 +122,8 @@ def main(argv=None):
                 sizes[key] = cache.estimate_nbytes([key])
     measured_seconds = time.time() - started
     if args.render_size_cache is not None:
-        args.render_size_cache.write_text(json.dumps(
-            {json.dumps(list(key)): value for key, value in sizes.items()}))
+        args.render_size_cache.write_text(digests.INSERTION_ASCII_SPACED_LAX.text(
+            {digests.INSERTION_ASCII_SPACED_LAX.text(list(key)): value for key, value in sizes.items()}))
 
     targets_by_layer = {}
     for layer, names in sorted(names_by_layer.items()):
@@ -177,7 +178,7 @@ def main(argv=None):
                                  boundary_storage=execution['boundary_storage'])
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(plan, indent=1, sort_keys=True) + '\n')
-    print(json.dumps({
+    print(digests.INSERTION_ASCII_INDENT1_LAX.text({
         'out': str(args.out.resolve()), 'sha256': _sha256(args.out),
         'superseded_plan_sha256': plan_sha256,
         'changed': {name: [sealed.as_dict()[name], budget.as_dict()[name]]
@@ -190,7 +191,7 @@ def main(argv=None):
         'retained_window_replay_multiplier': record['retained_window_replay_multiplier'],
         'candidate_files_measured': len(sizes),
         'measure_seconds': round(measured_seconds, 3),
-    }, indent=1))
+    }))
     return 0
 
 

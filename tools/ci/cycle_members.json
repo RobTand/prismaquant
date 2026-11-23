@@ -13165,6 +13165,7 @@
     "//tests:test_joint_qualification_windows_lib",
     "//tests:test_joint_replay_frontier_607",
     "//tests:test_joint_replay_frontier_607_lib",
+    "//tests:test_json_profile_route_2651_derive_retained_window_budget",
     "//tests:test_json_profile_route_2651_joint_and_tessera_reports_lib",
     "//tests:test_kl_ab",
     "//tests:test_lane_spec_and_gguf_kl_lib",
