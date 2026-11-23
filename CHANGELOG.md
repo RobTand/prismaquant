@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Use `INSERTION_ASCII_INDENT2_LAX.dump` for the three RTN staging writes (#5359). Part of #2651.
+  At base `c35dcdf1d6ad96a36aceec77daeb2b1279266dc3`, `tests/test_build_rtn_cache.py::test_staging_writes_use_indent2_dump_profile` failed at `assert [Path(stream.name) for _, stream in calls] == list(paths)`. The call list was empty.
+  The change passed `tests/test_build_rtn_cache.py::test_staging_writes_use_indent2_dump_profile`.
+  These cases passed on the base and on the change: `tests/test_build_rtn_cache.py::test_iter_quantizable_tensors_omits_vision_linears`, `tests/test_duplication_baseline.py::test_duplication_only_shrinks[False]`, and `tests/test_duplication_baseline.py::test_duplication_only_shrinks[True]`.
+  The duplication scan found no growth. The `stage_multimodal` same-name group matched the baseline. The staging scope had no near-duplicate pairs or primitive digest sites.
+
 - Use `DIRECT_ASCII_INDENT1_STRICT.text` for the Stage A retirement record (#5354). Part of #2651.
   At base `5a61e595897654b533fab33bb71be21cf8e49235`, `tests/test_stage_a_retirement_1073.py::test_retirement_record_uses_strict_indent1_text` failed at `assert calls == [digests.DIRECT_ASCII_INDENT1_STRICT]`.
   The call list was empty. The same test passed with the shared encoder.

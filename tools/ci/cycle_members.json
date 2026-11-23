@@ -9901,6 +9901,7 @@
     "//tests:test_bound_publication_digest_routing_2639_lib",
     "//tests:test_boundary_control",
     "//tests:test_boundary_stack_contract",
+    "//tests:test_build_rtn_cache_lib",
     "//tests:test_calibration_loader_lib",
     "//tests:test_campaign_acquisition_control_inputs",
     "//tests:test_campaign_acquisition_d32",
