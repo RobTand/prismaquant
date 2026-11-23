@@ -178,8 +178,18 @@ def _load_scoped_walk(config, scope, workers, metadata_memo=None, defer_render_o
     return data, started
 
 
+class _RenderDigestMismatch(ValueError):
+    pass
+
+
+def _payload_totals(progress):
+    # Copy the counts without a reader lock.
+    snapshot = progress.copy()
+    return {"payload_files": len(snapshot), "payload_bytes": sum(snapshot.values())}
+
+
 def render_sample_intake(config, *, manifest, scope, workers, hash_workers, trials,
-                         max_trials, max_files, max_bytes):
+                         max_trials, max_files, max_bytes, progress=None):
     """Admit the campaign roster. Hash only the selected renders.
     Pass the v1 manifest or its path. Set limits for all trials combined.
     To verify the sample, supply one independent expected_sha256 per cell in manifest order.
@@ -260,6 +270,8 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
     for resolve, _ in pending_origins:
         resolve()
     manifest_sha256 = digests.canonical_json_sha256(manifest, where="render sample manifest")
+    if progress is None:
+        progress = {}
 
     def measure(item):
         pair, path, signature = item
@@ -277,6 +289,7 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
                         chunk = handle.read(min(remaining, digests.FILE_BLOCK_BYTES))
                         require(bool(chunk), f"render is short: {path}")
                         remaining -= len(chunk)
+                        progress[trial, pair] = signature[2] - remaining
                         yield chunk
 
                 sha256 = digests.chunks_sha256hex(chunks())
@@ -284,12 +297,13 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
                         file_stat_signature(path.lstat()) == signature, changed)
         except FileNotFoundError as exc:
             raise ValueError(f"render changed or is missing: {path}") from exc
-        require(not expected or sha256 == expected[pair], f"render digest mismatch: {path}")
+        if expected and sha256 != expected[pair]:
+            raise _RenderDigestMismatch(f"render digest mismatch: {path}")
         return {"cell": list(pair), "sha256": sha256, "bytes": signature[2] - remaining}
 
     hash_started = time.monotonic()
     results = []
-    for _ in range(trials):
+    for trial in range(trials):
         rows = []
         _drive_ordered_units(plan, measure, lambda _, row: rows.append(row), workers=hash_workers)
         results.append(rows)
@@ -297,8 +311,7 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
             "verification": "sample-only", "scope": list(scope),
             "digest_verification": "verified" if expected else "not-requested",
             "head_walk_workers": data.head_walk_workers, "hash_workers": hash_workers,
-            "trials": results, "payload_files": sum(map(len, results)),
-            "payload_bytes": sum(row["bytes"] for rows in results for row in rows),
+            "trials": results, **_payload_totals(progress),
             "marks": {"anchor_input_s": hash_started - started,
                       "render_hash_s": time.monotonic() - hash_started}}
 
@@ -485,9 +498,10 @@ def render_sample_profile(args, scope) -> int:
                "deadline_s": args.deadline_s, "head_walk_workers": args.head_walk_workers,
                "file_hash_workers": args.file_hash_workers}
     wall_before, cpu_before = time.monotonic(), time.process_time()
+    progress = {}
 
     def report_stop(reason, **details):
-        record = {**context, "reason": reason, **details}
+        record = {**context, "reason": reason, **details, **_payload_totals(progress)}
         # Write the stop record without the stdout buffer lock.
         os.write(sys.stdout.fileno(), f"STAGE_B_HEAD_PROFILE_STOPPED {json.dumps(record)}\n".encode())
 
@@ -500,6 +514,7 @@ def render_sample_profile(args, scope) -> int:
     deadline = PeriodicSampler(lambda: stop("deadline"), interval_s=args.deadline_s,
                                name="render-sample-deadline", tick_first=False).start()
     guard = None
+    status, prefix = 0, "STAGE_B_HEAD_PROFILE"
     try:
         io_before, nfs_before, rtt_before = read_proc_io(), mount_ops(mount), read_rtt(mount)
         guard, trace = start_read_guard(
@@ -513,7 +528,7 @@ def render_sample_profile(args, scope) -> int:
             config, manifest=args.sample_manifest, scope=scope,
             workers=args.head_walk_workers, hash_workers=args.file_hash_workers,
             trials=args.trials, max_trials=args.max_trials, max_files=args.max_files,
-            max_bytes=args.max_bytes)
+            max_bytes=args.max_bytes, progress=progress)
         wall, cpu = time.monotonic() - wall_before, time.process_time() - cpu_before
         nfs_after, rtt_after = mount_ops(mount), read_rtt(mount)
         peak = read_proc_status().get("VmHWM")
@@ -532,13 +547,17 @@ def render_sample_profile(args, scope) -> int:
                             "interval_s": args.guard_interval_s, "trace": trace}}
         if time.monotonic() - wall_before >= args.deadline_s:
             stop("deadline")
+    except _RenderDigestMismatch as exc:
+        status, prefix = 1, "STAGE_B_HEAD_PROFILE_REFUSED"
+        report = {**context, "reason": "render digest mismatch", "detail": str(exc),
+                  **_payload_totals(progress)}
     finally:
         deadline.request_stop()
         if guard is not None:
             guard.request_stop()
         signal.signal(signal.SIGTERM, previous)
-    print("STAGE_B_HEAD_PROFILE " + DIRECT_ASCII_SPACED_LAX.text(report), flush=True)
-    return 0
+    print(f"{prefix} " + DIRECT_ASCII_SPACED_LAX.text(report), flush=True)
+    return status
 
 
 def main(argv=None) -> int:
