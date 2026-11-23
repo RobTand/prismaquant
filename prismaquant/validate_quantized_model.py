@@ -90,6 +90,9 @@ import urllib.error
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field, asdict
+
+from prismaquant import digests
+
 from .shipcard_slots import (
     BOUNDARY_ENDPOINT,
     BOUNDARY_REQUEST_SCHEMA,
@@ -222,7 +225,7 @@ class ValidationReport:
 # HTTP helpers (no extra deps — urllib is stdlib)
 # -----------------------------------------------------------------
 def _post_json(url: str, payload: dict, timeout: float = 300.0) -> dict:
-    body = json.dumps(payload).encode("utf-8")
+    body = digests.INSERTION_ASCII_SPACED_LAX.text(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -842,7 +845,7 @@ def format_report_md(rep: ValidationReport) -> str:
         "",
         f"- **artifact:** `{rep.artifact}`",
         f"- **endpoint:** {rep.base_url}",
-        f"- **thresholds:** {json.dumps(rep.thresholds, indent=None)}",
+        f"- **thresholds:** {digests.INSERTION_ASCII_SPACED_LAX.text(rep.thresholds)}",
         "",
         "| Check | Status | Detail |",
         "|---|---|---|",
@@ -856,7 +859,7 @@ def format_report_md(rep: ValidationReport) -> str:
             lines.append("")
             lines.append(f"### {c.name} metrics")
             lines.append("```json")
-            lines.append(json.dumps(c.metrics, indent=2, default=str))
+            lines.append(digests.INSERTION_ASCII_INDENT2_LAX_DEFAULT_STR.text(c.metrics))
             lines.append("```")
     return "\n".join(lines)
 

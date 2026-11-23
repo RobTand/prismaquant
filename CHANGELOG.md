@@ -57,6 +57,16 @@
   Keep the original ASCII escapes and text fallback.
 - Use `INSERTION_ASCII_INDENT2_LAX.text` for three allocator writes (#5267) and eight other JSON calls (#5282). Keep the output bytes the same (#2651).
 - Use the strict spaced JSON profile for quantum status (#2651).
+- Use exact JSON profiles for validator requests, thresholds, and metrics (#5356). Part of #2651.
+  On base `5a61e595897654b533fab33bb71be21cf8e49235`,
+  `tests/test_validate_quantized_model.py::test_request_and_report_use_exact_json_profiles`
+  failed at `assert len(profiles) == 3`. The test found no profile calls.
+  The duplication scan found no changes in the touched scopes.
+  These cases passed with the change:
+  - `tests/test_validate_quantized_model.py::test_request_and_report_use_exact_json_profiles`
+  - `tests/test_validate_quantized_model.py::test_end_to_end_healthy_report_no_spec_decode`
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[False]`
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[True]`
 
 - Use the shared byte framing recipe for the joint replay read order (#2541, #2648).
   Keep the domain tag, row order, and raw digest bytes unchanged.
