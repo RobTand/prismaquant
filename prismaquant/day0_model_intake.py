@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 from .cost_stage_checkpoint import atomic_write_bytes
-from .digests import indent2_json_file_bytes
+from .digests import INSERTION_ASCII_INDENT2_LAX, indent2_json_file_bytes
 from .export_structure import _read_index, _read_metadata, _regular_stat, verify_export_structure
 from .model_profiles.default import DefaultProfile
 from .model_profiles.registry import detect_profile
@@ -287,7 +287,7 @@ def main(argv=None) -> int:
             atomic_write_bytes(args.output / "intake.json", indent2_json_file_bytes(report))
             if result.returncode:
                 return result.returncode
-        print(json.dumps(report, indent=2))
+        print(INSERTION_ASCII_INDENT2_LAX.text(report))
         return 0
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"day-zero intake refused: {exc}", file=sys.stderr)
