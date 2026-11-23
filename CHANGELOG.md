@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Use `INSERTION_ASCII_SPACED_LAX.text` for ten JSON calls. Keep the output bytes unchanged (#5284, #2651).
 - Use `DIRECT_UTF8_STRICT.text` for the selector's resolved assignment payload digest (#5268, #2651).
 
 - Route ten byte digests through `bytes_sha256hex` (#4716, #2646).

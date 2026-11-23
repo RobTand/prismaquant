@@ -22,7 +22,7 @@ from pathlib import Path
 
 import torch
 from safetensors import safe_open
-from .digests import bytes_sha256hex
+from .digests import INSERTION_ASCII_SPACED_LAX, bytes_sha256hex
 
 try:
     from accelerate import init_empty_weights
@@ -222,7 +222,7 @@ class _StreamingInitializationAudit:
         mapping = {name: {"tensor": key, "file": os.path.basename(self.context.weight_shard[name])}
                    for name, key in self.context.weight_ckpt.items()}
         model_class = type(self.context.model)
-        state = json.loads(json.dumps(self.records))
+        state = json.loads(INSERTION_ASCII_SPACED_LAX.text(self.records))
         return validate_streaming_selected_initialization_witness({
             "schema": _SELECTED_INITIALIZATION_SCHEMA,
             "scope": "streamed_text_source_selected", "status": "completed",
@@ -247,7 +247,7 @@ class _StreamingInitializationAudit:
         mapping = {name: {"tensor": key, "file": os.path.basename(self.context.weight_shard[name])}
                    for name, key in self.context.weight_ckpt.items()}
         model_class = type(self.context.model)
-        state = json.loads(json.dumps(self.records))
+        state = json.loads(INSERTION_ASCII_SPACED_LAX.text(self.records))
         return validate_streaming_prefix_initialization_contract({
             "schema": "prismaquant.streaming_prefix_initialization.v1",
             "scope": "streamed_text_source_prefix", "status": "completed",

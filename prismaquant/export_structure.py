@@ -8,7 +8,6 @@ itself uses stdlib and shipcard's shared header validation only.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 import stat
@@ -19,7 +18,7 @@ from .shipcard import (
     _strict_json_object,
     safetensors_header_spans,
 )
-from .digests import DIRECT_ASCII_SPACED_LAX
+from .digests import DIRECT_ASCII_SPACED_LAX, INSERTION_ASCII_SPACED_LAX
 from .source_read_plan import safetensors_prefix_length
 
 
@@ -164,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         result = verify_export_structure(args.artifact_dir, expect_shards=args.expect_shards,
                                          index_size_basis=args.index_size_basis)
     except (OSError, ValueError) as exc:
-        print(json.dumps({"status": "structure_error", "error": str(exc)}))
+        print(INSERTION_ASCII_SPACED_LAX.text({"status": "structure_error", "error": str(exc)}))
         return 1
     print(DIRECT_ASCII_SPACED_LAX.text(result))
     return 0

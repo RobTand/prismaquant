@@ -145,7 +145,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.overrides import TorchFunctionMode
-from .digests import DIRECT_ASCII_LAX_DEFAULT_STR, bytes_sha256hex
+from .digests import DIRECT_ASCII_LAX_DEFAULT_STR, INSERTION_ASCII_SPACED_LAX, bytes_sha256hex
 
 __all__ = [
     "BYTE_POLICY_REPLICATED",
@@ -2020,11 +2020,11 @@ def main(argv: list[str] | None = None) -> int:
             "router_pin_rules": sum(
                 1 for r in rules_json
                 if r.get("disposition") == "pin"
-                and "router" in json.dumps(r).lower()),
+                and "router" in INSERTION_ASCII_SPACED_LAX.text(r).lower()),
             "packed_expert_decide_rules": sum(
                 1 for r in rules_json
                 if r.get("disposition") == "decide"
-                and "expert" in json.dumps(r).lower()),
+                and "expert" in INSERTION_ASCII_SPACED_LAX.text(r).lower()),
         }
 
     verdict = evaluate_walk_gate(
