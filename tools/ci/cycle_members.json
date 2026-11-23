@@ -9829,6 +9829,7 @@
     "//tests:test_import_cycle_wave1_3215_lib",
     "//tests:test_joint_cost_quantum_runtime_lib",
     "//tests:test_joint_replay_frontier_607_lib",
+    "//tests:test_json_profile_route_2651_sensitivity_probe_lib",
     "//tests:test_kl_ab",
     "//tests:test_kv_cotangent_path_lib",
     "//tests:test_lane_spec_and_gguf_kl_lib",

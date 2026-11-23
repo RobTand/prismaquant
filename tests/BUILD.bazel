@@ -27691,6 +27691,18 @@ pq_py_test(
 )
 
 pq_py_library(
+    name = "test_json_profile_route_2651_sensitivity_probe_lib",
+    srcs = [
+        "test_json_profile_route_2651_sensitivity_probe.py",
+    ],
+    deps = [
+        "//:prismaquant/__init__",
+        "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/digests",
+    ],
+)
+
+pq_py_library(
     name = "test_build_t4_overlay_catalog_lib",
     srcs = [
         "test_build_t4_overlay_catalog.py",
@@ -43945,6 +43957,35 @@ pq_py_library(
         ":test_joint_quanta_join_lib",
         "@pq_pip//pytest",
     ],
+)
+
+pq_py_test(
+    name = "test_json_profile_route_2651_sensitivity_probe",
+    path = "tests/test_json_profile_route_2651_sensitivity_probe.py",
+    library = ":test_json_profile_route_2651_sensitivity_probe_lib",
+    deps = [
+        "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
+        "//:pqtel/__init__",
+        "//:prismaquant/lane_shipcard",
+        "//:prismaquant/shipcard_cli",
+        "//:tools/build_streamed_full_kl_teacher",
+        "//:tools/dsv4_wikitext_inputs",
+        "//:tools/full_kl_teacher_payload",
+        "//:tools/g3job/g3_pq_policy/__init__",
+        "//:tools/gold_engine_options",
+        "//:tools/gold_measurement_fidelity",
+        "//:tools/measure_served_gold",
+        "//:tools/measure_vllm_full_kl",
+        "//:tools/measure_vllm_wikitext_ppl",
+        "//:tools/pq_profile_child",
+        "//:tools/prepare_dsv4_wikitext_inputs",
+        "//:tools/prismaquant_source_bootstrap",
+        "//:tools/spec_decode_guard",
+        "//:tools/tessera_campaign_container",
+        "//:tools/tessera_fleet/__init__",
+        ":conftest",
+    ],
+    timeout = "moderate",
 )
 
 pq_py_library(
