@@ -415,6 +415,65 @@ def test_render_sample_admits_marker_metadata_before_hashing(tmp_path, monkeypat
     assert opened == paths * 2
 
 
+def test_render_sample_opens_markers_only_after_plan_admission(tmp_path, monkeypatch):
+    import builtins
+    import io
+    import os
+    from contextlib import contextmanager
+    from pathlib import Path
+    from unittest.mock import Mock
+
+    run, manifest, paths, opened = _make_render_sample(tmp_path, monkeypatch, "marked")
+    marker = bridge._render_origin_marker_path(paths[0])
+    marker_opens, reads = [], []
+    wires = (tmp_path / "merged/cache/wire").iterdir()
+    payload_ids = {(info.st_dev, info.st_ino) for info in (path.stat() for path in [*paths, *wires])}
+    fdopen = os.fdopen
+
+    def watch(real_open):
+        def record(path, *args, **kwargs):
+            if not isinstance(path, int) and Path(os.fsdecode(path)) == marker:
+                marker_opens.append(marker)
+            return real_open(path, *args, **kwargs)
+        return record
+
+    @contextmanager
+    def count_reads(*args, **kwargs):
+        with fdopen(*args, **kwargs) as handle:
+            info = os.fstat(handle.fileno())
+            if (info.st_dev, info.st_ino) not in payload_ids:
+                yield handle
+                return
+
+            def read(size):
+                chunk = handle.read(size)
+                reads.append(len(chunk))
+                return chunk
+
+            yield Mock(wraps=handle, read=read)
+
+    for module in (builtins, io, os):
+        monkeypatch.setattr(module, "open", watch(module.open))
+    monkeypatch.setattr(os, "fdopen", count_reads)
+
+    for changes, message in [
+        ({"manifest": manifest | {"inputs": {}}}, "admitted inputs"),
+        ({"manifest": manifest | {"cells": [[manifest["cells"][0][0], "absent"]]}},
+         "unadmitted cell"),
+        ({"max_files": 3}, "max_files"),
+        ({"max_bytes": 15}, "max_bytes"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            run(**changes)
+        assert marker_opens == opened == reads == []
+
+    result = run()
+    assert marker_opens == [marker]
+    assert opened == paths * 2
+    assert result["payload_files"] == len(opened)
+    assert result["payload_bytes"] == sum(reads) == 16
+
+
 def test_render_sample_refuses_a_marker_link_to_wire_before_reading(tmp_path, monkeypatch):
     for link in ("symlink", "hardlink"):
         with monkeypatch.context() as patch:

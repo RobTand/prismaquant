@@ -148,7 +148,7 @@ def scoped_walk_intake(config, *, scope, workers, metadata_memo=None):
             "units_with_cells": len({name for name, _ in data.cells})}
 
 
-def _load_scoped_walk(config, scope, workers, metadata_memo=None):
+def _load_scoped_walk(config, scope, workers, metadata_memo=None, defer_render_origins=None):
     from prismaquant.tessera_joint_aura import load_measured_anchor_input
     from prismaquant.tessera_reader import load_declared_reader
 
@@ -169,7 +169,7 @@ def _load_scoped_walk(config, scope, workers, metadata_memo=None):
         require_existing_renders=True, verify_payloads=False,
         unit_scope=(low, high), head_walk_workers=workers,
         historical_encoder_reuse=config.get("historical_encoder_reuse"),
-        metadata_memo=metadata_memo)
+        metadata_memo=metadata_memo, defer_render_origins=defer_render_origins)
     return data, started
 
 
@@ -222,14 +222,14 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
         expected = dict(zip(pairs, hashes, strict=True))
     require(len(pairs) * trials <= max_files, "render sample plan exceeds max_files")
 
+    pending_origins = []
     data, started = _load_scoped_walk(
         {key: config[key] for key in ("inputs", "historical_encoder_reuse") if key in config},
-        scope, workers)
+        scope, workers, None, pending_origins.append)
     require(digests.canonical_json_bytes(manifest["inputs"], where="manifest inputs") ==
             digests.canonical_json_bytes(data.inputs, where="admitted inputs"),
             "render sample manifest does not match admitted inputs")
     require(all(pair in data.cells for pair in pairs), "render sample manifest names an unadmitted cell")
-    manifest_sha256 = digests.canonical_json_sha256(manifest, where="render sample manifest")
     plan = []
     for pair in pairs:
         path = Path(data.cells[pair]["render"])
@@ -239,6 +239,9 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
         plan.append((pair, path, file_stat_signature(info)))
     require(sum(signature[2] for _, _, signature in plan) * trials <= max_bytes,
             "render sample plan exceeds max_bytes")
+    for resolve in pending_origins:
+        resolve()
+    manifest_sha256 = digests.canonical_json_sha256(manifest, where="render sample manifest")
 
     def measure(item):
         pair, path, signature = item
