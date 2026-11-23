@@ -809,8 +809,9 @@ class _BoundCheckpointUnitIdentity:
     """
 
     def __init__(self, anchors, *, source_weight, calibration_source,
-                 projected_unit, static_scales, retain_source_receipt=True):
+                 projected_unit, static_scales, retain_source_receipt=True, run_host_hash=None):
         import copy
+        from dataclasses import replace
         import torch
         from types import SimpleNamespace
         from .production_weight_cache import _cb_cache_tensor_identity
@@ -837,23 +838,30 @@ class _BoundCheckpointUnitIdentity:
             raise ValueError("bound checkpoint identity Hessian is nonfinite")
         self._projection = projected_unit
         self._projection_record = copy.deepcopy(projected_unit)
-        self._template = _checkpoint_anchor_identity(representative,
-            weights={self._name: source_weight},
-            menus={self._name: [SimpleNamespace(format_name=fmt) for fmt in formats]},
-            calibration_source=calibration_source, static_scales=static_scales,
-            projected_units={} if projected_unit is None else {self._name: projected_unit},
-            check_scoring_metadata=False)
         self._settings = self._calibration_settings()
-        # H-free rosters retain no H receipt. The run-level identity uses its
-        # ordinary direct H receipt for those units, keeping every retained H
-        # record behind this holder's source/version guard.
+        if run_host_hash is not None:
+            # Move tensors on the caller before the worker reads them.
+            source_weight = source_weight.detach().cpu()
+            if self._hessian is not None:
+                calibration_source = replace(calibration_source,
+                    hessians={self._name: self._hessian.detach().cpu()})
+
+        def hash_inputs():
+            template = _checkpoint_anchor_identity(representative,
+                weights={self._name: source_weight},
+                menus={self._name: [SimpleNamespace(format_name=fmt) for fmt in formats]},
+                calibration_source=calibration_source, static_scales=static_scales,
+                projected_units={} if projected_unit is None else {self._name: projected_unit},
+                check_scoring_metadata=False)
+            receipt = _cb_cache_tensor_identity(source_weight) if retain_source_receipt else None
+            return template, receipt
+
+        self._template, self._source_receipt = (hash_inputs() if run_host_hash is None
+                                                else run_host_hash(hash_inputs))
+        self._guard()
+        # H-free rosters retain no H receipt.
         self._campaign_hessian = (None if self._template["calibration"] is None else
                                   copy.deepcopy(self._template["calibration"]["hessian"]))
-        # Joint AURA needs this separate cache receipt. Campaign pricing only
-        # keeps producer identities, so it must not add a second full CPU hash.
-        self._source_receipt = (_cb_cache_tensor_identity(source_weight)
-                                if retain_source_receipt else None)
-        self._guard()
 
     def _calibration_settings(self):
         """Snapshot producer settings without resealing the resident Hessian."""
@@ -1018,11 +1026,12 @@ class _BoundCheckpointUnitIdentity:
 
 def bind_checkpoint_unit_identity(anchors, *, source_weight, calibration_source,
                                   projected_unit, static_scales,
-                                  retain_source_receipt=True):
+                                  retain_source_receipt=True, run_host_hash=None):
     """Bind actual inputs once; accepts no caller-supplied hash or receipt."""
     return _BoundCheckpointUnitIdentity(anchors, source_weight=source_weight,
         calibration_source=calibration_source, projected_unit=projected_unit,
-        static_scales=static_scales, retain_source_receipt=retain_source_receipt)
+        static_scales=static_scales, retain_source_receipt=retain_source_receipt,
+        run_host_hash=run_host_hash)
 
 
 def _campaign_identity_anchor_roster(name, menu, *, calibration_source, static_scales):
