@@ -77,7 +77,6 @@ checker configuration; a panel or observation alone is insufficient.
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import os
 import re
@@ -89,7 +88,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
-from .digests import DIRECT_ASCII_SPACED_LAX, DIRECT_ASCII_STRICT, bytes_sha256hex, file_sha256hex
+from .digests import (DIRECT_ASCII_SPACED_LAX, DIRECT_ASCII_STRICT, INSERTION_ASCII_SPACED_LAX,
+                      bytes_sha256hex, file_sha256hex)
 from .lane_eligibility import (
     STRUCTURE_DENSE, STRUCTURE_ROUTED_MOE, STRUCTURES, EligibilityTable,
     LaneEligibilityError, ServingContext, cell_lane_admits,
@@ -1489,7 +1489,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                                               "out_sha256": digest}), flush=True)
             return 0
         table = load_shape_table(args.table)
-        print(json.dumps(table.identity()), flush=True)
+        print(INSERTION_ASCII_SPACED_LAX.text(table.identity()), flush=True)
         return 0
     except RuntimePriceError as exc:
         print(f"[shape-runtime-prices] REFUSED: {exc}", file=sys.stderr, flush=True)

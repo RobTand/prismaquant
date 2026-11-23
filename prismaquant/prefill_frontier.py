@@ -78,7 +78,7 @@ from typing import Sequence
 
 from .cost_stage_checkpoint import atomic_write_bytes, publish_new_bytes
 from .digests import (
-    DIRECT_ASCII_INDENT2_LAX,
+    DIRECT_ASCII_INDENT2_LAX, INSERTION_ASCII_SPACED_LAX,
     bytes_sha256hex,
     file_digest_sha256hex,
     file_sha256hex,
@@ -880,7 +880,7 @@ def run_constrained(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str]
 
 def _as_json(value):
     """``value`` as the document stores it, so a tuple compares equal to its list."""
-    return json.loads(json.dumps(value))
+    return json.loads(INSERTION_ASCII_SPACED_LAX.text(value))
 
 
 def load_pact_baseline(path: Path, expected_sha256: str, *, table_identity: dict,

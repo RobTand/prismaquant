@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import argparse
 import copy
-import json
 from pathlib import Path
 
-from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX, INSERTION_ASCII_SPACED_LAX
 from prismaquant.shipcard import (
     _strict_json_object,
     fill_slot,
@@ -144,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         report = ingest_receipts(args.shipcard, window=args.window,
                                  records_dir=args.records_dir, apply=args.apply)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
-        print(json.dumps({"status": "error", "error": str(exc)}))
+        print(INSERTION_ASCII_SPACED_LAX.text({"status": "error", "error": str(exc)}))
         return 2
     print(DIRECT_ASCII_INDENT2_LAX.text(report))
     return 0 if report["status"] == "ready" else 1

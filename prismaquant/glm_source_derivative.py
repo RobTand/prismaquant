@@ -18,10 +18,10 @@ import types
 import weakref
 
 if __package__:
-    from .digests import bytes_sha256hex, file_sha256hex
+    from .digests import INSERTION_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex
 else:
     # The stdlib image driver loads this file without initializing PQ/Torch.
-    from digests import bytes_sha256hex, file_sha256hex
+    from digests import INSERTION_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex
 
 VERSION = 'glm_kda_causal_exp_v1'
 SCHEMA = 'prismaquant.glm_source_derivative.v1'
@@ -203,7 +203,7 @@ def bind_source_derivative(model, profile, value):
     prior = _BINDINGS.get(model)
     _require(prior is None or prior['identity'] == identity, 'cannot change a live derivative binding')
     _BINDINGS[model] = dict(identity=identity, policy=policy, build=build)
-    return json.loads(json.dumps(identity))
+    return json.loads(INSERTION_ASCII_SPACED_LAX.text(identity))
 
 
 #: Every definition in the module, as a whole (PQ #1341).
