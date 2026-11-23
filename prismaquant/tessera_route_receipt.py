@@ -50,7 +50,7 @@ import json
 from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
-from .digests import text_sha256hex
+from .digests import INSERTION_ASCII_SPACED_LAX, text_sha256hex
 
 
 class TesseraRouteReceiptError(ValueError):
@@ -412,7 +412,7 @@ def _check_runtime_image_declaration(census, requested):
     try:
         replay = image_metadata.declared_reference(requested, env={
             image_metadata.CENSUS_IMAGE_ENV: image,
-            image_metadata.CENSUS_DECLARATION_ENV: json.dumps(dict(record)),
+            image_metadata.CENSUS_DECLARATION_ENV: INSERTION_ASCII_SPACED_LAX.text(dict(record)),
         })
     except image_metadata.RuntimeImageError as exc:
         raise TesseraRouteReceiptError(f"{exc.payload['reason']}: {exc}") from exc
