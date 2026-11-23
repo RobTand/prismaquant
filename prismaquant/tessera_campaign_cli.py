@@ -137,6 +137,10 @@ def campaign_argument_parser(*, description: str | None = None,
                          "identity narrows with it, so two invocations over "
                          "disjoint selections never contend. Omitted: measure "
                          "every group in scope, exactly as before.")
+    ap.add_argument("--reference-law-anchors", action="store_true",
+                    help="In round one, use the reference rung for all expert projections in --units. "
+                         "Use two more rungs for the transfer-law draw. "
+                         "Keep three dense anchors. Use a separate checkpoint.")
     ap.add_argument("--research-exact-member", default=None,
                     help="Research-only scalar endpoint for one named member of a "
                          "fully validated --units group. Requires a complete "

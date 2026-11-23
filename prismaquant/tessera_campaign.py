@@ -104,7 +104,7 @@ import pickle
 import sys
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -368,6 +368,21 @@ def _campaign_round_one_schedule(groups, group_rates, *, placement: AnchorPlacem
     """
     names = {name for members in groups.values() for name in members}
     schedule = {name: {} for name in sorted(names)}
+    samples = placement.reference_law_samples
+    tiers = {}
+    if samples is not None:
+        if (requests is not None or audit_units or placement.rate_band is not None
+                or placement.exhaustive_rate_grid or placement.anchors != 3):
+            raise ValueError("reference-law anchors require three anchors and no acquisition, audit or rate band")
+        for sample in samples.values():
+            if not sample.is_census or sample.reference_q256 is None or not sample.transfer_law_experts:
+                raise StackSampleError(f"{sample.packed_qname}: supply a census, a reference rung and a law draw")
+            law = set(sample.transfer_law_experts)
+            tiers.update((name, (sample.reference_q256, expert in law))
+                         for expert, members in sample.members.items() for name in members)
+        if not tiers or set(tiers) != {name for key, members in groups.items()
+                                       if key.startswith("s:") for name in members}:
+            raise StackSampleError("reference-law samples must cover all expert projections")
     if requests is not None:
         if set(requests) != names:
             raise ValueError("acquisition schedule requires every atomic member, no extra units")
@@ -376,6 +391,19 @@ def _campaign_round_one_schedule(groups, group_rates, *, placement: AnchorPlacem
             raise ValueError("acquisition schedule refuses audit, band, exhaustive or adaptive work")
     requested_schedule = None if requests is None else requested_acquisition_schedule(groups, requests)
     for key, members in sorted(groups.items()):
+        if tiers and key.startswith("s:"):
+            references = {tiers[name][0] for name in members}
+            for family, allowed in group_rates[key].items():
+                if len(allowed) < 3 or not references.issubset(allowed):
+                    continue
+                for name in members:
+                    reference, in_draw = tiers[name]
+                    lo = allowed[1] if reference == allowed[0] else allowed[0]
+                    hi = allowed[-2] if reference == allowed[-1] else allowed[-1]
+                    schedule[name][family] = sorted([lo, reference, hi]) if in_draw else [reference]
+            if not schedule[members[0]]:
+                raise StackSampleError(f"{key}: no legal family has the reference and two target rungs")
+            continue
         if requests is None:
             families = group_rates[key]
         else:
@@ -431,7 +459,8 @@ def _prime_first_anchor_batch(row_stream, *, placement: AnchorPlacement, seed_ch
                               batch_size, max_artifact_bpp, checkpoint, targets, menus,
                               weights, profile, expert_members, encode_structure,
                               projected_units, audit_units, route_cache,
-                              partitioned=False, acquisition_requests=None, finalize_checkpoint=False):
+                              partitioned=False, acquisition_requests=None, finalize_checkpoint=False,
+                              schedule=None):
     """Overlap a new head's exact first batch; never read ahead of resume gates.
 
     Use the existing group/anchor/batch mechanisms and row-local refusal memo.
@@ -452,27 +481,28 @@ def _prime_first_anchor_batch(row_stream, *, placement: AnchorPlacement, seed_ch
         else:
             return
 
-    def snap(rate, allowed):
-        if not allowed:
-            return None
-        return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
-
-    cap = float(max_artifact_bpp)
-    rates_by_unit = {}
-    for name in targets:
-        per_family = {}
-        for rung in menus[name]:
-            if cap > 0 and rung.bpp > cap:
-                continue
-            per_family.setdefault(rung.family, set()).add(rung.body_rate_q256)
-        rates_by_unit[name] = per_family
     groups = resolve_anchor_groups(targets, profile=profile, expert_members=expert_members)
-    group_rates, _refused = anchor_group_rate_grids(groups, rates_by_unit,
-        encode_structure=encode_structure, projected_units=projected_units,
-        route_cache=route_cache)
-    schedule = _campaign_round_one_schedule(groups, group_rates, placement=placement,
-        audit_units=audit_units, snap=snap, requests=acquisition_requests,
-        rates_by_unit=rates_by_unit)
+    if schedule is None:
+        def snap(rate, allowed):
+            if not allowed:
+                return None
+            return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
+
+        cap = float(max_artifact_bpp)
+        rates_by_unit = {}
+        for name in targets:
+            per_family = {}
+            for rung in menus[name]:
+                if cap > 0 and rung.bpp > cap:
+                    continue
+                per_family.setdefault(rung.family, set()).add(rung.body_rate_q256)
+            rates_by_unit[name] = per_family
+        group_rates, _refused = anchor_group_rate_grids(groups, rates_by_unit,
+            encode_structure=encode_structure, projected_units=projected_units,
+            route_cache=route_cache)
+        schedule = _campaign_round_one_schedule(groups, group_rates, placement=placement,
+            audit_units=audit_units, snap=snap, requests=acquisition_requests,
+            rates_by_unit=rates_by_unit)
     pending = [(name, family, rate) for key, members in sorted(groups.items())
                for family in sorted({f for name in members for f in schedule[name]})
                for name in members for rate in schedule[name].get(family, [])]
@@ -618,6 +648,11 @@ def campaign_checkpoint_identity(*, weights, acts, hessians, menus, settings: Ma
     settings.pop("acquisition_request", None)
     settings.pop("acquisition_request_sha256", None)
     settings.pop("acquisition_source_weights", None)
+    if settings.pop("reference_law_anchors", False):
+        if not settings.get("reference_law_schedule"):
+            raise ValueError("reference-law anchors require an exact checkpoint schedule")
+    else:
+        settings.pop("reference_law_schedule", None)
     restriction = parse_family_restriction(settings.get("family_restriction"))
     if settings.get("source_scope") is None:
         # Unset, the body's identity is byte-identical to before the flag.
@@ -1635,6 +1670,12 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
     except Exception as exc:
         raise RuntimeError(
             f"--seed-checkpoint {manifest}: unreadable manifest: {exc}") from exc
+    field = "reference_law_schedule"
+    schedule = expected_identity.get("settings", {}).get(field)
+    if schedule is not None:
+        seed_settings = seed_inputs.get("settings")
+        if not isinstance(seed_settings, Mapping) or seed_settings.get(field) != schedule:
+            raise RuntimeError(f"seed checkpoint identity mismatch at settings.{field}")
     for field in ('currency', 'calibration', 'input_global_scale_policy'):
         if (field not in seed_inputs or field not in expected_identity or
                 seed_inputs[field] != expected_identity[field]):
@@ -4148,6 +4189,9 @@ def _main(argv, *, source_scope, waits) -> int:
     from .tessera_campaign_cli import campaign_argument_parser
     ap = campaign_argument_parser(description=__doc__)
     args = ap.parse_args(argv)
+    if args.reference_law_anchors and (not args.units or args.census_out
+                                       or args.capture_calibration_out or args.research_exact_member):
+        ap.error("--reference-law-anchors requires --units in a pricing run without --research-exact-member")
     acquisition = _load_campaign_acquisition(args, ap)
     calibration_options = (args.calibration_input, args.calibration_input_sha256,
                            args.calibration_corpus)
@@ -4915,26 +4959,6 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
             selected_source_preparation['source_authentication'] = source_authentication.receipt()
             source_authentication.close()
 
-    route_cache: dict[tuple, str | None] = {}
-    acquisition_schedule = None
-    if isinstance(request, LoadedPricingRequest) and scope.acquisition is not None:
-        acquisition_groups = resolve_anchor_groups(targets, profile=profile, expert_members=scope.expert_members)
-        acquisition_rates = {name: {} for name in targets}
-        for name in targets:
-            for rung in menus[name]:
-                if request.recipe.max_artifact_bpp > 0 and rung.bpp > request.recipe.max_artifact_bpp:
-                    continue
-                acquisition_rates[name].setdefault(rung.family, set()).add(rung.body_rate_q256)
-        acquisition_grids, _ = anchor_group_rate_grids(acquisition_groups, acquisition_rates,
-            encode_structure=encode_structure, projected_units=projected_units, route_cache=route_cache)
-        acquisition_schedule = _campaign_round_one_schedule(acquisition_groups, acquisition_grids,
-            placement=request.recipe.placement, audit_units=scope.audit_units, snap=None, requests=scope.acquisition["requests"],
-            rates_by_unit=acquisition_rates)
-        checkpoint_settings["acquisition_schedule"] = acquisition_schedule
-        acquisition_origin = campaign_acquisition_origin(scope.acquisition, acquisition_schedule, menus)
-        checkpoint_settings["acquisition_origin"] = acquisition_origin
-        checkpoint_settings["acquisition_source_weights"] = scope.acquisition["source_weights"]
-
     if not streaming_head:
         close_source_authentication()
     elif source_authentication is not None:
@@ -4964,6 +4988,54 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
     seed_wire_dir = None if request.seed is None else request.seed.wire_dir
     identity_threads_requested = publication.requested_identity_threads
 
+    if request.reference_law_anchors:
+        placement = replace(placement, reference_law_samples=scope.stack_samples)
+
+    def _snap(rate: int, allowed: Sequence[int]) -> int | None:
+        if not allowed:
+            return None
+        return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
+
+    # Apply the artifact cap before intersecting the legal body rates.
+    cap = float(recipe.max_artifact_bpp)
+    rate_menus = full_partition_menus if scope.partition_menu_targets is not None else menus
+    rates_by_unit: dict[str, dict[str, set[int]]] = {}
+    for name in scope.partition_menu_targets or targets:
+        per_family: dict[str, set[int]] = {}
+        for rung in rate_menus[name]:
+            if cap > 0 and rung.bpp > cap:
+                continue
+            per_family.setdefault(rung.family, set()).add(rung.body_rate_q256)
+        rates_by_unit[name] = per_family
+    anchor_groups = resolve_anchor_groups(targets, profile=profile, expert_members=scope.expert_members)
+    rate_groups = ({entry["key"]: entry["members"] for entry in scope.selection["groups"]}
+                   if scope.partition_menu_targets is not None else anchor_groups)
+    route_cache: dict[tuple, str | None] = {}
+    group_rates, route_refused = anchor_group_rate_grids(
+        rate_groups, rates_by_unit,
+        encode_structure=(partition_encode_structure if scope.partition_menu_targets is not None else encode_structure),
+        projected_units=(scope.partition_unit_records if scope.partition_menu_targets is not None else projected_units),
+        route_cache=route_cache)
+    if scope.partition_menu_targets is not None:
+        fixed_rate = parse_rate_band(placement.rate_band)[0]
+        if any(not any(fixed_rate in rates for rates in families.values())
+               for families in group_rates.values()):
+            raise RuntimeError("expert partition pinned rate has no legal full-group family/grid")
+
+    round_one_schedule = acquisition_schedule = None
+    if scope.acquisition is not None or request.reference_law_anchors:
+        round_one_schedule = _campaign_round_one_schedule(anchor_groups, group_rates,
+            placement=placement, audit_units=scope.audit_units, snap=_snap,
+            requests=None if scope.acquisition is None else scope.acquisition["requests"],
+            rates_by_unit=rates_by_unit)
+    if request.reference_law_anchors:
+        checkpoint_settings["reference_law_schedule"] = round_one_schedule
+    if scope.acquisition is not None:
+        acquisition_schedule = round_one_schedule
+        checkpoint_settings["acquisition_schedule"] = acquisition_schedule
+        acquisition_origin = campaign_acquisition_origin(scope.acquisition, acquisition_schedule, menus)
+        checkpoint_settings["acquisition_origin"] = acquisition_origin
+        checkpoint_settings["acquisition_source_weights"] = scope.acquisition["source_weights"]
     checkpoint_settings = MappingProxyType(checkpoint_settings)
 
     from .cost_stage_checkpoint import prepare_journal, write_unit
@@ -5115,8 +5187,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
             targets=targets, menus=menus, weights=weights, profile=profile,
             expert_members=scope.expert_members, encode_structure=encode_structure,
             projected_units=projected_units, audit_units=scope.audit_units, route_cache=route_cache,
-            partitioned=scope.partition_menu_targets is not None,
-            acquisition_requests=None if scope.acquisition is None else scope.acquisition["requests"])
+            partitioned=scope.partition_menu_targets is not None, schedule=round_one_schedule)
 
     def run_identity(**receipts):
         # The resume identity, run level: everything a price is a function of,
@@ -5699,61 +5770,9 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
     def out_of_time() -> bool:
         return deadline > 0 and (time.time() - started) > deadline
 
-    # The measured ENVELOPE per (unit, family): the rung range anchors span.
-    # Capped by --max-artifact-bpp, which is a wall-clock budget and says so:
-    # the menu keeps every legal rung, and the ones above the envelope are
-    # left unpriced rather than extrapolated into.
-    cap = float(recipe.max_artifact_bpp)
-    rates_by_unit: dict[str, dict[str, set[int]]] = {}
-    rate_menu_targets = scope.partition_menu_targets or targets
-    rate_menus = full_partition_menus if scope.partition_menu_targets is not None else menus
-    for name in rate_menu_targets:
-        per_family: dict[str, set[int]] = {}
-        for rung in rate_menus[name]:
-            if cap > 0 and rung.bpp > cap:
-                continue
-            per_family.setdefault(rung.family, set()).add(rung.body_rate_q256)
-        rates_by_unit[name] = per_family
-
-    # Anchors are placed per FUSED GROUP, not per (unit, family).
-    #
-    # The cap is a WIRE bpp and the wire->body map is shape-dependent (the
-    # CHANNEL plane amortises over rows), so solving each member's top anchor
-    # independently put fused siblings on different body grids even when they
-    # share ``in_features`` and therefore share the realisable set: on
-    # Qwen3-0.6B ``q_proj`` topped out at R1388 where ``k/v_proj`` topped out
-    # at R1372, and every bisected anchor below inherited the offset. A
-    # measured-only table then has almost nothing in the intersection of a
-    # group's menus -- the qkv E4M3 intersection was exactly one rung -- which
-    # made the group's measured baseline weak for a reason that has nothing to
-    # do with Tessera. One grid per group, from the intersection of its
-    # members' realisable sets, and every member measures the same rungs.
     def _group_key(name: str) -> str:
         return anchor_group_key(name, profile=profile, expert_members=scope.expert_members)
 
-    anchor_groups = resolve_anchor_groups(
-        targets, profile=profile, expert_members=scope.expert_members)
-
-    # The rungs every member of the group can realise, per family. A family
-    # missing from one member is not a group family at all: a shared grid over
-    # a rung one sibling cannot build is not shared.
-    group_rates: dict[str, dict[str, list[int]]] = {}
-    # Rungs a member's serving structure has no attested wire for (#1502),
-    # read off the pinned contract: kept in the menu, not measured, and
-    # recorded here with the contract's reason rather than hidden.
-    route_refused: dict[str, dict[str, dict[str, dict]]] = {}
-    rate_groups = ({entry["key"]: entry["members"] for entry in scope.selection["groups"]}
-                   if scope.partition_menu_targets is not None else anchor_groups)
-    group_rates, route_refused = anchor_group_rate_grids(
-        rate_groups, rates_by_unit,
-        encode_structure=(partition_encode_structure if scope.partition_menu_targets is not None else encode_structure),
-        projected_units=(scope.partition_unit_records if scope.partition_menu_targets is not None else projected_units),
-        route_cache=route_cache)
-    if scope.partition_menu_targets is not None:
-        fixed_rate = parse_rate_band(placement.rate_band)[0]
-        if any(not any(fixed_rate in rates for rates in families.values())
-               for families in group_rates.values()):
-            raise RuntimeError("expert partition pinned rate has no legal full-group family/grid")
     if route_refused:
         print("[campaign] route-refused rungs (kept in the menu, not measured): "
               + ", ".join(f"{key}:{family}@{sorted(int(r) for r in rungs)}"
@@ -5765,20 +5784,9 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
               f"{key}({len(members)})" for key, members
               in sorted(anchor_groups.items())), flush=True)
 
-    def _snap(rate: int, allowed: Sequence[int]) -> "int | None":
-        """The realisable rung nearest ``rate``, or None if there is none.
-
-        ``anchor_schedule`` and ``next_anchor_rate`` both work in rate space
-        and can name a q256 no member can build; snapping keeps the group's
-        grid shared, which is the whole point of placing anchors per group.
-        """
-        if not allowed:
-            return None
-        return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
-
-    round_one_schedule = _campaign_round_one_schedule(anchor_groups, group_rates,
-        placement=placement, audit_units=scope.audit_units, snap=_snap,
-        requests=None if scope.acquisition is None else scope.acquisition["requests"], rates_by_unit=rates_by_unit)
+    if round_one_schedule is None:
+        round_one_schedule = _campaign_round_one_schedule(anchor_groups, group_rates,
+            placement=placement, audit_units=scope.audit_units, snap=_snap)
 
     # Round 1, breadth-first over units, so a deadline yields every unit priced
     # at the same depth rather than a prefix priced deeply and a tail not at all.

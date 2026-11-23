@@ -197,6 +197,7 @@ class AnchorPlacement:
     rate_band: str | None
     exhaustive_rate_grid: bool
     max_rounds: int
+    reference_law_samples: Mapping | None = None
 
 
 def anchor_placement(args) -> AnchorPlacement:
@@ -275,6 +276,7 @@ class LoadedPricingRequest:
     outputs: CampaignOutputs
     seed: CampaignSeed | None
     selection_requested: bool
+    reference_law_anchors: bool = False
 
 
 def loaded_campaign_request(args, *, mode, selected_source, streaming_head,
@@ -305,4 +307,5 @@ def loaded_campaign_request(args, *, mode, selected_source, streaming_head,
             checkpoint=checkpoint, hessian_reference_policy=args.export_hessian_reference_policy),
         seed=(None if not args.seed_checkpoint else
               CampaignSeed(args.seed_checkpoint, args.seed_wire_dir)),
-        selection_requested=bool(args.units))
+        selection_requested=bool(args.units),
+        reference_law_anchors=getattr(args, 'reference_law_anchors', False))
