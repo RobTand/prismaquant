@@ -1183,6 +1183,30 @@ def test_stat_only_scoped_intake_accepts_linked_marker_metadata_in_the_wire_dire
     assert data.cells[name, fmt]["render_origin"] == "synthesized_from_wire"
 
 
+def test_stat_only_scoped_intake_accepts_a_linked_marker_when_an_out_of_scope_receipt_is_missing(tmp_path):
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.render_cache_paths import cache_weight_filename
+
+    config, names, fmt, _, states = fixture(tmp_path)
+    name, omitted = sorted(names)
+    checkpoint = Path(config["merged_checkpoint"]["path"])
+    unit_path(checkpoint.with_name(checkpoint.name + ".parts"), omitted).unlink()
+    record = states[name]["wire_records"][fmt]
+    render = tmp_path / "campaign/rows/row-0000/cache" / cache_weight_filename(name, fmt)
+    metadata = tmp_path / "origin.json"
+    metadata.write_text(json.dumps({"schema": bridge.RENDER_ORIGIN_SCHEMA,
+        "render_origin": "synthesized_from_wire", "unit": name, "format_name": fmt,
+        "wire_file": record["file"], "wire_sha256": record["blob_sha256"]}))
+    bridge._render_origin_marker_path(render).symlink_to(metadata)
+
+    try:
+        data = bridge.load_measured_anchor_input(config, unit_scope=(0, 1), verify_payloads=False,
+                                                 require_existing_renders=True)
+    except (RuntimeError, ValueError) as exc:
+        raise AssertionError("The scoped walk refused the metadata link.") from exc
+    assert data.cells[name, fmt]["render_origin"] == "synthesized_from_wire"
+
+
 def test_stat_only_scoped_intake_treats_a_dangling_marker_link_as_no_marker(tmp_path):
     from prismaquant import tessera_joint_aura as bridge
     from prismaquant.render_cache_paths import cache_weight_filename

@@ -1,6 +1,7 @@
 """Check the render sample CLI with local inputs."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ import signal
 import subprocess
 import sys
 from threading import Event, current_thread, main_thread
+from unittest.mock import Mock
 
 import pytest
 
@@ -162,7 +164,43 @@ def test_cli_reads_no_payload_given_as_the_manifest_before_the_checks(
     assert capsys.readouterr().out == ""
 
 
-def _block_plan(reason, argv):
+def test_cli_reports_a_digest_mismatch_with_the_payload_read_so_far(sample_args, capsys):
+    manifest = Path(sample_args[sample_args.index("--sample-manifest") + 1])
+    content = json.loads(manifest.read_text())
+    content["expected_sha256"] = ["0" * 64, hashlib.sha256(b"inert render").hexdigest()]
+    manifest.write_text(json.dumps(content))
+    sample_args[sample_args.index("--file-hash-workers") + 1] = "1"
+
+    try:
+        status = head.main(sample_args)
+    except ValueError as exc:
+        raise AssertionError("The CLI did not report the digest refusal.") from exc
+    assert status == 1
+    prefix, _, payload = capsys.readouterr().out.strip().partition(" ")
+    assert prefix == "STAGE_B_HEAD_PROFILE_REFUSED"
+    report = json.loads(payload)
+    assert report["reason"] == "render digest mismatch"
+    assert (report["payload_files"], report["payload_bytes"]) == (1, len(b"inert render"))
+
+
+@pytest.mark.parametrize("reason", ["deadline", "read-guard", "SIGTERM"])
+def test_cli_stop_record_gives_the_payload_read_so_far(sample_args, reason):
+    sample_args[sample_args.index("--file-hash-workers") + 1] = "1"
+    done = subprocess.run([sys.executable, "-m", "tests.test_profile_render_sample",
+                           reason + ":payload", *sample_args[:-2],
+                           "--deadline-s", "0.1" if reason == "deadline" else "120",
+                           "--guard-interval-s", "0.01"], capture_output=True, text=True, timeout=45)
+    assert done.returncode == 75, done.stdout + done.stderr
+    blocked, record = done.stdout.splitlines()
+    assert blocked == "The payload read is blocked."
+    prefix, payload = record.split(" ", 1)
+    assert prefix == "STAGE_B_HEAD_PROFILE_STOPPED"
+    report = json.loads(payload)
+    assert report["reason"] == reason
+    assert (report.get("payload_files"), report.get("payload_bytes")) == (1, 5)
+
+
+def _block_plan(reason, argv, *, payload=False):
     entered, baseline = Event(), Event()
     mount = argv[argv.index("--storage-mount") + 1]
     sampler = io_spans.PeriodicSampler
@@ -188,18 +226,44 @@ def _block_plan(reason, argv):
             signal.pthread_kill(main_thread().ident, signal.SIGTERM)
         return {mount: {"bytes": None, "ops": {"READ": [ops, ops, 0, 0, 0, 0, ops * 100, 0]}}}
 
-    def read_plan(*args, **kwargs):
+    def block(message):
         if reason != "deadline":
             baseline.wait()
-        print("The plan read is blocked.", flush=True)
+        print(message, flush=True)
         entered.set()
         Event().wait()
 
+    def read_plan(*args, **kwargs):
+        block("The plan read is blocked.")
+
+    fdopen = os.fdopen
+
+    @contextmanager
+    def read_payload(*args, **kwargs):
+        with fdopen(*args, **kwargs) as handle:
+            if kwargs.get("buffering") != 0:
+                yield handle
+                return
+            first = True
+
+            def read(size):
+                nonlocal first
+                if not first:
+                    block("The payload read is blocked.")
+                first = False
+                return handle.read(min(size, 5))
+
+            yield Mock(wraps=handle, read=read)
+
     io_spans.PeriodicSampler = wait_for_read
     io_spans.read_mountstats = read_mountstats
-    tessera_joint_aura._read_bound = read_plan
+    if payload:
+        os.fdopen = read_payload
+    else:
+        tessera_joint_aura._read_bound = read_plan
     return head.main(argv)
 
 
 if __name__ == "__main__":
-    sys.exit(_block_plan(sys.argv[1], sys.argv[2:]))
+    reason, _, phase = sys.argv[1].partition(":")
+    sys.exit(_block_plan(reason, sys.argv[2:], payload=phase == "payload"))

@@ -1214,10 +1214,18 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         return filename
 
     def payload_paths():
+        scoped_names = set(roster)
         for name in sorted(names):
-            state = _load_unit(unit_path(parts, name), stage=STAGE, qname=name, identity_sha256=seal)
-            for record in state["wire_records"].values():
-                yield wire_dir_resolved / wire_filename(name, record)
+            receipt = unit_path(parts, name)
+            try:
+                if defer_render_origins is None and name not in scoped_names:
+                    receipt.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                state = _load_unit(receipt, stage=STAGE, qname=name, identity_sha256=seal)
+                for record in state["wire_records"].values():
+                    yield wire_dir_resolved / wire_filename(name, record)
             cache = owner_roots[str(owners[name])] / "cache"
             for fmt in measured_formats_by_name[name]:
                 render = cache / cache_weight_filename(name, fmt)
