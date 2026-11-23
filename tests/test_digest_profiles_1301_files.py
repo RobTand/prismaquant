@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import importlib
 import hashlib
+import json
 import os
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -171,6 +173,29 @@ def test_each_profile_pins_its_digest(tmp_path):
     for block_size in (1, 2, 3, digests.FILE_BLOCK_BYTES):
         assert digests.file_sha256hex(path, block_size=block_size) == _ABC
         assert digests.file_sha256hex(str(path), block_size=block_size) == _ABC
+
+
+def test_transition_package_rows_match_the_shared_owner(monkeypatch):
+    path = Path(__file__).resolve().parents[1] / "tests/fixtures/digest_profiles_1301_files.json"
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    packages = [cases for site, cases in rows.items() if site.endswith("::_package_digest@40:13")]
+    assert len(packages) == 1 and packages[0], "The table must have one set of package digest rows."
+
+    def digest(entries):
+        profile = digests.LengthFramedSourceSha256()
+        for name, payload in sorted(entries, key=lambda entry: Path(entry[0])):
+            profile.update(name, bytes(payload) if isinstance(payload, list) else payload)
+        return profile.hexdigest()
+
+    for case, row in packages[0].items():
+        recording = Mock(wraps=hashlib.sha256())
+        with monkeypatch.context() as patch:
+            patch.setattr(hashlib, "sha256", lambda: recording)
+            actual = outcome(lambda: digest(row["entries"]))
+        assert actual == row["outcome"], case
+        if "frame_hex" in row:
+            frame = b"".join(call.args[0] for call in recording.update.call_args_list)
+            assert frame.hex() == row["frame_hex"], case
 
 
 class _IndexZero:
