@@ -34685,6 +34685,7 @@ pq_py_library(
     ],
     deps = [
         "//:prismaquant/__init__",
+        "//:prismaquant/digests",
         "//:prismaquant/validate_quantized_model",
         "@pq_pip//pytest",
     ],
