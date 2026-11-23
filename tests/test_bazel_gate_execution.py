@@ -596,6 +596,38 @@ def test_failed_test_excerpt_reaches_only_the_main_shard_log(tmp_path, monkeypat
 SIX = [f'//tests:test_{index}' for index in range(6)]
 
 
+def test_main_mode_prints_an_excerpt_for_each_failed_test(tmp_path, monkeypatch, capsys):
+    upload = tmp_path / 'upload'
+    manifest = {'mode': 'main', 'base': 'b' * 40, 'head': 'a' * 40, 'branch': 'main',
+                'architecture': 'arm64', 'index': 0, 'targets': SIX, 'tests': SIX,
+                'require_execution': False}
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    monkeypatch.setenv('PQ_BAZEL_SHARD', json.dumps({'manifest_sha256': 'c' * 64,
+                                                     'partition_sha256': 'd' * 64}))
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'shard-excerpt-test-sentinel')
+    monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(gate.artifacts, 'scan_runtime_available', lambda: True)
+    monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
+    logs = {f'bytestream://log-{index}': f'Test {index} failed.' for index in range(len(SIX))}
+
+    def native(command, **_):
+        path = Path(next(word.split('=', 1)[1] for word in command
+                         if word.startswith('--build_event_json_file=')))
+        path.write_text(events(*(log_event(label, uri) for label, uri in zip(SIX, logs))))
+        return gate.subprocess.CompletedProcess(command, 3)
+
+    execute = gate.execute_shard
+    monkeypatch.setattr(gate, 'execute_shard', lambda document: execute(
+        document, root=tmp_path, runner=native, fetch=lambda uri, limit: logs[uri].encode()))
+    assert gate.main(['shard']) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        line for label, excerpt in zip(SIX, logs.values())
+        for line in (f'::error::failed test {label} on arm64', f'| {excerpt}')]
+    record = json.loads((upload / 'gate-result.json').read_text())
+    record['invocation_status'] = 'COMPLETE_INVOCATION_STATUS'
+    assert gate.aggregate_shards(SIX, [SIX], [record])['shards'][0]['excerpts'] == dict(zip(SIX, logs.values()))
+
+
 @pytest.mark.parametrize('excerpts,valid', [
     (None, True), ({SIX[0]: 'E   AssertionError: seeded\nexcerpt unavailable'}, True),
     ({SIX[0]: '\u00e9' * 2048}, True), ({SIX[0]: 3}, False), (['x'], False),
