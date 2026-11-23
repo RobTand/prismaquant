@@ -79,7 +79,7 @@ from typing import Any, Callable, Iterable, Mapping, NamedTuple, Sequence
 
 import torch
 import torch.nn as nn
-from .digests import DIRECT_ASCII_SPACED_LAX
+from .digests import DIRECT_ASCII_SPACED_LAX, INSERTION_ASCII_INDENT2_LAX
 from .cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
 try:
     from accelerate import init_empty_weights
@@ -5530,7 +5530,7 @@ def _main_impl(argv: Sequence[str] | None = None):
     _copy_tokenizer(args.model, out_dir)
 
     with open(out_dir / "mixed_native_manifest.json", "w") as f:
-        json.dump({
+        f.write(INSERTION_ASCII_INDENT2_LAX.text({
             "source_model": args.model,
             "source_recipe": args.layer_config,
             "format_histogram": {f"{k[0]}/{k[1]}": v for k, v in hist.items()},
@@ -5548,7 +5548,7 @@ def _main_impl(argv: Sequence[str] | None = None):
             "do_no_harm": _native_render_codec.do_no_harm_stats(),
             "packed_expert_export": _packed_expert_export_provenance(),
             "ignore": sorted(config_bf16_passthrough),
-        }, f, indent=2)
+        }))
 
     # R13: open the ship record. Build-lane facts are final here; the
     # serve-lane slots stay empty until the validators and the gold lane fill
@@ -5760,10 +5760,10 @@ class IncrementalSafetensorsWriter:
                 self.weight_map[key] = final_name
 
         with open(self.out_dir / "model.safetensors.index.json", "w") as f:
-            json.dump({
+            f.write(INSERTION_ASCII_INDENT2_LAX.text({
                 "metadata": {"total_size": self.total_size},
                 "weight_map": self.weight_map,
-            }, f, indent=2)
+            }))
         self._remove_stale_model_artifacts(
             {"model.safetensors.index.json", *set(self.weight_map.values())}
         )
@@ -5790,7 +5790,7 @@ def write_config_with_quantization(
         cfg["quantization_config"] = qc
 
     with open(out_dir / "config.json", "w") as f:
-        json.dump(cfg, f, indent=2)
+        f.write(INSERTION_ASCII_INDENT2_LAX.text(cfg))
 
 
 def _materialize_mtp_tensors(src_model: str,
