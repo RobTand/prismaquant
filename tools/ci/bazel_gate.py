@@ -606,7 +606,6 @@ def main(argv=None):
                 detail = f'; eai={subtype}; attempts={attempts}'
             if error.bazel_exit is not None:
                 detail += f'; bazel_exit={error.bazel_exit}'
-            if error.error_classes:
                 detail += '; error_class=' + ','.join(error.error_classes)
         else:
             category = refusal_category(error)

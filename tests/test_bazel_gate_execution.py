@@ -947,6 +947,33 @@ def test_shard_refusal_reports_bazel_abort_without_private_values(tmp_path, monk
                             'bazel_exit=38; error_class=UNAVAILABLE; upload refused\n')
 
 
+def test_aborted_run_refusal_always_names_error_class(tmp_path, monkeypatch, capsys):
+    sentinel = 'private-value-must-never-be-logged'
+    manifest = {'mode': 'pr', 'head': 'a' * 40, 'branch': 'probe',
+                'architecture': 'amd64', 'targets': [LABEL], 'tests': [LABEL],
+                'require_execution': False}
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(tmp_path / 'upload'))
+    monkeypatch.setenv('PQ_BAZEL_SHARD', '{}')
+    monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
+
+    def native(command, **kwargs):
+        path = Path(next(word.split('=', 1)[1] for word in command
+                         if word.startswith('--build_event_json_file=')))
+        path.write_text(events({'id': {'started': {}}, 'started': {'uuid': 'child'}}))
+        kwargs['stdout'].write(f'ERROR: {sentinel}\n')
+        return gate.subprocess.CompletedProcess(command, 38)
+
+    execute = gate.execute_shard
+    monkeypatch.setattr(gate, 'execute_shard', lambda document: execute(
+        document, root=tmp_path, runner=native))
+    assert gate.main(['shard']) == 75
+    refusal = capsys.readouterr().err
+    assert '; bazel_exit=38;' in refusal
+    assert sentinel not in refusal
+    assert '; error_class=' in refusal
+
+
 @pytest.mark.parametrize('error,category', [
     (OSError(errno.EIO, 'private'), 'io-device'),
     (OSError(errno.ELOOP, 'private'), 'io-symlink-loop'),
