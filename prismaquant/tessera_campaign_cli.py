@@ -141,6 +141,12 @@ def campaign_argument_parser(*, description: str | None = None,
                     help="In round one, use the reference rung for all expert projections in --units. "
                          "Use two more rungs for the transfer-law draw. "
                          "Keep three dense anchors. Use a separate checkpoint.")
+    ap.add_argument("--reference-q256", type=int, default=960,
+                    help="Set the census rung for --reference-law-anchors.")
+    ap.add_argument("--lower-target-q256", type=int, default=832,
+                    help="Set the lower draw rung for --reference-law-anchors.")
+    ap.add_argument("--upper-target-q256", type=int, default=1088,
+                    help="Set the upper draw rung for --reference-law-anchors.")
     ap.add_argument("--research-exact-member", default=None,
                     help="Research-only scalar endpoint for one named member of a "
                          "fully validated --units group. Requires a complete "

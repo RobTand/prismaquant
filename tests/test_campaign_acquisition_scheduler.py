@@ -502,6 +502,160 @@ def test_new_campaign_plans_exact_reference_and_law_draw_encodes(tmp_path, monke
     assert not primed
 
 
+def test_tiered_campaign_encodes_only_uncovered_requested_cells(tmp_path, monkeypatch):
+    import json
+    import pickle
+    from contextlib import ExitStack
+
+    from prismaquant.cost_stage_checkpoint import stored_manifest_identity
+    from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
+    from prismaquant.production_weight_cache import ProductionWeightCache
+    from prismaquant.tessera_campaign_cli import parse_campaign_arguments
+    from prismaquant.tessera_campaign_requests import campaign_scope_request, loaded_campaign_request
+
+    module = "model.layers.0.feed_forward.experts"
+    dense = "model.layers.1.mlp.down_proj"
+    profile = Lfm2MoeProfile()
+    monkeypatch.setattr(profile, "campaign_dense_unit_names", lambda *a, **k: [dense])
+    records, expert_shapes, packed_shapes = {}, {}, {}
+    expected = {(dense, FAMILY, q) for q in (768, 960, 1152)}
+    for param, roles in [("gate_up_proj", ("w1", "w3")), ("down_proj", ("w2",))]:
+        packed = f"{module}.{param}"
+        counts = dict.fromkeys(map(str, range(4)), 8)
+        draw = campaign_table.draw_stack_sample(counts, 2, seed=11, stack=packed)
+        law_experts = list(map(int, draw["units"]))
+        records[packed] = dict(probe_row=dict(_packed_experts_module=module,
+            _packed_param=param, num_experts=4, h_trace=10.0, h_trace_per_expert=[1, 2, 3, 4]),
+            sampled_experts=list(range(4)), inclusion_prob=dict.fromkeys(counts, 1.0),
+            seed=0, design="census", transfer_law_experts=law_experts, reference_q256=960,
+            law_draw=dict(draw=draw, audit_experts=law_experts[:1],
+                sizes=dict(source="counts", values=counts, sha256=draw["size_sha256"])))
+        packed_shapes[packed] = (4, 32 * len(roles), 256)
+        for e in range(4):
+            for role in roles:
+                name = f"{module}.{e}.{role}"
+                expert_shapes[name] = (32, 256)
+                expected.add((name, FAMILY, 960))
+                if e in law_experts:
+                    expected.update((name, FAMILY, q) for q in (832, 1088))
+    members = tuple(SimpleNamespace(qname=name, module_qname=module) for name in expert_shapes)
+    selection = tmp_path / "units.json"
+    selection.write_text(json.dumps(dict(schema=campaign_selection.UNITS_SCHEMA_V2, groups=[
+        dict(key=f"s:{module}", members=list(expert_shapes), stack_samples=records,
+             sampled=sorted(name for name, _, q in expected if name != dense and q == 832),
+             inclusion_probability=dict.fromkeys(expert_shapes, 1.0)),
+        dict(key=f"u:{dense}", members=[dense]),
+    ])))
+    weight = (torch.arange(32 * 256).reshape(32, 256) % 23 - 11).to(torch.bfloat16) / 32
+    rows = torch.linspace(-1, 1, 8 * 256).reshape(8, 256)
+    identity = campaign.th.calibration_identity("campaign fixture",
+        [torch.arange(8).reshape(1, 8)], fit_tokens=8)
+
+    def run(root, *, tiered, output="cost.pkl"):
+        wire = root / "wire"
+        wire.mkdir(parents=True, exist_ok=True)
+        args = parse_campaign_arguments(["--model", "model", "--out", str(root / output),
+            "--cache-dir", str(root), "--hessian", "off", "--max-artifact-bpp", "0",
+            "--max-rounds", "2", "--anchor-budget", "3", "--anchor-batch-size", "1",
+            *(["--reference-law-anchors", "--units", str(selection)] if tiered else [])])
+        args.calibration_input_receipt = None
+        population = (campaign_table.ExpertPopulation(members, {module: expert_shapes}, packed_shapes, {})
+                      if tiered else campaign_table.ExpertPopulation((), {}, {}, {}))
+        monkeypatch.setattr(campaign, "_require_campaign_population", lambda *_: population)
+        scope = campaign.resolve_campaign_scope(campaign_scope_request(args), None, profile,
+            mode="research", device="cpu", serving_target=None, selected_capture_census=None,
+            capture_unit_names=None, acquisition=None)
+        names = [*scope.dense_targets, *scope.expert_targets]
+        legal = [768, 832, 896, 960, 1024, 1088, 1152] if tiered else [1024, 1280, 1536]
+        menu = [SimpleNamespace(family=FAMILY, body_rate_q256=q, format_name=f"{FAMILY}_R{q}",
+            bpp=q / 256, admission=SimpleNamespace(activation_contract="fp8_e4m3")) for q in legal]
+        monkeypatch.setattr(campaign, "resolve_campaign_menu", lambda *a, **k: SimpleNamespace(
+            menus=dict.fromkeys(names, menu), context_by_unit=None, structure_by_unit=None,
+            encode_structure=None, no_admitted_rung=[], expert_projection=None,
+            projected_units={}, partition=None))
+        request = loaded_campaign_request(args, mode="research", selected_source=False,
+            streaming_head=False, wire_dir=wire, checkpoint=root / "anchors.json", identity_threads=1)
+        with ExitStack() as stack:
+            return campaign.run_loaded_campaign(request, weights=dict.fromkeys(names, weight),
+                statistics=(dict.fromkeys(names, rows), {}, {}, {}), hessian_identity=identity,
+                hessian_token_count=8, hessian_token_min=8, scope=scope, profile=profile,
+                static_scales={}, static_scale_policy=None, device="cpu", cache_dir=root,
+                calibration_cache=None, capture_identity=None, hessian_status=dict(reason="off", kwargs=[], recipe={}),
+                model_load_contract=None, attention_implementation=None, capture_runtime=None,
+                serving_target=None, source_scope=stack, waits=None, encoder_seal_ahead=None,
+                source_authentication=None, selected_source_preparation=None, selected_resources=None,
+                selected_guard=None, checkpoint_settings=vars(args).copy())
+
+    covered = (f"{module}.0.w1", FAMILY, 960)
+    calls, caches = [], []
+    interrupted = True
+
+    def encode(*, qnames, format_name, cache, wire_dir, **_):
+        name, = qnames
+        family, rate = format_name.rsplit("_R", 1)
+        q = int(rate)
+        cell = (name, family, q)
+        if interrupted and cell != covered:
+            raise RuntimeError("Stop after the covered cell.")
+        calls.append(cell)
+        caches.append(cache)
+        data = f"{name}:{format_name}".encode()
+        campaign_wire.wire_path(wire_dir, name, format_name).write_bytes(data)
+        return [campaign_table.CampaignAnchor(qname=name, family=family, format_name=format_name,
+            body_rate_q256=q, dloss=960 / q, dloss_stderr=0, memory_bytes=4096,
+            bits_per_param=q / 256, activation_contract="fp8_e4m3", activation_quantized=True,
+            wire_bytes=len(data), seconds=0, hessian_applied=False)]
+
+    def wire_record(anchor, root, identity, *, existing=None):
+        path = campaign_wire.wire_path(root, anchor.qname, anchor.format_name)
+        data = path.read_bytes()
+        assert len(data) == anchor.wire_bytes
+        record = {"identity": identity, "file": path.name, "data": data.hex()}
+        if existing is not None:
+            assert existing == record
+        return record
+
+    monkeypatch.setattr(cell_measurement, "measure_cells", encode)
+    monkeypatch.setattr(campaign, "_checkpoint_anchor_identity", lambda *a, **k: {})
+    monkeypatch.setattr(campaign_wire, "checkpoint_wire_record", wire_record)
+    monkeypatch.setattr(campaign, "next_anchor_rate", lambda *_: None if interrupted else 1024)
+    tier = tmp_path / "tier"
+    try:
+        with pytest.raises(RuntimeError, match="failed to price"):
+            run(tier, tiered=True)
+    except campaign_table.StackSampleError as exc:
+        assert False, str(exc)
+    assert calls == [covered]
+    interrupted = False
+    calls.clear()
+    caches.clear()
+    assert run(tier, tiered=True) == 0
+    assert sorted(calls) == sorted(expected - {covered})
+    assert isinstance(caches[0], ProductionWeightCache)
+    assert all(cache is caches[0] for cache in caches)
+    bound = stored_manifest_identity(tier / "anchors.json")
+    assert {(name, family, q) for name, families in bound["settings"]["reference_law_schedule"].items()
+            for family, rates in families.items() for q in rates} == expected
+    assert bound["stack_sampling_identity"] == records
+
+    legacy = tmp_path / "legacy"
+    assert run(legacy, tiered=False) == 0
+    settings = stored_manifest_identity(legacy / "anchors.json")["settings"]
+    assert not {"reference_q256", "lower_target_q256", "upper_target_q256",
+                "reference_law_schedule"} & settings.keys()
+    before = pickle.loads((legacy / "cost.pkl").read_bytes())
+    assert before["provenance"]["surfaces"][dense][FAMILY]["rungs"] == [1024, 1280, 1536]
+    files = [legacy / "anchors.json", *sorted((legacy / "wire").glob("*.tessera"))]
+    assert len(files) == 4
+    original = [path.read_bytes() for path in files]
+    monkeypatch.setattr(cell_measurement, "measure_cells",
+        lambda **_: pytest.fail("Dense resume must not encode a cell."))
+    assert run(legacy, tiered=False, output="resumed.pkl") == 0
+    after = pickle.loads((legacy / "resumed.pkl").read_bytes())
+    assert after["costs"] == before["costs"]
+    assert [path.read_bytes() for path in files] == original
+
+
 def test_real_cpu_scalar_renderer_publishes_exact_requested_wire(tmp_path):
     pytest.importorskip("tessera.export")
     from tessera.unit_artifact import read_unit_artifact

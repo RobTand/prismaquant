@@ -11,6 +11,17 @@
   - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[True]`
 
   `tests/test_tensor_digest_owner_recipes_2638.py::test_token_route_removes_only_enumerated_main_baseline_scopes` passed with the updated baseline.
+
+- Use the full stack census for the reference rung. Use the original draw for the two target rungs (#5351). Part of #2897.
+  At base `c8567a1c6e6738ad172ed50baa9f044c706f8c3f`,
+  `tests/test_tessera_campaign_requests.py::test_reference_law_request_uses_configured_rungs`
+  failed the schedule equality assertion. The planner requested `[768, 960, 1152]` for `a` instead of `[832, 960, 1088]`.
+  The candidate check passed each test below:
+  - `tests/test_tessera_stack_sample_cost.py::test_tiered_selection_round_trips_census_and_law_draw`
+  - `tests/test_tessera_campaign_requests.py::test_reference_law_request_uses_configured_rungs`
+  - `tests/test_campaign_acquisition_scheduler.py::test_tiered_campaign_encodes_only_uncovered_requested_cells`
+  - `tests/test_tessera_campaign_resume.py::test_main_resumes_identical_cost_and_wire_without_reencoding`
+
 - Put the checkout root after the standard library on the three graph tools' import paths (#5323). Part of #4684.
   The local import-path measurement used the new test with safe-path startup and with early checkout entries.
   Refusal stopped all six cases. Removing early checkout entries and appending the root passed all six cases.
