@@ -9,6 +9,12 @@ UNITS_SCHEMA_V3 = "prismaquant.tessera_campaign_units.v3"
 EXPERT_PARTITION_SCHEMA = "prismaquant.tessera_campaign_expert_partition.v1"
 
 
+def tiered_stack_selection(entry: Mapping) -> bool:
+    records = entry.get("stack_samples")
+    return isinstance(records, Mapping) and any(
+        isinstance(record, Mapping) and "law_draw" in record for record in records.values())
+
+
 def validate_unit_selection(selection, *, path="in-memory") -> dict:
     """Validate the same selection at file, plan and merged-row boundaries."""
     schema = None if not isinstance(selection, dict) else selection.get("schema")
@@ -36,6 +42,11 @@ def validate_unit_selection(selection, *, path="in-memory") -> dict:
                 f"which is a {UNITS_SCHEMA_V2} field; a file that samples "
                 "must say so in its schema")
         members = set(entry["members"])
+        if tiered_stack_selection(entry):
+            if not entry["key"].startswith("s:"):
+                raise RuntimeError(f"--units {path}: law_draw requires a stack group")
+            if entry.get("audit"):
+                raise RuntimeError(f"--units {path}: law_draw does not permit ordinary audit anchors")
         if schema == UNITS_SCHEMA_V3:
             part = entry["partition"]
             fields = {"schema", "experts_per_row", "index", "count", "rate_q256", "members"}
@@ -82,7 +93,7 @@ def selection_priced_units(selection: Mapping) -> tuple[set, set, dict]:
     audit: set = set()
     pi: dict = {}
     for entry in selection["groups"]:
-        sampled = entry.get("sampled")
+        sampled = None if tiered_stack_selection(entry) else entry.get("sampled")
         partition = entry.get("partition")
         priced.update(partition["members"] if partition is not None else
                       (sampled if sampled else entry["members"]))

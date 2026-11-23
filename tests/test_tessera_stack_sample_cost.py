@@ -461,6 +461,65 @@ def test_lfm_layer18_sample_brackets_the_census_it_estimates():
     assert block["n_random_stratum"] == len([e for e in drawn if pi[e] < 1.0])
 
 
+def test_tiered_selection_round_trips_census_and_law_draw(tmp_path):
+    from copy import deepcopy
+
+    from prismaquant.tessera_campaign_selection import (
+        UNITS_SCHEMA_V2, load_unit_selection, selection_priced_units,
+    )
+
+    packed = f"{STEM}.gate_up_proj"
+    experts = range(4)
+    members = {f"{STEM}.{e}.{role}" for e in experts for role in ("w1", "w3")}
+    counts = dict(zip(map(str, experts), (10, 11, 12, 13)))
+    draw = campaign.draw_stack_sample(counts, 2, seed=17, stack=packed)
+    law = dict(draw=draw, audit_experts=[int(draw["units"][0])],
+        sizes=dict(source="counts", values=counts, sha256=draw["size_sha256"]))
+    record = dict(probe_row=_packed_probe_row(4, [1, 4, 9, 16]),
+        sampled_experts=list(experts), inclusion_prob=dict.fromkeys(map(str, experts), 1.0),
+        seed=0, design="census", reference_q256=960,
+        transfer_law_experts=list(map(int, draw["units"])), law_draw=law)
+    pi = dict.fromkeys(members, 1.0)
+    entry = dict(key=f"s:{STEM}", members=sorted(members), inclusion_probability=pi,
+        stack_samples={packed: record})
+    path = tmp_path / "units.json"
+    path.write_text(json.dumps(dict(schema=UNITS_SCHEMA_V2, groups=[entry])))
+    selection = load_unit_selection(path)
+    assert selection_priced_units(selection) == (members, set(), pi)
+    try:
+        samples = campaign.selection_stack_samples(selection, _profile())
+    except campaign.StackSampleError as exc:
+        assert False, str(exc)
+    sample = samples[packed]
+    assert sample.is_census and sample.sampled_experts == tuple(experts)
+    assert {name for roles in sample.members.values() for name in roles} == members
+    assert sample.transfer_law_experts == tuple(map(int, draw["units"]))
+    stored = selection["groups"][0]["stack_samples"][packed]["law_draw"]
+    assert stored == law
+    assert stored["draw"] == campaign.draw_stack_sample(
+        stored["sizes"]["values"], 2, seed=17, stack=packed)
+    assert samples == campaign.selection_stack_samples(load_unit_selection(path), _profile())
+    entry["sampled"] = [name for expert in sample.transfer_law_experts for name in sample.members[expert]]
+    path.write_text(json.dumps(dict(schema=UNITS_SCHEMA_V2, groups=[entry])))
+    selection = load_unit_selection(path)
+    assert selection_priced_units(selection) == (members, set(), pi)
+    assert campaign.selection_stack_samples(selection, _profile()) == samples
+
+    for field, value, diagnostic in (
+        ("audit_experts", [9], "audit"), ("sizes", {}, "counts"),
+        ("sizes", {**law["sizes"], "sha256": "0" * 64}, "digest"),
+        ("draw", {**draw, "seed": 18}, "replay"),
+        ("draw", {**draw, "inclusion_probability": {}}, "replay"),
+    ):
+        invalid = deepcopy(selection)
+        invalid["groups"][0]["stack_samples"][packed]["law_draw"][field] = value
+        with pytest.raises(campaign.StackSampleError, match=diagnostic):
+            campaign.selection_stack_samples(invalid, _profile())
+    record["probe_row"].pop("h_trace_per_expert")
+    with pytest.raises(campaign.StackSampleError, match="h_trace_per_expert"):
+        campaign.selection_stack_samples({"groups": [entry]}, _profile())
+
+
 def test_fixture_records_the_probe_it_was_distilled_from():
     """A committed fixture that cannot say where it came from is a guess."""
     data = _fixture()

@@ -198,12 +198,15 @@ class AnchorPlacement:
     exhaustive_rate_grid: bool
     max_rounds: int
     reference_law_samples: Mapping | None = None
+    reference_law_rungs: tuple[int, int, int] | None = None
 
 
 def anchor_placement(args) -> AnchorPlacement:
     """Bind the actual round-one plan shared by priming and execution."""
     return AnchorPlacement(anchors=args.anchors, rate_band=args.rate_band,
-        exhaustive_rate_grid=args.exhaustive_rate_grid, max_rounds=args.max_rounds)
+        exhaustive_rate_grid=args.exhaustive_rate_grid, max_rounds=args.max_rounds,
+        reference_law_rungs=((args.reference_q256, args.lower_target_q256, args.upper_target_q256)
+                             if getattr(args, 'reference_law_anchors', False) else None))
 
 
 @dataclass(frozen=True, slots=True)
