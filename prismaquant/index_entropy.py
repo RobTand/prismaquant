@@ -11,12 +11,16 @@ so ``k`` up to 24 (2^24 symbols) never allocates a ``2^k`` histogram.
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import pickle
+import sys
 from pathlib import Path
 
 import torch
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from prismaquant import digests
 
 
 def _empirical_entropy_bits(counts: torch.Tensor) -> float:
@@ -139,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.k is not None:
         k = int(args.k)
     result = index_entropy(idx, k)
-    text = json.dumps(result, indent=2)
+    text = digests.INSERTION_ASCII_INDENT2_LAX.text(result)
     if args.output:
         Path(args.output).write_text(text)
     print(text)
