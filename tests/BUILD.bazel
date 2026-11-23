@@ -24162,6 +24162,7 @@ pq_py_library(
         "//:prismaquant/allocator.py",
         "//:prismaquant/io_engine.py",
         "//:prismaquant/joint_forward_resume.py",
+        "//:prismaquant/native_receipt_table.py",
         "//:prismaquant/select_validated_frontier.py",
         "//:prismaquant/stage_a_retirement.py",
         "//:prismaquant/tensor_digests.py",
@@ -24183,6 +24184,7 @@ pq_py_library(
         "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/allocator_cycle",
         "//:prismaquant/io_engine",
+        "//:prismaquant/native_receipt_table",
         "//:prismaquant/tensor_digests",
         "//:prismaquant/tessera_hessian",
         "//:tools/build_glm_derivative_image",
@@ -24441,6 +24443,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/digests",
         "//:prismaquant/native_execution_binding_cycle",
         "//:prismaquant/native_receipt_table",
         "//:prismaquant/native_row_admission",
