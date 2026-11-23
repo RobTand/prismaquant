@@ -14,12 +14,12 @@ unary rankings.
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import pickle
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from prismaquant.digests import INSERTION_ASCII_INDENT1_LAX
 from prismaquant.joint_aura import ASSIGNMENT_OBJECTIVES, assignment_probe_summary, paired_assignment_difference
 from prismaquant.joint_aura_rows import PROBE_UNCERTAINTY_SCOPE, validate_joint_aura_entry
 
@@ -193,7 +193,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result["paired_assignment"] = paired_assignment_report(
             payload, assignment, load_assignment(args.comparison_assignment),
             objective=args.paired_objective)
-    text = json.dumps(result, indent=1)
+    text = INSERTION_ASCII_INDENT1_LAX.text(result)
     if args.output:
         Path(args.output).write_text(text)
     print(text)

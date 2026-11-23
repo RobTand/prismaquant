@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Use `INSERTION_ASCII_INDENT1_LAX.text` for the AURA additivity JSON report (#5297, #2651).
 - Use `INSERTION_ASCII_SPACED_LAX.text` for ten JSON calls. Keep the output bytes unchanged (#5284, #2651).
 - Use `DIRECT_UTF8_STRICT.text` for the selector's resolved assignment payload digest (#5268, #2651).
 - Use `DIRECT_ASCII_INDENT2_LAX.text` for registry, pipeline spec, and prepriced cost report files (#5285, #2651).
