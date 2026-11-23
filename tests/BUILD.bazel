@@ -51040,6 +51040,25 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "test_json_profile_route_2651_cli_status_reports_lib",
+    srcs = [
+        "test_json_profile_route_2651_cli_status_reports.py",
+    ],
+    deps = [
+        "//:prismaquant/__init__",
+        "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/allocator_cycle",
+        "//:prismaquant/digests",
+        "//:prismaquant/export_structure",
+        "//:prismaquant/glm_source_derivative",
+        "//:prismaquant/release_receipts",
+        "//:prismaquant/ship_gates",
+        "@pq_pip//torch",
+        "@pq_pip//transformers",
+    ],
+)
+
+pq_py_library(
     name = "test_tessera_row_wait_1663_lib",
     srcs = [
         "test_tessera_row_wait_1663.py",
@@ -56310,6 +56329,31 @@ pq_py_test(
         "//:tools/g3job/g3_pq_policy/__init__",
         "//:tools/gold_engine_options",
         "//:tools/gold_measurement_fidelity",
+        "//:tools/measure_served_gold",
+        "//:tools/measure_vllm_full_kl",
+        "//:tools/measure_vllm_wikitext_ppl",
+        "//:tools/pq_profile_child",
+        "//:tools/prepare_dsv4_wikitext_inputs",
+        "//:tools/prismaquant_source_bootstrap",
+        "//:tools/spec_decode_guard",
+        "//:tools/tessera_campaign_container",
+        "//:tools/tessera_fleet/__init__",
+        ":conftest",
+    ],
+    timeout = "moderate",
+)
+
+pq_py_test(
+    name = "test_json_profile_route_2651_cli_status_reports",
+    path = "tests/test_json_profile_route_2651_cli_status_reports.py",
+    library = ":test_json_profile_route_2651_cli_status_reports_lib",
+    deps = [
+        "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
+        "//:pqtel/__init__",
+        "//:prismaquant/lane_shipcard",
+        "//:prismaquant/shipcard_cli",
+        "//:tools/build_streamed_full_kl_teacher",
+        "//:tools/g3job/g3_pq_policy/__init__",
         "//:tools/measure_served_gold",
         "//:tools/measure_vllm_full_kl",
         "//:tools/measure_vllm_wikitext_ppl",

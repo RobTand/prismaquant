@@ -9,7 +9,6 @@ import argparse
 import ast
 import re
 import copy
-import json
 import shlex
 import os
 from pathlib import Path
@@ -17,7 +16,7 @@ import subprocess
 import sys
 
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes
-from prismaquant.digests import file_sha256hex, indent2_json_file_bytes
+from prismaquant.digests import INSERTION_ASCII_SPACED_LAX, file_sha256hex, indent2_json_file_bytes
 from prismaquant.model_profiles import detect_profile
 from prismaquant.shipcard import _strict_json_object, load_shipcard, required_slots, verify
 
@@ -454,8 +453,8 @@ def main(argv: list[str] | None = None) -> int:
             path = Path(stage[key]) if key in stage else None
             if path is not None and path.is_file():
                 evidence.append({"path": str(path), "sha256": file_sha256hex(path)})
-    print(json.dumps({"status": report["status"], "evidence": evidence,
-                      "problems": report["problems"]}))
+    print(INSERTION_ASCII_SPACED_LAX.text({"status": report["status"], "evidence": evidence,
+                                           "problems": report["problems"]}))
     return 1 if report["status"] == "refused" else 0
 
 
