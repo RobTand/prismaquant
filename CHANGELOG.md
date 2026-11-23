@@ -10,7 +10,7 @@
 - Route ten byte digests through `bytes_sha256hex` (#4716, #2646).
 - Use `diagnostic_json_bytes` for diagnostic fingerprints (#2541).
   Keep the original ASCII escapes and text fallback.
-- Use the shared JSON profile for three allocator writes without changing the output bytes (#5267, #2651).
+- Use `INSERTION_ASCII_INDENT2_LAX.text` for three allocator writes (#5267) and eight other JSON calls (#5282). Keep the output bytes the same (#2651).
 - Use the strict spaced JSON profile for quantum status (#2651).
 
 - Use the shared byte framing recipe for the joint replay read order (#2541, #2648).

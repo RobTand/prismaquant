@@ -8,7 +8,6 @@ perturbed-X measurement.
 """
 from __future__ import annotations
 
-import json
 import pickle
 import tempfile
 import time
@@ -30,7 +29,7 @@ from prismaquant.perturbed_x_cache import (
     iter_calibration_forwards,
 )
 from prismaquant.sensitivity_probe import _prismaquant_temp_parent
-from prismaquant.digests import DIRECT_ASCII_LAX
+from prismaquant.digests import DIRECT_ASCII_LAX, INSERTION_ASCII_INDENT2_LAX
 
 
 def _unify_fused_max_abs(
@@ -426,14 +425,14 @@ def recache_production_weight_cache(
             getattr(production_weight_cache, "activation_max_abs", {}) or {})
         atomic_write_bytes(
             sidecar,
-            json.dumps(applied, indent=2).encode("utf-8"),
+            INSERTION_ASCII_INDENT2_LAX.text(applied).encode("utf-8"),
         )
         delta = (
             getattr(production_weight_cache, "metadata", {}) or {}
         ).get("activation_recache", {}).get("activation_max_abs_delta")
         if delta:
             delta_sidecar = Path(cache_dir) / "activation_max_abs_delta.json"
-            delta_sidecar.write_text(json.dumps(delta, indent=2))
+            delta_sidecar.write_text(INSERTION_ASCII_INDENT2_LAX.text(delta))
             if progress:
                 print(
                     "[prod-recache] activation max_abs after/before "

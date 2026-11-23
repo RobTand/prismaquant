@@ -76,7 +76,7 @@ from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
-from .digests import indent2_json_file_bytes
+from .digests import INSERTION_ASCII_INDENT2_LAX, indent2_json_file_bytes
 from .tessera_expert_projection import (
     CARRIED_PROJECTION_SCHEMA,
     PROJECTION_KEY,
@@ -525,7 +525,7 @@ def build_serving_plan(config: dict, shapes: dict, *, cover: str, allow_disagree
         raise PlanError(
             f"{len(disagreements)} fused module(s) do not share one scheme "
             f"(family, grid, body, scale plane): "
-            f"{json.dumps(disagreements[:3], indent=2)}\n"
+            f"{INSERTION_ASCII_INDENT2_LAX.text(disagreements[:3])}\n"
             f"vLLM builds ONE quantization method per fused module, so the exporter would pass "
             f"the whole group through as BF16.  That is a finding about the allocation -- it "
             f"chose an assignment this serving path cannot express.  Differing RUNGS are not "
@@ -752,7 +752,7 @@ def main(argv=None):
     # acceptance compares parsed plans, so the owner's trailing LF is safe.
     args.out.write_bytes(indent2_json_file_bytes(plan))
     sidecar = args.out.with_suffix(args.out.suffix + ".provenance.json")
-    sidecar.write_text(json.dumps(provenance, indent=2))
+    sidecar.write_text(INSERTION_ASCII_INDENT2_LAX.text(provenance))
     if setup is not None:
         args.export_setup_json.parent.mkdir(parents=True, exist_ok=True)
         args.export_setup_json.write_bytes(indent2_json_file_bytes(setup))
