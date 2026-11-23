@@ -1,8 +1,10 @@
 """Metadata plans preserve source ownership and do not qualify a runtime."""
+import base64
 import json
 from pathlib import Path
 import subprocess
 import sys
+import zlib
 
 import pytest
 import torch
@@ -45,6 +47,49 @@ def metadata_cli(source, plan):
                            "--dry-run", "--source", str(source), "--plan", str(plan),
                            "--cpus", "2", "--mem-gb", "6"], cwd=ROOT,
                           capture_output=True, text=True, timeout=120)
+
+
+def test_dry_run_stdout_uses_indent2_profile(tmp_path, monkeypatch, capsysbinary):
+    from prismaquant import digests
+    from tools.tessera_fleet import dispatch_model
+
+    source, plan, _ = source_fixture(tmp_path, "dense")
+    argv = ["--dry-run", "--source", str(source), "--plan", str(plan), "--out", "café"]
+    source_bytes = str(source.resolve()).encode()
+    # These bytes come from the base run. Replace the temporary source path before comparison.
+    expected = zlib.decompress(base64.b85decode(
+        b"c%1E5TW{Jh6n^JdpgcpkRGPM_n$&GflUCZUbWdGnndAU2iJkfaLlysh$8kbjNZC-gsnYruj=yvKox8bj"
+        b"G@F5nW{}e0Z8OLuQz^YOl<QD~QXnaTADNJvD9|Pg7rmh6R73_=V+J$^sR-pU$)uRD1c>0t%E1bW1>P-"
+        b"zA35ogNr(xR(Tr(`w2`0?ag9gK5{KV6z6Fx&AWBOEj)5>T0-}K{A+7$s(@#YVNeJl}uh3$S$Kev#bfzr"
+        b"{cc|zDO1+k^mCzOX5_ZEh$--DHxpnFGVEx_`_4^0tqxw3Jhv7_DVRXSjvBOom`(136YHCLF{9YG=X7i}"
+        b"u^1h4Dn~lPpahskX#{0mt<FbV2WV|l`2$c}A42bpPS9F71XWjZOS0Bm7b9J@%1Xmv^oagFlzt+`F>*L@"
+        b"796a_2rvwwcYVvAg6;mqQ0hgo7qBV`?`G{C=+9jh>Gm9gUFx+xGdMK~yB@71qKyi0F5Y-T>BD-f0wYEX"
+        b"~n{p>Be)wxI-5L<Nc5NM%9`z3JXn$M%1G4?Y$v)B;f0FE`Y$L24+)|M%F2ovdJ7Fp6{CB{GCerY-MkQo"
+        b"|0AJXntHEeAxI7`3gNyU>ynb8a!B@L4KMDDP8by=Sp`&%<?-gtF*tzzuvNv7$X0nx@iDE(L0xd+MI^`pv"
+        b"#;Gt{Rp>4ATVZGy8n;UD3ej%IuwaolS5nZl;J;~9jFDz35PXy*Y{DX1Oo9gi41h=IDUo7X)3?zwpHjz5A"
+        b"?GTiNVDVURyS{j10@}!WM|BHXFD?X0fUA>`T^Kb@FnfGD_Kv}-L1J8Cs{sa?<-i88NVy@(4=HKw!&AQbn"
+        b"0-0U|l7TPPfW;I_}ln?F!Dj_<VRl&b|%F)#uB>$;XimThHe|{BpYY{QP2Y_Wtx_v<uqdC_&2=u?^)t>l}"
+        b"N`w=nqRw7$LWcKw>tlyQ)RrF820png_7qm=hvQvScCy#JE&zmxJt^)`ga<jaWh%xG`Jx&%ogaknV9D!56"
+        b"KV(sM?ABvEJ<sQ+=chl{{oBS_TW8L@({nY<*"
+    ))
+    assert dispatch_model.main(argv) == 0
+    stdout = capsysbinary.readouterr().out.replace(source_bytes, b"<source>")
+    assert stdout == expected
+    assert stdout.startswith(b'{\n  "schema": "prismaquant.tessera_export_setup.v1",\n  "scope":')
+    assert b'"out": "caf\\u00e9"' in stdout
+    assert stdout.endswith(b"\n}\n")
+
+    real_text = digests.JsonProfile.text
+
+    def mark_text(self, value):
+        text = real_text(self, value)
+        return " " + text if self is digests.INSERTION_ASCII_INDENT2_LAX else text
+
+    monkeypatch.setattr(digests.JsonProfile, "text", mark_text)
+    assert dispatch_model.main(argv) == 0
+    assert capsysbinary.readouterr().out.replace(source_bytes, b"<source>") == b" " + expected, (
+        "The dry run did not print the text from the shared profile."
+    )
 
 
 @pytest.mark.parametrize("layout", ["dense", "indexed_experts"])

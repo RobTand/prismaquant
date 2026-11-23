@@ -35,6 +35,19 @@
   - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[True]`: PASSED
   - `tests/test_tensor_digest_owner_recipes_2638.py::test_token_route_removes_only_enumerated_main_baseline_scopes`: PASSED
 
+- Use the shared indent-2 JSON profile for the dispatch dry run (#5358). Keep the output bytes the same. Part of #2651.
+  Base revision: `c8567a1c6e6738ad172ed50baa9f044c706f8c3f`.
+  `tests/test_tessera_export_setup.py::test_dry_run_stdout_uses_indent2_profile` failed on the base with `The dry run did not print the text from the shared profile.`
+  The candidate passed these tests:
+  - `tests/test_tessera_export_setup.py::test_dry_run_stdout_uses_indent2_profile`
+  - `tests/test_tessera_export_setup.py::test_real_metadata_dispatch_covers_source_once_and_plans_census[dense]`
+  - `tests/test_tessera_export_setup.py::test_real_metadata_dispatch_covers_source_once_and_plans_census[indexed_experts]`
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[False]`
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[True]`
+
+  The duplication scan found no near duplicates, same-name helpers, or primitive digest sites for the dispatcher on the base or the candidate.
+  Keep the baseline unchanged.
+
 - Put the checkout root after the standard library on the three graph tools' import paths (#5323). Part of #4684.
   The local import-path measurement used the new test with safe-path startup and with early checkout entries.
   Refusal stopped all six cases. Removing early checkout entries and appending the root passed all six cases.
