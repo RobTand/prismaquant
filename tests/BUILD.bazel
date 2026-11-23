@@ -628,6 +628,16 @@ pq_py_library(
 )
 
 pq_py_test(
+    name = "test_json_profile_route_2651_materialize_wikitext_corpus",
+    path = "tests/test_json_profile_route_2651_materialize_wikitext_corpus.py",
+    library = ":test_json_profile_route_2651_materialize_wikitext_corpus_lib",
+    deps = [
+        ":conftest",
+    ],
+    timeout = "moderate",
+)
+
+pq_py_test(
     name = "test_gate_actions",
     path = "tests/test_gate_actions.py",
     library = ":test_gate_actions_lib",
@@ -33989,6 +33999,19 @@ pq_py_library(
         ":test_campaign_acquisition_scheduler_lib",
         ":test_joint_full_domain_acquisition_lib",
         "@pq_pip//pytest",
+    ],
+)
+
+pq_py_library(
+    name = "test_json_profile_route_2651_materialize_wikitext_corpus_lib",
+    srcs = [
+        "test_json_profile_route_2651_materialize_wikitext_corpus.py",
+    ],
+    deps = [
+        "//:prismaquant/__init__",
+        "//:prismaquant/digests",
+        "//:tools/__init__",
+        "//:tools/materialize_wikitext_corpus",
     ],
 )
 

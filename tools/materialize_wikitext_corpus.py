@@ -32,7 +32,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -59,7 +58,7 @@ def main() -> int:
     args = ap.parse_args()
 
     from datasets import load_dataset
-    from prismaquant.digests import bytes_sha256hex
+    from prismaquant.digests import INSERTION_ASCII_INDENT1_LAX, bytes_sha256hex
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -95,7 +94,7 @@ def main() -> int:
         print(f"[corpus] {split}: {entry['bytes']} bytes  "
               f"sha256 {entry['sha256'][:16]}  rows {entry['n_rows_kept']}")
 
-    (out_dir / "corpus_index.json").write_text(json.dumps(index, indent=1))
+    (out_dir / "corpus_index.json").write_text(INSERTION_ASCII_INDENT1_LAX.text(index))
     return 0
 
 
