@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .pipeline import MetricGateSpec
-from .digests import DIRECT_ASCII_LAX, is_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, DIRECT_ASCII_LAX, is_sha256hex
 
 
 DEFAULT_REGISTRY_PATH = Path("/home/rob/dq-runs/prismaquant-artifact-registry.json")
@@ -272,8 +272,7 @@ class ArtifactRegistry:
         )
         try:
             with open(tmp, "w") as f:
-                json.dump(payload, f, indent=2, sort_keys=True)
-                f.write("\n")
+                f.write(DIRECT_ASCII_INDENT2_LAX.text(payload) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp, self.path)

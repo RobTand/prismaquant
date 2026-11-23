@@ -2127,6 +2127,20 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "test_json_profile_route_2651_registry_and_spec_writes_lib",
+    srcs = [
+        "test_json_profile_route_2651_registry_and_spec_writes.py",
+    ],
+    deps = [
+        "//:prismaquant/__init__",
+        "//:prismaquant/artifact_registry",
+        "//:prismaquant/digests",
+        "//:prismaquant/pipeline",
+        "//:prismaquant/prepriced_cost",
+    ],
+)
+
+pq_py_library(
     name = "test_g3_quality_replay_lib",
     srcs = [
         "test_g3_quality_replay.py",
@@ -14547,6 +14561,35 @@ pq_py_library(
         "@pq_pip//pytest",
         "@pq_pip//torch",
     ],
+)
+
+pq_py_test(
+    name = "test_json_profile_route_2651_registry_and_spec_writes",
+    path = "tests/test_json_profile_route_2651_registry_and_spec_writes.py",
+    library = ":test_json_profile_route_2651_registry_and_spec_writes_lib",
+    deps = [
+        "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
+        "//:pqtel/__init__",
+        "//:prismaquant/lane_shipcard",
+        "//:prismaquant/shipcard_cli",
+        "//:tools/build_streamed_full_kl_teacher",
+        "//:tools/dsv4_wikitext_inputs",
+        "//:tools/full_kl_teacher_payload",
+        "//:tools/g3job/g3_pq_policy/__init__",
+        "//:tools/gold_engine_options",
+        "//:tools/gold_measurement_fidelity",
+        "//:tools/measure_served_gold",
+        "//:tools/measure_vllm_full_kl",
+        "//:tools/measure_vllm_wikitext_ppl",
+        "//:tools/pq_profile_child",
+        "//:tools/prepare_dsv4_wikitext_inputs",
+        "//:tools/prismaquant_source_bootstrap",
+        "//:tools/spec_decode_guard",
+        "//:tools/tessera_campaign_container",
+        "//:tools/tessera_fleet/__init__",
+        ":conftest",
+    ],
+    timeout = "moderate",
 )
 
 pq_py_test(
