@@ -1266,6 +1266,8 @@ pq_py_test(
     deps = [
         "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
         "//:pqtel/__init__",
+        "//:prismaquant/__init__",
+        "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/lane_shipcard",
         "//:prismaquant/shipcard_cli",
         "//:tools/build_streamed_full_kl_teacher",
@@ -51290,6 +51292,8 @@ pq_py_library(
         "//:README.md",
         "//:docs/bazel.md",
         "//:files/tools/ci",
+        "//:prismaquant/tessera_runtime/tessera_serving_runtime_pin.json",
+        "//:prismaquant/tessera_runtime_contract.py",
         "//:pyproject.toml",
         "//:pytest.ini",
         "//:tools/tessera_campaign_container.py",
@@ -51301,6 +51305,7 @@ pq_py_library(
     ],
     deps = [
         "//:prismaquant/__init__",
+        "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/digests",
         "//:tools/ci/bazel_artifacts",
         "//:tools/ci/bazel_gate",
