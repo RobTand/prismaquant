@@ -191,8 +191,8 @@ def aggregate_shards(population, shards, records, *, require_execution=False,
         result = architecture_result(selected_tests, run,
                                      budget_warnings=record['budget_warnings'])
         excerpts = record.get('excerpts', {})
-        if (not isinstance(excerpts, dict) or len(excerpts) > EXCERPT_LABELS
-                or not set(excerpts) <= set(result['failed'])
+        if (not isinstance(excerpts, dict) or not set(excerpts) <= set(result['failed'])
+                or (record.get('mode') != 'main' and len(excerpts) > EXCERPT_LABELS)
                 or any(type(text) is not str or len(text.encode()) > EXCERPT_BYTES
                        or any(inert(line) != line for line in text.split('\n'))
                        for text in excerpts.values())):
@@ -390,7 +390,7 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
             with evidence_phase('result-validation'):
                 result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
                                              require_execution=manifest['require_execution'] and bool(tests))
-            excerpts = failure_excerpts(text, result['failed'], fetch)
+            excerpts = failure_excerpts(text, result['failed'], fetch, main=manifest['mode'] == 'main')
     except ShardEvidenceError as error:
         if outcome.returncode not in (0, 1, 3):
             error.bazel_exit = outcome.returncode
@@ -415,8 +415,7 @@ def inert(line):
     return re.sub(':(?=:)', ': ', re.sub(r'#\[', '# [', re.sub(r'[\x00-\x08\x0a-\x1f\x7f-\x9f]', '', line)))
 
 
-def failure_excerpts(text, failed, fetch):
-    """First error lines and last lines of the own test.log of up to five failed tests."""
+def failure_excerpts(text, failed, fetch, *, main=False):
     logs = {}
     for line in text.splitlines() if failed else ():
         try:  # bep_run judges the build events; an excerpt skips an event it cannot read.
@@ -428,7 +427,7 @@ def failure_excerpts(text, failed, fetch):
         except (ValueError, TypeError, KeyError, AttributeError):
             continue
     excerpts = {}
-    for label, uri in sorted(logs.items())[:EXCERPT_LABELS]:
+    for label, uri in sorted(logs.items())[:None if main else EXCERPT_LABELS]:
         try:  # The test already failed; an unreadable log cannot change that verdict.
             lines = fetch(uri, limit=EXCERPT_READ).decode('utf-8', 'replace').splitlines()
         except (OSError, RuntimeError, ValueError, TypeError, AttributeError):
