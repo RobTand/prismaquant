@@ -37,6 +37,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from prismaquant import digests
 from prismaquant.nvfp4_activation_contract import (
     E2M1_MIDPOINTS,
     FP4_E2M1_MAX,
@@ -168,7 +169,7 @@ def stage_multimodal(model_path: str):
                 continue
             (Path(staged) / p.name).symlink_to(p.resolve())
         with open(Path(staged) / "config.json", "w") as f:
-            json.dump(cfg, f, indent=2)
+            digests.INSERTION_ASCII_INDENT2_LAX.dump(cfg, f)
         return staged, staged
 
     # --- Build CausalLM config from the VL config ---
@@ -222,7 +223,7 @@ def stage_multimodal(model_path: str):
 
             # Write remapped index
             with open(Path(staged) / "model.safetensors.index.json", "w") as f:
-                json.dump(idx, f, indent=2)
+                digests.INSERTION_ASCII_INDENT2_LAX.dump(idx, f)
 
             # Symlink everything EXCEPT config.json and the index
             for p in Path(model_path).iterdir():
@@ -242,7 +243,7 @@ def stage_multimodal(model_path: str):
             (Path(staged) / p.name).symlink_to(p.resolve())
 
     with open(Path(staged) / "config.json", "w") as f:
-        json.dump(cfg, f, indent=2)
+        digests.INSERTION_ASCII_INDENT2_LAX.dump(cfg, f)
     return staged, staged
 
 

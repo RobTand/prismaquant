@@ -1,10 +1,86 @@
+import json
+from pathlib import Path
+from unittest.mock import patch
+
 import torch
 import torch.nn as nn
 
+from prismaquant import sensitivity_probe
 from prismaquant.build_rtn_cache import is_fused_moe_experts
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
 from prismaquant.build_rtn_cache import _fp8_round
 from prismaquant.build_rtn_cache import rtn_fp8_any_shape
+from prismaquant.build_rtn_cache import stage_multimodal
+
+
+def test_staging_writes_use_indent2_dump_profile(tmp_path, monkeypatch):
+    digests = sensitivity_probe.digests
+    dump = digests.JsonProfile.dump
+    calls = []
+
+    def observe(profile, value, stream):
+        assert stream.mode == "w"
+        with patch.object(stream, "write", wraps=stream.write) as write:
+            result = dump(profile, value, stream)
+        assert not stream.closed
+        assert result is None
+        assert [call.args[0] for call in write.call_args_list] == list(
+            json.JSONEncoder(indent=2).iterencode(value)
+        )
+        calls.append((profile, stream))
+        return result
+
+    monkeypatch.setattr(digests.JsonProfile, "dump", observe)
+    monkeypatch.setenv("PRISMAQUANT_TMPDIR", str(tmp_path))
+    quant = tmp_path / "quant"
+    quant.mkdir()
+    (quant / "config.json").write_bytes(b'{"z":"\\u00e9","a":NaN,"quantization_config":{}}')
+    multimodal = tmp_path / "multimodal"
+    multimodal.mkdir()
+    (multimodal / "config.json").write_bytes(
+        b'{"model_type":"composite","architectures":["ToyForConditionalGeneration"],'
+        b'"text_config":{"model_type":"text","label":"\\u00e9"}}'
+    )
+    index = "model.safetensors.index.json"
+    (multimodal / index).write_bytes(
+        b'{"weight_map":{"model.language_model.layer":"\\u00e9.safetensors",'
+        b'"model.vision.layer":"vision.safetensors","lm_head.weight":"head.safetensors"}}'
+    )
+
+    quant_stage, quant_cleanup = stage_multimodal(str(quant))
+    text_stage, text_cleanup = stage_multimodal(str(multimodal))
+    for staged, cleanup, source in ((quant_stage, quant_cleanup, quant),
+                                    (text_stage, text_cleanup, multimodal)):
+        assert staged == cleanup
+        assert Path(staged) != source
+        assert Path(staged).parent == tmp_path
+
+    paths = (Path(quant_stage) / "config.json", Path(text_stage) / index,
+             Path(text_stage) / "config.json")
+    actual = tuple(path.read_bytes() for path in paths)
+    assert actual == (
+        br'''{
+  "z": "\u00e9",
+  "a": NaN
+}''',
+        br'''{
+  "weight_map": {
+    "model.layer": "\u00e9.safetensors",
+    "lm_head.weight": "head.safetensors"
+  }
+}''',
+        br'''{
+  "model_type": "text",
+  "architectures": [
+    "ToyForCausalLM"
+  ],
+  "label": "\u00e9"
+}''',
+    )
+    assert [Path(stream.name) for _, stream in calls] == list(paths)
+    for profile, stream in calls:
+        assert profile is digests.INSERTION_ASCII_INDENT2_LAX
+        assert stream.closed
 
 
 class _ToyPackedExperts(nn.Module):

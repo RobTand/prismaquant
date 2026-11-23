@@ -52664,15 +52664,14 @@
      "refusal_behavior": "Preserve stdlib key, cycle, fallback, and nonfinite behavior for the exact options. Keep caller catches and Unicode encoding unchanged."
     },
     "owner": {
-     "route": null,
-     "gap": "No public owner retains json.dump text-handle chunk writes and its None result.",
-     "candidate": null
+     "route": "prismaquant.digests.INSERTION_ASCII_INDENT2_LAX.dump",
+     "gap": null
     },
     "contract_kind": "json-publication",
     "ratcheted": false,
-    "disposition": "add-exact-owner-recipe",
+    "disposition": "migrate-exact-route",
     "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
+    "disposition_reason": "Use the exact owner route without changes to consumer policy.",
     "retention_evidence": null,
     "epic_key": "k2",
     "epic": "prismaquant#2541",
@@ -52744,15 +52743,14 @@
      "refusal_behavior": "Preserve stdlib key, cycle, fallback, and nonfinite behavior for the exact options. Keep caller catches and Unicode encoding unchanged."
     },
     "owner": {
-     "route": null,
-     "gap": "No public owner retains json.dump text-handle chunk writes and its None result.",
-     "candidate": null
+     "route": "prismaquant.digests.INSERTION_ASCII_INDENT2_LAX.dump",
+     "gap": null
     },
     "contract_kind": "json-publication",
     "ratcheted": false,
-    "disposition": "add-exact-owner-recipe",
+    "disposition": "migrate-exact-route",
     "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
+    "disposition_reason": "Use the exact owner route without changes to consumer policy.",
     "retention_evidence": null,
     "epic_key": "k2",
     "epic": "prismaquant#2541",
@@ -52821,15 +52819,14 @@
      "refusal_behavior": "Preserve stdlib key, cycle, fallback, and nonfinite behavior for the exact options. Keep caller catches and Unicode encoding unchanged."
     },
     "owner": {
-     "route": null,
-     "gap": "No public owner retains json.dump text-handle chunk writes and its None result.",
-     "candidate": null
+     "route": "prismaquant.digests.INSERTION_ASCII_INDENT2_LAX.dump",
+     "gap": null
     },
     "contract_kind": "json-publication",
     "ratcheted": false,
-    "disposition": "add-exact-owner-recipe",
+    "disposition": "migrate-exact-route",
     "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
+    "disposition_reason": "Use the exact owner route without changes to consumer policy.",
     "retention_evidence": null,
     "epic_key": "k2",
     "epic": "prismaquant#2541",
