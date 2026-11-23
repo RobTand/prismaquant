@@ -1859,7 +1859,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     every phase it declares (RobTand/prismaquant#678).
     """
     import torch
-    from contextlib import nullcontext
+    from concurrent.futures import ThreadPoolExecutor, wait
+    from contextlib import ExitStack, nullcontext
     from . import tessera_calibration_cache as cc, tessera_hessian as th, tessera_campaign as tc
     from .joint_aura import activation_identity, prefetch_joint_cache
     from .joint_prewarm_phases import HEAD_PHASE, phase_name
@@ -2155,9 +2156,17 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                             max_resident_bytes=max_render_bytes,
                             max_load_buffer_bytes=policy['max_load_buffer_bytes'],
                             max_workers=file_load_workers))
-                        with tc.bind_checkpoint_unit_identity(anchors, source_weight=source_weight,
-                                calibration_source=calibration_source, projected_unit=projected.get(name),
-                                static_scales=scales) as bound_unit:
+                        with ExitStack() as unit:
+                            wire_reader = unit.enter_context(ThreadPoolExecutor(
+                                max_workers=1, thread_name_prefix="joint-wire-read"))
+                            pending = (None if policy is None or not windows else
+                                       wire_reader.submit(_read_verified_wire_blob, data.cells[windows[0][0]]))
+                            bound_unit = unit.enter_context(tc.bind_checkpoint_unit_identity(
+                                anchors, source_weight=source_weight, calibration_source=calibration_source,
+                                projected_unit=projected.get(name), static_scales=scales))
+                            # Drain the first read before render window entry can fail.
+                            if pending is not None:
+                                wait((pending,))
                             for window in windows:
                                 owner = (nullcontext() if policy is None else cache.resident_window(window,
                                     max_resident_bytes=max_render_bytes, max_workers=file_load_workers,
@@ -2165,14 +2174,6 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                 with owner as window_receipt:
                                     if window_receipt is not None:
                                         layer_stats.append(dict(unit=name, **window_receipt))
-                                    # One ephemeral wire blob is read ahead while the GPU
-                                    # verifies its predecessor.  Keep its worker inside the
-                                    # resident window so an exception waits for/cancels it
-                                    # before PWC releases the tensors it could overlap.
-                                    from concurrent.futures import ThreadPoolExecutor
-                                    wire_reader = ThreadPoolExecutor(max_workers=1,
-                                                                     thread_name_prefix="joint-wire-read")
-                                    pending = None
                                     try:
                                         for index, (_, fmt) in enumerate(window):
                                             cell = data.cells[name, fmt]
@@ -2211,9 +2212,8 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                             verified[name, fmt] = record
                                             resident = rendered = blob = None
                                     finally:
-                                        if pending is not None:
-                                            pending.cancel()
-                                        wire_reader.shutdown(wait=True, cancel_futures=True)
+                                        if pending is not None and not pending.cancel():
+                                            wait((pending,))
                                     if guard is not None:
                                         guard.check('after_joint_qualification_window:' + name)
                 finally:
