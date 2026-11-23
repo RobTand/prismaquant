@@ -14,25 +14,23 @@ activation paths.
 
 ## Freeze
 
-Both freeze paths require a dictionary stamp with backend
-`registered_scaled_fp4_quant` for a measured-as-served static reference.
-Both paths carry the stamp into the frozen panel unchanged.
+Both freeze paths and receipt admission validate the stamp for a
+measured-as-served static reference. Other paths do not require a stamp.
+The check requires schema `prismaquant.served_quantizer_identity.v1`,
+backend `registered_scaled_fp4_quant`, and `op` set to `scaled_fp4_quant`.
+It requires nonempty strings for `platform`, `torch`, `vllm`, and
+`image_content_sha256`. It requires `torch_git` but permits `null`.
+The stamp can omit `dequant_kernel`.
 
-- Ordinary freeze checks the stamp against the validated joint AURA probe
-  arithmetic. The comparison requires a quantizer identity in the probe.
-  It checks `schema` and the reuse axes: `backend`, `op`, `platform`,
-  `torch`, `torch_git`, `vllm`, and `image_content_sha256`.
-  It does not check `dequant_kernel`.
-- Execution-first freeze has no joint quality row. It checks the stamp
-  without comparing joint arithmetic.
+Both freeze paths carry the stamp unchanged. Ordinary freeze compares its
+schema and reuse axes against the validated joint AURA probe arithmetic.
+The comparison ignores `dequant_kernel`. Execution-first freeze does not
+compare arithmetic because it has no joint quality row.
 
 ## Receipt admission
 
-`consume_native_receipt` checks the expected panel's stamp against its final
-joint arithmetic. For a late-bound receipt, it resolves the binding first.
-The binding must preserve the measured execution panel, including the stamp.
-Admission then applies the same arithmetic comparison as ordinary freeze.
-It refuses a measured-as-served static reference without a registered stamp.
-Other activation paths do not require a stamp.
+Late-bound admission resolves the binding before it checks the stamp.
+The binding must preserve the measured panel and its stamp.
+Admission compares the schema and reuse axes against the final joint arithmetic.
 
 The exact QDQ gate still requires zero absolute error.

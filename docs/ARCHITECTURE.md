@@ -7757,23 +7757,20 @@ fifteen full-size elementwise ops, including an int64 code tensor.
   identity from `effective_served_quantizer_identity` for that contract.
   An explicit contract binding takes priority over the process binding.
 
-- **Ordinary freeze.** `freeze_native_panel` requires a stamp with backend
-  `registered_scaled_fp4_quant` for a measured-as-served static reference.
-  The stamp must match the validated joint AURA probe arithmetic on `schema`
-  and the reuse axes, not `dequant_kernel`. Freeze carries the stamp into
-  the panel unchanged.
+- **Ordinary freeze.** Both freeze paths and receipt admission require a stamp for
+  a measured-as-served static reference. They require schema `prismaquant.served_quantizer_identity.v1`,
+  backend `registered_scaled_fp4_quant`, and `op` set to `scaled_fp4_quant`.
+  They require nonempty strings for `platform`, `torch`, `vllm`, and `image_content_sha256`.
+  They require `torch_git` but permit `null`. The stamp can omit `dequant_kernel`.
+  The stamp must match the validated joint AURA probe arithmetic on schema and the reuse axes.
+  The comparison ignores `dequant_kernel`. `freeze_native_panel` carries the stamp unchanged.
 
-- **Execution-first freeze.** `freeze_execution_panel` requires the
-  `registered_scaled_fp4_quant` stamp for the same static path. It carries
-  the stamp into the execution panel unchanged. There is no joint quality row
-  yet, so it does not compare arithmetic.
+- **Execution-first freeze.** `freeze_execution_panel` carries the stamp with backend
+  `registered_scaled_fp4_quant` unchanged. It has no joint quality row and does not compare arithmetic.
 
-- **Receipt admission.** Direct admission checks the expected panel's stamp
-  against its final joint arithmetic. Late-bound admission resolves the
-  binding first. The binding must preserve the measured execution panel,
-  including the stamp.
-  Admission then makes the same comparison. Both paths refuse an unstamped
-  measured-as-served static reference.
+- **Receipt admission.** Direct admission checks the stamp against the final joint arithmetic.
+  Late-bound admission resolves the binding first. The binding must preserve the panel and stamp.
+  Admission then makes the same comparison. Both paths refuse an unstamped static reference.
 
 - **One Triton trap, caught by the raw-bit comparison.** Triton's unary minus
   is `0 - x`, so `-(+0.0)` is `+0.0`, while Torch's `-magnitude` gives `-0.0`
