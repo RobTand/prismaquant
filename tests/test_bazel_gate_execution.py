@@ -885,6 +885,36 @@ def test_shard_refusal_names_fixed_phase_and_category_without_private_values(
     assert list(upload.iterdir()) == []
 
 
+def test_shard_refusal_reports_bazel_abort_without_private_values(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    sentinel = 'private-value-must-never-be-logged'
+    upload = tmp_path / 'upload'
+    manifest = {'mode': 'pr', 'base': 'b' * 40, 'head': 'a' * 40,
+                'branch': 'probe', 'architecture': 'amd64', 'index': 0,
+                'targets': [LABEL], 'tests': [LABEL], 'require_execution': False}
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    monkeypatch.setenv('PQ_BAZEL_SHARD', '{}')
+    monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
+
+    def native(command, **kwargs):
+        path = Path(next(word.split('=', 1)[1] for word in command
+                         if word.startswith('--build_event_json_file=')))
+        path.write_text(events({'id': {'started': {}}, 'started': {'uuid': 'child'}}))
+        kwargs['stdout'].write(f'INFO: DEADLINE_EXCEEDED\nERROR: UNAVAILABLE: {sentinel}\n')
+        return SimpleNamespace(returncode=38)
+
+    execute = gate.execute_shard
+    monkeypatch.setattr(gate, 'execute_shard', lambda document: execute(
+        document, root=tmp_path, runner=native))
+    assert gate.main(['shard']) == 75
+    captured = capsys.readouterr()
+    assert sentinel not in captured.out + captured.err
+    assert list(upload.iterdir()) == []
+    assert captured.err == ('shard refused at result-validation; category=invalid-evidence; '
+                            'bazel_exit=38; error_class=UNAVAILABLE; upload refused\n')
+
+
 @pytest.mark.parametrize('error,category', [
     (OSError(errno.EIO, 'private'), 'io-device'),
     (OSError(errno.ELOOP, 'private'), 'io-symlink-loop'),

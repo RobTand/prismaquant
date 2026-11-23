@@ -30,6 +30,11 @@ from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_s
 SCHEMA = 'prismaquant.bazel-gate.v1'
 NONHERMETIC = Path(__file__).resolve().parents[2] / 'tools/bazel/nonhermetic.bzl'
 EXCERPT_LABELS, EXCERPT_BYTES, EXCERPT_READ = 5, 4096, 1 << 20
+BAZEL_ERROR_CLASS = re.compile(
+    r'\b(?:CANCELLED|UNKNOWN|INVALID_ARGUMENT|DEADLINE_EXCEEDED|NOT_FOUND|ALREADY_EXISTS|'
+    r'PERMISSION_DENIED|RESOURCE_EXHAUSTED|FAILED_PRECONDITION|ABORTED|OUT_OF_RANGE|'
+    r'UNIMPLEMENTED|INTERNAL|UNAVAILABLE|DATA_LOSS|UNAUTHENTICATED|'
+    r'Build did NOT complete successfully|Server terminated abruptly|Bazel ran out of memory and crashed)\b')
 # dl380g10 has 40 physical cores; the rest of the host uses some (Fleet lead 3, 2026-11-19: load1 101 at 52 actions).
 AMD64_TASK_BUDGET = 36
 
@@ -46,6 +51,8 @@ class ShardEvidenceError(GateError):
         self.phase, self.category = phase, category
         self.inventory_progress = None
         self.dns_detail = None
+        self.bazel_exit = None
+        self.error_classes = ()
 
 
 def refusal_category(error):
@@ -367,21 +374,34 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
                     *(['--notest_keep_going'] if manifest['mode'] != 'main' else [])]
     if manifest['require_execution']:
         command += ['--noremote_accept_cached', '--nocache_test_results']
+    log = private / 'bazel.log'
     with evidence_phase('native-execution'):
-        with (private / 'bazel.log').open('w') as diagnostic:
+        with log.open('w') as diagnostic:
             outcome = runner(command, cwd=root, env=environment, stdout=diagnostic,
                              stderr=subprocess.STDOUT, check=False)
-    with evidence_phase('bep-read'):
-        text = bep.read_text()
-    with evidence_phase('bep-parse'):
-        run = bep_run(text, returncode=outcome.returncode)
-    with InventoryFetcher() as own_fetch:
-        fetch = fetch or own_fetch
-        inventory = inventory_evidence(text, fetch)
-        with evidence_phase('result-validation'):
-            result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
-                                         require_execution=manifest['require_execution'] and bool(tests))
-        excerpts = failure_excerpts(text, result['failed'], fetch)
+    try:
+        with evidence_phase('bep-read'):
+            text = bep.read_text()
+        with evidence_phase('bep-parse'):
+            run = bep_run(text, returncode=outcome.returncode)
+        with InventoryFetcher() as own_fetch:
+            fetch = fetch or own_fetch
+            inventory = inventory_evidence(text, fetch)
+            with evidence_phase('result-validation'):
+                result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
+                                             require_execution=manifest['require_execution'] and bool(tests))
+            excerpts = failure_excerpts(text, result['failed'], fetch)
+    except ShardEvidenceError as error:
+        if outcome.returncode not in (0, 1, 3):
+            error.bazel_exit = outcome.returncode
+            try:
+                with log.open(encoding='utf-8', errors='replace') as diagnostic:
+                    error.error_classes = sorted({name for line in diagnostic
+                                                  if line.startswith(('ERROR:', 'FATAL:'))
+                                                  for name in BAZEL_ERROR_CLASS.findall(line)})
+            except OSError:
+                pass
+        raise
     if not tests and result['verdict'] == 'skipped':
         result['verdict'] = 'pass'
     return {'schema': SCHEMA, 'mode': manifest['mode'], 'head': manifest['head'],
@@ -579,14 +599,18 @@ def main(argv=None):
         elif upload.exists():
             shutil.rmtree(upload)
         upload.mkdir(parents=True, exist_ok=True)
+        detail = ''
         if isinstance(error, ShardEvidenceError):
             phase, category = error.phase, error.category
+            if error.dns_detail is not None:
+                subtype, attempts = error.dns_detail
+                detail = f'; eai={subtype}; attempts={attempts}'
+            if error.bazel_exit is not None:
+                detail += f'; bazel_exit={error.bazel_exit}'
+            if error.error_classes:
+                detail += '; error_class=' + ','.join(error.error_classes)
         else:
             category = refusal_category(error)
-        detail = ''
-        if isinstance(error, ShardEvidenceError) and error.dns_detail is not None:
-            subtype, attempts = error.dns_detail
-            detail = f'; eai={subtype}; attempts={attempts}'
         print('shard refused at ' + phase + '; category=' + category + detail + '; upload refused',
               file=sys.stderr)
         if isinstance(error, ShardEvidenceError) and error.inventory_progress is not None:
