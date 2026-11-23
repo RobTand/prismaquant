@@ -9,7 +9,7 @@ stages use. The probe Fisher that gave this module its name is removed
 """
 from __future__ import annotations
 
-from . import probe_inventory
+from . import digests, probe_inventory
 
 import json
 import atexit
@@ -200,7 +200,7 @@ def _stage_text_only_impl(
             continue
         (staged / p.name).symlink_to(p.resolve())
     with open(staged / "config.json", "w") as f:
-        json.dump(cfg, f, indent=2)
+        f.write(digests.INSERTION_ASCII_INDENT2_LAX.text(cfg))
     return str(staged)
 
 
@@ -250,7 +250,7 @@ def stage_multimodal(model_path: str) -> str:
     # and do NOT promote text_config.model_type — the multimodal loader
     # needs the full config as-is.
     with open(staged / "config.json", "w") as f:
-        json.dump(cfg, f, indent=2)
+        f.write(digests.INSERTION_ASCII_INDENT2_LAX.text(cfg))
     return str(staged)
 
 
