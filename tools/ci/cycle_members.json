@@ -6710,6 +6710,7 @@
     "//tests:test_tessera_campaign_namespace_1986_lib",
     "//tests:test_tessera_campaign_packed_lib",
     "//tests:test_tessera_campaign_pins_lib",
+    "//tests:test_tessera_campaign_resume_lib",
     "//tests:test_tessera_core_boundary_lib",
     "//tests:test_tessera_materialization_lib",
     "//tests:test_tessera_packed_export_scope_lib",
