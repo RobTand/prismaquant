@@ -23,8 +23,9 @@ import tarfile
 import tempfile
 import time
 
-if __package__ in (None, ''):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path[:] = [entry for entry in sys.path if Path(entry).resolve() != ROOT]
+sys.path.append(str(ROOT))
 
 from prismaquant.digests import file_sha256hex
 from tools import duplication_inventory
@@ -32,7 +33,6 @@ from tools.bazel import build_files as build
 from tools.ci import graph_impact as core
 from tools.ci import graph_impact_imports as legacy_fanout
 
-ROOT = Path(__file__).resolve().parents[2]
 BASELINE = Path('tests/fixtures/graph_impact_baseline.json')
 ALLOWLIST = Path('tests/fixtures/graph_impact_allowlist.json')
 SOURCE_ROOTS = ('prismaquant/', 'tools/')

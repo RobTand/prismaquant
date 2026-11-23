@@ -58,7 +58,8 @@ import textwrap
 import warnings
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path[:] = [entry for entry in sys.path if Path(entry).resolve() != ROOT]
+sys.path.append(str(ROOT))
 from prismaquant.digests import length_framed_bytes_sha256, text_sha256hex  # noqa: E402
 # Bazel packages that hold modules. Every other file belongs to the root
 # package: an import cycle joins prismaquant/ and tools/ (tools/serve_fingerprint.py),
