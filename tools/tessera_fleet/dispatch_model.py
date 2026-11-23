@@ -138,6 +138,7 @@ def main(argv=None):
     if args.dry_run:
         if args.resume or args.source is None or args.plan is None:
             parser.error('--dry-run requires --source and --plan, without --resume')
+        from prismaquant import digests
         from prismaquant.tessera_export_lane import export_setup
         setup = export_setup(args.source, model.read_json(args.plan))
         spec = {'cpus': args.cpus, 'mem_gb': args.mem_gb,
@@ -147,7 +148,7 @@ def main(argv=None):
                                 for part in setup['partitions']]
         setup['execution_inputs'] = {'encoder_revision': args.encoder_revision,
                                      'image': args.image, 'out': str(args.out) if args.out else None}
-        print(json.dumps(setup, indent=2))
+        print(digests.INSERTION_ASCII_INDENT2_LAX.text(setup))
         return 0
     if args.workspace is None:
         parser.error('--workspace is required for execution or resume')

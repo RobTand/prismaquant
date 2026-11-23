@@ -1602,6 +1602,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/digests",
         ":prismaquant/flux_jobs",
         ":tools/__init__",
         ":tools/tessera_fleet/__init__",

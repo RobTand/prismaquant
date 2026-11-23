@@ -57096,6 +57096,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/digests",
         "//:tools/__init__",
         "//:tools/tessera_fleet/__init__",
         "//:tools/tessera_fleet/dispatch_model",
