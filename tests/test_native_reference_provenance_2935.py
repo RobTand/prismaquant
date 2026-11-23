@@ -51,6 +51,18 @@ def test_design_note_and_architecture_describe_the_shipped_stamp():
             assert term in paragraph, f"{label}: Include {term}."
 
 
+def test_docs_describe_reference_quantizer_stamp_validation():
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    for path, start, end in (
+        ("design/native_panel_served_quantizer_identity_2026-09-19.md", "## Freeze", "The exact QDQ gate"),
+        ("ARCHITECTURE.md", "- **Ordinary freeze.**", "- **One Triton trap"),
+    ):
+        text = (docs / path).read_text(encoding="utf-8").partition(start)[2].partition(end)[0]
+        for field in ("prismaquant.served_quantizer_identity.v1", "scaled_fp4_quant", "platform", "torch",
+                      "torch_git", "vllm", "image_content_sha256"):
+            assert f"`{field}`" in text, f"{path}: Include `{field}`."
+
+
 def test_reference_quantizer_preserves_recorded_outcomes():
     assert hashlib.sha256(RECORDS).hexdigest() == "8b37bb4e2ea60ec9bd2cddae7f999ce973bf0a9d2b9ebebe7c719a5848751cb8"
     for name, digest in zip(CASES, (
@@ -146,6 +158,30 @@ def _joined(inputs):
                 runtime=runtime, runtime_sha256=joint_identity_sha256(runtime),
                 native_tensors_sha256=joint_identity_sha256(weights),
                 scheme_sha256=joint_identity_sha256(operator["scheme"])), row
+
+
+@pytest.mark.parametrize("case", ["backend-only", "wrong-schema", "missing-build", "valid"])
+def test_execution_first_freeze_validates_reference_quantizer_stamp(monkeypatch, case):
+    with monkeypatch.context() as seam:
+        inputs = _prepare(seam, "explicit")
+    preflight, _ = _joined(inputs)
+    stamp = dict(inputs[STAMP], torch_git=None)
+    del stamp["dequant_kernel"]
+    if case == "backend-only":
+        stamp = {"backend": stamp["backend"]}
+    elif case == "wrong-schema":
+        stamp["schema"] = "prismaquant.served_quantizer_identity.v2"
+    elif case == "missing-build":
+        del stamp["vllm"]
+    inputs[STAMP] = stamp
+    try:
+        panel = freeze_execution_panel(inputs, preflight, source_sha256="4" * 64)
+    except ValueError as error:
+        assert case != "valid", "Freeze must accept the v1 stamp."
+        assert str(error) == MISSING
+    else:
+        assert case == "valid", f"Freeze must refuse the {case} stamp."
+        assert panel[STAMP] == stamp
 
 
 def _receipt(panel, preflight, *, late):

@@ -11,25 +11,28 @@ from .native_panel_kind import DENSE_EXECUTION_PANEL_SCHEMA as RAW_PANEL_SCHEMA
 
 
 def require_reference_quantizer(data, activation, probe=None):
-    """A served static oracle is bound to the actual quality producer build."""
+    """Check the static reference stamp before comparing reuse axes."""
     if not (activation.get('static_contract') or {}).get('measured_as_served'):
         return None
-    reference=data.get('reference_served_quantizer')
-    if not isinstance(reference,dict) or reference.get('backend')!='registered_scaled_fp4_quant':
+    from .nvfp4_activation_contract import (
+        SERVED_QUANTIZER_BACKEND_REGISTERED_OP, SERVED_QUANTIZER_IDENTITY_SCHEMA,
+        SERVED_QUANTIZER_OP, served_quantizer_reuse_differences)
+
+    reference = data.get('reference_served_quantizer')
+    if (not isinstance(reference, dict)
+            or reference.get('schema') != SERVED_QUANTIZER_IDENTITY_SCHEMA
+            or reference.get('backend') != SERVED_QUANTIZER_BACKEND_REGISTERED_OP
+            or reference.get('op') != SERVED_QUANTIZER_OP
+            or 'torch_git' not in reference
+            or not all(isinstance(reference.get(key), str) and reference[key]
+                       for key in ('platform', 'torch', 'vllm', 'image_content_sha256'))):
         raise ValueError('static native references require their registered served quantizer identity')
     if probe is not None:
-        # Compared on the fields that change the priced number (schema and
-        # the reuse axes), not as a whole record: ``dequant_kernel`` (#1211)
-        # names bit-identical implementations, so a reference recorded before
-        # the field existed still binds a row that carries it.
-        from .nvfp4_activation_contract import served_quantizer_reuse_differences
         actual = (probe.get('arithmetic') or {}).get('served_quantizer')
         if (not isinstance(actual, dict)
                 or served_quantizer_reuse_differences(reference, actual)):
             raise ValueError('native reference quantizer differs from actual joint quality arithmetic')
     return copy.deepcopy(reference)
-
-
 
 
 def freeze_execution_panel(inputs, preflight, *, source_sha256):

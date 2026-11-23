@@ -17035,8 +17035,7 @@ pq_py_library(
         "test_native_reference_provenance_2935.py",
     ],
     data = [
-        "//:docs/ARCHITECTURE.md",
-        "//:docs/design/native_panel_served_quantizer_identity_2026-09-19.md",
+        "//:files/docs",
         ":files/fixtures",
         "test_native_reference_provenance_2935.py",
     ],
