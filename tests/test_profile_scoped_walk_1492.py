@@ -613,6 +613,48 @@ def test_render_sample_separates_marker_metadata_from_payload(render_sample, tmp
         assert opened == []
 
 
+def test_render_sample_counts_every_read_when_an_unselected_render_links_to_its_marker(
+        tmp_path, monkeypatch):
+    import os
+    from contextlib import contextmanager
+    from unittest.mock import Mock
+
+    run, manifest, paths, _ = _make_render_sample(tmp_path, monkeypatch, "marked")
+    marker = bridge._render_origin_marker_path(paths[0])
+    paths[0].unlink()
+    paths[0].symlink_to(marker)
+    payloads = [path.stat() for path in [*paths, *(tmp_path / "merged/cache/wire").iterdir()]]
+    fdopen = os.fdopen
+    reads = []
+
+    @contextmanager
+    def count_reads(*args, **kwargs):
+        with fdopen(*args, **kwargs) as handle:
+            info = os.fstat(handle.fileno())
+            if not any(os.path.samestat(info, payload) for payload in payloads):
+                yield handle
+                return
+            reads.append(0)
+
+            def read(size):
+                chunk = handle.read(size)
+                reads[-1] += len(chunk)
+                return chunk
+
+            yield Mock(wraps=handle, read=read)
+
+    monkeypatch.setattr(os, "fdopen", count_reads)
+    try:
+        report = run(manifest=manifest | {"cells": manifest["cells"][1:]},
+                     trials=1, max_files=1, max_bytes=5)
+    except ValueError as exc:
+        assert "render origin marker" in str(exc)
+        assert reads == []
+    else:
+        assert len(reads) == report["payload_files"] <= 1
+        assert sum(reads) == report["payload_bytes"] <= 5
+
+
 def test_render_sample_stops_reading_at_the_planned_size(render_sample, monkeypatch):
     import os
     from contextlib import contextmanager

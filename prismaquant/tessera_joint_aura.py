@@ -569,44 +569,50 @@ def _synthesize_render_from_wire(render, *, wire, record, name, fmt, shape, read
     return "synthesized_from_wire"
 
 
-def _read_render_origin_marker(render, *, linked_marker_payloads=None):
+def _read_fenced_metadata(path, before, label, *, check_path=None, unlinked=False):
+    signature = _stat_signature(before)
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    with os.fdopen(os.open(path, flags), "rb") as handle:
+        opened = os.fstat(handle.fileno())
+        _require(not unlinked or opened.st_nlink == 1, f"{label} has a hard link")
+        _same(_stat_signature(opened), signature, label)
+        data = handle.read(before.st_size)
+        _same(len(data), before.st_size, label)
+        _same(_stat_signature(os.fstat(handle.fileno())), signature, label)
+    _same(_stat_signature(path.lstat() if check_path is None else check_path.stat()),
+          signature, label)
+    return data
+
+
+def _read_render_origin_marker(render, *, check_payload=None, allow_linked=False):
     marker = _render_origin_marker_path(render)
     try:
         before = marker.lstat()
     except FileNotFoundError:
         return None
     label = f"{marker}: render origin marker"
-    linked = linked_marker_payloads is not None and (
-        stat.S_ISLNK(before.st_mode) or before.st_nlink > 1)
+    symlink = stat.S_ISLNK(before.st_mode)
+    linked = allow_linked and (symlink or before.st_nlink > 1)
     try:
-        path = marker.resolve() if linked else marker
-        if linked:
+        path = marker
+        if linked and symlink:
+            try:
+                path = marker.resolve(strict=True)
+            except FileNotFoundError:
+                return None
             before = path.lstat()
-            for payload in linked_marker_payloads():
-                try:
-                    aliases_payload = os.path.samestat(before, payload.stat())
-                except FileNotFoundError:
-                    continue
-                _require(not aliases_payload, f"{label} names a payload: {payload}")
         _require(stat.S_ISREG(before.st_mode) and (linked or before.st_nlink == 1),
                  f"render origin marker must be an unlinked regular file: {marker}")
-        signature = _stat_signature(before)
-        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
-        with os.fdopen(os.open(path, flags), "rb") as handle:
-            opened = os.fstat(handle.fileno())
-            _require(linked or opened.st_nlink == 1, f"{label} has a hard link")
-            _same(_stat_signature(opened), signature, label)
-            data = handle.read(before.st_size)
-            _same(len(data), before.st_size, label)
-            _same(_stat_signature(os.fstat(handle.fileno())), signature, label)
-        _same(_stat_signature(marker.stat() if linked else marker.lstat()), signature, label)
+        if check_payload is not None and (linked or not allow_linked):
+            check_payload(before, label)
+        return _read_fenced_metadata(path, before, label, check_path=marker if linked else None,
+                                     unlinked=not linked)
     except OSError as exc:
         raise ValueError(f"{label} changed during intake") from exc
-    return data
 
 
 def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, device="cpu",
-                           require_existing_renders=False, linked_marker_payloads=None):
+                           require_existing_renders=False, check_payload=None, allow_linked=False):
     """Name where this rung's decoded PWC shard came from, never guess it.
 
     The campaign journals fresh and resumed wires through one receipt grammar
@@ -617,7 +623,8 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
     """
     render = Path(render)
     if render.is_file():
-        marker = _read_render_origin_marker(render, linked_marker_payloads=linked_marker_payloads)
+        marker = _read_render_origin_marker(render, check_payload=check_payload,
+                                            allow_linked=allow_linked)
         if marker is not None:
             stamp = json.loads(marker.decode("utf-8"))
             _same(stamp.get("schema"), RENDER_ORIGIN_SCHEMA, f"{name}@{fmt}: render origin schema")
@@ -955,8 +962,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     hold (``_campaign_metadata``, #1492). Without it nothing is shared. The
     reused state is read-only for the walk.
 
-    ``defer_render_origins`` receives a function that reads the origin markers.
-    Call that function after you admit the sample and its read budget.
+    ``defer_render_origins`` receives an origin resolver and a metadata identity check.
+    Call the resolver after you admit the sample and its read budget.
     """
     _require(progress_allowance_s is None,
              "the retired PB no-progress watchdog is gone; use native walltime and "
@@ -1200,21 +1207,44 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         if banked and progress_phase is not None and cadence.committed != resolved:
             log_progress(resolved, progress_phase, unit=banked[-1][0])
 
-    def linked_marker_payloads():
-        yield from wire_dir_resolved.glob("*")
-        for root in names_by_owner:
-            cache = root / "cache"
-            yield from cache.glob("*.pt")
-            if mirror_root is not None:
-                yield from (mirror_root / cache.relative_to(cache.root)).glob("*.pt")
+    def wire_filename(name, record):
+        filename = record["file"]
+        _require(isinstance(filename, str) and Path(filename).name == filename and
+                 filename not in {".", ".."}, f"{name}: escaping wire filename")
+        return filename
+
+    def payload_paths():
+        for name in sorted(names):
+            state = _load_unit(unit_path(parts, name), stage=STAGE, qname=name, identity_sha256=seal)
+            for record in state["wire_records"].values():
+                yield wire_dir_resolved / wire_filename(name, record)
+            cache = owner_roots[str(owners[name])] / "cache"
+            for fmt in measured_formats_by_name[name]:
+                render = cache / cache_weight_filename(name, fmt)
+                yield render
+                if mirror_root is not None:
+                    yield mirror_root / render.relative_to(render.root)
+
+    @functools.cache
+    def payload_identities():
+        identities = set()
+        for path in payload_paths():
+            try:
+                identities.add(file_stat_signature(path.stat())[:2])
+            except FileNotFoundError:
+                continue
+        return identities
+
+    def check_payload(info, label):
+        _require(file_stat_signature(info)[:2] not in payload_identities(), f"{label} names a payload")
 
     def resolve_origin(name, fmt, target, wire, record):
         return _resolve_render_origin(
             target, wire=wire, record=record, name=name, fmt=fmt,
             shape=census["unit_shapes"][name], reader=reader, device=synthesis_device,
             require_existing_renders=require_existing_renders,
-            linked_marker_payloads=(linked_marker_payloads
-                                    if stat_only_scope and defer_render_origins is None else None))
+            check_payload=check_payload if stat_only_scope else None,
+            allow_linked=stat_only_scope and defer_render_origins is None)
 
     def walk_one(name):
         """Verify one unit end to end; the rows, the fences, the events."""
@@ -1257,9 +1287,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                 _same(recorded["calibration"]["hessian"], unit["hessian"], f"{name}: recorded H")
             else:
                 _same(recorded.get("calibration"), None, f"{name}: unexpected recorded H")
-            filename = record["file"]
-            _require(isinstance(filename, str) and Path(filename).name == filename and
-                     filename not in {".", ".."}, f"{name}: escaping wire filename")
+            filename = wire_filename(name, record)
             # The filename is a validated leaf, so the wire's lexical parent
             # is the wire directory itself: the escape check is the symlink
             # test on the wire, and the directory side is resolved once above
@@ -1377,7 +1405,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             for (name, fmt), cell in cells.items():
                 cell["render_origin"] = resolve_origin(name, fmt, cell["render"], cell["wire"], cell["record"])
 
-        defer_render_origins(resolve_origins)
+        defer_render_origins(resolve_origins, check_payload)
     if log_every and synthesized:
         elapsed = max(time.time() - started, 1e-9)
         print(f"tessera_joint_aura: synthesized {synthesized} renders in {elapsed:.0f}s "

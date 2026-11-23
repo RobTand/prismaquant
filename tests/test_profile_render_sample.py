@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from pathlib import Path
 import signal
 import subprocess
 import sys
@@ -128,6 +130,36 @@ def test_cli_reports_stop_while_plan_read_blocks(sample_args, reason):
     report = json.loads(payload)
     assert report["reason"] == reason
     assert report["storage_mount"] == sample_args[-3]
+
+
+@pytest.mark.parametrize("payload_kind", ["render", "wire"])
+@pytest.mark.parametrize("alias", ["direct", "symlink", "hardlink"])
+def test_cli_reads_no_payload_given_as_the_manifest_before_the_checks(
+        sample_args, tmp_path, monkeypatch, capsys, payload_kind, alias):
+    directory, pattern = {"render": ("campaign/rows/row-0000/cache", "*.pt"),
+                          "wire": ("merged/cache/wire", "*.tessera")}[payload_kind]
+    payload = min((tmp_path / directory).glob(pattern))
+    manifest = tmp_path / "alias.json"
+    if alias == "direct":
+        manifest = payload
+    elif alias == "symlink":
+        manifest.symlink_to(payload)
+    else:
+        manifest.hardlink_to(payload)
+    sample_args[sample_args.index("--sample-manifest") + 1] = str(manifest)
+
+    def guard(real_open):
+        def open_file(file, *args, **kwargs):
+            path = Path(os.fsdecode(file))
+            assert not path.exists() or not path.samefile(payload), "The sample opened a payload."
+            return real_open(file, *args, **kwargs)
+        return open_file
+
+    for owner in (Path, os):
+        monkeypatch.setattr(owner, "open", guard(owner.open))
+    with pytest.raises(ValueError, match="manifest"):
+        head.main(sample_args)
+    assert capsys.readouterr().out == ""
 
 
 def _block_plan(reason, argv):

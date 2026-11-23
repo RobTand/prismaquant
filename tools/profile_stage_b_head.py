@@ -181,7 +181,7 @@ def _load_scoped_walk(config, scope, workers, metadata_memo=None, defer_render_o
 def render_sample_intake(config, *, manifest, scope, workers, hash_workers, trials,
                          max_trials, max_files, max_bytes):
     """Admit the campaign roster. Hash only the selected renders.
-    Pass the parsed v1 manifest, its scope, and limits for all trials combined.
+    Pass the v1 manifest or its path. Set limits for all trials combined.
     To verify the sample, supply one independent expected_sha256 per cell in manifest order.
     Start the deadline and stop reporter before input reads.
     Keep the stop reporter independent of the readers.
@@ -194,6 +194,7 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
     from prismaquant.cost_stage_checkpoint import MAX_UNIT_IO_WORKERS, _drive_ordered_units
     from prismaquant.file_identity import file_stat_signature
     from prismaquant.stage_inputs import require
+    from prismaquant.tessera_joint_aura import _read_fenced_metadata
 
     for name, limit in (("max_trials", max_trials), ("max_files", max_files),
                         ("max_bytes", max_bytes)):
@@ -205,6 +206,20 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
     require(isinstance(scope, (tuple, list)) and len(scope) == 2
             and all(type(index) is int for index in scope), "render sample scope needs two integers")
     scope = tuple(scope)
+    pending_origins = []
+    scoped_args = (
+        {key: config[key] for key in ("inputs", "historical_encoder_reuse") if key in config},
+        scope, workers, None, lambda *steps: pending_origins.append(steps))
+    from_path = isinstance(manifest, Path)
+    if from_path:
+        data, started = _load_scoped_walk(*scoped_args)
+        _, check_payload = pending_origins[0]
+        path = manifest.resolve()
+        info = path.lstat()
+        label = f"{manifest}: render sample manifest"
+        require(S_ISREG(info.st_mode), f"{label} is not a regular file")
+        check_payload(info, label)
+        manifest = json.loads(_read_fenced_metadata(path, info, label, check_path=manifest))
     manifest = digests.canonical_json(manifest, where="render sample manifest")
     require(isinstance(manifest, dict)
             and manifest.keys() - {"expected_sha256"} == {"schema", "scope", "inputs", "cells"}
@@ -227,10 +242,8 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
         expected = dict(zip(pairs, hashes, strict=True))
     require(len(pairs) * trials <= max_files, "render sample plan exceeds max_files")
 
-    pending_origins = []
-    data, started = _load_scoped_walk(
-        {key: config[key] for key in ("inputs", "historical_encoder_reuse") if key in config},
-        scope, workers, None, pending_origins.append)
+    if not from_path:
+        data, started = _load_scoped_walk(*scoped_args)
     require(digests.canonical_json_bytes(manifest["inputs"], where="manifest inputs") ==
             digests.canonical_json_bytes(data.inputs, where="admitted inputs"),
             "render sample manifest does not match admitted inputs")
@@ -244,7 +257,7 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
         plan.append((pair, path, file_stat_signature(info)))
     require(sum(signature[2] for _, _, signature in plan) * trials <= max_bytes,
             "render sample plan exceeds max_bytes")
-    for resolve in pending_origins:
+    for resolve, _ in pending_origins:
         resolve()
     manifest_sha256 = digests.canonical_json_sha256(manifest, where="render sample manifest")
 
@@ -497,7 +510,7 @@ def render_sample_profile(args, scope) -> int:
         config = load_joint_anchor_plan(args.plan, args.plan_sha256,
                                         projection_runtime=False, defer_pool_reads=True)
         result = render_sample_intake(
-            config, manifest=json.loads(args.sample_manifest.read_bytes()), scope=scope,
+            config, manifest=args.sample_manifest, scope=scope,
             workers=args.head_walk_workers, hash_workers=args.file_hash_workers,
             trials=args.trials, max_trials=args.max_trials, max_files=args.max_files,
             max_bytes=args.max_bytes)
