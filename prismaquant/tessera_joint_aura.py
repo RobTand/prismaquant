@@ -569,33 +569,44 @@ def _synthesize_render_from_wire(render, *, wire, record, name, fmt, shape, read
     return "synthesized_from_wire"
 
 
-def _read_render_origin_marker(render):
+def _read_render_origin_marker(render, *, linked_marker_payloads=None):
     marker = _render_origin_marker_path(render)
     try:
         before = marker.lstat()
     except FileNotFoundError:
         return None
     label = f"{marker}: render origin marker"
-    _require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1,
-             f"render origin marker must be an unlinked regular file: {marker}")
-    signature = _stat_signature(before)
+    linked = linked_marker_payloads is not None and (
+        stat.S_ISLNK(before.st_mode) or before.st_nlink > 1)
     try:
+        path = marker.resolve() if linked else marker
+        if linked:
+            before = path.lstat()
+            for payload in linked_marker_payloads():
+                try:
+                    aliases_payload = os.path.samestat(before, payload.stat())
+                except FileNotFoundError:
+                    continue
+                _require(not aliases_payload, f"{label} names a payload: {payload}")
+        _require(stat.S_ISREG(before.st_mode) and (linked or before.st_nlink == 1),
+                 f"render origin marker must be an unlinked regular file: {marker}")
+        signature = _stat_signature(before)
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
-        with os.fdopen(os.open(marker, flags), "rb") as handle:
+        with os.fdopen(os.open(path, flags), "rb") as handle:
             opened = os.fstat(handle.fileno())
-            _require(opened.st_nlink == 1, f"{label} has a hard link")
+            _require(linked or opened.st_nlink == 1, f"{label} has a hard link")
             _same(_stat_signature(opened), signature, label)
             data = handle.read(before.st_size)
             _same(len(data), before.st_size, label)
             _same(_stat_signature(os.fstat(handle.fileno())), signature, label)
-        _same(_stat_signature(marker.lstat()), signature, label)
+        _same(_stat_signature(marker.stat() if linked else marker.lstat()), signature, label)
     except OSError as exc:
         raise ValueError(f"{label} changed during intake") from exc
     return data
 
 
 def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, device="cpu",
-                           require_existing_renders=False):
+                           require_existing_renders=False, linked_marker_payloads=None):
     """Name where this rung's decoded PWC shard came from, never guess it.
 
     The campaign journals fresh and resumed wires through one receipt grammar
@@ -606,7 +617,7 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
     """
     render = Path(render)
     if render.is_file():
-        marker = _read_render_origin_marker(render)
+        marker = _read_render_origin_marker(render, linked_marker_payloads=linked_marker_payloads)
         if marker is not None:
             stamp = json.loads(marker.decode("utf-8"))
             _same(stamp.get("schema"), RENDER_ORIGIN_SCHEMA, f"{name}@{fmt}: render origin schema")
@@ -813,7 +824,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                head_checkpoint=None, head_resume=False,
                                head_walk_workers=None, head_walk_quantum=None,
                                progress_allowance_s=None, metadata_memo=None,
-                               progress_interval_s=None):
+                               progress_interval_s=None, defer_render_origins=None):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -943,6 +954,9 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     later load in the process while the bound records and their stat fences
     hold (``_campaign_metadata``, #1492). Without it nothing is shared. The
     reused state is read-only for the walk.
+
+    ``defer_render_origins`` receives a function that reads the origin markers.
+    Call that function after you admit the sample and its read budget.
     """
     _require(progress_allowance_s is None,
              "the retired PB no-progress watchdog is gone; use native walltime and "
@@ -993,6 +1007,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     missing = [key for key in HEAD_WALK_INPUT_KEYS if key not in inputs]
     _require(not missing, "campaign chain input(s) not bound in the plan's "
              f"``inputs`` block: {', '.join(missing)}")
+    stat_only_scope = (unit_scope is not None and require_existing_renders
+                       and head_checkpoint is None and inputs.get("candidate_overlay") is None)
+    _require(defer_render_origins is None or (stat_only_scope and progress_phase is None),
+             "render sample admission requires a scoped read without progress or an overlay")
     metadata = _campaign_metadata(inputs, reuse_policy, metadata_memo)
     (paths, census, plan, rows, owners, groups, names, payload, provenance,
      manifest, identity, declared_seal, seal, encoder_source_reuse, parts) = (
@@ -1182,6 +1200,22 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         if banked and progress_phase is not None and cadence.committed != resolved:
             log_progress(resolved, progress_phase, unit=banked[-1][0])
 
+    def linked_marker_payloads():
+        yield from wire_dir_resolved.glob("*")
+        for root in names_by_owner:
+            cache = root / "cache"
+            yield from cache.glob("*.pt")
+            if mirror_root is not None:
+                yield from (mirror_root / cache.relative_to(cache.root)).glob("*.pt")
+
+    def resolve_origin(name, fmt, target, wire, record):
+        return _resolve_render_origin(
+            target, wire=wire, record=record, name=name, fmt=fmt,
+            shape=census["unit_shapes"][name], reader=reader, device=synthesis_device,
+            require_existing_renders=require_existing_renders,
+            linked_marker_payloads=(linked_marker_payloads
+                                    if stat_only_scope and defer_render_origins is None else None))
+
     def walk_one(name):
         """Verify one unit end to end; the rows, the fences, the events."""
         state = _load_unit(unit_path(parts, name), stage=STAGE, qname=name, identity_sha256=seal)
@@ -1240,11 +1274,11 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             # measuring run can never replace the campaign's own bytes.
             target = (render if mirror_root is None
                       else mirror_root / render.relative_to(render.root))
-            if require_existing_renders or target.is_file():
-                origin = _resolve_render_origin(target, wire=wire, record=record, name=name,
-                                                fmt=fmt, shape=census["unit_shapes"][name],
-                                                reader=reader, device=synthesis_device,
-                                                require_existing_renders=require_existing_renders)
+            if defer_render_origins is not None:
+                _require(target.is_file(), f"{name}@{fmt}: prepared render is missing")
+                origin = None
+            elif require_existing_renders or target.is_file():
+                origin = resolve_origin(name, fmt, target, wire, record)
             else:
                 # The one thread-unsafe step in the walk: synthesis decodes
                 # through the bound reader, which is proven single-threaded
@@ -1252,9 +1286,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                 # the rare missing render waits on one lock while pure-read
                 # verification overlaps freely around it.
                 with _HEAD_WALK_SYNTHESIS_LOCK:
-                    origin = _resolve_render_origin(target, wire=wire, record=record, name=name,
-                                                    fmt=fmt, shape=census["unit_shapes"][name],
-                                                    reader=reader, device=synthesis_device)
+                    origin = resolve_origin(name, fmt, target, wire, record)
                 events.append(fmt)
             unit_cells[fmt] = {"anchor": anchor, "record": record, "wire": str(wire_dir_resolved / filename),
                                "render": str(target), "render_origin": origin,
@@ -1340,6 +1372,12 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         # function, so a restart resumes from the walk's true frontier.
         if head_root is not None and pending_bank:
             _flush_bank()
+    if defer_render_origins is not None:
+        def resolve_origins():
+            for (name, fmt), cell in cells.items():
+                cell["render_origin"] = resolve_origin(name, fmt, cell["render"], cell["wire"], cell["record"])
+
+        defer_render_origins(resolve_origins)
     if log_every and synthesized:
         elapsed = max(time.time() - started, 1e-9)
         print(f"tessera_joint_aura: synthesized {synthesized} renders in {elapsed:.0f}s "
