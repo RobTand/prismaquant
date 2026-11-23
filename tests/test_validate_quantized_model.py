@@ -14,10 +14,12 @@ import math
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from io import BytesIO
 
 import pytest
 
 import prismaquant.validate_quantized_model as vqm
+from prismaquant import digests
 from prismaquant.validate_quantized_model import (
     check_generation_sanity,
     check_perplexity,
@@ -25,6 +27,61 @@ from prismaquant.validate_quantized_model import (
     run_validation,
     EVAL_PROMPTS,
 )
+
+
+def test_request_and_report_use_exact_json_profiles(monkeypatch):
+    captured = []
+
+    def open_local(request, *, timeout):
+        captured.append(request.data)
+        return BytesIO(b'{"ok": true}')
+
+    monkeypatch.setattr(vqm.urllib.request, "urlopen", open_local)
+    url = "http://localhost"
+    payload = {"z": "é", "a": math.nan}
+    rep = vqm.ValidationReport("model", url, "model", payload, [
+        vqm.CheckResult("quality", True, "OK", {**payload, "fallback": 1 + 2j}),
+    ])
+    expected_body = br'{"z": "\u00e9", "a": NaN}'
+    expected_metrics = r'''{
+  "z": "\u00e9",
+  "a": NaN,
+  "fallback": "(1+2j)"
+}'''
+    expected_report = rf'''# PrismaQuant Validation Report — ✅ PASS
+
+- **artifact:** `model`
+- **endpoint:** http://localhost
+- **thresholds:** {{"z": "\u00e9", "a": NaN}}
+
+| Check | Status | Detail |
+|---|---|---|
+| quality | ✅ | OK |
+
+### quality metrics
+```json
+{expected_metrics}
+```'''
+    assert vqm._post_json(url, payload) == {"ok": True}
+    assert captured[-1] == expected_body
+    assert vqm.format_report_md(rep) == expected_report
+
+    profiles = []
+
+    def mark_text(profile, value):
+        profiles.append(profile)
+        return f"JSON {len(profiles)}"
+
+    monkeypatch.setattr(digests.JsonProfile, "text", mark_text)
+    vqm._post_json(url, payload)
+    report = vqm.format_report_md(rep)
+    assert len(profiles) == 3, "Use one JSON profile at each boundary."
+    assert profiles[0] is digests.INSERTION_ASCII_SPACED_LAX
+    assert profiles[1] is digests.INSERTION_ASCII_SPACED_LAX
+    assert profiles[2] is digests.INSERTION_ASCII_INDENT2_LAX_DEFAULT_STR
+    assert captured[-1] == b"JSON 1"
+    assert report == expected_report.replace(expected_body.decode(), "JSON 2").replace(
+        expected_metrics, "JSON 3")
 
 
 class _FakeVLLMHandler(BaseHTTPRequestHandler):
