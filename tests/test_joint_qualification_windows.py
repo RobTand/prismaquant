@@ -225,6 +225,136 @@ def test_wire_read_ahead_reserves_current_and_pending_blobs(tmp_path, monkeypatc
     assert units == [2 * 128 + 4 * 10000 + 2 * maximum] * 2
 
 
+@pytest.fixture
+def single_io_worker(monkeypatch):
+    from prismaquant import io_engine
+
+    engine = io_engine.IOEngine()
+    engine.width = 1
+    monkeypatch.setattr(io_engine, 'ENGINE', engine)
+    yield
+    if engine._pool is not None:
+        engine._pool.shutdown(wait=True)
+
+
+def test_prepare_overlaps_current_unit_identity_and_drains_before_release(
+        tmp_path, monkeypatch, single_io_worker):
+    from threading import Event, current_thread
+    from prismaquant import tessera_campaign as tc, tessera_hessian as th
+    from prismaquant.digests import canonical_json_bytes
+    from prismaquant.format_registry import get_format
+    from prismaquant.production_weight_cache import ProductionWeightCache
+
+    bind_identity = tc.bind_checkpoint_unit_identity
+    activation_source = th.activation_source
+    read_wire = bridge._read_verified_wire_blob
+    verify_render = bridge.verify_anchor_render
+    release_render = ProductionWeightCache.release_resident_tensors
+    for failure in (None, 'read', 'identity', 'verify'):
+        root = tmp_path / (failure or 'success')
+        root.mkdir()
+        with monkeypatch.context() as patch:
+            runner, data, capture, events, live, _ = fixture(root, patch)
+            provenance = th.calibration_identity('fixture', [torch.arange(4).reshape(1, 4)], fit_tokens=4)
+            patch.setattr(th, 'activation_source', lambda h, _: activation_source(h, provenance))
+            renders = {}
+            gates = {}
+            for name, formats in data.formats_by_qname.items():
+                gates[name] = (Event(), Event())
+                for fmt in formats:
+                    cell = data.cells[name, fmt]
+                    spec = get_format(fmt)
+                    cell['anchor']['activation_contract'] = str(spec.act_dtype_name or 'a16')
+                    cell['anchor']['activation_quantized'] = spec.act_quant_changes_input
+                    renders[Path(cell['wire']).read_bytes()] = cell['render']
+            caller = current_thread()
+            released = Event()
+            capture_refs = []
+            identities = []
+
+            def release(owner, name):
+                events.append((owner, name))
+                released.set()
+
+            def bind(anchors, **kwargs):
+                name = anchors[0].qname
+                started, _ = gates[name]
+                capture_refs.append(weakref.ref(live[-2](), lambda _: release('drop capture', name)))
+                assert started.wait(2), 'The wire read did not start before identity work ended.'
+                if failure == 'identity':
+                    raise RuntimeError('Identity failed.')
+                result = bind_identity(anchors, **kwargs)
+                events.append(('identity ready', name))
+                return result
+
+            def read(cell):
+                if current_thread() is caller:
+                    return read_wire(cell)
+                name, fmt = (cell['anchor'][key] for key in ('qname', 'format_name'))
+                started, next_started = gates[name]
+                assert ('capture', name) in events
+                first = fmt == data.formats_by_qname[name][0]
+                events.append(('read start', name, fmt))
+                (started if first else next_started).set()
+                try:
+                    if failure == 'identity' or (failure == 'verify' and not first):
+                        released.wait(0.2)
+                    if failure == 'read':
+                        raise OSError('Read failed.')
+                    return read_wire(cell)
+                finally:
+                    events.append(('read end', name, fmt))
+
+            def verify(cell, source, rendered, **kwargs):
+                name = cell['anchor']['qname']
+                if failure == 'verify':
+                    assert gates[name][1].wait(2), 'The next wire read did not start.'
+                    raise RuntimeError('Verification failed.')
+                actual = verify_render(cell, source, rendered, **kwargs)
+                serial = verify_render(cell, source, rendered, **{
+                    **kwargs, 'bound_unit': None, 'wire_blob': None, 'wire_sha256': None})
+                assert identities[-2] == identities[-1]
+                assert canonical_json_bytes(actual, where='receipt') == canonical_json_bytes(
+                    serial, where='receipt')
+                return actual
+
+            def release_window(cache, keys):
+                release('drop render', keys[0][0])
+                return release_render(cache, keys)
+
+            patch.setattr(tc, 'bind_checkpoint_unit_identity', bind)
+            patch.setattr(bridge, '_read_verified_wire_blob', read)
+            patch.setattr(bridge, 'verify_anchor_render', verify)
+            patch.setattr(bridge, '_decode_wire', lambda blob, **_: torch.load(renders[blob]))
+            patch.setattr(ProductionWeightCache, 'release_resident_tensors', release_window)
+            patch.setattr(runner.context, 'unload', lambda layer: release('drop source', layer))
+            reader = SimpleNamespace(identity={}, verify_cached_unit=lambda blob, record, expected:
+                                     identities.append(canonical_json_bytes(expected, where='identity')))
+            options = dict(capture=capture, max_render_bytes=10000, file_load_workers=1,
+                           qualification_window=policy(), reader=reader)
+            if failure is None:
+                cache = bridge.prepare_cache(runner, data, **options)
+                assert set(cache.metadata['verified_cells']) == set(data.cells)
+                assert len(identities) == 2 * len(data.cells)
+            else:
+                error = OSError if failure == 'read' else RuntimeError
+                message = {'read': 'Read', 'identity': 'Identity', 'verify': 'Verification'}[failure]
+                with pytest.raises(error, match=message + r' failed\.'):
+                    bridge.prepare_cache(runner, data, **options)
+            for name, formats in data.formats_by_qname.items():
+                first = ('read start', name, formats[0])
+                if first not in events:
+                    assert failure is not None and name != next(iter(data.formats_by_qname))
+                    continue
+                if failure != 'identity':
+                    assert events.index(first) < events.index(('identity ready', name))
+                ends = [i for i, row in enumerate(events) if row[:2] == ('read end', name)]
+                assert len(ends) == (2 if failure in (None, 'verify') else 1)
+                for owner in [('drop render', name), ('drop capture', name), ('drop source', 0)]:
+                    if owner[0] != 'drop render' or failure in (None, 'verify') or owner in events:
+                        assert max(ends) < events.index(owner)
+
+
 def test_prepared_metadata_counts_a_synthesized_rung_apart(tmp_path, monkeypatch):
     """A shard written from its own wire is never counted as independently
     compared, and a receipt that disagrees with its cell refuses."""
