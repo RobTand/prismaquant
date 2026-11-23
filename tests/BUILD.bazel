@@ -12638,6 +12638,10 @@ pq_py_library(
     srcs = [
         "test_digest_profiles_1301_files.py",
     ],
+    data = [
+        "fixtures/digest_profiles_1301_files.json",
+        "test_digest_profiles_1301_files.py",
+    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
@@ -20600,6 +20604,11 @@ pq_py_library(
 pq_py_library(
     name = "test_generate_transition_rewrites_lib",
     srcs = [
+        "test_generate_transition_rewrites.py",
+    ],
+    data = [
+        "//:tools/generate_transition_rewrites.py",
+        "fixtures/digest_profiles_1301_files.json",
         "test_generate_transition_rewrites.py",
     ],
     deps = [

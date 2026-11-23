@@ -1,4 +1,12 @@
 {
+"hashlib:tools\/generate_transition_rewrites.py::_package_digest@40:13": {
+  "unicode": {"entries": [["a/\u00e9", [0, 255]], ["a.\u96ea", [1, 2]]], "outcome": {"returned": "'7d4fdfd51f7238f9052504a4824718185b92a4340e5b8af1c6dfb4aa1d20b6bb'"}, "frame_hex": "00000004612fc3a9000000000000000200ff00000005612ee99baa00000000000000020102"},
+  "short_payload": {"entries": [["a/\u00e9", [0, 255]], ["a.\u96ea", [1]]], "outcome": {"returned": "'752e5929a57e27a019ff1089860792e5a54d4e23f6b7c42ea98cefe698360bd2'"}, "frame_hex": "00000004612fc3a9000000000000000200ff00000005612ee99baa000000000000000101"},
+  "omitted_tail": {"entries": [["a/\u00e9", [0, 255]]], "outcome": {"returned": "'3457a5036530090060baaff18b39a085d3638fd3c3d91c819e3be771dafa3cf7'"}, "frame_hex": "00000004612fc3a9000000000000000200ff"},
+  "reversed_insertion": {"entries": [["a.\u96ea", [1, 2]], ["a/\u00e9", [0, 255]]], "outcome": {"returned": "'7d4fdfd51f7238f9052504a4824718185b92a4340e5b8af1c6dfb4aa1d20b6bb'"}, "frame_hex": "00000004612fc3a9000000000000000200ff00000005612ee99baa00000000000000020102"},
+  "surrogate_name": {"entries": [["\ud800", [0]]], "outcome": {"raised": "builtins.UnicodeEncodeError", "text": "'utf-8' codec can't encode character '\\ud800' in position 0: surrogates not allowed", "cause": null}},
+  "text_payload": {"entries": [["a", "text"]], "outcome": {"raised": "builtins.TypeError", "text": "Strings must be encoded before hashing", "cause": null}}
+},
 "test_bytes_digest_site[ascii]#0": {"returned": "'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'"},
 "test_bytes_digest_site[ascii]#1": {"returned": "'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'"},
 "test_bytes_digest_site[ascii]#2": {"returned": "'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'"},
@@ -491,7 +499,7 @@
 "test_file_digest_site[directory]#3": {"cause": null, "raised": "builtins.IsADirectoryError", "text": "[Errno 21] Is a directory: '<tmp>/directory'"},
 "test_file_digest_site[directory]#4": {"cause": null, "raised": "builtins.IsADirectoryError", "text": "[Errno 21] Is a directory: '<tmp>/directory'"},
 "test_file_digest_site[directory]#5": {"cause": null, "raised": "builtins.IsADirectoryError", "text": "[Errno 21] Is a directory: '<tmp>/directory'"},
-"test_file_digest_site[directory]#6": {"cause": ["builtins.IsADirectoryError", "[Errno 21] Is a directory: '<tmp>/directory'"], "raised": "prismaquant.joint_quanta_join.JoinRefused", "text": "w: unreadable file at <tmp>/directory: [Errno 21] Is a directory: '<tmp>/directory'"},
+"test_file_digest_site[directory]#6": {"cause": ["builtins.IsADirectoryError", "[Errno 21] Is a directory: '<tmp>/directory'"], "raised": "prismaquant\u002ejoint_quanta_join.JoinRefused", "text": "w: unreadable file at <tmp>/directory: [Errno 21] Is a directory: '<tmp>/directory'"},
 "test_file_digest_site[directory]#7": {"cause": null, "raised": "builtins.IsADirectoryError", "text": "[Errno 21] Is a directory: '<tmp>/directory'"},
 "test_file_digest_site[directory]#8": {"cause": null, "raised": "builtins.IsADirectoryError", "text": "[Errno 21] Is a directory: '<tmp>/directory'"},
 "test_file_digest_site[directory]#9": {"cause": null, "raised": "builtins.IsADirectoryError", "text": "[Errno 21] Is a directory: '<tmp>/directory'"},
@@ -543,7 +551,7 @@
 "test_file_digest_site[missing]#3": {"cause": null, "raised": "builtins.FileNotFoundError", "text": "[Errno 2] No such file or directory: '<tmp>/missing'"},
 "test_file_digest_site[missing]#4": {"cause": null, "raised": "builtins.FileNotFoundError", "text": "[Errno 2] No such file or directory: '<tmp>/missing'"},
 "test_file_digest_site[missing]#5": {"cause": null, "raised": "builtins.FileNotFoundError", "text": "[Errno 2] No such file or directory: '<tmp>/missing'"},
-"test_file_digest_site[missing]#6": {"cause": ["builtins.FileNotFoundError", "[Errno 2] No such file or directory: '<tmp>/missing'"], "raised": "prismaquant.joint_quanta_join.JoinRefused", "text": "w: unreadable file at <tmp>/missing: [Errno 2] No such file or directory: '<tmp>/missing'"},
+"test_file_digest_site[missing]#6": {"cause": ["builtins.FileNotFoundError", "[Errno 2] No such file or directory: '<tmp>/missing'"], "raised": "prismaquant\u002ejoint_quanta_join.JoinRefused", "text": "w: unreadable file at <tmp>/missing: [Errno 2] No such file or directory: '<tmp>/missing'"},
 "test_file_digest_site[missing]#7": {"cause": null, "raised": "builtins.FileNotFoundError", "text": "[Errno 2] No such file or directory: '<tmp>/missing'"},
 "test_file_digest_site[missing]#8": {"cause": null, "raised": "builtins.FileNotFoundError", "text": "[Errno 2] No such file or directory: '<tmp>/missing'"},
 "test_file_digest_site[missing]#9": {"cause": null, "raised": "builtins.FileNotFoundError", "text": "[Errno 2] No such file or directory: '<tmp>/missing'"},

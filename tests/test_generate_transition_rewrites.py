@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -97,6 +100,34 @@ def test_package_digest_matches_source_proof_path_order(tmp_path, monkeypatch, n
         assert _package_digest({name: text.encode() for name, text in ordered.items()}) == expected
     assert main(["--sealed-dir", str(sealed), "--executing-dir", str(executing),
                  "--new-file", module, "--expect-sealed-sha256", expected]) == 0
+
+
+def test_package_digest_matches_the_frozen_rows(monkeypatch):
+    path = Path(__file__).resolve().parents[1] / "tests/fixtures/digest_profiles_1301_files.json"
+    # JSON escapes distinguish metadata names from module references in the graph.
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    site = "hashlib:tools/generate_transition_rewrites.py::_package_digest@40:13"
+    assert rows.get(site), f"No frozen rows for {site}."
+
+    for case, row in rows[site].items():
+        files = {name: bytes(payload) if isinstance(payload, list) else payload
+                 for name, payload in row["entries"]}
+        expected = row["outcome"]
+        recording = Mock(wraps=hashlib.sha256())
+        with monkeypatch.context() as patch:
+            patch.setattr(hashlib, "sha256", lambda: recording)
+            if "raised" in expected:
+                with pytest.raises((UnicodeEncodeError, TypeError)) as refusal:
+                    _package_digest(files)
+                exc = refusal.value
+                kind = type(exc)
+                assert f"{kind.__module__}.{kind.__qualname__}" == expected["raised"], case
+                assert str(exc) == expected["text"], case
+                assert exc.__cause__ is expected["cause"], case
+            else:
+                assert {"returned": repr(_package_digest(files))} == expected, case
+                frame = b"".join(call.args[0] for call in recording.update.call_args_list)
+                assert frame.hex() == row["frame_hex"], case
 
 
 def test_each_hunk_is_unique_in_both_files():
