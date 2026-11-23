@@ -723,6 +723,16 @@
   default, gate, pin or artifact byte changes. No performance or
   serving qualification follows from this refactor.
 
+- Use `INSERTION_ASCII_INDENT1_LAX.text` for the produced-group lookup JSON report (#5357). Part of #2651.
+  At base `ef7ea25910a3feaf810d230c87a5f4ee0b47ed59`, `tests/test_profile_produced_group_lookup_json.py::test_lookup_report_uses_indent1_profile` failed at `assert calls == [digests.INSERTION_ASCII_INDENT1_LAX]`.
+  The call list was empty.
+  These cases passed on the change:
+  - `tests/test_profile_produced_group_lookup_json.py::test_lookup_report_uses_indent1_profile`
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[False]`
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[True]`
+
+  The scoped inventory found no near duplicates, same-name helpers, or primitive digest sites in the base, the change, or the fixture.
+
 - **Share the two GLM MTP capture file-byte recipes** (#2359, Refs #1301).
   Final-hidden manifests and MTP censuses use the existing
   `digests.indent2_json_file_bytes` owner: sorted keys, two-space indentation,
