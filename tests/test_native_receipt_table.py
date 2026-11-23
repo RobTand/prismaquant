@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from prismaquant import native_receipt_table as emitter
+from prismaquant.digests import DIRECT_ASCII_INDENT1_LAX, DIRECT_ASCII_INDENT1_STRICT, JsonProfile
 from prismaquant.joint_aura_rows import make_joint_aura_entry
 from prismaquant.measured_runtime_prices import (
     RuntimePriceError, identity_sha256, parse_measured_runtime_table, parse_runtime_context,
@@ -99,6 +100,57 @@ def _argv(state, **overrides):
               "--receipts": state.manifest, "--now": NOW.isoformat()}
     values.update(overrides)
     return [token for flag, value in values.items() for token in (flag, str(value))]
+
+
+def test_emission_uses_exact_indent1_profiles(emitted, monkeypatch):
+    report = emitted.root / "r\u00e9port.json"
+    (emitted.root / "report.json").rename(report)
+    argv = _argv(emitted, **{"--table-id": "r\u00e9sum\u00e9", "--full-engine-report": report})
+    paths = (emitted.root / "table.fixed-resources-receipt.json", emitted.out,
+             emitted.root / "table.emission.json")
+    profiles = (DIRECT_ASCII_INDENT1_LAX, DIRECT_ASCII_INDENT1_STRICT, DIRECT_ASCII_INDENT1_STRICT)
+    text = JsonProfile.text
+
+    def legacy(profile, value):
+        if profile is DIRECT_ASCII_INDENT1_LAX:
+            return json.dumps(value, indent=1, sort_keys=True)
+        if profile is DIRECT_ASCII_INDENT1_STRICT:
+            return json.dumps(value, indent=1, sort_keys=True, allow_nan=False)
+        return text(profile, value)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(JsonProfile, "text", legacy)
+        emitter.main(argv)
+        expected = [path.read_bytes() for path in paths]
+
+    nonfinite = [float("nan"), float("inf"), -float("inf")]
+    for encode in (legacy, text):
+        for profile in profiles[:2]:
+            with pytest.raises(TypeError):
+                encode(profile, {"one": 1, 2: "two"})
+        assert encode(DIRECT_ASCII_INDENT1_LAX, nonfinite) == "[\n NaN,\n Infinity,\n -Infinity\n]"
+        with pytest.raises(ValueError):
+            encode(DIRECT_ASCII_INDENT1_STRICT, nonfinite)
+
+    writes = []
+
+    def record(profile, value):
+        result = text(profile, value)
+        if profile is DIRECT_ASCII_INDENT1_LAX or profile is DIRECT_ASCII_INDENT1_STRICT:
+            writes.append((profile.name, (result + "\n").encode("ascii")))
+        return result
+
+    monkeypatch.setattr(JsonProfile, "text", record)
+    for path in paths:
+        path.unlink()
+    emitter.main(argv)
+    actual = [path.read_bytes() for path in paths]
+    assert actual == expected
+    for raw in actual:
+        assert isinstance(json.loads(raw), dict)
+        assert raw.startswith(b"{\n") and raw.endswith(b"\n}\n")
+        assert rb"\u00e9" in raw
+    assert writes == [(profile.name, raw) for profile, raw in zip(profiles, actual)]
 
 
 def test_emitted_table_is_admitted_by_admit_native_rows_and_refused_only_at_fixed_resources(emitted, capsys):

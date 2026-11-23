@@ -127,7 +127,6 @@
   "sorted-json:prismaquant/joint_cost_stage_a.py::_produced_output_block",
   "sorted-json:prismaquant/model_walk.py::main",
   "sorted-json:prismaquant/model_walk.py::save_walk",
-  "sorted-json:prismaquant/native_receipt_table.py::emit_native_receipt_table",
   "sorted-json:prismaquant/pipeline.py::_record_stage_settings",
   "sorted-json:prismaquant/pipeline.py::_record_unverified_reuse",
   "sorted-json:prismaquant/pipeline.py::main",

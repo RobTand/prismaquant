@@ -78,7 +78,7 @@ from .measured_runtime_prices import (
 from . import record_fields
 from .native_panel_kind import DENSE_PANEL_SCHEMA, MOE_PANEL_SCHEMA, panel_kind
 from .runtime_provenance import SCHEMA as RELATION_SCHEMA, recompute_fixed_resources
-from .digests import DIRECT_ASCII_SPACED_LAX, file_sha256hex
+from .digests import DIRECT_ASCII_INDENT1_LAX, DIRECT_ASCII_INDENT1_STRICT, DIRECT_ASCII_SPACED_LAX, file_sha256hex
 from .native_row_admission import load_measured_runtime_table
 
 EMISSION_SCHEMA = "prismaquant.native_receipt_table_emission.v1"
@@ -680,8 +680,7 @@ def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation
     parse_runtime_context(context)
     fixed, fixed_evidence, report_verdict = derive_fixed_resources(_resolve(full_engine_report, manifest_dir), table_dir)
     receipt_path = out.with_name(out.stem + ".fixed-resources-receipt.json")
-    receipt_path.write_text(json.dumps({"full_model_resources": report_verdict["reference"]},
-                                       indent=1, sort_keys=True) + "\n")
+    receipt_path.write_text(DIRECT_ASCII_INDENT1_LAX.text({"full_model_resources": report_verdict["reference"]}) + "\n")
     if not isinstance(fixed_assignment, Mapping):
         raise RuntimePriceError("fixed_assignment must be a unit -> format mapping")
     table = {
@@ -698,7 +697,7 @@ def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation
         "runtime_provenance": relation_ref,
         "native_receipt_bindings": [item["binding"] for item in sorted(bound, key=lambda i: (i["row"]["unit"], i["row"]["format"]))],
     }
-    out.write_text(json.dumps(table, indent=1, sort_keys=True, allow_nan=False) + "\n")
+    out.write_text(DIRECT_ASCII_INDENT1_STRICT.text(table) + "\n")
     admission = admission_report(out, expected_context=parse_runtime_context(context),
                                  expected_cost_sha256=cost_sha256, now=current)
     emission = {
@@ -719,7 +718,7 @@ def emit_native_receipt_table(*, out: Path, table_id: str, costs: Path, relation
                  for item, unshared in zip(bound, unshared_native_libraries([item["panel"] for item in bound]))],
         "admission": admission,
     }
-    out.with_name(out.stem + ".emission.json").write_text(json.dumps(emission, indent=1, sort_keys=True, allow_nan=False) + "\n")
+    out.with_name(out.stem + ".emission.json").write_text(DIRECT_ASCII_INDENT1_STRICT.text(emission) + "\n")
     return emission
 
 

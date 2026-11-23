@@ -30,7 +30,7 @@ TOKEN_SCOPE = "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256"
 # Canonical JSON identity after the token route, native migration, and sealed
 # buffer digest consolidation. Retained byte-contract goldens stay fixed.
 # #3457 drops three same-name helper entries of its deleted modules.
-TOKEN_ONLY_BASELINE_SHA256 = "5d2776bb2517fdf410fbda8ecfae73a9cbb178f0b59b67092129fdca89d25598"
+TOKEN_ONLY_BASELINE_SHA256 = "16e92f386c21b7f8b5c9eeb3cce55e6d76246f0ce745847267863134209a38ad"
 # Supplied main 6d8288ad had 277 primitive scopes. The migration removed
 # retired PB tooling in 8c336f2e3, 728a6e8fd, a4cf01ccc, adaf3d9f6,
 # 989eaa5fc and cb07374d5. 3ffa08ae7 consolidated SealedBuffer.seal;
@@ -54,6 +54,7 @@ MIGRATION_REMOVED_SCOPES = {
     "hashlib:tools/pwc_window_load_bench.py::run_setup",
     "hashlib:tools/pwc_window_load_bench.py::run_window",
     "hashlib:tools/stagea_produced_live_cycle.py::_digest",
+    "sorted-json:prismaquant/native_receipt_table.py::emit_native_receipt_table",
     "sorted-json:prismaquant/prismabuild_progress.py::commit",
     "sorted-json:prismaquant/prismabuild_progress.py::declare_export_wait",
     "sorted-json:prismaquant/prismabuild_progress.py::declare_staged_wait",
@@ -167,7 +168,7 @@ def test_token_route_removes_only_enumerated_main_baseline_scopes():
     removals = {TOKEN_SCOPE, *MIGRATION_REMOVED_SCOPES}
     assert removals <= set(main_sites)
     assert set(baseline['primitive_digest_sites']) == set(main_sites) - removals
-    assert len(baseline['primitive_digest_sites']) == 215
+    assert len(baseline['primitive_digest_sites']) == 214
     canonical = json.dumps(baseline, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(canonical).hexdigest() == TOKEN_ONLY_BASELINE_SHA256, (
         "regenerate the reviewed native baseline after classifying source removals; "
