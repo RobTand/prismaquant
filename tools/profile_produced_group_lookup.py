@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import cProfile
-import json
 import pstats
 import io
 import sys
@@ -19,6 +18,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from prismaquant import digests
 
 
 class _Ref:
@@ -114,7 +114,7 @@ def main() -> int:
     # The window this lookup sits in front of reads 64 x 16 MiB from a
     # staged tier. That is the number the lookup has to be compared with.
     out["window_payload_bytes"] = args.per_group * (16 << 20)
-    print(json.dumps(out, indent=1))
+    print(digests.INSERTION_ASCII_INDENT1_LAX.text(out))
     return 0
 
 
