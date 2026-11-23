@@ -370,13 +370,20 @@ def _campaign_round_one_schedule(groups, group_rates, *, placement: AnchorPlacem
     schedule = {name: {} for name in sorted(names)}
     samples = placement.reference_law_samples
     tiers = {}
+    configured = getattr(placement, "reference_law_rungs", None)
     if samples is not None:
+        if configured is not None:
+            ref, lo, hi = configured
+            if min(configured) <= 0 or len(set(configured)) != 3 or lo >= hi:
+                raise ValueError("reference-law rungs must be positive and distinct, with lower target below upper target")
         if (requests is not None or audit_units or placement.rate_band is not None
                 or placement.exhaustive_rate_grid or placement.anchors != 3):
             raise ValueError("reference-law anchors require three anchors and no acquisition, audit or rate band")
         for sample in samples.values():
             if not sample.is_census or sample.reference_q256 is None or not sample.transfer_law_experts:
                 raise StackSampleError(f"{sample.packed_qname}: supply a census, a reference rung and a law draw")
+            if configured is not None and sample.reference_q256 != ref:
+                raise StackSampleError(f"{sample.packed_qname}: reference_q256 disagrees with --reference-q256")
             law = set(sample.transfer_law_experts)
             tiers.update((name, (sample.reference_q256, expert in law))
                          for expert, members in sample.members.items() for name in members)
@@ -394,12 +401,14 @@ def _campaign_round_one_schedule(groups, group_rates, *, placement: AnchorPlacem
         if tiers and key.startswith("s:"):
             references = {tiers[name][0] for name in members}
             for family, allowed in group_rates[key].items():
-                if len(allowed) < 3 or not references.issubset(allowed):
+                required = references if configured is None else set(configured)
+                if len(allowed) < 3 or not required.issubset(allowed):
                     continue
                 for name in members:
                     reference, in_draw = tiers[name]
-                    lo = allowed[1] if reference == allowed[0] else allowed[0]
-                    hi = allowed[-2] if reference == allowed[-1] else allowed[-1]
+                    if configured is None:
+                        lo = allowed[1] if reference == allowed[0] else allowed[0]
+                        hi = allowed[-2] if reference == allowed[-1] else allowed[-1]
                     schedule[name][family] = sorted([lo, reference, hi]) if in_draw else [reference]
             if not schedule[members[0]]:
                 raise StackSampleError(f"{key}: no legal family has the reference and two target rungs")
@@ -653,6 +662,8 @@ def campaign_checkpoint_identity(*, weights, acts, hessians, menus, settings: Ma
             raise ValueError("reference-law anchors require an exact checkpoint schedule")
     else:
         settings.pop("reference_law_schedule", None)
+        for name in ("reference_q256", "lower_target_q256", "upper_target_q256"):
+            settings.pop(name, None)
     restriction = parse_family_restriction(settings.get("family_restriction"))
     if settings.get("source_scope") is None:
         # Unset, the body's identity is byte-identical to before the flag.
@@ -5828,6 +5839,8 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                 break
             pending: list[tuple[str, str, int]] = []
             for key, members in sorted(anchor_groups.items()):
+                if round_index > 1 and request.reference_law_anchors and key.startswith("s:"):
+                    continue
                 for family, allowed in group_rates[key].items():
                     # The grid is what EVERY member actually measured: one
                     # member's failed encode must not let the group think it has

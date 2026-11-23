@@ -19,7 +19,7 @@ from .cost_stage_checkpoint import merge_identity_migrations
 from .schemas import strict_json_loads
 from .tessera_campaign_selection import (
     UNITS_SCHEMA_V3, EXPERT_PARTITION_SCHEMA,
-    selection_priced_units, validate_unit_selection,
+    selection_priced_units, tiered_stack_selection, validate_unit_selection,
 )
 
 STAGE = "Tessera campaign"
@@ -1322,7 +1322,7 @@ STACK_SAMPLE_COUNTS_SUFFIX = "_counts"
 def _stack_draw_sizes(record: Mapping, sample: StackExpertSample) -> dict:
     """The census counts a stack's draw was made proportional to."""
     sizes = record.get("sizes")
-    if sizes is None or str(sizes.get("source")) != "counts":
+    if not isinstance(sizes, Mapping) or sizes.get("source") != "counts":
         raise StackSampleError(
             f"{sample.packed_qname}: the draw declares no census counts; a "
             "draw proportional to the probe's h_trace is retired")
@@ -1351,35 +1351,59 @@ def selection_stack_samples(selection: Mapping, profile) -> dict[str, StackExper
             continue
         if not isinstance(records, Mapping) or not records:
             raise StackSampleError(f"{entry['key']}: stack_samples must name packed parameters")
+        tiered = tiered_stack_selection(entry)
         frame_members, sampled_members, frame_pi, audit_members = set(), set(), {}, set()
         for name, record in sorted(records.items()):
             if name in result:
                 raise StackSampleError(f"{name}: duplicate packed sampling record")
+            if not isinstance(record, Mapping):
+                raise StackSampleError(f"{name}: invalid packed sampling record")
             reference = record.get("reference_q256")
-            if "reference_q256" in record and (type(reference) is not int or reference <= 0):
+            if (tiered or "reference_q256" in record) and (type(reference) is not int or reference <= 0):
                 raise StackSampleError(f"{name}: reference_q256 must be a positive integer")
-            sample = stack_sample_from_probe(
-                name, record["probe_row"], profile,
-                sampled_experts=record["sampled_experts"],
-                inclusion_prob=record["inclusion_prob"], seed=record["seed"],
-                design=record["design"],
-                transfer_law_experts=record.get("transfer_law_experts", ()),
-                reference_q256=reference)
+            try:
+                sample = stack_sample_from_probe(
+                    name, record["probe_row"], profile,
+                    sampled_experts=record["sampled_experts"],
+                    inclusion_prob=record["inclusion_prob"], seed=record["seed"],
+                    design=record["design"],
+                    transfer_law_experts=record.get("transfer_law_experts", ()),
+                    reference_q256=reference)
+            except StackSampleError:
+                raise
+            except (AttributeError, KeyError, TypeError, ValueError, OverflowError) as exc:
+                raise StackSampleError(f"{name}: invalid packed sampling record: {exc}") from exc
             validate_stack_sample(sample)
-            replay = draw_stack_sample(
-                _stack_draw_sizes(record, sample),
-                len(sample.sampled_experts), seed=sample.seed, stack=name)
-            if (record.get("draw") != replay
-                    or sample.design != replay["method"] + STACK_SAMPLE_COUNTS_SUFFIX
-                    or list(sample.sampled_experts) != sorted(int(e) for e in replay["units"])
-                    or dict(sample.inclusion_prob) != {
-                        int(e): p for e, p in replay["inclusion_probability"].items()}):
-                raise StackSampleError(f"{name}: packed draw receipt does not replay from probe and seed")
-            if str(record["sizes"].get("sha256")) != replay["size_sha256"]:
-                # The digest binds the DECLARED size vector to the one the
-                # draw was actually made proportional to.
-                raise StackSampleError(
-                    f"{name}: declared size digest does not match the draw's")
+            receipt, experts, seed = record, sample.sampled_experts, sample.seed
+            if tiered:
+                if not sample.is_census or sample.design != "census" or not sample.transfer_law_experts:
+                    raise StackSampleError(f"{name}: a tier record requires a full census and a smaller law draw")
+                if any(field in record for field in ("draw", "sizes", "audit_experts")):
+                    raise StackSampleError(f"{name}: put draw, sizes and audit data in law_draw")
+                receipt = record.get("law_draw")
+                draw = receipt.get("draw") if isinstance(receipt, Mapping) else None
+                if not isinstance(draw, Mapping) or type(draw.get("seed")) is not int:
+                    raise StackSampleError(f"{name}: law_draw requires a draw receipt with an integer seed")
+                experts, seed = sample.transfer_law_experts, draw["seed"]
+                audit = receipt.get("audit_experts")
+                if (not isinstance(audit, list) or any(type(e) is not int for e in audit)
+                        or len(audit) != len(set(audit)) or not set(audit) <= set(experts)):
+                    raise StackSampleError(f"{name}: law_draw audit experts must be distinct draw experts")
+            try:
+                replay = draw_stack_sample(_stack_draw_sizes(receipt, sample),
+                    len(experts), seed=seed, stack=name)
+            except StackSampleError:
+                raise
+            except (KeyError, TypeError, ValueError, OverflowError, RuntimeError) as exc:
+                raise StackSampleError(f"{name}: cannot replay draw from census counts: {exc}") from exc
+            if (receipt.get("draw") != replay
+                    or list(experts) != sorted(int(e) for e in replay["units"])
+                    or (not tiered and (sample.design != replay["method"] + STACK_SAMPLE_COUNTS_SUFFIX
+                        or dict(sample.inclusion_prob) != {
+                            int(e): p for e, p in replay["inclusion_probability"].items()}))):
+                raise StackSampleError(f"{name}: packed draw receipt does not replay from counts and seed")
+            if str(receipt["sizes"].get("sha256")) != replay["size_sha256"]:
+                raise StackSampleError(f"{name}: declared size digest does not match the draw's")
             if set(sample.inclusion_prob) != set(range(sample.num_experts)):
                 raise StackSampleError(f"{name}: selection needs full-frame inclusion probabilities")
             if entry["key"] != "s:" + sample.packed_experts_module:
@@ -1397,11 +1421,11 @@ def selection_stack_samples(selection: Mapping, profile) -> dict[str, StackExper
                     frame_pi[member] = sample.inclusion_prob[e]
                     if e in record.get("audit_experts", []):
                         audit_members.add(member)
-            sampled_members.update(m for members in sample.members.values() for m in members)
+            sampled_members.update(m for e in experts for m in sample.members[e])
             result[name] = sample
         if frame_members != set(entry["members"]):
             raise StackSampleError(f"{entry['key']}: packed probe projections disagree with census members")
-        if sampled_members != set(entry.get("sampled", entry["members"])):
+        if (not tiered or "sampled" in entry) and sampled_members != set(entry.get("sampled", entry["members"])):
             raise StackSampleError(f"{entry['key']}: packed draw disagrees with sampled members")
         if audit_members != set(entry.get("audit", [])):
             raise StackSampleError(f"{entry['key']}: packed audit disagrees with audit members")

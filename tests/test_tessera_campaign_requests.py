@@ -58,6 +58,37 @@ def test_census_request_requires_its_destination():
         census_request(_parsed([]))
 
 
+def test_reference_law_request_uses_configured_rungs():
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from prismaquant.tessera_campaign_requests import loaded_campaign_request
+
+    family = 'TESSERA_E4M3_K1'
+    args = _parsed(['--reference-law-anchors', '--units', 'units.json'])
+    request = loaded_campaign_request(args, mode='research', selected_source=False,
+        streaming_head=False, wire_dir=None, checkpoint=None, identity_threads=1)
+    sample = SimpleNamespace(is_census=True, reference_q256=960,
+        transfer_law_experts=(0,), members={0: ('a',), 1: ('b',)})
+    placement = replace(request.recipe.placement, reference_law_samples={'stack': sample})
+    groups = {'s:stack': ['a', 'b']}
+    legal = {'s:stack': {family: [768, 832, 896, 960, 1024, 1088, 1152]}}
+    assert request.reference_law_anchors
+    actual = campaign._campaign_round_one_schedule(groups, legal,
+        placement=placement, audit_units=set(), snap=None)
+    assert actual == {'a': {family: [832, 960, 1088]}, 'b': {family: [960]}}
+
+    args = _parsed(['--reference-law-anchors', '--units', 'units.json',
+        '--reference-q256', '1024', '--lower-target-q256', '896', '--upper-target-q256', '960'])
+    request = loaded_campaign_request(args, mode='research', selected_source=False,
+        streaming_head=False, wire_dir=None, checkpoint=None, identity_threads=1)
+    sample.reference_q256 = 1024
+    placement = replace(request.recipe.placement, reference_law_samples={'stack': sample})
+    assert campaign._campaign_round_one_schedule(groups, legal,
+        placement=placement, audit_units=set(), snap=None) == {
+            'a': {family: [896, 960, 1024]}, 'b': {family: [1024]}}
+
+
 def _publish(tmp_path, expected, maximum=1.5):
     request = CensusRequest('checkpoint', 2, 4, 0, 1, None, 'cache',
                             str(tmp_path / 'results/census.json'), 1, None)
