@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
+from prismaquant import digests
 from prismaquant import stage_a_chain_resume as resume_mod, stage_a_retirement as retire
 from prismaquant.joint_adjoint_band import BandRefused, build_band_receipt
 from prismaquant.joint_adjoint_checkpoints import adjoint_space, checkpoint_directory, write_adjoint_receipt
@@ -77,6 +78,47 @@ def test_a_superseded_scientific_run_retires_exact_selected_files_and_refuses_re
             recomputed={}, running_implementation_sha256='1' * 64)
     with pytest.raises(BandRefused, match='retires this Stage A run'):
         build_band_receipt(output_root=case.root, boundary=2, stride_value=2, bind_identity={}, **DIGESTS)
+
+
+def test_retirement_record_uses_strict_indent1_text(tmp_path, monkeypatch):
+    case = scientific_case(tmp_path / 'é', monkeypatch)
+    record = case.plan.record
+    path = retire.retirement_record_path(case.space)
+    expected = (json.dumps(record, sort_keys=True, indent=1, ensure_ascii=True,
+                           separators=(',', ': '), allow_nan=False) + '\n').encode('utf-8')
+    with monkeypatch.context() as patch:
+        patch.setattr(retire, 'plan_retirement', lambda *args, **kwargs: case.plan)
+        for invalid, error, message in [
+            *((float(value), ValueError, 'Out of range float') for value in ('nan', 'inf', '-inf')),
+            ({'a': 0, 1: 0}, TypeError, 'not supported between instances'),
+        ]:
+            patch.setitem(record, 'invalid', invalid)
+            with pytest.raises(error, match=message):
+                retire.apply_retirement(case.plan)
+            assert not path.exists()
+        del record['invalid']
+        before = snapshot(case.root)
+        path.write_bytes(b'{}\n')
+        with pytest.raises(retire.RetirementRefused, match='another retirement already sealed this space'):
+            retire.apply_retirement(case.plan)
+        assert path.read_bytes() == b'{}\n'
+        path.unlink()
+        assert snapshot(case.root) == before
+
+    calls = []
+    text = digests.JsonProfile.text
+
+    def track_text(profile, value):
+        if value is record:
+            calls.append(profile)
+        return text(profile, value)
+
+    monkeypatch.setattr(digests.JsonProfile, 'text', track_text)
+    retire.apply_retirement(case.plan)
+    sealed = path.read_bytes()
+    assert sealed == expected
+    assert b'\\u00e9' in sealed
+    assert calls == [digests.DIRECT_ASCII_INDENT1_STRICT]
 
 
 @pytest.mark.parametrize('kind', ['seed-spec', 'band-by-digest', 'stage-b-slice-gz'])

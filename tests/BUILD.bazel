@@ -24162,6 +24162,7 @@ pq_py_library(
         "//:prismaquant/io_engine.py",
         "//:prismaquant/joint_forward_resume.py",
         "//:prismaquant/select_validated_frontier.py",
+        "//:prismaquant/stage_a_retirement.py",
         "//:prismaquant/tensor_digests.py",
         "//:prismaquant/tessera_census_cache.py",
         "//:prismaquant/tessera_hessian.py",
@@ -34158,6 +34159,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/digests",
         "//:prismaquant/stage_a_produced_output",
         ":produced_native_fixtures",
         ":test_stage_a_chain_resume_lib",
