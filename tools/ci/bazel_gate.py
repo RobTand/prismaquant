@@ -46,6 +46,13 @@ class ShardEvidenceError(GateError):
         self.phase, self.category = phase, category
         self.inventory_progress = None
         self.dns_detail = None
+        self.abort_detail = None  # (Bazel exit code, its error classes) of a run that left tests without a result
+
+
+# The only Bazel log text a refusal prints: gRPC status names and fixed abort phrases, never a free line.
+ABORT_CLASS = re.compile(r'\b(UNAVAILABLE|DEADLINE_EXCEEDED|RESOURCE_EXHAUSTED|INTERNAL|UNKNOWN|ABORTED|CANCELLED|'
+                         r'NOT_FOUND|UNAUTHENTICATED|PERMISSION_DENIED|FAILED_PRECONDITION|No registered executors|'
+                         r'Lost connection|interrupted|OutOfMemoryError|Server terminated abruptly)\b')
 
 
 def refusal_category(error):
@@ -378,9 +385,15 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
     with InventoryFetcher() as own_fetch:
         fetch = fetch or own_fetch
         inventory = inventory_evidence(text, fetch)
-        with evidence_phase('result-validation'):
-            result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
-                                         require_execution=manifest['require_execution'] and bool(tests))
+        try:
+            with evidence_phase('result-validation'):
+                result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
+                                             require_execution=manifest['require_execution'] and bool(tests))
+        except ShardEvidenceError as refused:
+            errors = [line for line in (private / 'bazel.log').read_text(errors='replace').splitlines()
+                      if line.startswith(('ERROR:', 'FATAL:'))]
+            refused.abort_detail = (run['returncode'], sorted({found for line in errors for found in ABORT_CLASS.findall(line)}))
+            raise
         excerpts = failure_excerpts(text, result['failed'], fetch)
     if not tests and result['verdict'] == 'skipped':
         result['verdict'] = 'pass'
@@ -588,6 +601,9 @@ def main(argv=None):
         if isinstance(error, ShardEvidenceError) and error.dns_detail is not None:
             subtype, attempts = error.dns_detail
             detail = f'; eai={subtype}; attempts={attempts}'
+        if isinstance(error, ShardEvidenceError) and error.abort_detail is not None:
+            code, classes = error.abort_detail
+            detail = f'; bazel_exit={code}; error_class={"+".join(classes) or "none"}'
         print('shard refused at ' + phase + '; category=' + category + detail + '; upload refused',
               file=sys.stderr)
         if isinstance(error, ShardEvidenceError) and error.inventory_progress is not None:
