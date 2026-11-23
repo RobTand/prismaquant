@@ -22,6 +22,11 @@ thread stops the run when the NFS READ round trip rises past
 ``--stop-read-rtt-ms``. The census-wide gates still run over the whole
 campaign, so a one-unit run gives the constant cost to subtract.
 
+``--mode render-sample`` hashes the renders in a bounded sample manifest.
+It requires a deadline and separate worker counts for the walk and the hash.
+It does not load a prepared head or write a handoff.
+Use the required ``--storage-mount`` to select the mount for the NFS guard and report.
+
 The NFS counts come from ``/proc/self/mountstats``, which is per mount, not
 per process: concurrent NFS traffic from other processes on the same box
 lands in the same counters. The report records the box load beside them.
@@ -457,23 +462,89 @@ def slice_intake(config, *, record, prepared, plan_sha256, scratch):
             "max_render_file_bytes": head.max_render_file_bytes}
 
 
+def render_sample_profile(args, scope) -> int:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+    from prismaquant.io_spans import PeriodicSampler, counter_delta, read_proc_io, read_proc_status
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan
+
+    mount = str(args.storage_mount)
+    context = {"mode": args.mode, "scope": list(scope), "storage_mount": mount,
+               "deadline_s": args.deadline_s, "head_walk_workers": args.head_walk_workers,
+               "file_hash_workers": args.file_hash_workers}
+    wall_before, cpu_before = time.monotonic(), time.process_time()
+
+    def report_stop(reason, **details):
+        record = {**context, "reason": reason, **details}
+        # Write the stop record without the stdout buffer lock.
+        os.write(sys.stdout.fileno(), f"STAGE_B_HEAD_PROFILE_STOPPED {json.dumps(record)}\n".encode())
+
+    def stop(reason, **details):
+        report_stop(reason, **details)
+        os._exit(75)
+
+    previous = signal.getsignal(signal.SIGTERM)
+    install_stop_signal(report_stop)
+    deadline = PeriodicSampler(lambda: stop("deadline"), interval_s=args.deadline_s,
+                               name="render-sample-deadline", tick_first=False).start()
+    guard = None
+    try:
+        io_before, nfs_before, rtt_before = read_proc_io(), mount_ops(mount), read_rtt(mount)
+        guard, trace = start_read_guard(
+            args.stop_read_rtt_ms, interval_s=args.guard_interval_s,
+            sample=lambda: read_rtt(mount),
+            on_stop=lambda mean: stop("read-guard", limit_ms=args.stop_read_rtt_ms,
+                                      mean_ms=round(mean, 3)))
+        config = load_joint_anchor_plan(args.plan, args.plan_sha256,
+                                        projection_runtime=False, defer_pool_reads=True)
+        result = render_sample_intake(
+            config, manifest=json.loads(args.sample_manifest.read_bytes()), scope=scope,
+            workers=args.head_walk_workers, hash_workers=args.file_hash_workers,
+            trials=args.trials, max_trials=args.max_trials, max_files=args.max_files,
+            max_bytes=args.max_bytes)
+        wall, cpu = time.monotonic() - wall_before, time.process_time() - cpu_before
+        nfs_after, rtt_after = mount_ops(mount), read_rtt(mount)
+        peak = read_proc_status().get("VmHWM")
+        available = bool(nfs_before and nfs_after)
+        rtt = (interval_read_rtt_ms(rtt_before, rtt_after, min_ops=1)
+               if "READ" in nfs_before and "READ" in nfs_after else None)
+        result["file_hash_workers"] = result.pop("hash_workers")
+        report = {"schema": "prismaquant.stage_b_head_profile.v1", **context, **result,
+                  "wall_s": round(wall, 3), "cpu_s": round(cpu, 3),
+                  "peak_rss_kib": None if peak is None else peak // 1024,
+                  "proc_io": counter_delta(read_proc_io(), io_before),
+                  "nfs_status": "available" if available else "unavailable",
+                  "nfs_ops": delta(nfs_after, nfs_before) if available else None,
+                  "read_rtt_ms_mean": None if rtt is None else round(rtt, 3),
+                  "guard": {"limit_ms": args.stop_read_rtt_ms,
+                            "interval_s": args.guard_interval_s, "trace": trace}}
+        if time.monotonic() - wall_before >= args.deadline_s:
+            stop("deadline")
+    finally:
+        deadline.request_stop()
+        if guard is not None:
+            guard.request_stop()
+        signal.signal(signal.SIGTERM, previous)
+    print("STAGE_B_HEAD_PROFILE " + DIRECT_ASCII_SPACED_LAX.text(report), flush=True)
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("walk", "slice", "scoped-walk"), required=True)
-    parser.add_argument("--quantum", type=Path, required=True)
-    parser.add_argument("--quantum-sha256", required=True)
+    parser.add_argument("--mode", choices=("walk", "slice", "scoped-walk", "render-sample"),
+                        required=True)
+    parser.add_argument("--quantum", type=Path)
+    parser.add_argument("--quantum-sha256")
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--plan-sha256", required=True)
-    parser.add_argument("--scratch", type=Path, required=True,
+    parser.add_argument("--scratch", type=Path,
                         help="host-local directory for everything the quantum "
                              "would have written under its output space")
     parser.add_argument("--allowed-tiers", default=None,
                         help="activate the staged-tier policy (slice mode)")
     parser.add_argument("--unit-scope", default=None, metavar="LO:HI",
-                        help="scoped-walk: half-open slice of the sorted census "
-                             f"roster, at most {SCOPED_WALK_MAX_UNITS} units")
+                        help=f"Select at most {SCOPED_WALK_MAX_UNITS} units from the sorted roster.")
     parser.add_argument("--head-walk-workers", type=int, default=None,
-                        help="scoped-walk: explicit I/O worker count (1-16)")
+                        help="Set the metadata walk worker count (1-16).")
     parser.add_argument("--sweep-start", type=int, default=None,
                         help="scoped-walk sweep: first roster index (replaces --unit-scope)")
     parser.add_argument("--slice-units", type=int, default=None,
@@ -481,15 +552,50 @@ def main(argv=None) -> int:
     parser.add_argument("--sweep-workers", default=None,
                         help="scoped-walk sweep: worker counts in run order, e.g. 4,1,8,2")
     parser.add_argument("--stop-read-rtt-ms", type=float, default=40.0,
-                        help="scoped-walk: stop when the NFS READ round trip "
-                             "exceeds this mean over a guard interval")
+                        help="Stop when the mean NFS READ round trip exceeds this limit.")
     parser.add_argument("--guard-interval-s", type=float, default=5.0)
+    sample = parser.add_argument_group("render-sample options")
+    sample.add_argument("--sample-manifest", type=Path)
+    sample.add_argument("--deadline-s", type=float)
+    sample.add_argument("--storage-mount", type=Path, help="Select the mount point for NFS telemetry.")
+    sample_limits = ("file-hash-workers", "trials", "max-trials", "max-files", "max-bytes")
+    for option in sample_limits:
+        sample.add_argument(f"--{option}", type=int)
     args = parser.parse_args(argv)
     if str(args.scratch).startswith("/mnt/shared"):
         parser.error("--scratch must be host-local, never the pool")
     scope, sweep = None, None
     sweep_args = (args.sweep_start, args.slice_units, args.sweep_workers)
-    if args.mode == "scoped-walk":
+    legacy = {"--quantum": args.quantum, "--quantum-sha256": args.quantum_sha256,
+              "--scratch": args.scratch}
+    limits = [getattr(args, option.replace("-", "_")) for option in sample_limits]
+    render_sample = args.mode == "render-sample"
+    if render_sample:
+        from threading import TIMEOUT_MAX
+
+        if any(value is not None for value in (*legacy.values(), args.allowed_tiers, *sweep_args)):
+            parser.error("render-sample does not accept quantum, scratch, tier or sweep options")
+        if args.deadline_s is None or not 0 < args.deadline_s <= TIMEOUT_MAX:
+            parser.error("--deadline-s must be positive, finite and within the timer range")
+        if args.guard_interval_s > TIMEOUT_MAX:
+            parser.error("--guard-interval-s exceeds the timer range")
+        if args.sample_manifest is None:
+            parser.error("render-sample requires --sample-manifest")
+        if args.storage_mount is None:
+            parser.error("render-sample requires --storage-mount")
+        for option, value in zip(sample_limits, limits):
+            if value is None or value <= 0:
+                parser.error(f"--{option} must be a positive integer")
+        if args.unit_scope is None:
+            parser.error("render-sample requires --unit-scope LO:HI")
+    else:
+        if any(value is not None for value in (
+                args.sample_manifest, args.deadline_s, args.storage_mount, *limits)):
+            parser.error("the sample options require --mode render-sample")
+        missing = [option for option, value in legacy.items() if value is None]
+        if missing:
+            parser.error("the following arguments are required: " + ", ".join(missing))
+    if args.mode == "scoped-walk" or render_sample:
         from prismaquant.tessera_joint_aura import (
             HEAD_WALK_MAX_WORKERS, parse_unit_scope)
         single = args.unit_scope is not None or args.head_walk_workers is not None
@@ -517,7 +623,7 @@ def main(argv=None) -> int:
                      "order": order}
         else:
             if args.unit_scope is None or args.unit_scope.endswith(":"):
-                parser.error("scoped-walk needs --unit-scope LO:HI with an explicit end")
+                parser.error(f"{args.mode} needs --unit-scope LO:HI with an explicit end")
             try:
                 scope = parse_unit_scope(args.unit_scope)
             except (ValueError, TypeError) as exc:
@@ -525,10 +631,12 @@ def main(argv=None) -> int:
             if scope is None or scope[1] - scope[0] > SCOPED_WALK_MAX_UNITS:
                 parser.error(f"--unit-scope must hold at most {SCOPED_WALK_MAX_UNITS} units")
             if args.head_walk_workers is None or not 1 <= args.head_walk_workers <= HEAD_WALK_MAX_WORKERS:
-                parser.error(f"scoped-walk needs --head-walk-workers in 1:{HEAD_WALK_MAX_WORKERS}")
+                parser.error(f"{args.mode} needs --head-walk-workers in 1:{HEAD_WALK_MAX_WORKERS}")
     elif (args.unit_scope is not None or args.head_walk_workers is not None
           or any(value is not None for value in sweep_args)):
         parser.error("the scope, worker and sweep options belong to --mode scoped-walk")
+    if render_sample:
+        return render_sample_profile(args, scope)
     args.scratch.mkdir(parents=True, exist_ok=True)
 
     from prismaquant.io_spans import read_proc_io, read_proc_status
