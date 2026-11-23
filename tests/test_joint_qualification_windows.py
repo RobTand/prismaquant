@@ -355,6 +355,219 @@ def test_prepare_overlaps_current_unit_identity_and_drains_before_release(
                         assert max(ends) < events.index(owner)
 
 
+def test_prepare_runs_bounded_host_identity_work_on_the_io_engine(
+        tmp_path, monkeypatch, single_io_worker):
+    from collections import Counter
+    from threading import Event, current_thread
+    from tessera import cached_unit
+    from prismaquant import io_engine, production_weight_cache as pwc
+    from prismaquant import tessera_campaign as tc, tessera_hessian as th
+    from prismaquant.digests import canonical_json_bytes
+    from prismaquant.format_registry import get_format
+
+    bind = tc.bind_checkpoint_unit_identity
+    activation_source = th.activation_source
+    verify = bridge.verify_anchor_render
+    read_wire = bridge._read_verified_wire_blob
+    hash_tensor = cached_unit.tensor_identity
+    hash_receipt = pwc._cb_cache_tensor_identity
+    runner, data, capture, events, live, _ = fixture(tmp_path, monkeypatch)
+    caller = current_thread()
+    worker = io_engine.ENGINE.submit(current_thread).result()
+    provenance = th.calibration_identity('fixture', [torch.arange(4).reshape(1, 4)], fit_tokens=4)
+    targets = bridge._live_targets(runner, data.formats_by_qname)
+    starts, finishes, renders, producers, serial_producers = {}, {}, {}, {}, {}
+    hash_counts, serial_counts = Counter(), Counter()
+    active = set()
+    serial = None
+    failure = None
+    settings = None
+
+    def calibration(hessians, _):
+        nonlocal settings
+        for name, hessian in hessians.items():
+            if name in targets:
+                hessian.mul_(1 + list(targets).index(name))
+        source = activation_source(hessians, provenance)
+        if any(name in targets for name in hessians):
+            settings = source.provenance
+        return source
+
+    for index, (name, formats) in enumerate(data.formats_by_qname.items(), 1):
+        with torch.no_grad():
+            targets[name].weight.fill_(index)
+        for offset, fmt in enumerate(formats):
+            key = name, fmt
+            cell = data.cells[key]
+            spec = get_format(fmt)
+            cell['anchor']['activation_contract'] = str(spec.act_dtype_name or 'a16')
+            cell['anchor']['activation_quantized'] = spec.act_quant_changes_input
+            torch.save(targets[name].weight.detach() + offset, cell['render'])
+            renders[Path(cell['wire']).read_bytes()] = key
+            starts[key], finishes[key] = Event(), Event()
+
+    def read(cell):
+        key = tuple(cell['anchor'][field] for field in ('qname', 'format_name'))
+        if current_thread() is not caller:
+            assert events[-1] == ('capture', key[0])
+            active.add(key)
+            try:
+                starts[key].set()
+                finishes[key].wait(5)
+                if failure == 'read':
+                    raise OSError('The wire read failed.')
+                return read_wire(cell)
+            finally:
+                active.remove(key)
+        return read_wire(cell)
+
+    def producer_hash(tensor):
+        if tensor.shape != (4, 4):
+            return hash_tensor(tensor)
+        name = events[-1][1]
+        key = name, data.formats_by_qname[name][0]
+        if serial is not None:
+            if serial == key:
+                serial_counts[name, tensor.dtype] += 1
+            return hash_tensor(tensor)
+        active.add('producer')
+        try:
+            assert current_thread() is worker, 'The shared I/O worker must hash producer tensors.'
+            assert tensor.device.type == 'cpu'
+            assert starts[key].wait(5), 'Start the wire read before the producer hash.'
+            assert key in active
+            hash_counts[name, tensor.dtype] += 1
+            result = hash_tensor(tensor)
+            if tensor.dtype == torch.float32:
+                if failure == 'identity':
+                    raise RuntimeError('The producer hash failed.')
+                if failure == 'hessian':
+                    live[-1]().add_(1)
+                if failure == 'source':
+                    targets[name].weight.detach().add_(1)
+            return result
+        except BaseException:
+            finishes[key].set()
+            raise
+        finally:
+            active.remove('producer')
+
+    def receipt_hash(tensor):
+        if serial is not None:
+            return hash_receipt(tensor)
+        name = events[-1][1]
+        is_source = tensor.data_ptr() == targets[name].weight.data_ptr()
+        key = name, data.formats_by_qname[name][0 if is_source else 1]
+        active.add('receipt')
+        try:
+            assert current_thread() is worker, 'The shared I/O worker must hash receipts.'
+            assert tensor.device.type == 'cpu'
+            if not finishes[key].is_set():
+                assert starts[key].wait(5), 'Start the wire read before the receipt hash.'
+                assert key in active
+            result = hash_receipt(tensor)
+            if is_source and failure == 'settings':
+                settings['fit_tokens'] += 1
+            if is_source and failure == 'projection':
+                projection['source_slice']['expert'] += 1
+            if not is_source and failure == 'render':
+                tensor.add_(1)
+            return result
+        finally:
+            active.remove('receipt')
+            finishes[key].set()
+
+    def check_identity(blob, _record, expected):
+        assert current_thread() is caller
+        (serial_producers if serial else producers)[renders[blob]] = expected
+
+    def verify_on_caller(cell, source, rendered, **kwargs):
+        nonlocal serial
+        assert current_thread() is caller
+        name, fmt = (cell['anchor'][field] for field in ('qname', 'format_name'))
+        if fmt == data.formats_by_qname[name][0]:
+            with pytest.raises(ValueError, match='inputs differ from bound checkpoint unit'):
+                kwargs['bound_unit'].derive(source_weight=source, qname=name,
+                    format_name='BF16', grid=None, rung=None, activation=None, projected_unit=None)
+        actual = verify(cell, source, rendered, **kwargs)
+        serial = name, fmt
+        try:
+            expected = verify(cell, source, rendered, **{
+                **kwargs, 'bound_unit': None, 'wire_blob': None, 'wire_sha256': None})
+        finally:
+            serial = None
+        assert canonical_json_bytes(actual, where='receipt') == canonical_json_bytes(
+            expected, where='receipt')
+        return actual
+
+    monkeypatch.setattr(th, 'activation_source', calibration)
+    monkeypatch.setattr(tc, 'bind_checkpoint_unit_identity', bind)
+    monkeypatch.setattr(cached_unit, 'tensor_identity', producer_hash)
+    monkeypatch.setattr(pwc, '_cb_cache_tensor_identity', receipt_hash)
+    monkeypatch.setattr(bridge, '_read_verified_wire_blob', read)
+    monkeypatch.setattr(bridge, '_decode_wire', lambda blob, **_: torch.load(data.cells[renders[blob]]['render']))
+    monkeypatch.setattr(bridge, 'verify_anchor_render', verify_on_caller)
+    release = pwc.ProductionWeightCache.release_resident_tensors
+    prefetch = pwc.ProductionWeightCache.prefetch
+    unload = runner.context.unload
+
+    def open_window(cache, *args, **kwargs):
+        if failure == 'entry':
+            raise RuntimeError('The render window did not open.')
+        return prefetch(cache, *args, **kwargs)
+
+    def release_window(cache, keys):
+        assert not active, 'Drain the work before release of the renders.'
+        return release(cache, keys)
+
+    def unload_layer(layer):
+        assert not active, 'Drain the work before release of the layer.'
+        unload(layer)
+
+    monkeypatch.setattr(pwc.ProductionWeightCache, 'release_resident_tensors', release_window)
+    monkeypatch.setattr(pwc.ProductionWeightCache, 'prefetch', open_window)
+    monkeypatch.setattr(runner.context, 'unload', unload_layer)
+    reader = SimpleNamespace(identity={}, verify_cached_unit=check_identity)
+    options = dict(capture=capture, max_render_bytes=10000,
+        file_load_workers=1, qualification_window=policy(), reader=reader)
+    cache = bridge.prepare_cache(runner, data, **options)
+    assert set(cache.metadata['verified_cells']) == set(data.cells)
+    assert producers == serial_producers
+    first_keys = [(name, formats[0]) for name, formats in data.formats_by_qname.items()]
+    assert len({producers[key]['source']['sha256'] for key in first_keys}) == 2
+    assert len({producers[key]['calibration']['hessian']['sha256'] for key in first_keys}) == 2
+    assert set(serial_counts) == {
+        (name, dtype) for name in targets for dtype in (torch.bfloat16, torch.float32)}
+    assert hash_counts == serial_counts
+    assert all(event.is_set() for event in finishes.values())
+    assert all(ref() is None for ref in live)
+
+    name = first_keys[0][0]
+    projection = dict(tensor=name + '.weight', source_tensor='packed.weight',
+        source_layout='packed', source_slice={'expert': 0}, expert=0,
+        projection='gate_proj', group='w13', rows=4, cols=4)
+    for failure, error, message in (
+            ('source', ValueError, 'source tensor changed'),
+            ('hessian', ValueError, 'Hessian tensor changed'),
+            ('settings', ValueError, 'calibration settings changed'),
+            ('read', OSError, 'The wire read failed.'),
+            ('identity', RuntimeError, 'The producer hash failed.'),
+            ('entry', RuntimeError, 'The render window did not open.'),
+            ('render', ValueError, 'resident render tensor changed'),
+            ('projection', ValueError, 'producer projection changed')):
+        for event in (*starts.values(), *finishes.values()):
+            event.clear()
+        hash_counts.clear()
+        live.clear()
+        with torch.no_grad():
+            targets[name].weight.fill_(1)
+        if failure == 'projection':
+            data.census['expert_projection'] = {'stacks': {'packed': {name: projection}}}
+        with pytest.raises(error, match=message):
+            bridge.prepare_cache(runner, data, **options)
+        assert events[-1] == ('unload', 0)
+
+
 def test_prepared_metadata_counts_a_synthesized_rung_apart(tmp_path, monkeypatch):
     """A shard written from its own wire is never counted as independently
     compared, and a receipt that disagrees with its cell refuses."""
