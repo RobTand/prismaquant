@@ -1676,6 +1676,10 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
         seed_settings = seed_inputs.get("settings")
         if not isinstance(seed_settings, Mapping) or seed_settings.get(field) != schedule:
             raise RuntimeError(f"seed checkpoint identity mismatch at settings.{field}")
+        field = "stack_sampling_identity"
+        draw = expected_identity.get(field)
+        if not draw or seed_inputs.get(field) != draw:
+            raise RuntimeError(f"seed checkpoint identity mismatch at {field}")
     for field in ('currency', 'calibration', 'input_global_scale_policy'):
         if (field not in seed_inputs or field not in expected_identity or
                 seed_inputs[field] != expected_identity[field]):

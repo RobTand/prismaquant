@@ -437,6 +437,103 @@ def test_seed_refuses_changed_scoring_rows_before_linking_wire(
     assert checkpoint.read_bytes() == original_manifest
 
 
+def test_tiered_seed_requires_matching_draw_with_same_schedule(monkeypatch, tmp_path):
+    from prismaquant import production_weight_cache as pwc
+    from prismaquant.cost_stage_checkpoint import prepare_journal, write_unit
+    from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
+
+    monkeypatch.setattr(pwc, "_production_cache_source_sha256", lambda: "a" * 64)
+    (campaign, legacy, argv, _model, inputs), initial = _fresh_priced_campaign(monkeypatch, tmp_path)
+    _forbid_reencode(monkeypatch, campaign)
+    legacy_parts = legacy.with_suffix(".json.parts")
+    legacy_identity = json.loads(legacy.read_text())["identity"]
+    assert "reference_law_anchors" not in legacy_identity["settings"]
+    assert "reference_law_schedule" not in legacy_identity["settings"]
+    assert "stack_sampling_identity" not in legacy_identity
+    stage = campaign.STAGE
+    _, legacy_digest, states = prepare_journal(legacy_parts, manifest_path=legacy,
+        stage=stage, qnames=[UNIT], identity=legacy_identity, resume=True)
+    legacy_bytes = legacy.read_bytes(), _priced_file_digests(legacy_parts)
+    menu = inputs["menu"][0]
+    source_wire = tmp_path / "cache" / "wire"
+
+    module = "model.layers.0.feed_forward.experts"
+    packed = f"{module}.down_proj"
+    key = f"s:{module}"
+    members = [f"{module}.{i}.w2" for i in range(3)]
+    sizes = dict.fromkeys(map(str, range(3)), 1.0)
+    groups = {key: members, f"u:{UNIT}": [UNIT]}
+    grids = {key: {menu.family: [896, 1024, 1152]}, f"u:{UNIT}": {menu.family: [1024]}}
+    identities = []
+    for seed in (3, 4):
+        draw = campaign_table.draw_stack_sample(sizes, 3, seed=seed, stack=packed)
+        records = {packed: dict(
+            probe_row=dict(_packed_experts_module=module, _packed_param="down_proj",
+                           num_experts=3, h_trace=3.0, h_trace_per_expert=[1.0] * 3),
+            sampled_experts=draw["units"], inclusion_prob=draw["inclusion_probability"],
+            seed=seed, design=draw["method"] + campaign_table.STACK_SAMPLE_COUNTS_SUFFIX,
+            transfer_law_experts=[0, 1], reference_q256=1024, draw=draw,
+            sizes=dict(source="counts", values=sizes, sha256=draw["size_sha256"]))}
+        selection = {"groups": [dict(key=key, members=members, stack_samples=records,
+                                     inclusion_probability=dict.fromkeys(members, 1.0))]}
+        samples = campaign_table.selection_stack_samples(selection, Lfm2MoeProfile())
+        placement = SimpleNamespace(reference_law_samples=samples, rate_band=None,
+                                    exhaustive_rate_grid=False, anchors=3)
+        schedule = campaign._campaign_round_one_schedule(groups, grids, placement=placement,
+            audit_units=set(), snap=lambda rate, allowed: min(allowed, key=lambda q: abs(q - rate)))
+        identities.append(dict(legacy_identity, stack_sampling_identity=records,
+                               settings=dict(legacy_identity["settings"], reference_law_schedule=schedule)))
+    same, different = identities
+    assert same["settings"] == different["settings"]
+    assert same["stack_sampling_identity"] != different["stack_sampling_identity"]
+    missing = {k: v for k, v in same.items() if k != "stack_sampling_identity"}
+
+    for label, stored, expected, refuse in (
+        ("untiered", different, legacy_identity, False),
+        ("different", different, same, True),
+        ("missing", missing, same, True),
+        ("both-missing", missing, missing, True),
+        ("same", same, same, False),
+    ):
+        manifest = tmp_path / f"{label}.json"
+        parts = manifest.with_suffix(".json.parts")
+        _, digest, _ = prepare_journal(parts, manifest_path=manifest, stage=stage,
+            qnames=[UNIT, *members], identity=stored, resume=False)
+        write_unit(parts, stage=stage, qname=UNIT, identity_sha256=digest, state=states[UNIT])
+        if label == "untiered":
+            destination = tmp_path / label
+            for flag, path in (("--checkpoint", destination / legacy.name),
+                               ("--cache-dir", destination / "cache"),
+                               ("--out", destination / "cost.pkl")):
+                argv[argv.index(flag) + 1] = str(path)
+            assert campaign.main([*argv, "--seed-checkpoint", str(manifest)]) == 0
+            assert _priced_cost_payload(destination)["costs"] == initial["costs"]
+            assert (destination / legacy.name).read_bytes() == legacy_bytes[0]
+            assert (legacy.read_bytes(), _priced_file_digests(legacy_parts)) == legacy_bytes
+            continue
+        wire_dir = tmp_path / label
+        wire_dir.mkdir()
+        adopted = {}
+        refusal = None
+        try:
+            result = campaign._adopt_seed_checkpoint(manifest, source_wire,
+                targets=[UNIT, *members], wire_dir=wire_dir, expected_identity=expected,
+                identity_sha256=legacy_digest,
+                adopt=lambda name, state, **_: adopted.update({name: state}), admits=lambda *_: True)
+        except RuntimeError as exc:
+            refusal = exc
+        if refuse:
+            assert refusal is not None, f"The campaign accepted the {label} draw."
+            assert "stack_sampling_identity" in str(refusal)
+            assert not adopted
+            assert not list(wire_dir.iterdir())
+        else:
+            assert refusal is None
+            assert result["units"] == [UNIT]
+            assert adopted == states
+            assert _priced_file_digests(wire_dir) == _priced_file_digests(source_wire)
+
+
 @pytest.mark.parametrize("changed", ["producer", "encoder", "mixed", "certified",
                                      "tampered_wire", "other_wire_identity"])
 def test_main_producer_identity_resume_policy(monkeypatch, tmp_path, priced_campaign, capsys, changed):
