@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Put the checkout root after the standard library on the three graph tools' import paths (#5323). Part of #4684.
+  The local import-path measurement used the new test with safe-path startup and with early checkout entries.
+  Refusal stopped all six cases. Removing early checkout entries and appending the root passed all six cases.
+  Use the append option to keep the tools available when a root file shares a standard library module name.
+  At base `d0d16723a6eb454127ba866b83a982ceeb9a9a5e`, all six cases failed.
+  Each case reported `A root file took the place of inspect.`
+  The probe reported `['False', 'False']` instead of `['True', 'True']`.
+
+  Base pytest IDs:
+  - `tests/test_graph_tool_import_path.py::test_a_root_file_named_like_a_stdlib_module_does_not_shadow_it[safe-path-tools/ci/graph_impact_pq.py]`
+  - `tests/test_graph_tool_import_path.py::test_a_root_file_named_like_a_stdlib_module_does_not_shadow_it[safe-path-tools/bazel/build_files.py]`
+  - `tests/test_graph_tool_import_path.py::test_a_root_file_named_like_a_stdlib_module_does_not_shadow_it[safe-path-tools/ci/gate_select.py]`
+  - `tests/test_graph_tool_import_path.py::test_a_root_file_named_like_a_stdlib_module_does_not_shadow_it[early-root-tools/ci/graph_impact_pq.py]`
+  - `tests/test_graph_tool_import_path.py::test_a_root_file_named_like_a_stdlib_module_does_not_shadow_it[early-root-tools/bazel/build_files.py]`
+  - `tests/test_graph_tool_import_path.py::test_a_root_file_named_like_a_stdlib_module_does_not_shadow_it[early-root-tools/ci/gate_select.py]`
+
 - Use `INSERTION_ASCII_INDENT2_LAX.text` for the index entropy JSON report (#5332). Part of #2651.
 - Start the first wire read during identity binding for the admitted qualification unit (#5310). Part of #2923.
   On the unchanged checkout, `tests/test_joint_qualification_windows.py::test_prepare_overlaps_current_unit_identity_and_drains_before_release`
