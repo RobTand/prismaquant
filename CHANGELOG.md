@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Use `INSERTION_ASCII_INDENT2_LAX.text` for the index entropy JSON report (#5332). Part of #2651.
 - Start the first wire read during identity binding for the admitted qualification unit (#5310). Part of #2923.
   On the unchanged checkout, `tests/test_joint_qualification_windows.py::test_prepare_overlaps_current_unit_identity_and_drains_before_release`
   failed with `The wire read did not start before identity work ended.`
