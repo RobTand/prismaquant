@@ -415,6 +415,93 @@ def test_unset_flags_leave_checkpoint_identity_settings_byte_identical(monkeypat
     assert bound[0]["settings"]["acquisition_schedule"] == schedule_value
 
 
+def test_new_campaign_plans_exact_reference_and_law_draw_encodes(tmp_path, monkeypatch):
+    from prismaquant.cost_stage_checkpoint import prepare_journal
+    from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
+    from prismaquant.tessera_campaign_cli import campaign_argument_parser
+
+    module = "model.layers.0.feed_forward.experts"
+    packed = f"{module}.gate_up_proj"
+    profile = Lfm2MoeProfile()
+    sample = campaign_table.stack_sample_from_probe(packed, {
+        "_packed_experts_module": module, "_packed_param": "gate_up_proj",
+        "num_experts": 3, "h_trace": 7.0, "h_trace_per_expert": [1.0, 2.0, 4.0],
+    }, profile, sampled_experts=range(3), inclusion_prob=dict.fromkeys(range(3), 1.0),
+        seed=11, design="census", transfer_law_experts=(0, 2), reference_q256=896)
+    experts = {f"{module}.{expert}.{role}": SimpleNamespace(module_qname=module)
+               for expert in range(3) for role in ("w1", "w3")}
+    dense = "model.layers.1.mlp.down_proj"
+    names = [*experts, dense]
+    groups = campaign.resolve_anchor_groups(names, profile=profile, expert_members=experts)
+    legal = [832, 896, 960, 1024, 1088]
+    rates = {name: {FAMILY: set(legal)} for name in names}
+    grids, _ = campaign.anchor_group_rate_grids(groups, rates,
+        encode_structure=None, projected_units={})
+    weights = dict.fromkeys(names, torch.zeros((32, 256), dtype=torch.bfloat16))
+    menus = dict.fromkeys(names, [SimpleNamespace(family=FAMILY, body_rate_q256=q) for q in legal])
+    default = vars(arguments(acquisition_request=None, acquisition_request_sha256=None))
+    placement = SimpleNamespace(**default, reference_law_samples={packed: sample})
+    snap = lambda rate, allowed: min(allowed, key=lambda q: (abs(q - rate), q))
+    actual = campaign._campaign_round_one_schedule(groups, grids, placement=placement,
+        audit_units=set(), snap=snap, rates_by_unit=rates)
+    expected = {(name, FAMILY, 896) for name in experts}
+    expected |= {(f"{module}.{expert}.{role}", FAMILY, q)
+                 for expert in (0, 2) for role in ("w1", "w3") for q in (832, 1088)}
+    expected |= {(dense, FAMILY, q) for q in (832, 960, 1088)}
+    assert {(name, family, q) for name, families in actual.items()
+            for family, rungs in families.items() for q in rungs} == expected
+
+    parser = campaign_argument_parser(description="Plan the first encodes.")
+    argv = ["--model", "model", "--out", "out.pkl", "--cache-dir", "cache"]
+    assert not parser.parse_args(argv).reference_law_anchors
+    assert parser.parse_args([*argv, "--reference-law-anchors"]).reference_law_anchors
+    untiered = campaign._campaign_round_one_schedule(groups, grids, placement=anchor_placement(arguments()),
+        audit_units=set(), snap=snap, rates_by_unit=rates)
+    assert all(families == {FAMILY: [832, 960, 1088]} for families in untiered.values())
+
+    primed = []
+    compatible_batches = cell_measurement.compatible_batches
+
+    def batch(pending, **kwargs):
+        assert len(pending) == len(expected)
+        assert set(pending) == expected
+        return compatible_batches(pending, **kwargs)
+
+    monkeypatch.setattr(cell_measurement, "compatible_batches", batch)
+    checkpoint = tmp_path / "anchors.json"
+    prime_args = dict(placement=placement, seed_checkpoint=None, batch_size=2, max_artifact_bpp=0,
+        checkpoint=checkpoint, targets=names, menus=menus, weights=weights, profile=profile,
+        expert_members=experts, encode_structure=None, projected_units={}, audit_units=set(), route_cache={},
+        schedule=actual)
+    campaign._prime_first_anchor_batch(SimpleNamespace(prime=primed.append), **prime_args)
+    pending = sorted(expected, key=lambda cell: (cell[0] == dense, cell))
+    batches = compatible_batches(pending, weights=weights, batch_size=2)
+    assert primed == [[name for name, _, _ in batches[0]]]
+
+    common = dict(weights={}, acts={}, hessians={}, menus={}, calibration_identity={},
+                  serving_scope=None, static_scales={}, static_scale_policy=None)
+    old = campaign.campaign_checkpoint_identity(settings={}, **common)
+    assert campaign.campaign_checkpoint_identity(settings={"reference_law_anchors": False}, **common) == old
+    new = campaign.campaign_checkpoint_identity(settings={"reference_law_anchors": True,
+        "reference_law_schedule": actual}, **common)
+    assert new["settings"]["reference_law_schedule"] == actual
+    parts = checkpoint.with_name(checkpoint.name + ".parts")
+    stream = checkpoint.with_name(checkpoint.name + campaign.STREAM_JOURNAL_SUFFIX)
+    for journal_args in (dict(checkpoint_dir=parts, manifest_path=checkpoint, stage=campaign.STAGE),
+                         dict(checkpoint_dir=stream, stage=campaign.STREAM_JOURNAL_STAGE)):
+        _, old_sha, _ = prepare_journal(**journal_args, resume=True, qnames=names, identity=old)
+        with pytest.raises(RuntimeError, match="identity mismatch.*reference_law_schedule"):
+            prepare_journal(**journal_args, resume=True, qnames=names, identity=new,
+                            seal_fields=campaign_wire.CAMPAIGN_CHECKPOINT_SEAL_FIELDS)
+    with pytest.raises(RuntimeError, match="seed checkpoint.*reference_law_schedule"):
+        campaign._adopt_seed_checkpoint(checkpoint, None, targets=names, wire_dir=tmp_path,
+            adopt=lambda *a, **k: pytest.fail("The campaign accepted a seed row."), admits=lambda *_: True,
+            identity_sha256=old_sha, expected_identity=new)
+    primed.clear()
+    campaign._prime_first_anchor_batch(SimpleNamespace(prime=primed.append), **prime_args)
+    assert not primed
+
+
 def test_real_cpu_scalar_renderer_publishes_exact_requested_wire(tmp_path):
     pytest.importorskip("tessera.export")
     from tessera.unit_artifact import read_unit_artifact
