@@ -59,7 +59,7 @@ def measure_cell(
     *, qname: str, weight, activations, format_name: str, cache, wire_dir: Path,
     activation_kwargs_for=None, hessian_required: bool = True,
     static_input_scale: "float | None" = None, publisher=None,
-    structure: "str | None" = None, profile=None,
+    structure: "str | None" = None, profile=None, before_encode=None,
 ) -> CampaignAnchor:
     """Render one rung, price it as served, and store the wire beside it.
 
@@ -99,6 +99,8 @@ def measure_cell(
         activation_kwargs_for=activation_kwargs_for,
         hessian_required=hessian_required, static_input_scale=static_input_scale,
         structure=structure, profile=profile)
+    if before_encode is not None:
+        before_encode()
     started = time.time()
     render, blob = tessera_render.encode_tessera_unit(
         weight, format_name, recipe=prepared.wire,
@@ -451,7 +453,8 @@ def _score_and_publish(*, qname, weight, activations, format_name, cache, wire_d
 def measure_cells(*, qnames, weights, activations, format_name,
                   cache, wire_dir, activation_kwargs_for=None,
                   hessian_required=True, static_input_scales=None,
-                  publisher=None, structures=None, profile=None) -> list[CampaignAnchor]:
+                  publisher=None, structures=None, profile=None,
+                  before_encode=None) -> list[CampaignAnchor]:
     """One producer batch, with the scalar path's per-unit gates and storage.
 
     ``structures`` maps a unit to its serving structure, as ``structure`` does
@@ -467,7 +470,8 @@ def measure_cells(*, qnames, weights, activations, format_name,
             format_name=format_name, cache=cache, wire_dir=wire_dir,
             activation_kwargs_for=activation_kwargs_for, hessian_required=hessian_required,
             static_input_scale=(static_input_scales or {}).get(name),
-            structure=(structures or {}).get(name), publisher=publisher, profile=profile)]
+            structure=(structures or {}).get(name), publisher=publisher, profile=profile,
+            **({'before_encode': before_encode} if before_encode is not None else {}))]
     from .tessera_render import encode_tessera_units
 
     prepared = [CellRecipe.prepare(
@@ -490,6 +494,8 @@ def measure_cells(*, qnames, weights, activations, format_name,
                 f"recipe or Hessian requirement than {qnames[0]}")
     campaign_wire.require_injective_anchor_filenames(
         cache, wire_dir, ((name, format_name) for name in qnames))
+    if before_encode is not None:
+        before_encode()
     started = time.time()
     encoded = encode_tessera_units(
         weights, format_name, recipe=prepared[0].wire,
