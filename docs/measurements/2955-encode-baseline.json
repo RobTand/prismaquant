@@ -1,0 +1,43 @@
+{
+  "issue": 2955,
+  "base_revision": "31c7790514dc8ea62a2a9b3b63a824b40b629742",
+  "scope": "Profile the campaign encode path before prepare-ahead. This run does not qualify serving, numerical results, or performance.",
+  "workload": {
+    "runner": "tests/test_tessera_encode_profile.py",
+    "row_head": "stream",
+    "hessian": "require",
+    "format": "TESSERA_E4M3_K1_R1024",
+    "rounds": 1,
+    "units": 3,
+    "batch_width": 1,
+    "weight_shape": [8, 256],
+    "activation_shape": [4, 256],
+    "seed": 2955
+  },
+  "run": {
+    "environment": "Flux GPU lane",
+    "command": "git diff --exit-code HEAD~ HEAD -- prismaquant pyproject.toml uv.lock && git rev-parse HEAD~ && export PRISMAQUANT_RELEASE_SOURCE_PAGES=1 MIMALLOC_PURGE_DELAY=0 PYTHONPATH=. && d=$(mktemp -d) && if python tests/test_tessera_encode_profile.py \"$d\" \"$TL3B_OUT\" >\"$TL3B_OUT/2955-encode-baseline.log\" 2>&1; then tail -n 12 \"$TL3B_OUT/2955-encode-baseline.log\" && cat \"$TL3B_OUT/2955-encode-summary.json\"; else tail -n 45 \"$TL3B_OUT/2955-encode-baseline.log\"; exit 1; fi",
+    "exit_code": 0,
+    "log": "2955-encode-baseline.log",
+    "summary": "2955-encode-summary.json",
+    "result": "The campaign priced three units and three rungs in one format. The profiler recorded CPU and CUDA events."
+  },
+  "profile": {
+    "host": "sparklina",
+    "gpu": "NVIDIA GB10",
+    "python": "3.12.3",
+    "torch": "2.14.1+cu130",
+    "cuda": "13.0",
+    "tessera": "0.1.0",
+    "inputs_sha256": "d4f60d9d85c016c17e6f1af86f0a02b64adb164d52522391e361b81c2e252865",
+    "trace": "2955-encode.trace.json",
+    "trace_sha256": "6a8cf8e32faece22e3a93b846f5862360ab8853fa87769fe82e9963ac3b9f497",
+    "kernels": 4516,
+    "copies": 552,
+    "cpu_ranges_us": {
+      "campaign.admit": [1831722.783, 1100.304, 622.496],
+      "campaign.factor": [75870.331, 1691.504, 1244.304, 969.41, 1181.122, 75349.372],
+      "campaign.encode": [1097520.482, 17141.822, 16584.639, 16440.097, 16972.64, 1097216.519, 151.362]
+    }
+  }
+}
