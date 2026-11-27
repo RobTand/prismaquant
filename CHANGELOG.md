@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Set `PRISMAQUANT_TESSERA_PREPARE_AHEAD=1` to prepare one next unit during a streaming campaign encode (#2955). Set it to `0` for serial Hessian preparation.
+  At base `8af79528d14336852f3cfc48293b21256775a260`, `tests/test_tessera_unit_prepare_ahead.py::test_next_preparation_overlaps_encode` failed at `assert overlap == [True]`. The result was `[False]`.
+  The Flux GB10 check passed `tests/test_tessera_unit_prepare_ahead.py::test_cuda_prepared_storage_and_events[encode]` and `tests/test_tessera_unit_prepare_ahead.py::test_cuda_prepared_storage_and_events[unused]`. See `prepare-ahead.log` and `prepare-ahead.xml` in the check output.
+  Run `python -m pytest -q tests/test_tessera_unit_prepare_ahead.py::test_profile_campaign_encode` on the base and candidate. The check records `prepare-ahead-before.json` and `prepare-ahead-after.json` for the same synthetic CPU encode workload. These traces do not establish a performance, serving, or numerical result.
+
 - Use `INSERTION_ASCII_INDENT2_LAX.dump` for the three RTN staging writes (#5359). Part of #2651.
   At base `c35dcdf1d6ad96a36aceec77daeb2b1279266dc3`, `tests/test_build_rtn_cache.py::test_staging_writes_use_indent2_dump_profile` failed at `assert [Path(stream.name) for _, stream in calls] == list(paths)`. The call list was empty.
   The change passed `tests/test_build_rtn_cache.py::test_staging_writes_use_indent2_dump_profile`.
