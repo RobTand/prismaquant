@@ -1,0 +1,50 @@
+{
+  "issue": 2955,
+  "base_revision": "957825f0392d5b6eb57a12dac690fa5ce98501f1",
+  "scope": "Profile the campaign encode path with prepare-ahead enabled. This run does not qualify serving, numerical results, or performance.",
+  "workload": {
+    "runner": "tests/test_tessera_encode_profile.py",
+    "row_head": "stream",
+    "hessian": "require",
+    "format": "TESSERA_E4M3_K1_R1024",
+    "rounds": 1,
+    "units": 3,
+    "batch_width": 1,
+    "weight_shape": [8, 256],
+    "activation_shape": [4, 256],
+    "seed": 2955
+  },
+  "run": {
+    "environment": "Flux GPU lane",
+    "env": {
+      "PRISMAQUANT_RELEASE_SOURCE_PAGES": "1",
+      "MIMALLOC_PURGE_DELAY": "0",
+      "PYTHONPATH": ".",
+      "PRISMAQUANT_TESSERA_PREPARE_AHEAD": "1"
+    },
+    "command": "git diff --exit-code HEAD~ HEAD -- prismaquant pyproject.toml uv.lock && git rev-parse HEAD~ && export PRISMAQUANT_RELEASE_SOURCE_PAGES=1 MIMALLOC_PURGE_DELAY=0 PYTHONPATH=. PRISMAQUANT_TESSERA_PREPARE_AHEAD=1 && d=$(mktemp -d) && if python tests/test_tessera_encode_profile.py \"$d\" \"$TL3B_OUT\" >\"$TL3B_OUT/2955-encode-after.log\" 2>&1; then tail -n 16 \"$TL3B_OUT/2955-encode-after.log\" && cat \"$TL3B_OUT/2955-encode-summary.json\"; else tail -n 45 \"$TL3B_OUT/2955-encode-after.log\"; exit 1; fi",
+    "exit_code": 0,
+    "log": "2955-encode-after.log",
+    "summary": "2955-encode-summary.json",
+    "result": "The campaign priced three units and three rungs in one format. The profiler recorded CPU and CUDA events. The input digest matches the baseline."
+  },
+  "profile": {
+    "host": "sparklina",
+    "gpu": "NVIDIA GB10",
+    "python": "3.12.3",
+    "torch": "2.14.1+cu130",
+    "cuda": "13.0",
+    "tessera": "0.1.0",
+    "inputs_sha256": "d4f60d9d85c016c17e6f1af86f0a02b64adb164d52522391e361b81c2e252865",
+    "trace": "2955-encode.trace.json",
+    "trace_sha256": "eb5719077973491bf3e35497f603b52ab369f06e4fdf74d6f95aab22e0b08f1a",
+    "kernels": 4516,
+    "copies": 552,
+    "cpu_ranges_us": {
+      "campaign.admit": [1820266.956, 868.785, 590.672],
+      "campaign.factor": [81761.524, 1208.288, 943.266, 81249.636],
+      "campaign.encode": [1124796.028, 18722.712, 16455.927, 16325.001, 1124453.914, 18518.409, 174.754],
+      "campaign.prepare_next": [4266.706]
+    }
+  }
+}

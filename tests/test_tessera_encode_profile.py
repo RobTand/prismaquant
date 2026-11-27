@@ -132,6 +132,9 @@ def _profile(root, out, monkeypatch):
     mark(tessera_row_stream.RowStream, "admit", labels[0])
     mark(tessera_hessian, "encoder_kwargs", labels[1])
     mark(tessera_render, "encode_tessera_unit", labels[2])
+    if os.environ.get("PRISMAQUANT_TESSERA_PREPARE_AHEAD") == "1":
+        labels += ("campaign.prepare_next",)
+        mark(tessera_row_stream.RowStream, "prepare_next", labels[-1])
     with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU,
                                             torch.profiler.ProfilerActivity.CUDA]) as prof:
         assert campaign.main(args) == 0
@@ -172,6 +175,35 @@ def test_encode_profile_matches_baseline_workload(tmp_path):
         assert profile["kernels"] > 0 and profile["copies"] > 0
         for label in ("campaign.admit", "campaign.factor", "campaign.encode"):
             assert len(profile["cpu_ranges_us"][label]) >= len(NAMES)
+
+
+def test_encode_profile_records_prepare_ahead(tmp_path):
+    records = Path(__file__).parents[1] / "docs/measurements"
+    baseline = json.loads((records / "2955-encode-baseline.json").read_text())
+    after = json.loads((records / "2955-encode-after.json").read_text())
+    assert after["workload"] == baseline["workload"]
+    expected = after["profile"]
+    assert expected["inputs_sha256"] == baseline["profile"]["inputs_sha256"]
+    assert after["run"]["exit_code"] == 0
+    assert after["run"]["env"]["PRISMAQUANT_TESSERA_PREPARE_AHEAD"] == "1"
+    profiles = [expected]
+    if "TL3B_OUT" in os.environ:
+        out = Path(os.environ["TL3B_OUT"]).resolve() / "2955-encode-after"
+        out.mkdir(exist_ok=True)
+        with (out / after["run"]["log"]).open("w") as log:
+            subprocess.run([sys.executable, __file__, str(tmp_path), str(out)],
+                           env={**os.environ, **after["run"]["env"]}, check=True,
+                           stdout=log, stderr=subprocess.STDOUT)
+        observed = json.loads((out / after["run"]["summary"]).read_text())
+        assert observed["inputs_sha256"] == expected["inputs_sha256"]
+        assert hashlib.sha256((out / observed["trace"]).read_bytes()).hexdigest() == observed["trace_sha256"]
+        profiles.append(observed)
+    for profile in profiles:
+        assert profile["kernels"] > 0 and profile["copies"] > 0
+        ranges = profile["cpu_ranges_us"]
+        assert ranges["campaign.prepare_next"], "Record a prepare-ahead submission."
+        for label in ("campaign.admit", "campaign.factor", "campaign.encode"):
+            assert len(ranges[label]) >= after["workload"]["units"]
 
 
 if __name__ == "__main__":

@@ -14051,7 +14051,7 @@ pq_py_library(
         "test_tessera_encode_profile.py",
     ],
     data = [
-        "//:docs/measurements/2955-encode-baseline.json",
+        "//:files/docs/measurements",
         "test_tessera_encode_profile.py",
     ],
     deps = [
