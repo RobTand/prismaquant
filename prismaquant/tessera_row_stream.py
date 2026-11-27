@@ -249,6 +249,17 @@ class _Entry:
     weight_seconds: float = 0.0
 
 
+@dataclass
+class _Preparation:
+    name: str
+    plane: object
+    capture_sha256: str
+    stream: object = None
+    future: object = None
+    result: tuple | None = None
+    consumer: object = None
+
+
 class RowStream:
     """Verified capture entries on reader threads, consumed a batch at a time.
 
@@ -276,7 +287,8 @@ class RowStream:
     def __init__(self, *, capture_path, expected_sha256, expected_identity, census, names,
                  policy, weights, hessian_identity, bind, threads, batch_size, device,
                  memo_capacity, resource_check=None, factor_scratch_bytes=0,
-                 load_unit=None, clock=time.monotonic, wait_sink=None):
+                 load_unit=None, clock=time.monotonic, wait_sink=None,
+                 prepare_ahead_bytes=0):
         from . import tessera_calibration_cache as store
         from .perturbed_x_cache import normalize_verified_activation_load
         self._store = store
@@ -321,6 +333,8 @@ class RowStream:
         self._device = device
         self._resource_check = resource_check
         self._factor_scratch_bytes = int(factor_scratch_bytes)
+        self.prepare_ahead_bytes = prepare_ahead_bytes
+        self._preparation = None
         self.threads = int(threads)
         self.batch_size = batch_size
         self._memo_capacity = memo_capacity
@@ -402,7 +416,6 @@ class RowStream:
         entry = observed_future_result(
             future, sink=self.wait_sink, kind="row-stream-load",
             info={"unit": name}, clock=time.time)
-        del self._inflight[name]
         self.stats["entries_read"] += 1
         self.stats["read_seconds"] += entry.read_seconds
         if entry.weight is not None:
@@ -418,16 +431,17 @@ class RowStream:
         else:
             self.stats["rereads"] += 1
             if first != record:
-                self._close_entry(entry)
                 raise RuntimeError(
                     f"{name}: a second read of the capture entry disagrees with the first "
                     "read's receipts, so the unit's inputs changed during this run")
+        # Keep rejected entries in the read window until cleanup joins preparation.
+        del self._inflight[name]
         if entry.weight is not None:
             # The consumer thread is the only writer, and it installs a unit
             # before any later read of it is submitted, so the next reader of
             # this unit sees the installed tensor and reads no source byte.
             self._weights[name] = entry.weight
-            entry.weight = None
+            # Keep the reference for a preparation that still owns the read.
         self._live[name] = entry
         return entry
 
@@ -459,7 +473,6 @@ class RowStream:
                          if canonical_json(observed[field], where=where)
                          != canonical_json(expected[field], where=where)]
         if differing:
-            self._close_entry(entry)
             raise RuntimeError(
                 f"{entry.name}: this run's read of its capture entry gives a "
                 f"{', '.join(differing)} receipt the resumed checkpoint's manifest did not "
@@ -519,7 +532,7 @@ class RowStream:
             # that promise with the newly submitted ahead window, not just RSS.
             reserved = list(dict.fromkeys([*wanted, *[
                 name for name in (self._primed or []) if name in self._inflight]]))
-            self._resource_check(f"before_row_stream_admit:{index}", reserve_bytes=sum(
+            self.check_preparation(f"before_row_stream_admit:{index}", reserve_bytes=sum(
                 self.reader_reserve_bytes(name) for name in reserved))
         for name in wanted:
             self._submit(name)
@@ -533,17 +546,123 @@ class RowStream:
         resident = len(self._live) + sum(1 for future in self._inflight.values() if future.done())
         self.stats["peak_resident_units"] = max(self.stats["peak_resident_units"], resident)
         if self._resource_check is not None:
-            self._resource_check(f"after_row_stream_admit:{index}")
+            self.check_preparation(f"after_row_stream_admit:{index}")
 
     def entry(self, name) -> _Entry:
         if name not in self._live:
             raise RuntimeError(f"{name} is not resident in the row stream window")
         return self._live[name]
 
+    def check_preparation(self, label, *, reserve_bytes=0):
+        if self._resource_check is not None:
+            if self._preparation is not None:
+                reserve_bytes += self.prepare_ahead_bytes + sum(
+                    self.reader_reserve_bytes(name) for name in self._inflight)
+            self._resource_check(label, reserve_bytes=reserve_bytes)
+
+    def prepare_next(self, name, plane):
+        """Submit one unit. Keep the slot until the consumer releases it."""
+        if not self.prepare_ahead_bytes or self._preparation is not None:
+            return
+        import torch
+        from contextlib import nullcontext
+        from .io_engine import ENGINE
+        from . import tessera_hessian as th
+
+        self.check_preparation('before_row_stream_prepare_ahead', reserve_bytes=(
+            self.prepare_ahead_bytes + sum(self.reader_reserve_bytes(n) for n in self._inflight)))
+        slot = self._preparation = _Preparation(name, plane, self.capture['sha256'])
+        entry = self._live.get(name)
+        read = self._inflight.get(name)
+        weight = self._weights[name]
+        memo = self._memo.get((name, plane))
+        ready = None
+        if torch.device(self._device).type == 'cuda':
+            ready = torch.cuda.current_stream(self._device).record_event()
+            slot.stream = torch.cuda.Stream(device=self._device)
+
+        @torch.inference_mode()
+        def prepare():
+            # The row reader uses a different pool.
+            owned = read.result() if entry is None else entry
+            host_weight = owned.weight if weight.is_meta else weight
+            rows, source = owned.inputs, owned.source
+            seal = dict(owned.identities['hessian'])
+            shapes = tuple(host_weight.shape), tuple(rows.shape)
+            with nullcontext() if slot.stream is None else torch.cuda.stream(slot.stream):
+                if ready is not None:
+                    slot.stream.wait_event(ready)
+                staged_weight = host_weight.to(self._device, non_blocking=True)
+                staged_rows = rows.to(self._device, non_blocking=True)
+                kwargs = (memo if memo is not None else th.encoder_kwargs(
+                    source, name, int(host_weight.shape[1]), self._device, scale_plane=plane))
+                done = None if slot.stream is None else slot.stream.record_event()
+            return owned, host_weight, rows, source, seal, shapes, staged_weight, staged_rows, kwargs, done
+
+        slot.future = ENGINE.submit(prepare)
+
+    def take_prepared(self, name):
+        """Check the live inputs before use. Return the staged weight and rows."""
+        slot = self._preparation
+        if slot is None:
+            return None
+        from .tessera_campaign_wire import require_checkpoint_identity_api
+        from .tessera_render import HessianContractError
+        if name != slot.name:
+            raise HessianContractError(f'{name}: prepared unit key changed')
+        slot.result = slot.future.result()
+        owned, weight, rows, source, seal, shapes, staged_weight, staged_rows, _kwargs, done = slot.result
+        entry = self.entry(name)
+        if (owned is not entry or source is not entry.source
+                or slot.capture_sha256 != self.capture['sha256']
+                or source.provenance != self._hessian_identity):
+            raise HessianContractError(f'{name}: prepared source changed')
+        if (weight is not self._weights[name] or rows is not entry.inputs
+                or shapes != (tuple(weight.shape), tuple(rows.shape))):
+            raise HessianContractError(f'{name}: prepared inputs changed')
+        identity = require_checkpoint_identity_api().tensor_identity
+        matrices = source.hessians
+        live_hessian = matrices.get(name, matrices.get(name + '.weight'))
+        if (live_hessian is None or identity(entry.hessian) != seal
+                or (live_hessian is not entry.hessian and identity(live_hessian) != seal)):
+            raise HessianContractError(f'{name}: prepared Hessian changed')
+        if done is not None:
+            import torch
+            slot.consumer = torch.cuda.current_stream(self._device)
+            slot.consumer.wait_event(done)
+        return staged_weight, staged_rows
+
+    def release_prepared(self):
+        """Join the work before release. Also drain unused device work."""
+        slot = self._preparation
+        if slot is None:
+            return
+        from concurrent.futures import wait
+        if slot.future is not None:
+            slot.future.cancel()
+            if not slot.future.cancelled():
+                wait((slot.future,))
+        if slot.stream is not None:
+            slot.stream.synchronize()
+        if slot.consumer is not None:
+            slot.consumer.synchronize()
+        slot.future = slot.result = None
+        self._preparation = None
+        self.check_preparation('after_row_stream_prepare_ahead')
+
     def encoder_kwargs(self, name, scale_plane):
         """The unit's encoder keywords, memoized per (unit, plane) within the window."""
         from . import tessera_hessian as th
         key = (name, scale_plane)
+        slot = self._preparation
+        if slot is not None and slot.result is not None and name == slot.name:
+            if slot.plane != scale_plane:
+                from .tessera_render import HessianContractError
+                raise HessianContractError(f'{name}: prepared scale plane changed')
+            kwargs = slot.result[-2]
+            if key not in self._memo and len(self._memo) >= self._memo_capacity:
+                self._memo.popitem(last=False)
+            self._memo[key] = kwargs
         if key in self._memo:
             self._memo.move_to_end(key)
             return self._memo[key]
@@ -551,19 +670,19 @@ class RowStream:
             self._memo.popitem(last=False)
         entry = self.entry(name)
         if self._resource_check is not None:
-            self._resource_check("before_selected_encoder_factors:" + name,
-                                 reserve_bytes=self._factor_scratch_bytes)
+            self.check_preparation("before_selected_encoder_factors:" + name,
+                                   reserve_bytes=self._factor_scratch_bytes)
         kwargs = th.encoder_kwargs(entry.source, name, int(self._weights[name].shape[1]),
                                    self._device, scale_plane=scale_plane)
         if self._resource_check is not None:
-            self._resource_check("after_selected_encoder_factors:" + name)
+            self.check_preparation("after_selected_encoder_factors:" + name)
         self._memo[key] = kwargs
         return kwargs
 
     def _close_entry(self, entry):
         if entry.holder is not None:
             entry.holder.close()
-        entry.inputs = entry.hessian = entry.source = entry.holder = None
+        entry.inputs = entry.hessian = entry.source = entry.holder = entry.weight = None
 
     def _release(self, name):
         """Drop a unit's X, H, source, holder and encoder factors."""
@@ -578,6 +697,7 @@ class RowStream:
         A deadline stop, a failed batch or an empty menu leaves units the loop
         never needed; the run identity binds them all the same.
         """
+        self.release_prepared()
         started = self._clock()
         for name in list(self._live):
             self._release(name)
@@ -607,6 +727,7 @@ class RowStream:
         """Stop the readers and drop every resident entry; safe on any exit."""
         if self._closed:
             return
+        self.release_prepared()
         self._closed = True
         for future in self._inflight.values():
             future.cancel()

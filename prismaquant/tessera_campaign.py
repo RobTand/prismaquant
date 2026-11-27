@@ -4407,7 +4407,8 @@ def _main(argv, *, source_scope, waits) -> int:
     waits.before_gpu_work()
     if selected_source:
         from . import tessera_calibration_cache as calibration_store
-        if device == 'cuda':
+        if device == 'cuda' or (streaming_head and
+                os.environ.get('PRISMAQUANT_TESSERA_PREPARE_AHEAD') == '1'):
             from .memory_management import CaptureMemoryGuard
             selected_guard = CaptureMemoryGuard(device)
         source_authentication = source_scope.enter_context(
@@ -4731,8 +4732,7 @@ def _main(argv, *, source_scope, waits) -> int:
             # The plan beside it states deltas, so the receipt has to carry
             # the floor those deltas are over, measured in this row's own
             # process rather than assumed from another host's run
-            # (RobTand/prismaquant#390). None on a CPU row, where there is no
-            # guard and therefore no measurement to report.
+            # (RobTand/prismaquant#390). An unguarded row has no measurement.
             baseline=(None if selected_guard is None
                       else dict(selected_guard.baseline)),
             initialization_witness_origin='complete-canonical-capture',
@@ -5201,6 +5201,9 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
             memo_capacity=selected_resources['encoder_memo_capacity'],
             resource_check=None if selected_guard is None else selected_guard.check,
             wait_sink=waits.ledger.sink,
+            prepare_ahead_bytes=sum(value for key, value in
+                selected_resources.get('stream_phases', {}).get('stream_window', {}).items()
+                if want_h and key.startswith('ahead_')),
             factor_scratch_bytes=(selected_resources['phases']['resident_anchors']
                                   ['factorization_scratch_bytes']))
         source_scope.callback(row_stream.close)
@@ -5785,6 +5788,16 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
     started = time.time()
     deadline = float(publication.deadline_seconds)
     stopped_early = False
+
+    def prepare_next(item):
+        from .tessera_formats import tessera_served_wire_recipe
+        from .tessera_render import rung_accepts_hessian
+        name, family, rung = item
+        fmt = f'{family}_R{rung}'
+        wire = tessera_served_wire_recipe(family, rung, structure=(encode_structure or {}).get(name))
+        if rung_accepts_hessian(fmt, wire):
+            row_stream.prepare_next(name, wire.scale_plane)
+
     # Every (unit, format) whose last attempt failed to price, with its error.
     # The loop keeps pricing past a failure, so the round's successes are
     # journalled for the retry and a later round may still price the rung;
@@ -5948,6 +5961,8 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                     print("[campaign] deadline reached; stopping", flush=True)
                     # A deadline is a termination, so the staged bytes are written
                     # and journalled before the loop is left; they were paid for.
+                    if row_stream is not None:
+                        row_stream.release_prepared()
                     ledger.drain()
                     break
                 if row_stream is not None:
@@ -5956,6 +5971,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                     # refused entry raises here, outside the per-batch retry.
                     row_stream.admit(batch_index)
                 names = [item[0] for item in batch]
+                staged = None if row_stream is None else row_stream.take_prepared(names[0])
                 scoring_rows = (acts if row_stream is None else
                                 {name: row_stream.entry(name).inputs for name in names})
                 family, rung = batch[0][1:]
@@ -5969,7 +5985,8 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                     # carries the runtime's one-time first-use cost while later
                     # batches are the steady state the plan actually charges for
                     # (RobTand/prismaquant#390).
-                    selected_guard.check('before_selected_anchor_batch')
+                    check = selected_guard.check if row_stream is None else row_stream.check_preparation
+                    check('before_selected_anchor_batch')
                     batch_floor = selected_guard.last[
                         'conservative_cgroup_plus_cuda_reserved_bytes']
                 try:
@@ -5978,10 +5995,16 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                             ((_activation_kwargs_for if row_stream is None
                               else row_stream.encoder_kwargs) if want_h else None)),
                         hessian_required=want_h, publisher=publisher, profile=profile)
+                    if (row_stream is not None and row_stream.prepare_ahead_bytes
+                            and staged is None and batch_index + 1 < len(batches)):
+                        common['before_encode'] = functools.partial(prepare_next, batches[batch_index + 1][0])
+                    serial = names if staged is None else names[1:]
                     anchors = cell_measurement.measure_cells(
                         qnames=names,
-                        weights=[weights[name].to(device) for name in names],
-                        activations=[scoring_rows[name].to(device) for name in names],
+                        weights=([] if staged is None else [staged[0]]) +
+                                [weights[name].to(device) for name in serial],
+                        activations=([] if staged is None else [staged[1]]) +
+                                    [scoring_rows[name].to(device) for name in serial],
                         static_input_scales=static_scales,
                         structures=encode_structure, **common)
                 except (HessianContractError, _ActivationScaleContractError,
@@ -5996,6 +6019,8 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                 except Exception as exc:
                     if selected_guard is not None and selected_guard.failure is not None:
                         raise  # A physical memory refusal must stop the action.
+                    if row_stream is not None and staged is None:
+                        row_stream.release_prepared()
                     # A batch that raises part way through has already handed
                     # the writer files for its early units. Nothing records
                     # those units, so no receipt job follows and nothing is
@@ -6012,6 +6037,10 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                     for name in names:
                         anchor_failures[(name, fmt)] = f"{type(exc).__name__}: {exc}"
                     continue
+                finally:
+                    if staged is not None:
+                        staged = None
+                        row_stream.release_prepared()
                 if selected_guard is not None:
                     # With publication staging on, this upper bracket includes the
                     # staged CPU bytes of any batch the writer has not finished.
@@ -6019,7 +6048,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                     # belongs in the growth figure rather than being filtered out
                     # of it; the publisher's own budget and peak are stamped
                     # separately on the receipt so a reader can attribute it.
-                    selected_guard.check('after_selected_anchor_batch')
+                    check('after_selected_anchor_batch')
                     anchor_batch_growth.append(selected_guard.last[
                         'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
                 for anchor in anchors:

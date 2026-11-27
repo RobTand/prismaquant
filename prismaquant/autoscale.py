@@ -832,6 +832,14 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
             stream_finalize=dict(common,
                 export_input_page_window_bytes=export_inputs['export_input_page_window_bytes'],
                 publication_staging_bytes=int(publication_overlap_bytes)))
+        if os.environ.get('PRISMAQUANT_TESSERA_PREPARE_AHEAD') == '1':
+            # Count one extra W, X and H. Count transfer scratch separately.
+            transfer_bytes = widest_weight + widest_prefix + widest_h
+            stream_phases['stream_window'].update(
+                ahead_input_bytes=transfer_bytes,
+                ahead_transfer_scratch_bytes=transfer_bytes,
+                ahead_factor_bytes=encoding['encoder_memo_bytes'] // memo_capacity,
+                ahead_factorization_scratch_bytes=encoding['factorization_scratch_bytes'])
         stream = dict(stream_phases=stream_phases, stream_memory_bytes=max(
             sum(phase.values()) for phase in (preparation, *stream_phases.values())))
     return dict(schema='prismaquant.selected_anchor_resources.v2', phases=phases, **stream,

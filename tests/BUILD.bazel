@@ -21323,6 +21323,35 @@ pq_py_test(
 )
 
 pq_py_test(
+    name = "test_tessera_unit_prepare_ahead",
+    path = "tests/test_tessera_unit_prepare_ahead.py",
+    library = ":test_tessera_unit_prepare_ahead_lib",
+    deps = [
+        "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
+        "//:pqtel/__init__",
+        "//:prismaquant/lane_shipcard",
+        "//:prismaquant/shipcard_cli",
+        "//:tools/build_streamed_full_kl_teacher",
+        "//:tools/dsv4_wikitext_inputs",
+        "//:tools/full_kl_teacher_payload",
+        "//:tools/g3job/g3_pq_policy/__init__",
+        "//:tools/gold_engine_options",
+        "//:tools/gold_measurement_fidelity",
+        "//:tools/measure_served_gold",
+        "//:tools/measure_vllm_full_kl",
+        "//:tools/measure_vllm_wikitext_ppl",
+        "//:tools/pq_profile_child",
+        "//:tools/prepare_dsv4_wikitext_inputs",
+        "//:tools/prismaquant_source_bootstrap",
+        "//:tools/spec_decode_guard",
+        "//:tools/tessera_campaign_container",
+        "//:tools/tessera_fleet/__init__",
+        ":conftest",
+    ],
+    timeout = "moderate",
+)
+
+pq_py_test(
     name = "test_allocator_byte_budget_selection",
     path = "tests/test_allocator_byte_budget_selection.py",
     library = ":test_allocator_byte_budget_selection_lib",
@@ -35283,6 +35312,25 @@ pq_py_test(
         ":conftest",
     ],
     timeout = "moderate",
+)
+
+pq_py_library(
+    name = "test_tessera_unit_prepare_ahead_lib",
+    srcs = [
+        "test_tessera_unit_prepare_ahead.py",
+    ],
+    deps = [
+        "//:prismaquant/__init__",
+        "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/io_engine",
+        "//:prismaquant/memory_management",
+        "//:prismaquant/tessera_campaign_selection",
+        "//:prismaquant/tessera_hessian",
+        "@pq_pip//pytest",
+        "@pq_pip//safetensors",
+        "@pq_pip//tessera_quant",
+        "@pq_pip//torch",
+    ],
 )
 
 pq_py_library(
