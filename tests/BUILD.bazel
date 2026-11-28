@@ -43475,6 +43475,10 @@ pq_py_library(
     srcs = [
         "test_stageb_one_pass_spill.py",
     ],
+    data = [
+        "//:files/docs/measurements",
+        "test_stageb_one_pass_spill.py",
+    ],
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
