@@ -335,6 +335,17 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
     return payload, state
 
 
+def test_stage_b_capture_memory_record():
+    measurements = Path(__file__).resolve().parents[1] / "docs/measurements"
+    record = (measurements / "pq2883-stage-b-capture-memory.md").read_text()
+    w1 = (measurements / "pq2881-stage-b-allocation-snapshot.md").read_text()
+    workspace, = (line.split("|")[-2].strip() for line in w1.splitlines()
+                  if line.startswith("| cuBLAS workspace cache |"))
+    peak, = (line.split("|")[2].strip() for line in w1.splitlines()
+             if line.startswith("| Allocated |"))
+    assert f"The cuBLAS workspace cache held {workspace} of {peak} live bytes" in record
+
+
 def test_stage_b_allocation_snapshot_record(campaign, monkeypatch, tmp_path):
     import ctypes
     import gzip
