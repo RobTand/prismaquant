@@ -1207,6 +1207,56 @@ def test_stat_only_scoped_intake_accepts_a_linked_marker_when_an_out_of_scope_re
     assert data.cells[name, fmt]["render_origin"] == "synthesized_from_wire"
 
 
+def test_stat_only_scoped_intake_accepts_a_linked_marker_when_an_out_of_scope_receipt_is_malformed(
+        tmp_path, monkeypatch):
+    import builtins
+    import io
+    import os
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.render_cache_paths import cache_weight_filename
+
+    config, names, fmt, payload, states = fixture(tmp_path)
+    name, omitted = sorted(names)
+    checkpoint = Path(config["merged_checkpoint"]["path"])
+    unit_path(checkpoint.with_name(checkpoint.name + ".parts"), omitted).write_bytes(b"invalid receipt")
+    record = states[name]["wire_records"][fmt]
+    cache = tmp_path / "campaign/rows/row-0000/cache"
+    marker = bridge._render_origin_marker_path(cache / cache_weight_filename(name, fmt))
+    metadata = tmp_path / "origin.json"
+    metadata.write_text(json.dumps({"schema": bridge.RENDER_ORIGIN_SCHEMA,
+        "render_origin": "synthesized_from_wire", "unit": name, "format_name": fmt,
+        "wire_file": record["file"], "wire_sha256": record["blob_sha256"]}))
+    marker.symlink_to(metadata)
+    payloads = [*cache.glob("*.pt"), *Path(payload["provenance"]["wire_dir"]).glob("*.tessera")]
+
+    def guard(real_open):
+        def open_metadata(file, *args, **kwargs):
+            if not isinstance(file, int):
+                path = Path(os.fsdecode(file))
+                assert not path.exists() or not any(path.samefile(p) for p in payloads), (
+                    "The scoped walk opened a payload.")
+            return real_open(file, *args, **kwargs)
+        return open_metadata
+
+    for module in (builtins, io, os):
+        monkeypatch.setattr(module, "open", guard(module.open))
+
+    def load_scope():
+        return bridge.load_measured_anchor_input(config, unit_scope=(0, 1), verify_payloads=False,
+                                                 require_existing_renders=True)
+
+    try:
+        data = load_scope()
+    except (RuntimeError, ValueError) as exc:
+        raise AssertionError("The scoped walk refused the metadata link.") from exc
+    assert data.cells[name, fmt]["render_origin"] == "synthesized_from_wire"
+
+    marker.unlink()
+    marker.symlink_to(cache / cache_weight_filename(omitted, fmt))
+    with pytest.raises(ValueError, match="render origin marker.*names a payload"):
+        load_scope()
+
+
 def test_stat_only_scoped_intake_treats_a_dangling_marker_link_as_no_marker(tmp_path):
     from prismaquant import tessera_joint_aura as bridge
     from prismaquant.render_cache_paths import cache_weight_filename

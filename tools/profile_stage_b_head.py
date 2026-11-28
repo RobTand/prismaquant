@@ -178,8 +178,10 @@ def _load_scoped_walk(config, scope, workers, metadata_memo=None, defer_render_o
     return data, started
 
 
-class _RenderDigestMismatch(ValueError):
-    pass
+class _RenderHashRefusal(ValueError):
+    def __init__(self, reason, path):
+        super().__init__(f"{reason}: {path}")
+        self.reason = reason
 
 
 def _payload_totals(progress):
@@ -276,29 +278,31 @@ def render_sample_intake(config, *, manifest, scope, workers, hash_workers, tria
     def measure(item):
         pair, path, signature = item
         remaining = signature[2]
-        changed = f"render changed: {path}"
         try:
             flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
             with os.fdopen(os.open(path, flags), "rb", buffering=0) as handle:
-                require(file_stat_signature(os.fstat(handle.fileno())) ==
-                        file_stat_signature(path.lstat()) == signature, changed)
+                if not (file_stat_signature(os.fstat(handle.fileno())) ==
+                        file_stat_signature(path.lstat()) == signature):
+                    raise _RenderHashRefusal("render changed", path)
 
                 def chunks():
                     nonlocal remaining
                     while remaining:
                         chunk = handle.read(min(remaining, digests.FILE_BLOCK_BYTES))
-                        require(bool(chunk), f"render is short: {path}")
+                        if not chunk:
+                            raise _RenderHashRefusal("render is short", path)
                         remaining -= len(chunk)
                         progress[trial, pair] = signature[2] - remaining
                         yield chunk
 
                 sha256 = digests.chunks_sha256hex(chunks())
-                require(file_stat_signature(os.fstat(handle.fileno())) ==
-                        file_stat_signature(path.lstat()) == signature, changed)
+                if not (file_stat_signature(os.fstat(handle.fileno())) ==
+                        file_stat_signature(path.lstat()) == signature):
+                    raise _RenderHashRefusal("render changed", path)
         except FileNotFoundError as exc:
-            raise ValueError(f"render changed or is missing: {path}") from exc
+            raise _RenderHashRefusal("render changed or is missing", path) from exc
         if expected and sha256 != expected[pair]:
-            raise _RenderDigestMismatch(f"render digest mismatch: {path}")
+            raise _RenderHashRefusal("render digest mismatch", path)
         return {"cell": list(pair), "sha256": sha256, "bytes": signature[2] - remaining}
 
     hash_started = time.monotonic()
@@ -547,9 +551,9 @@ def render_sample_profile(args, scope) -> int:
                             "interval_s": args.guard_interval_s, "trace": trace}}
         if time.monotonic() - wall_before >= args.deadline_s:
             stop("deadline")
-    except _RenderDigestMismatch as exc:
+    except _RenderHashRefusal as exc:
         status, prefix = 1, "STAGE_B_HEAD_PROFILE_REFUSED"
-        report = {**context, "reason": "render digest mismatch", "detail": str(exc),
+        report = {**context, "reason": exc.reason, "detail": str(exc),
                   **_payload_totals(progress)}
     finally:
         deadline.request_stop()

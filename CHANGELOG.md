@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+- Keep stat-only scoped intake available when an unselected receipt is malformed (#5386). Report the files and bytes read when render hashing fails. Part of #2876.
+  Base revision: `997127869d4e5cc0783d169070cbfeb0d649f737`.
+  - `tests/test_tessera_joint_aura.py::test_stat_only_scoped_intake_accepts_a_linked_marker_when_an_out_of_scope_receipt_is_malformed`: Failed with `AssertionError: The scoped walk refused the metadata link.`
+  - `tests/test_profile_render_sample.py::test_cli_reports_a_changed_short_or_missing_render_with_the_payload_read_so_far[changed]`: Failed with `AssertionError: The CLI did not report the render refusal.`
+  - `tests/test_profile_render_sample.py::test_cli_reports_a_changed_short_or_missing_render_with_the_payload_read_so_far[short]`: Failed with `AssertionError: The CLI did not report the render refusal.`
+  - `tests/test_profile_render_sample.py::test_cli_reports_a_changed_short_or_missing_render_with_the_payload_read_so_far[removed]`: Failed with `AssertionError: The CLI did not report the render refusal.`
+
+  The CPU test box passed all 35 cases below on the change. See `scoped-intake-render-refusal.log`.
+  - `tests/test_tessera_joint_aura.py::test_stat_only_scoped_intake_accepts_a_linked_marker_when_an_out_of_scope_receipt_is_malformed`
+  - `tests/test_tessera_joint_aura.py::test_stat_only_scoped_intake_accepts_a_linked_marker_when_an_out_of_scope_receipt_is_missing`
+  - `tests/test_tessera_joint_aura.py::test_stat_only_scoped_intake_accepts_linked_marker_metadata_in_the_wire_directory[symlink]`
+  - `tests/test_tessera_joint_aura.py::test_stat_only_scoped_intake_accepts_linked_marker_metadata_in_the_wire_directory[hardlink]`
+  - `tests/test_tessera_joint_aura.py::test_stat_only_scoped_intake_treats_a_dangling_marker_link_as_no_marker`
+  - `tests/test_profile_render_sample.py::test_cli_reports_a_changed_short_or_missing_render_with_the_payload_read_so_far[changed]`
+  - `tests/test_profile_render_sample.py::test_cli_reports_a_changed_short_or_missing_render_with_the_payload_read_so_far[short]`
+  - `tests/test_profile_render_sample.py::test_cli_reports_a_changed_short_or_missing_render_with_the_payload_read_so_far[removed]`
+  - `tests/test_profile_render_sample.py::test_cli_reports_a_digest_mismatch_with_the_payload_read_so_far`
+  - `tests/test_profile_render_sample.py::test_cli_stop_record_gives_the_payload_read_so_far[deadline]`
+  - `tests/test_profile_render_sample.py::test_cli_stop_record_gives_the_payload_read_so_far[read-guard]`
+  - `tests/test_profile_render_sample.py::test_cli_stop_record_gives_the_payload_read_so_far[SIGTERM]`
+  - `tests/test_profile_scoped_walk_1492.py::test_render_sample_refuses_a_file_changed_during_hashing[extend]`
+  - `tests/test_profile_scoped_walk_1492.py::test_render_sample_refuses_a_file_changed_during_hashing[replace]`
+  - `tests/test_profile_scoped_walk_1492.py::test_render_sample_counts_every_read_when_an_unselected_render_links_to_its_marker`
+  - `tests/test_duplication_baseline.py::test_a_consolidated_helper_is_defined_only_in_its_owner[file_sha256hex-prismaquant/digests.py]`
+  - `tests/test_duplication_baseline.py::test_a_consolidated_helper_is_defined_only_in_its_owner[_canon_fmt-prismaquant/streaming_production_cache.py]`
+  - `tests/test_duplication_baseline.py::test_a_consolidated_helper_is_defined_only_in_its_owner[nvfp4_activation_qdq_served-prismaquant/nvfp4_activation_contract.py]`
+  - `tests/test_duplication_baseline.py::test_a_consolidated_helper_is_defined_only_in_its_owner[_optional_str-prismaquant/model_profiles/structure.py]`
+  - `tests/test_duplication_baseline.py::test_a_consolidated_helper_is_defined_only_in_its_owner[sha256-prismaquant/tessera_calibration_cache.py]`
+  - `tests/test_duplication_baseline.py::test_a_consolidated_helper_is_defined_only_in_its_owner[sha-tools/benchmarks/joint_validation_pair.py]`
+  - `tests/test_duplication_baseline.py::test_a_digest_free_module_has_no_primitive_digest_site[tools/measure_served_gold.py]`
+  - `tests/test_duplication_baseline.py::test_a_digest_free_module_has_no_primitive_digest_site[prismaquant/visual_linears.py]`
+  - `tests/test_duplication_baseline.py::test_a_digest_free_module_has_no_primitive_digest_site[prismaquant/stage_a_chain_resume.py]`
+  - `tests/test_duplication_baseline.py::test_a_digest_free_module_has_no_primitive_digest_site[prismaquant/tessera_census_cache.py]`
+  - `tests/test_duplication_baseline.py::test_a_digest_free_module_has_no_primitive_digest_site[tools/tessera_campaign_container.py]`
+  - `tests/test_duplication_baseline.py::test_a_digest_free_module_has_no_primitive_digest_site[prismaquant/joint_prewarm_phases.py]`
+  - `tests/test_duplication_baseline.py::test_a_digest_free_module_has_no_primitive_digest_site[tools/full_kl_teacher_payload.py]`
+  - `tests/test_duplication_baseline.py::test_scanner_finds_a_renamed_copy_and_ignores_same_file_pairs`
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[False]`
+  - `tests/test_duplication_baseline.py::test_duplication_only_shrinks[True]`
+  - `tests/test_duplication_baseline.py::test_must_differ_pairs_are_live_and_give_a_reason`
+  - `tests/test_duplication_baseline.py::test_the_digest_site_ratchet_fails_on_a_new_raw_site_and_passes_the_owner`
+  - `tests/test_duplication_baseline.py::test_image_side_patch_scripts_are_outside_the_scan_and_their_loader_is_not`
+  - `tests/test_duplication_baseline.py::test_shared_stdlib_core_has_an_independent_helper_namespace`
+
 - Set `PRISMAQUANT_TESSERA_PREPARE_AHEAD=1` to prepare one next unit during a streaming campaign encode (#2955). Set it to `0` for serial Hessian preparation.
   At base `8af79528d14336852f3cfc48293b21256775a260`, `tests/test_tessera_unit_prepare_ahead.py::test_next_preparation_overlaps_encode` failed at `assert overlap == [True]`. The result was `[False]`.
   The Flux GB10 check passed `tests/test_tessera_unit_prepare_ahead.py::test_cuda_prepared_storage_and_events[encode]` and `tests/test_tessera_unit_prepare_ahead.py::test_cuda_prepared_storage_and_events[unused]`. See `prepare-ahead.log` and `prepare-ahead.xml` in the check output.
