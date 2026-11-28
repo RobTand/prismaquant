@@ -335,6 +335,246 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
     return payload, state
 
 
+def test_stage_b_allocation_snapshot_record(campaign, monkeypatch, tmp_path):
+    import ctypes
+    import gzip
+    import pickle
+    import weakref
+    from collections import Counter
+
+    from prismaquant.stage_b_pass_profile import PROFILE_ENV, SPEC_ENV, PassProfileSession
+
+    record = (Path(__file__).resolve().parents[1] / "docs" / "measurements"
+              / "pq2881-stage-b-allocation-snapshot.md").read_text()
+    spec = "capture=0,windowed=none,wait=0,warmup=0,active=1,memory_group=0,memory_entries=100000"
+    assert spec in record
+    assert campaign.device.type == "cuda"
+    device = torch.cuda.current_device()
+    output_root = Path(os.environ.get("TL3B_OUT", tmp_path))
+    out = Path(os.environ.get("PQ2881_OUT", output_root / "pq2881"))
+    monkeypatch.setenv(PROFILE_ENV, str(out))
+    monkeypatch.setenv(SPEC_ENV, spec)
+    snapshot = torch.cuda.memory._snapshot
+    saved, held, phases, saved_at_forward, operands = [], [], {}, [], []
+    session = None
+
+    def storage(tensor):
+        data = tensor.untyped_storage()
+        return {"addr": data.data_ptr(), "bytes": data.nbytes(),
+                "shape": list(tensor.shape), "stride": list(tensor.stride()),
+                "dtype": str(tensor.dtype)}
+
+    def sample(phase):
+        free, total = torch.cuda.mem_get_info(device)
+        phases[phase] = (snapshot(), total - free)
+
+    def start(profile):
+        nonlocal session
+        session = profile
+        sample("start")
+        memory_start(profile)
+
+    def pack(tensor):
+        detached = tensor.detach()
+        if tensor.is_cuda:
+            saved.append((storage(tensor), weakref.ref(detached)))
+        return detached
+
+    def isolated(runner, *args, **kwargs):
+        if session is None or not session._memory_on:
+            return isolated_layer(runner, *args, **kwargs)
+        with torch.autograd.graph.saved_tensors_hooks(pack, lambda tensor: tensor):
+            result = isolated_layer(runner, *args, **kwargs)
+        saved_at_forward.extend(info for info, ref in saved if ref() is not None)
+        sample("forward_end")
+        return result
+
+    def observe(observer, name, weight, x, output, *args, **kwargs):
+        observe_spill(observer, name, weight, x, output, *args, **kwargs)
+        if session is not None and session._memory_on and output.requires_grad:
+            held.append({"name": name, **storage(x)})
+
+    def stop(profile, status):
+        sample("end")
+        memory_stop(profile, status)
+
+    grouped_mm = F.grouped_mm
+
+    def grouped(inputs, weight, *, offs, **kwargs):
+        if session is not None and session._memory_on:
+            operands.append([storage(t) for t in (inputs, weight, offs)])
+        return grouped_mm(inputs, weight, offs=offs, **kwargs)
+
+    monkeypatch.setattr(F, "grouped_mm", grouped)
+    memory_start, memory_stop = PassProfileSession._memory_start, PassProfileSession._memory_stop
+    isolated_layer, observe_spill = StreamedCausalLM.isolated_layer, spill_mod._SpillObserver._observe
+    monkeypatch.setattr(PassProfileSession, "_memory_start", start)
+    monkeypatch.setattr(PassProfileSession, "_memory_stop", stop)
+    monkeypatch.setattr(StreamedCausalLM, "isolated_layer", isolated)
+    monkeypatch.setattr(spill_mod._SpillObserver, "_observe", observe)
+    layer = 1
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "spill", needs_direct_io=False),
+                              ceiling=1 << 30, regime="capture_batch=2")
+    assert payload is not None, _chain(state.error)
+    timing, = out.glob("*.timing.json")
+    raw, = out.glob("*.memory_snapshot.pickle")
+    trace, = out.glob("*.trace.json.gz")
+    timing_record = json.loads(timing.read_text())
+    memory = timing_record["memory"]
+    assert f"`{raw.name}`" in record
+    assert f"probe {timing_record['probe']}, group {memory['group']}" in record
+    assert f"shape `{memory['input']['shape']}`" in record
+    recorded_ends = {}
+    for label in ("Allocated", "Reserved"):
+        row, = (line for line in record.splitlines() if line.startswith(f"| {label} |"))
+        replay, counter, residual, replay_end, recorded_ends[label] = (
+            int(cell.replace(",", "")) for cell in row.split("|")[2:-1])
+        assert counter - replay == residual
+        if label == "Reserved":
+            assert residual == 0 and replay_end == recorded_ends[label]
+    active, inactive = (int(line.rsplit("|", 2)[1].replace(",", ""))
+                        for line in record.splitlines()
+                        if line.startswith(("| Active allocated |", "| Inactive |")))
+    assert active == recorded_ends["Allocated"]
+    assert active + inactive == recorded_ends["Reserved"]
+    assert memory["status"] == memory["history_status"] == "complete"
+    with raw.open("rb") as source:
+        events = pickle.load(source)["device_traces"][device]
+    with gzip.open(trace, "rt") as source:
+        spans = json.load(source)["traceEvents"]
+    kernels = [event for event in spans if event.get("cat") == "kernel"]
+    assert kernels, "The trace has no CUDA kernels."
+    assert saved and held
+    assert all(ref() is None for _, ref in saved)
+    (out / "roles.json").write_text(json.dumps({"saved": [info for info, _ in saved], "held": held}))
+
+    def segments(phase):
+        return [seg for seg in phases[phase][0]["segments"] if seg["device"] == device]
+
+    def blocks(phase):
+        return {block["address"]: block for seg in segments(phase) for block in seg["blocks"]}
+
+    torch.cuda.synchronize(device)
+    sample("before_workspace_clear")
+    torch._C._cuda_clearCublasWorkspaces()
+    sample("after_workspace_clear")
+    before_clear = blocks("before_workspace_clear")
+    after_clear = blocks("after_workspace_clear")
+    freed = {event["addr"] for event in events if event["action"] == "free_requested"}
+    workspaces = {
+        addr: block["size"] for addr, block in blocks("start").items()
+        if block["state"] == "active_allocated" and addr not in freed
+        and before_clear.get(addr) == block
+        and after_clear.get(addr, {}).get("state") != "active_allocated"
+    }
+    with (out / "phases.pickle").open("wb") as destination:
+        pickle.dump(phases, destination)
+    assert workspaces, "No entry block matches a released cuBLAS workspace."
+
+    def fragmentation(phase):
+        by_state = {}
+        for block in blocks(phase).values():
+            state = block["state"]
+            by_state[state] = by_state.get(state, 0) + block["size"]
+            if state == "active_allocated":
+                slack = block["size"] - block["requested_size"]
+                by_state["rounding"] = by_state.get("rounding", 0) + slack
+        by_state["inactive_split"] = sum(
+            block["size"] for seg in segments(phase) if seg["active_size"]
+            for block in seg["blocks"] if block["state"] == "inactive")
+        return by_state
+
+    live = {addr: (-1, block["size"], block["frames"]) for addr, block in blocks("start").items()
+            if block["state"] == "active_allocated"}
+    allocated = sum(entry[1] for entry in live.values())
+    reserved = sum(seg["total_size"] for seg in segments("start"))
+    peak = (allocated, live.copy())
+    reserved_peak = reserved
+    at_forward = len(phases["forward_end"][0]["device_traces"][device])
+    forward = {}
+    for i, event in enumerate(events):
+        action, size = event["action"], event["size"]
+        if action == "alloc":
+            live[event["addr"]] = (i, size, event["frames"])
+            allocated += size
+            if allocated > peak[0]:
+                peak = (allocated, live.copy())
+        elif action == "free_requested":
+            allocated -= live.pop(event["addr"])[1]
+        elif action in {"segment_alloc", "segment_map"}:
+            reserved += size
+            reserved_peak = max(reserved, reserved_peak)
+        elif action in {"segment_free", "segment_unmap"}:
+            reserved -= size
+        if i + 1 == at_forward:
+            forward = live.copy()
+
+    saved_addresses = {info["addr"] for info in saved_at_forward if info["bytes"]}
+    held_addresses = {info["addr"] for info in held if info["bytes"]}
+
+    def owners(live_set):
+        totals = {}
+        for addr, (index, size, _) in live_set.items():
+            matched = addr in forward and forward[addr][0] == index
+            autograd = matched and addr in saved_addresses
+            spill = matched and addr in held_addresses
+            label = ("both" if autograd and spill else "saved" if autograd else
+                     "spill" if spill else "workspace" if index == -1 and addr in workspaces else
+                     "baseline" if index == -1 else "other")
+            totals[label] = totals.get(label, 0) + size
+        return totals
+
+    assert forward.keys() == {addr for addr, block in blocks("forward_end").items()
+                              if block["state"] == "active_allocated"}
+    assert saved_addresses | held_addresses <= forward.keys()
+    assert operands
+    launches = {event["args"]["correlation"]: event for event in spans
+                if event.get("cat") == "cuda_driver" and event["name"] == "cuLaunchKernel"}
+    dispatch = []
+    for kernel in kernels:
+        if "cutlass_80" not in kernel["name"]:
+            continue
+        correlation = kernel["args"]["correlation"]
+        launch = launches[correlation]
+        enclosing = sorted((event for event in spans if event.get("cat") == "cpu_op"
+                            and event["tid"] == launch["tid"]
+                            and event["ts"] <= launch["ts"] < event["ts"] + event["dur"]),
+                           key=lambda event: event["ts"])
+        dispatch.append({"kernel": kernel["name"], "correlation": correlation,
+                         "ops": [{"name": op["name"], "args": op["args"]} for op in enclosing]})
+    assert dispatch
+    cublas = ctypes.CDLL("libcublas.so.13")
+    version = []
+    for prop in range(3):
+        value = ctypes.c_int()
+        assert cublas.cublasGetProperty(prop, ctypes.byref(value)) == 0
+        version.append(value.value)
+    report = {"events": len(events), "cuda_kernels": len(kernels),
+              "cublas_version": version, "workspace_blocks": sorted(workspaces.values()),
+              "allocated_history": [peak[0], allocated],
+              "reserved_history": [reserved_peak, reserved],
+              "peak_owners": owners(peak[1]), "forward_owners": owners(forward),
+              "phase_blocks": {phase: fragmentation(phase) for phase in phases},
+              "device_used": {phase: used for phase, (_, used) in phases.items()},
+              "peak_blocks": sorted(peak[1].values(), key=lambda entry: -entry[1]),
+              "dispatch": dispatch, "grouped_operands": operands,
+              "allocator": torch.cuda.get_allocator_backend()}
+    (out / "attribution.json").write_text(json.dumps(report, indent=1))
+    print(f"{timing.name}: {memory}")
+    print({key: value for key, value in report.items()
+           if key not in {"dispatch", "peak_blocks", "grouped_operands"}})
+    for signature, count in Counter(
+            tuple((op["name"], json.dumps([op["args"][key] for key in
+                                          ("Input Dims", "Input Strides", "Input type")],
+                                         separators=(",", ":")))
+                  for op in entry["ops"] if op["name"] in
+                  {"aten::mm", "aten::_grouped_mm", "aten::linear", "MmBackward0", "GroupedMmBackward0"})
+            for entry in dispatch).items():
+        print("Operands", count, *(f"{name}={args}" for name, args in signature))
+
+
 class _RecordingGuard:
     """The capture guard's admission contract, admitting everything.
 
