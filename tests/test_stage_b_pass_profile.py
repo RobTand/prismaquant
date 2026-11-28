@@ -498,6 +498,22 @@ def test_full_history_buffer_reports_incomplete_coverage(tmp_path, monkeypatch, 
     assert memory.get("history_status") == "incomplete"
 
 
+@pytest.mark.parametrize("selected_trace, expected", [
+    ([], "incomplete"),
+    ([{"action": "alloc"}], "complete"),
+])
+def test_history_coverage_uses_the_capture_device(
+        tmp_path, monkeypatch, memory_spy, selected_trace, expected):
+    other_trace = [{"action": "alloc"}] * 4 if selected_trace else []
+    monkeypatch.setattr(torch.cuda.memory, "_snapshot", lambda: {
+        "device_traces": [other_trace, selected_trace],
+    })
+    session = _memory_request(tmp_path, "memory_group=1,memory_entries=4").session(
+        kind="capture", probe=1, identity={}, capture_device="cuda:1")
+    _run_memory_groups(session, monkeypatch, memory_spy)
+    assert _memory_timing(tmp_path)["memory"]["history_status"] == expected
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA (allocator)")
 def test_cuda_memory_snapshot_of_the_selected_group(tmp_path):
     import pickle
