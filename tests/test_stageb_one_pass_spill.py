@@ -191,13 +191,17 @@ def _prepared(model, context, runner, weights, root):
 
 
 @pytest.fixture(scope="module")
-def campaign(tmp_path_factory):
+def campaign(tmp_path_factory, request):
     """One stage A capture and the sealed records both replays consume."""
     from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
     from prismaquant.joint_statistics_replay import preflight_joint_operator_admission
 
     root = tmp_path_factory.mktemp("spill-campaign")
     device = _device()
+    calib_ids = _calibration()
+    if (samples := getattr(request, "param", None)) is not None:
+        calib_ids = calib_ids[:samples]
+        calib_ids[:, 0] = torch.arange(1, samples + 1)
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
         patch.setenv("PRISMAQUANT_DEV_MODE", "1")
@@ -220,7 +224,7 @@ def campaign(tmp_path_factory):
         output_root = root / "campaign"
         _model_a, _context_a, runner_a = _runner(state, device)
         receipt = run_adjoint_capture_core(
-            runner_a, _calibration(), execution=_execution(root / "exec"),
+            runner_a, calib_ids, execution=_execution(root / "exec"),
             output_root=output_root, stride=2,
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=rt._hex("a"), plan_sha256=rt._hex("d"),
@@ -246,7 +250,7 @@ def campaign(tmp_path_factory):
         records[layer] = record
     return SimpleNamespace(root=root, state=state, weights=weights, receipt=receipt,
                            records=records, slices=slices, output_root=output_root, device=device,
-                           formats_by_qname=formats_by_qname, preflight=preflight)
+                           formats_by_qname=formats_by_qname, preflight=preflight, calib_ids=calib_ids)
 
 
 def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
@@ -1509,6 +1513,89 @@ def test_batched_spill_capture_is_stamped_and_reruns_bitwise(campaign, monkeypat
     _report(f"batched-rerun-{campaign.device.type}", {
         "regime": regime, "evidence": runs[0][0],
         "route_moves": sum(abs(batched[name] - single[name]) for name in single)})
+
+
+@pytest.mark.parametrize("campaign", [3], indirect=True)
+def test_partial_capture_group_orders_targets_and_cotangents_and_cleans_up(
+        campaign, monkeypatch, tmp_path):
+    from contextlib import contextmanager, nullcontext
+
+    from prismaquant.joint_adjoint_checkpoints import PlaneHostStaging
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
+
+    targets, writes, observers, stages = [], [], [], []
+    fault = RuntimeError("Stop after the partial capture group.")
+    observe = spill_mod._SpillObserver._observe
+    isolated_layer = StreamedCausalLM.isolated_layer
+    store = PlaneHostStaging.store
+
+    # Test capture without a disk backend. This test does not check spill I/O.
+    class MemorySink(nullcontext):
+        telemetry = {"replay_reclaims": 0, "replay_reclaimed_bytes": 0}
+
+        def __init__(self, **kwargs):
+            super().__init__(self)
+
+        @contextmanager
+        def capture(self, probe, modules, specs, **kwargs):
+            with spill_mod._SpillObserver(self, modules, specs, **kwargs) as observer:
+                observers.append(observer)
+                observer.begin_probe()
+                yield observer
+
+        def _record(self, *args, **kwargs):
+            pass
+
+        def _end_batch(self):
+            pass
+
+        def close_replay_stream(self):
+            pass
+
+    def record_target(self, name, weight, x, output, *args):
+        targets.append((self.capture_batch, name, x.shape[0]))
+        return observe(self, name, weight, x, output, *args)
+
+    def stop_after_partial_group(self, keys, rows, gradient):
+        store(self, keys, rows, gradient)
+        if keys == [(0, 2)]:
+            assert self._buffer is not None
+            stages.append(self)
+            raise fault
+
+    def mark_cotangents(self, batch, layer, hidden, *, pass_state):
+        if layer == 0:
+            markers = batch.input_ids[:, :1, None]
+            hidden.register_hook(lambda grad: markers.to(grad).expand_as(grad).contiguous())
+        return isolated_layer(self, batch, layer, hidden, pass_state=pass_state)
+
+    class RecordingPlane(dict):
+        def __setitem__(self, key, value):
+            super().__setitem__(key, value)
+            if not targets:
+                return
+            writes.append(key)
+            assert torch.equal(value, torch.full_like(value, key[1] + 1))
+
+    monkeypatch.setitem(globals(), "_calibration", lambda: campaign.calib_ids)
+    monkeypatch.setattr(spill_mod, "StageBReplaySpill", MemorySink)
+    monkeypatch.setattr(spill_mod._SpillObserver, "_observe", record_target)
+    monkeypatch.setattr(PlaneHostStaging, "store", stop_after_partial_group)
+    monkeypatch.setattr(StreamedCausalLM, "isolated_layer", mark_cotangents)
+    monkeypatch.setattr(StreamedBoundaryArtifacts, "checkpoint_cotangent_sink",
+                        lambda self, records: RecordingPlane())
+    payload, state = _quantum(campaign, monkeypatch, layer=0, spill_root=tmp_path,
+                              ceiling=1 << 30, regime="capture_batch=2")
+    assert payload is None and state.error is fault, _chain(getattr(state, "error", None))
+    shared_targets = [(group, name.rsplit(".", 1)[-1], tokens)
+                      for group, name, tokens in targets if ".shared_expert." in name]
+    assert shared_targets == [(group, name, tokens) for group, tokens in [(0, 16), (1, 8)]
+                              for name in ("gate_proj", "up_proj", "down_proj")]
+    assert writes == [(0, 0), (0, 1), (0, 2)]
+    observer, = observers
+    assert not observer.active and not observer.handles and not observer.forward_originals
+    stage, = stages
+    assert stage._buffer is None
 
 
 def test_capture_pass_charges_the_planned_workspace_per_stored_batch(campaign, monkeypatch,
