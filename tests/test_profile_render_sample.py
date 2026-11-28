@@ -183,6 +183,69 @@ def test_cli_reports_a_digest_mismatch_with_the_payload_read_so_far(sample_args,
     assert (report["payload_files"], report["payload_bytes"]) == (1, len(b"inert render"))
 
 
+@pytest.mark.parametrize("failure,reason", [
+    pytest.param("changed", "render changed", id="changed"),
+    pytest.param("short", "render is short", id="short"),
+    pytest.param("removed", "render changed or is missing", id="removed"),
+])
+def test_cli_reports_a_changed_short_or_missing_render_with_the_payload_read_so_far(
+        sample_args, tmp_path, monkeypatch, capsys, failure, reason):
+    from prismaquant import digests
+    from prismaquant.render_cache_paths import cache_weight_filename
+
+    manifest = Path(sample_args[sample_args.index("--sample-manifest") + 1])
+    cache = tmp_path / "campaign/rows/row-0000/cache"
+    paths = [cache / cache_weight_filename(*cell) for cell in json.loads(manifest.read_text())["cells"]]
+    sample_args[sample_args.index("--file-hash-workers") + 1] = "1"
+    if failure == "changed":
+        drive = cost_stage_checkpoint._drive_ordered_units
+
+        def change_before_read(plan, *args, **kwargs):
+            os.truncate(paths[0], paths[0].stat().st_size + 1)
+            return drive(plan, *args, **kwargs)
+
+        monkeypatch.setattr(cost_stage_checkpoint, "_drive_ordered_units", change_before_read)
+        counts = (0, 0)
+    elif failure == "short":
+        fdopen = os.fdopen
+        partial = 5
+
+        @contextmanager
+        def short_read(*args, **kwargs):
+            with fdopen(*args, **kwargs) as handle:
+                if kwargs.get("buffering") != 0:
+                    yield handle
+                    return
+                yield Mock(wraps=handle, read=Mock(side_effect=[handle.read(partial), b""]))
+
+        monkeypatch.setattr(os, "fdopen", short_read)
+        counts = (1, partial)
+    else:
+        digest = digests.chunks_sha256hex
+        reads = iter(paths)
+
+        def remove_after_read(chunks):
+            result = digest(chunks)
+            path = next(reads)
+            if path == paths[-1]:
+                path.unlink()
+            return result
+
+        monkeypatch.setattr(digests, "chunks_sha256hex", remove_after_read)
+        counts = (len(paths), sum(path.stat().st_size for path in paths))
+
+    try:
+        status = head.main(sample_args)
+    except ValueError as exc:
+        raise AssertionError("The CLI did not report the render refusal.") from exc
+    assert status == 1
+    prefix, _, payload = capsys.readouterr().out.strip().partition(" ")
+    assert prefix == "STAGE_B_HEAD_PROFILE_REFUSED"
+    report = json.loads(payload)
+    assert report["reason"] == reason
+    assert (report["payload_files"], report["payload_bytes"]) == counts
+
+
 @pytest.mark.parametrize("reason", ["deadline", "read-guard", "SIGTERM"])
 def test_cli_stop_record_gives_the_payload_read_so_far(sample_args, reason):
     sample_args[sample_args.index("--file-hash-workers") + 1] = "1"

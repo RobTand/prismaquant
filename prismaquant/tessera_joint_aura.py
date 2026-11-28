@@ -1218,13 +1218,15 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         scoped_names = set(roster)
         for name in sorted(names):
             receipt = unit_path(parts, name)
+            optional_receipt = stat_only_scope and defer_render_origins is None and name not in scoped_names
             try:
-                if defer_render_origins is None and name not in scoped_names:
+                if optional_receipt:
                     receipt.lstat()
-            except FileNotFoundError:
-                pass
-            else:
                 state = _load_unit(receipt, stage=STAGE, qname=name, identity_sha256=seal)
+            except (FileNotFoundError, RuntimeError):
+                if not optional_receipt:
+                    raise
+            else:
                 for record in state["wire_records"].values():
                     yield wire_dir_resolved / wire_filename(name, record)
             cache = owner_roots[str(owners[name])] / "cache"
