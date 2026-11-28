@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Record allocator history for one Stage B capture group (#2881).
+  The timing record includes tensor layouts, stored batch indices, and allocator peaks.
+  Use the Flux GB10 test box for the two allocator unit cases.
+  Use small CUDA tensors and one backward call.
+  CPU tests cannot check CUDA allocation stacks, frees, or peak counters.
+  Allow one minute of GPU time. Do not run a model checkpoint or a shadow pass.
+  The first Flux run passed the bounded snapshot case.
+  See `pq2881-validation.log` and `pq2881-cuda` in the Flux output.
+  The next Flux run passed `test_cuda_memory_history_covers_forward_and_backward`.
+  See `pq2881-forward-backward.log` and `pq2881-forward-backward` in the Flux output.
+  These runs do not establish serving or numerical qualification.
+
 - Keep stat-only scoped intake available when an unselected receipt is malformed (#5386). Report the files and bytes read when render hashing fails. Part of #2876.
   Base revision: `997127869d4e5cc0783d169070cbfeb0d649f737`.
   - `tests/test_tessera_joint_aura.py::test_stat_only_scoped_intake_accepts_a_linked_marker_when_an_out_of_scope_receipt_is_malformed`: Failed with `AssertionError: The scoped walk refused the metadata link.`

@@ -969,6 +969,49 @@ def test_render_pass_profile_times_each_probe_of_its_window_and_changes_no_byte(
         replay["read_calls"])
 
 
+@pytest.mark.parametrize("batch_size", [1, 2])
+def test_snapshot_profiles_one_capture_group_without_changing_costs(
+        campaign, monkeypatch, tmp_path, batch_size):
+    from prismaquant.stage_b_pass_profile import PROFILE_ENV, SPEC_ENV
+
+    layer = 0
+    regime = f"capture_batch={batch_size}"
+    monkeypatch.setenv("PQ_STAGE_B_SPILL_TEST_ROOT",
+                       os.environ.get("PQ_STAGE_B_SPILL_TEST_ROOT") or str(tmp_path))
+    monkeypatch.delenv(PROFILE_ENV, raising=False)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, regime=regime,
+                              spill_root=_spill_root(tmp_path / "plain"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    plain = _evidence(campaign, layer, payload)
+
+    profile_dir = tmp_path / "profile"
+    monkeypatch.setenv(PROFILE_ENV, str(profile_dir))
+    monkeypatch.setenv(SPEC_ENV, "capture=0+1,windowed=none,memory_group=1,"
+                                 "wait=0,warmup=0,active=1")
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, regime=regime,
+                              spill_root=_spill_root(tmp_path / "profiled"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    assert _evidence(campaign, layer, payload) == plain
+    assert state.counters_block["replay"]["layer_passes"] == N_PROBES
+    timings = [json.loads(path.read_text()) for path in profile_dir.glob("*.timing.json")]
+    assert sorted((row["kind"], row["probe"]) for row in timings) == [
+        ("capture", 0), ("capture", 1)]
+    selected = [row for row in timings if "memory" in row]
+    assert len(selected) == 1
+    row = selected[0]
+    assert row["probe"] == 0
+    assert row["identity"]["quantum_id"] == campaign.records[layer]["quantum_id"]
+    memory = row["memory"]
+    assert memory["group"] == 1
+    assert memory["stored_batch_indices"] == list(range(batch_size, 2 * batch_size))
+    for tensor in ("input", "incoming_grad"):
+        assert memory[tensor]["shape"] == [batch_size, 8, WIDTH]
+        assert memory[tensor]["dtype"] == str(DTYPE)
+        assert memory[tensor]["stride"] == [8 * WIDTH, WIDTH, 1]
+
+
 def test_spill_chunks_dropped_ahead_are_read_again_and_change_no_byte(
         campaign, monkeypatch, tmp_path):
     """PQ #1348: the replay's chunks read ahead are reclaimable.
