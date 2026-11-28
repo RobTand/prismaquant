@@ -50,19 +50,17 @@ campaign row.
   ``:stack``, or ``none`` (default ``none``);
 * ``render_wait=1,render_warmup=1,render_active=1`` -- the render schedule,
   in probes;
-* ``memory_group=3`` -- the one capture group whose CUDA allocator history
-  is recorded (allocation stacks), or ``none`` (default ``none``). The
-  history runs only while that group runs. The session writes
+* ``memory_group=3`` -- record CUDA allocator history with allocation
+  stacks for group 3 of the first probe in ``capture``. Use ``none`` to
+  disable recording (the default). The capture session writes
   ``.memory_snapshot.pickle`` and a ``memory`` entry in ``.timing.json``.
-  Its ``status`` is ``complete``, ``incomplete`` (the capture raised),
-  ``export_failed``, ``unsupported`` (no CUDA) or ``not_reached``. A group
-  beyond ``identity["capture_groups"]`` raises ``ValueError``. A session
-  without that count cannot check, and reports ``not_reached`` when the
-  pass ends before the group. Only capture sessions record it. For the
-  statuses ``complete``, ``incomplete`` and ``export_failed`` the entry also
-  has ``device`` (``name``, ``capability``, ``torch``, ``cuda``) and
-  ``allocated_bytes`` and ``reserved_bytes``, each ``{"start", "end"}`` in
-  device bytes at the start and the end of the group;
+  The entry includes the stored batch indices and tensor geometry. It
+  records the capture device and runtime, start and end byte counts, and
+  allocated and reserved peak byte counts when available. The status is
+  ``complete``, ``incomplete`` (capture error), ``export_failed``,
+  ``unsupported`` or ``not_reached``. After export, check ``history_status``
+  before attribution. A capture error or a full buffer gives ``incomplete``.
+  A group beyond ``identity["capture_groups"]`` raises ``ValueError``;
 * ``memory_entries=100000`` -- the most allocator events kept (maximum
   1000000).
 
@@ -73,6 +71,7 @@ from __future__ import annotations
 
 import json
 import os
+import pickle
 import socket
 import time
 from dataclasses import dataclass, field
@@ -136,7 +135,8 @@ class PassProfileRequest:
         return self.render_window is not None and int(window) == self.render_window
 
     def session(self, *, kind: str, probe: int | None = None, identity: dict,
-                stop_after=None, window: int | None = None, counters=None):
+                stop_after=None, window: int | None = None, counters=None,
+                capture_device=None):
         if kind == "capture":
             schedule = (self.wait, self.warmup, self.active)
             stack = bool(self.capture_probes.get(int(probe), False))
@@ -150,7 +150,8 @@ class PassProfileRequest:
             stack = self.render_stack
         else:
             raise ValueError(f"unknown pass profile kind {kind!r}")
-        memory_group = self.memory_group if kind == "capture" else None
+        memory_group = (self.memory_group if kind == "capture" and
+                        int(probe) == next(iter(self.capture_probes), None) else None)
         groups = identity.get("capture_groups")
         if memory_group is not None and groups is not None and memory_group >= groups:
             # Only the quantum knows the pass length. A session without the
@@ -162,7 +163,7 @@ class PassProfileRequest:
             schedule=schedule, with_stack=stack, identity=identity,
             stop_after=stop_after, window=None if window is None else int(window),
             counters=counters, memory_group=memory_group,
-            memory_entries=self.memory_entries)
+            memory_entries=self.memory_entries, capture_device=capture_device)
 
 
 def _spec_int(spec, key, minimum=0):
@@ -240,10 +241,10 @@ class PassProfileSession:
     counters: object = None
     memory_group: int | None = None
     memory_entries: int = 100000
+    capture_device: object = None
     _memory_status: str | None = None
     _memory_on: bool = False
-    _memory_device: dict | None = None
-    _memory_bytes: dict | None = None
+    _memory_metadata: dict = field(default_factory=dict)
     units: list = field(default_factory=list)
     _unit_counters: dict | None = None
     _profiler: object = None
@@ -312,36 +313,73 @@ class PassProfileSession:
         import torch
         from torch.cuda import memory
 
-        if not torch.cuda.is_available():
-            self._memory_status = "unsupported"
+        device = None if self.capture_device is None else torch.device(self.capture_device)
+        self._memory_status = "unsupported"
+        if ((device is not None and device.type != "cuda") or not torch.cuda.is_available()
+                or not callable(getattr(memory, "_record_memory_history", None))
+                or not callable(getattr(memory, "_snapshot", None))):
             return
-        self._memory_device = {
-            "name": torch.cuda.get_device_name(),
-            "capability": list(torch.cuda.get_device_capability()),
-            "torch": str(torch.__version__), "cuda": torch.version.cuda}
-        self._memory_bytes = {
-            "allocated_bytes": {"start": torch.cuda.memory_allocated()},
-            "reserved_bytes": {"start": torch.cuda.memory_reserved()}}
-        memory._record_memory_history(
-            "all", context="alloc", stacks="python", max_entries=self.memory_entries)
-        self._memory_on = True
+        try:
+            if device is None or device.index is None:
+                device = torch.device("cuda", torch.cuda.current_device())
+            self.capture_device = device
+            self._memory_metadata.update(
+                device_index=device.index,
+                device={"name": torch.cuda.get_device_name(device),
+                        "capability": list(torch.cuda.get_device_capability(device)),
+                        "torch": str(torch.__version__), "cuda": torch.version.cuda},
+                allocated_bytes={"start": torch.cuda.memory_allocated(device)},
+                reserved_bytes={"start": torch.cuda.memory_reserved(device)})
+            torch.cuda.reset_peak_memory_stats(device)
+            try:
+                memory._record_memory_history(
+                    "all", context="alloc", stacks="python", max_entries=self.memory_entries,
+                    device=device, clear_history=True)
+            except Exception:
+                memory._record_memory_history(None, device=device)
+                raise
+            self._memory_on = True
+        except Exception as exc:
+            self._errors.append(f"memory history start: {exc!r}")
 
     def _memory_stop(self, status: str) -> None:
-        """Export the history, then stop it, even when the export fails."""
         import torch
         from torch.cuda import memory
 
         self._memory_on = False
-        self._memory_bytes["allocated_bytes"]["end"] = torch.cuda.memory_allocated()
-        self._memory_bytes["reserved_bytes"]["end"] = torch.cuda.memory_reserved()
+        device = self.capture_device
+        path = self.out_dir / f"{self.stem}.memory_snapshot.pickle"
+        partial = path.with_suffix(".tmp")
         try:
-            memory._dump_snapshot(str(self.out_dir / f"{self.stem}.memory_snapshot.pickle"))
-        except Exception as exc:  # a lost snapshot is recorded, never fatal
+            try:
+                self._memory_metadata["allocated_bytes"]["end"] = torch.cuda.memory_allocated(device)
+                self._memory_metadata["reserved_bytes"]["end"] = torch.cuda.memory_reserved(device)
+                self._memory_metadata.update(
+                    peak_allocated_bytes=torch.cuda.max_memory_allocated(device),
+                    peak_reserved_bytes=torch.cuda.max_memory_reserved(device))
+                snapshot = memory._snapshot()
+            finally:
+                memory._record_memory_history(None, device=device)
+            full = any(len(trace) >= self.memory_entries for trace in snapshot["device_traces"])
+            try:
+                with partial.open("wb") as handle:
+                    pickle.dump(snapshot, handle)
+                partial.replace(path)
+            finally:
+                partial.unlink(missing_ok=True)
+            self._memory_metadata["history_status"] = "incomplete" if full else status
+        except Exception as exc:
             status = "export_failed"
             self._errors.append(f"memory snapshot: {exc!r}")
-        finally:
-            memory._record_memory_history(None)
         self._memory_status = status
+
+    def capture_geometry(self, indices, x_in, incoming_grad) -> None:
+        if self.memory_group is not None and self.memory_group == len(self.units):
+            self._memory_metadata["stored_batch_indices"] = list(indices)
+            for name, tensor in (("input", x_in), ("incoming_grad", incoming_grad)):
+                self._memory_metadata[name] = {
+                    "shape": list(tensor.shape), "stride": list(tensor.stride()),
+                    "dtype": str(tensor.dtype)}
 
     def unit_begin(self) -> None:
         # A CPU annotation per unit, so the trace separates the units from
@@ -429,10 +467,7 @@ class PassProfileSession:
         if self.memory_group is not None:
             record["memory"] = {
                 "group": self.memory_group, "entries": self.memory_entries,
-                "status": self._memory_status or "not_reached"}
-            if self._memory_device is not None:
-                record["memory"]["device"] = self._memory_device
-                record["memory"].update(self._memory_bytes)
+                "status": self._memory_status or "not_reached", **self._memory_metadata}
         (self.out_dir / f"{self.stem}.timing.json").write_text(
             json.dumps(record, indent=1, sort_keys=True, default=str) + "\n")
         return exc_type is ShadowPassDone

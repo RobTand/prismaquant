@@ -1,5 +1,6 @@
 """PQ #1269: the Stage B pass profiler is off by default and bounded when on."""
 import json
+import pickle
 from pathlib import Path
 
 import pytest
@@ -197,6 +198,18 @@ def memory_spy(monkeypatch):
     spy = _MemorySpy()
     monkeypatch.setattr(torch.cuda.memory, "_record_memory_history", spy.record)
     monkeypatch.setattr(torch.cuda.memory, "_dump_snapshot", spy.dump)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda device: None)
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda device: 175)
+    monkeypatch.setattr(torch.cuda, "max_memory_reserved", lambda device: 400)
+
+    def snapshot():
+        spy.calls.append(("dump",))
+        if spy.fail_dump:
+            raise OSError("disk full")
+        return {"device_traces": [[]]}
+
+    monkeypatch.setattr(torch.cuda.memory, "_snapshot", snapshot)
     # Fixed device values: the tests do not depend on the box.
     allocated, reserved = iter((100, 150)), iter((200, 300))
     monkeypatch.setattr(torch.cuda, "get_device_name", lambda *a: "FakeGPU")
@@ -391,6 +404,100 @@ def test_memory_group_that_the_pass_never_reaches_is_not_reached(
     assert _memory_timing(tmp_path)["memory"]["status"] == "not_reached"
 
 
+def test_explicit_memory_off_makes_no_allocator_calls(tmp_path, monkeypatch, memory_spy):
+    request = _memory_request(tmp_path, "memory_group=none")
+    session = request.session(kind="capture", probe=1, identity={})
+    assert _run_memory_groups(session, monkeypatch, memory_spy) == [False] * 3
+    assert memory_spy.calls == []
+    assert "memory" not in _memory_timing(tmp_path)
+
+
+def test_memory_targets_one_probe_and_uses_its_device(tmp_path, monkeypatch, memory_spy):
+    request = _memory_request(tmp_path, "capture=2+1,memory_group=1,memory_entries=80")
+    calls = []
+    for name, result in [("get_device_name", "FakeGPU"), ("get_device_capability", (12, 1)),
+                         ("memory_allocated", 100), ("memory_reserved", 200),
+                         ("max_memory_allocated", 175), ("max_memory_reserved", 400),
+                         ("reset_peak_memory_stats", None)]:
+        def counter(device=None, *, name=name, result=result):
+            calls.append((name, device))
+            return result
+        monkeypatch.setattr(torch.cuda, name, counter)
+    for probe, expected in [(1, [False] * 3), (2, [False, True, False])]:
+        session = request.session(kind="capture", probe=probe, identity={})
+        session.capture_device = torch.device("cuda:1")
+        assert _run_memory_groups(session, monkeypatch, memory_spy) == expected
+    timing = json.loads((tmp_path / "quantum-p2-capture.timing.json").read_text())
+    assert timing["memory"]["peak_allocated_bytes"] == 175
+    assert timing["memory"]["peak_reserved_bytes"] == 400
+    assert {torch.device(device) for _, device in calls} == {torch.device("cuda:1")}
+    assert len([call for call in memory_spy.calls if call[:2] == ("record", "all")]) == 1
+
+
+@pytest.mark.parametrize("api", ["_snapshot", "_record_memory_history"])
+def test_missing_allocator_api_is_unsupported(tmp_path, monkeypatch, memory_spy, api):
+    monkeypatch.delattr(torch.cuda.memory, api)
+    session = _memory_request(tmp_path, "memory_group=1").session(
+        kind="capture", probe=1, identity={})
+    try:
+        seen = _run_memory_groups(session, monkeypatch, memory_spy)
+    except AttributeError:
+        seen = None
+    assert seen == [False] * 3
+    assert memory_spy.calls == []
+    assert _memory_timing(tmp_path)["memory"]["status"] == "unsupported"
+
+
+def test_failed_end_counter_stops_recording(tmp_path, monkeypatch, memory_spy):
+    def allocated(*args):
+        if memory_spy.on:
+            raise RuntimeError("Cannot read allocated bytes")
+        return 100
+
+    monkeypatch.setattr(torch.cuda, "memory_allocated", allocated)
+    session = _memory_request(tmp_path, "memory_group=1").session(
+        kind="capture", probe=1, identity={})
+    try:
+        seen = _run_memory_groups(session, monkeypatch, memory_spy)
+    except RuntimeError:
+        seen = None
+    assert not memory_spy.on
+    assert seen == [False, True, False]
+    timing = _memory_timing(tmp_path)
+    assert timing["memory"]["status"] == "export_failed"
+    assert timing["units_count"] == 3
+
+
+def test_partial_snapshot_write_leaves_no_file(tmp_path, monkeypatch, memory_spy):
+    def fail_write(handle):
+        handle.write(b"partial")
+        raise OSError("Cannot write snapshot")
+
+    def fail_dump(path, *args, **kwargs):
+        with open(path, "wb") as handle:
+            fail_write(handle)
+
+    monkeypatch.setattr(torch.cuda.memory, "_dump_snapshot", fail_dump)
+    monkeypatch.setattr(pickle, "dump", lambda snapshot, handle: fail_write(handle))
+    session = _memory_request(tmp_path, "memory_group=1").session(
+        kind="capture", probe=1, identity={})
+    assert _run_memory_groups(session, monkeypatch, memory_spy) == [False, True, False]
+    assert not memory_spy.on
+    assert _memory_timing(tmp_path)["memory"]["status"] == "export_failed"
+    assert not list(tmp_path.glob("*snapshot*"))
+
+
+def test_full_history_buffer_reports_incomplete_coverage(tmp_path, monkeypatch, memory_spy):
+    monkeypatch.setattr(torch.cuda.memory, "_snapshot", lambda: {"device_traces": [
+        [{"action": "alloc"} for _ in range(4)]
+    ]})
+    session = _memory_request(tmp_path, "memory_group=1,memory_entries=4").session(
+        kind="capture", probe=1, identity={})
+    assert _run_memory_groups(session, monkeypatch, memory_spy) == [False, True, False]
+    memory = _memory_timing(tmp_path)["memory"]
+    assert memory.get("history_status") == "incomplete"
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA (allocator)")
 def test_cuda_memory_snapshot_of_the_selected_group(tmp_path):
     import pickle
@@ -414,6 +521,44 @@ def test_cuda_memory_snapshot_of_the_selected_group(tmp_path):
     traces = [trace for trace in snapshot["device_traces"] if trace]
     assert traces and all(len(trace) <= 8 for trace in traces)
     assert any(event.get("frames") for trace in traces for event in trace)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA allocator required")
+def test_cuda_memory_history_covers_forward_and_backward(tmp_path):
+    request = _memory_request(
+        tmp_path, "capture=0,wait=1,warmup=0,active=1,memory_group=0,memory_entries=256")
+    x = torch.ones(1 << 18, device="cuda", requires_grad=True)
+    session = request.session(kind="capture", probe=0, identity={})
+    with session:
+        # Use a wait unit so shape recording cannot hold these tensors.
+        session.unit_begin()
+        y = x.square()
+        forward_ptr = y.data_ptr()
+        y.sum().backward()
+        backward_ptr = x.grad.data_ptr()
+        live_bytes = torch.cuda.memory_allocated(x.device)
+        del y
+        x.grad = None
+        session.unit_end()
+        session.unit_begin()
+        x.detach().sum()
+        session.unit_end()
+    base = tmp_path / "quantum-p0-capture"
+    memory = json.loads(base.with_suffix(".timing.json").read_text())["memory"]
+    assert memory["status"] == "complete"
+    assert memory.get("peak_allocated_bytes", 0) >= live_bytes
+    assert live_bytes >= memory["allocated_bytes"]["end"] + 2 * x.nbytes
+    assert memory["peak_reserved_bytes"] >= memory["peak_allocated_bytes"]
+    with base.with_suffix(".memory_snapshot.pickle").open("rb") as handle:
+        trace = pickle.load(handle)["device_traces"][x.device.index]
+    assert len(trace) < 256
+    assert any(event.get("addr") == forward_ptr and event["action"] == "alloc"
+               and event.get("frames") for event in trace)
+    for ptr in (forward_ptr, backward_ptr):
+        actions = [event["action"] for event in trace if event.get("addr") == ptr]
+        assert "alloc" in actions
+        assert {"free_requested", "free_completed"}.intersection(
+            actions[actions.index("alloc") + 1:])
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA (allocator)")
