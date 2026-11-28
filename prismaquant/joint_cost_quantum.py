@@ -2859,6 +2859,8 @@ def run_layer_quantum_core(
                 x_in = stage.boundaries(
                     [item[2] for item in group], device=runner.device,
                     dtype=runner.dtype).detach().requires_grad_(True)
+                if pass_session is not None:
+                    pass_session.capture_geometry(indices, x_in, incoming_grad)
                 batch = (batches[indices[0]] if len(indices) == 1 else
                          _chain_group_batch(runner, batches, indices, capture_group_cache))
                 with target_pass():
@@ -3002,6 +3004,8 @@ def run_layer_quantum_core(
                         x_in = stage.boundaries(
                             [boundary_cpu], device=runner.device, dtype=runner.dtype
                         ).detach().requires_grad_(True)
+                        if pass_session is not None:
+                            pass_session.capture_geometry((batch_index,), x_in, incoming_grad)
                         isolated = profile.isolated_layer_pass_state(
                             batch.shared_pass_state, runner.layers[layer])
                         isolated = owner.graft(isolated)
@@ -3374,7 +3378,8 @@ def run_layer_quantum_core(
                                         observer=observer)
                         return
                     with pass_profile.session(kind="capture", probe=probe_index,
-                                              identity=identity) as session:
+                                              identity=identity,
+                                              capture_device=runner.device) as session:
                         pass_session = session
                         try:
                             replay_backward(final=True, lease=None, probe=probe_index,
