@@ -346,6 +346,44 @@ def test_stage_b_capture_memory_record():
     assert f"The cuBLAS workspace cache held {workspace} of {peak} live bytes" in record
 
 
+def test_published_spill_cost_preserves_provenance(campaign, monkeypatch, tmp_path):
+    import pickle
+
+    from prismaquant.joint_cost_quantum import publish_quantum_outputs
+    from prismaquant.joint_replay_regime import replay_regime_of
+    from prismaquant.joint_stageb_resources import COTANGENT_SCRATCH_ENV, SCHEMA
+
+    _, budget, _ = _policy_budget()
+    resources = {"schema": SCHEMA, "budget": budget.as_dict(),
+                 "limits": {"host_bytes": 32 << 20}}
+    for name in COTANGENT_SCRATCH_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(ProductionWeightCache, "_joint_stage_b_resource_policy",
+                        resources, raising=False)
+    layer = 1
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path, needs_direct_io=False),
+                              ceiling=1 << 30, regime="capture_batch=2")
+    assert payload is not None, _chain(state.error)
+    record = campaign.records[layer]
+    status = publish_quantum_outputs(
+        record, payload=payload, result={}, counters=state.counters_block,
+        units_total=sum(len(window["names"]) for window in state.resolved))
+    assert status["status"] == "complete"
+    raw = Path(record["output_space"]["cost_payload"]).read_bytes()
+    provenance = pickle.loads(raw)["provenance"]
+    probe = provenance["probe_identity"]
+    assert probe["calibration_sha256"] == hashlib.sha256(_calibration().numpy().tobytes()).hexdigest()
+    assert probe["n_probes"] == N_PROBES
+    assert provenance["probe_identity_sha256"] == joint_aura_rows.joint_identity_sha256(probe)
+    arithmetic = probe["arithmetic"]
+    assert arithmetic["measurement_dtype"] == "torch.bfloat16"
+    assert arithmetic["projection_dtype"] == "torch.float32"
+    assert replay_regime_of(arithmetic)["capture_batch"] == 2
+    assert provenance["stage_b_resource_policy"] == arithmetic["stage_b_resource_policy"] == resources
+
+
 def test_stage_b_allocation_snapshot_record(campaign, monkeypatch, tmp_path):
     import ctypes
     import gzip

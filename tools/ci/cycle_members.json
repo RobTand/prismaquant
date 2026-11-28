@@ -4600,6 +4600,7 @@
     "//tests:test_serve_fingerprint_descendants",
     "//tests:test_stage_b_workspace_profile_lib",
     "//tests:test_stage_settings_guard_lib",
+    "//tests:test_stageb_one_pass_spill_lib",
     "//tests:test_stdlib_tools_no_package_1605",
     "//tests:test_stdlib_tools_no_package_1605_lib",
     "//tests:test_streamed_gold_companion",
