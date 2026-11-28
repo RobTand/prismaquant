@@ -59,7 +59,8 @@ campaign row.
   allocated and reserved peak byte counts when available. The status is
   ``complete``, ``incomplete`` (capture error), ``export_failed``,
   ``unsupported`` or ``not_reached``. After export, check ``history_status``
-  before attribution. A capture error or a full buffer gives ``incomplete``.
+  before attribution. A capture error gives ``incomplete``. An empty or full
+  trace on the capture device also gives ``incomplete``.
   A group beyond ``identity["capture_groups"]`` raises ``ValueError``;
 * ``memory_entries=100000`` -- the most allocator events kept (maximum
   1000000).
@@ -360,14 +361,16 @@ class PassProfileSession:
                 snapshot = memory._snapshot()
             finally:
                 memory._record_memory_history(None, device=device)
-            full = any(len(trace) >= self.memory_entries for trace in snapshot["device_traces"])
+            traces = snapshot["device_traces"]
+            trace = traces[device.index] if device.index < len(traces) else ()
             try:
                 with partial.open("wb") as handle:
                     pickle.dump(snapshot, handle)
                 partial.replace(path)
             finally:
                 partial.unlink(missing_ok=True)
-            self._memory_metadata["history_status"] = "incomplete" if full else status
+            self._memory_metadata["history_status"] = (
+                status if 0 < len(trace) < self.memory_entries else "incomplete")
         except Exception as exc:
             status = "export_failed"
             self._errors.append(f"memory snapshot: {exc!r}")
