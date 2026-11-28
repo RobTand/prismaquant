@@ -1931,6 +1931,60 @@ def test_partial_capture_group_orders_targets_and_cotangents_and_cleans_up(
     assert stage._buffer is None
 
 
+def test_partial_capture_group_spills_in_order_and_closes_on_backward_error(
+        tmp_path_factory, monkeypatch, tmp_path):
+    from prismaquant.joint_adjoint_checkpoints import PlaneHostStaging
+
+    record = spill_mod.StageBReplaySpill._record
+    store = PlaneHostStaging.store
+    isolated_layer = StreamedCausalLM.isolated_layer
+    targets, writes, interrupted = [], [], []
+    fault = RuntimeError("Stop during spill backward.")
+    root = _spill_root(tmp_path, needs_direct_io=False)
+
+    def record_target(self, name, x, selected, *, capture_batch):
+        record(self, name, x, selected, capture_batch=capture_batch)
+        if self._probe == 1:
+            assert _open_under(root)
+            interrupted.append((self, self._writer))
+            raise fault
+        if ".shared_expert." in name:
+            targets.append((capture_batch, name.rsplit(".", 1)[-1], x.shape[0]))
+
+    def mark_cotangents(self, batch, layer, hidden, *, pass_state):
+        if layer == 0:
+            markers = batch.input_ids[:, :1, None]
+            hidden.register_hook(lambda grad: markers.to(grad).expand_as(grad).contiguous())
+        return isolated_layer(self, batch, layer, hidden, pass_state=pass_state)
+
+    def record_cotangents(self, keys, rows, gradient):
+        store(self, keys, rows, gradient)
+        for key in keys:
+            value = self.plane[key]
+            assert torch.equal(value, torch.full_like(value, key[1] + 1))
+            writes.append(key)
+
+    calib_ids = _calibration()[:3]
+    calib_ids[:, 0] = torch.arange(1, 4)
+    monkeypatch.setitem(globals(), "_calibration", lambda: calib_ids)
+    partial_campaign = campaign.__wrapped__(tmp_path_factory)
+    monkeypatch.setattr(spill_mod, "DEFAULT_THREADS", True)
+    monkeypatch.setattr(spill_mod.StageBReplaySpill, "_record", record_target)
+    monkeypatch.setattr(PlaneHostStaging, "store", record_cotangents)
+    monkeypatch.setattr(StreamedCausalLM, "isolated_layer", mark_cotangents)
+    payload, state = _quantum(partial_campaign, monkeypatch, layer=0, spill_root=root,
+                              ceiling=1 << 30, regime="capture_batch=2")
+    assert payload is None and state.error is fault, _chain(getattr(state, "error", None))
+    assert targets == [(group, name, tokens) for group, tokens in [(0, 16), (1, 8)]
+                       for name in ("down_proj", "up_proj", "gate_proj")]
+    assert writes == [(0, 0), (0, 1), (0, 2)]
+    (spill, writer), = interrupted
+    assert spill.telemetry["write_calls"] > 0
+    assert not writer.is_alive()
+    assert all(not window.dedupe for window in spill._windows)
+    assert not _open_under(root) and not list(root.iterdir())
+
+
 def test_capture_pass_charges_the_planned_workspace_per_stored_batch(campaign, monkeypatch,
                                                                      tmp_path):
     """The guard charges the capture the quantity the plan priced (PQ #1151).
